@@ -1,0 +1,964 @@
+/* src/App.css */
+* { box-sizing: border-box; }
+
+/* ============================================================
+   GLOBAL TYPE HELPERS
+   ============================================================ */
+body{
+  color: rgba(255,255,255,.92);
+}
+
+.tr-kicker{
+  font-size: 11px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  font-weight: 900;
+  color: rgba(255,255,255,.62);
+}
+
+.tr-sub{
+  color: rgba(255,255,255,.64);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.tr-techMono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* ============================================================
+   CARDS
+   ============================================================ */
+.tr-card{
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(900px 240px at 50% 0%, rgba(0,170,255,.08), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.055) 0%, rgba(255,255,255,.025) 40%, rgba(0,0,0,.14) 140%);
+  box-shadow:
+    0 22px 70px rgba(0,0,0,.58),
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 0 0 1px rgba(0,170,255,.06);
+  overflow: hidden;
+}
+
+.tr-card-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.tr-card-title{
+  font-weight: 950;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.tr-card-right{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+
+.tr-card-body{
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+/* ============================================================
+   INSET ROWS
+   ============================================================ */
+.tr-rowbox{
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.10));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  padding: 12px;
+}
+
+/* ============================================================
+   BUTTONS / SEGMENTS
+   ============================================================ */
+.tr-seg{
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+  color: rgba(255,255,255,.92);
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease, filter .12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.tr-seg:hover{
+  transform: translateY(-1px);
+  border-color: rgba(0,170,255,.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 14px 40px rgba(0,0,0,.35);
+}
+.tr-seg.is-active{
+  border-color: rgba(0,170,255,.75);
+  background: linear-gradient(180deg, rgba(0,170,255,.22), rgba(0,170,255,.12));
+  box-shadow: 0 18px 50px rgba(0,170,255,.14), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.tr-btn{
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+  color: rgba(255,255,255,.92);
+  font-weight: 950;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease, opacity .12s ease, filter .12s ease;
+}
+.tr-btn:hover{
+  transform: translateY(-1px);
+  border-color: rgba(0,170,255,.45);
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+}
+.tr-btn:disabled{
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.tr-btn--primary{
+  border-color: rgba(0,170,255,.78);
+  background: linear-gradient(180deg, rgba(0,170,255,.26), rgba(0,170,255,.12));
+  box-shadow:
+    0 18px 55px rgba(0,170,255,.14),
+    0 0 0 1px rgba(0,170,255,.10) inset,
+    inset 0 1px 0 rgba(255,255,255,.06);
+}
+.tr-btn--primary:hover{
+  border-color: rgba(0,170,255,.95);
+  filter: saturate(1.05);
+  box-shadow:
+    0 22px 65px rgba(0,170,255,.18),
+    0 0 0 1px rgba(0,170,255,.14) inset,
+    inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.tr-btn--blueOutline{
+  border-color: rgba(0,170,255,.55);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+  box-shadow:
+    0 14px 40px rgba(0,0,0,.30),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+.tr-btn--blueOutline:hover{
+  border-color: rgba(0,170,255,.85);
+}
+
+.tr-danger{
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,140,0,.55);
+  background: linear-gradient(180deg, rgba(255,140,0,.22), rgba(255,80,80,.10));
+  color: rgba(255,255,255,.92);
+  font-weight: 950;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow:
+    0 14px 40px rgba(0,0,0,.35),
+    0 0 0 1px rgba(255,140,0,.10) inset,
+    inset 0 1px 0 rgba(255,255,255,.06);
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.tr-danger:hover{
+  transform: translateY(-1px);
+  border-color: rgba(255,140,0,.90);
+  filter: saturate(1.05);
+}
+
+.tr-rowBtn{
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: rgba(255,255,255,.92);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* ============================================================
+   LEGACY MEDIA FRAME
+   ============================================================ */
+.tr-mediaFrame{
+  border-radius: 16px;
+  border: 1px solid rgba(0,170,255,.45);
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.14));
+  box-shadow: 0 0 0 1px rgba(0,170,255,.12) inset, 0 18px 60px rgba(0,170,255,.10);
+  overflow: hidden;
+  padding: 10px;
+}
+
+/* ============================================================
+   NEW PREMIUM MEDIA STAGE
+   ============================================================ */
+.tr-mediaBlock{
+  display: grid;
+  gap: 10px;
+  min-height: 100%;
+  height: 100%;
+}
+
+.tr-mediaStage{
+  position: relative;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(0,170,255,.34);
+  background:
+    linear-gradient(180deg, rgba(8,14,24,.98), rgba(3,6,12,.98)),
+    radial-gradient(1000px 560px at 0% 0%, rgba(0,170,255,.16) 0%, rgba(0,170,255,.07) 28%, rgba(0,0,0,0) 64%),
+    radial-gradient(860px 460px at 100% 100%, rgba(0,170,255,.12) 0%, rgba(0,170,255,.05) 30%, rgba(0,0,0,0) 66%);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.58),
+    inset 0 0 0 2px rgba(255,255,255,.04),
+    inset 0 0 0 3px rgba(0,170,255,.06),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 20px 70px rgba(0,0,0,.56),
+    0 0 18px rgba(0,170,255,.10),
+    0 0 56px rgba(0,170,255,.08);
+  min-height: clamp(360px, 58vh, 780px);
+  height: clamp(360px, 58vh, 780px);
+}
+
+.tr-mediaStage::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.11) 0%, rgba(255,255,255,.03) 18%, rgba(255,255,255,0) 44%),
+    radial-gradient(600px 260px at 50% 50%, rgba(0,170,255,.05) 0%, rgba(0,170,255,.02) 38%, rgba(0,0,0,0) 72%);
+  opacity: .9;
+  z-index: 2;
+}
+
+.tr-mediaEchoWrap{
+  position:absolute;
+  inset:0;
+  overflow:hidden;
+  z-index: 0;
+}
+
+.tr-mediaEchoAsset{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.08);
+  filter: blur(24px) saturate(1.02) brightness(.52);
+  opacity: .75;
+}
+
+.tr-mediaStageFx{
+  position:absolute;
+  inset:0;
+  z-index: 1;
+  pointer-events:none;
+  background:
+    radial-gradient(560px 260px at 50% 52%, rgba(0,170,255,.10) 0%, rgba(0,170,255,.04) 34%, rgba(0,0,0,0) 72%),
+    radial-gradient(1200px 460px at 50% 100%, rgba(0,0,0,.20) 0%, rgba(0,0,0,.46) 62%, rgba(0,0,0,.68) 100%),
+    linear-gradient(180deg, rgba(0,0,0,.14) 0%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 72%, rgba(0,0,0,.22) 100%);
+}
+
+.tr-mediaAmbientGrid{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg, rgba(0,170,255,.05) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(0,170,255,.04) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(circle at center, rgba(0,0,0,.7), transparent 78%);
+  opacity:.24;
+}
+
+.tr-mediaStageInner{
+  position: relative;
+  z-index: 3;
+  min-height: 100%;
+  height: 100%;
+  padding: 46px 18px 18px;
+  display: grid;
+  place-items: center;
+}
+
+.tr-mediaMount{
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display:grid;
+  place-items:center;
+}
+
+.tr-mediaMountGlow{
+  position:absolute;
+  inset: 10% 10%;
+  pointer-events:none;
+  background:
+    radial-gradient(circle at center, rgba(0,170,255,.12) 0%, rgba(0,170,255,.05) 34%, rgba(0,0,0,0) 68%);
+  filter: blur(10px);
+}
+
+.tr-mediaMountPlate{
+  position:absolute;
+  width:min(92%, 760px);
+  height:min(82%, 620px);
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,.08);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.14)),
+    radial-gradient(520px 180px at 50% 0%, rgba(0,170,255,.06), rgba(0,0,0,0) 70%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 22px 60px rgba(0,0,0,.34),
+    0 0 18px rgba(0,170,255,.06);
+  pointer-events:none;
+}
+
+.tr-mediaMountInner{
+  position:relative;
+  z-index:1;
+  width: calc(100% - 28px);
+  height: calc(100% - 28px);
+  display:grid;
+  place-items:center;
+  padding: clamp(14px, 3vw, 30px);
+}
+
+.tr-mediaAsset{
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  border-radius: 16px;
+  background: transparent;
+  filter: drop-shadow(0 20px 50px rgba(0,0,0,.35));
+}
+
+.tr-mediaCtl{
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,170,255,.42);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.16)),
+    rgba(5,11,20,.66);
+  color: rgba(240,249,255,.92);
+  font-weight: 950;
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 10px 24px rgba(0,0,0,.28),
+    0 0 16px rgba(0,170,255,.08);
+}
+.tr-mediaCtl:hover{
+  border-color: rgba(0,170,255,.70);
+  transform: translateY(-1px);
+}
+
+.tr-mediaEmpty{
+  display:grid;
+  gap: 8px;
+  text-align:center;
+  justify-items:center;
+  width: min(420px, 100%);
+  padding: 20px;
+}
+
+.tr-mediaEmptyTitle{
+  font-weight: 1100;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-size: 18px;
+  color: rgba(255,255,255,.95);
+}
+
+.tr-mediaStage.is-missing .tr-mediaStageInner{
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0,170,255,.08) 0%, rgba(0,170,255,0) 50%),
+    linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.18));
+}
+
+/* ============================================================
+   EXERCISE CONSOLE LAYOUT
+   ============================================================ */
+.tr-exerciseConsole{
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(360px, .92fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.tr-exerciseConsoleMedia{
+  min-width: 0;
+  display: flex;
+  align-self: stretch;
+}
+
+.tr-exerciseConsoleRail{
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.tr-railModule{
+  border-radius: 16px;
+}
+
+.tr-railModule--stats{
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  padding: 12px;
+}
+
+.tr-doneBtn{
+  min-width: 160px;
+}
+
+@media (max-width: 1180px){
+  .tr-exerciseConsole{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-exerciseConsoleMedia{
+    display: block;
+  }
+
+  .tr-mediaStage{
+    min-height: clamp(320px, 52vh, 620px);
+    height: clamp(320px, 52vh, 620px);
+  }
+}
+
+/* ============================================================
+   MODAL
+   ============================================================ */
+.tr-modalOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.66);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  z-index: 999;
+  padding: 18px;
+}
+.tr-modal{
+  width: min(860px, 100%);
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.18));
+  box-shadow: 0 26px 90px rgba(0,0,0,.65);
+  overflow: hidden;
+}
+.tr-modalHead{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.tr-modalHead button{
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* ============================================================
+   HUD / APP SHELL
+   ============================================================ */
+.tr-hudPanel{ margin-bottom: 14px; }
+
+.tr-hudPanel.tr-card{
+  border-color: rgba(0,170,255,.26);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.05),
+    0 26px 90px rgba(0,0,0,.68),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 0 18px rgba(0,170,255,.11),
+    0 0 60px rgba(0,170,255,.08);
+}
+
+.tr-hudStrip{
+  position: relative;
+  overflow: hidden;
+
+  --slab-line: rgba(0,170,255,.34);
+  --slab-innerLine: rgba(0,170,255,.09);
+  --slab-bloom: .065;
+
+  border-radius: 18px;
+  border: 1px solid var(--slab-line);
+  padding: 16px;
+
+  display: grid;
+  grid-template-areas: "left center right";
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 2fr) minmax(240px, 1fr);
+  gap: 14px;
+  align-items: center;
+
+  background:
+    linear-gradient(180deg, rgba(12,18,30,.96), rgba(6,10,18,.98)),
+    radial-gradient(1000px 520px at 0% 0%, rgba(0,170,255,.18) 0%, rgba(0,170,255,.08) 28%, rgba(0,0,0,0) 62%),
+    radial-gradient(1000px 520px at 100% 100%, rgba(0,170,255,.14) 0%, rgba(0,170,255,.06) 30%, rgba(0,0,0,0) 64%),
+    radial-gradient(1000px 520px at 100% 0%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.30) 44%, rgba(0,0,0,0) 72%),
+    radial-gradient(1000px 520px at 0% 100%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.30) 44%, rgba(0,0,0,0) 72%);
+
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.05),
+    inset 0 0 0 3px var(--slab-innerLine),
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 0 18px rgba(0,170,255,.12),
+    0 0 46px rgba(0,170,255,.08),
+    0 22px 70px rgba(0,0,0,.58);
+
+  backdrop-filter: blur(10px);
+}
+
+.tr-hudStrip::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius: 18px;
+  pointer-events:none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.04) 18%, rgba(255,255,255,0) 46%),
+    radial-gradient(520px 220px at 50% 52%, rgba(0,170,255,var(--slab-bloom)) 0%, rgba(0,170,255,calc(var(--slab-bloom) * .40)) 32%, rgba(0,0,0,0) 74%);
+  opacity: .86;
+}
+.tr-hudStrip > *{ position: relative; z-index: 1; }
+
+.tr-hudLeft{ grid-area: left; justify-self: start; min-width: 0; }
+.tr-hudTimeBig{ grid-area: center; justify-self: center; }
+.tr-hudActionsRow{ grid-area: right; justify-self: end; }
+
+.tr-hudActionsRow{
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.tr-hudActionBtn{
+  min-width: 210px;
+  flex: 0 0 auto;
+}
+
+.tr-hudKicker{
+  font-size: 14px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  font-weight: 950;
+  opacity: 1;
+  color: rgba(246, 250, 246, 0.94);
+  text-shadow: 0 8px 0 rgba(0,0,0,.80);
+}
+.tr-hudStripSub{
+  font-size: 14px;
+  opacity: 1;
+  color: rgba(246, 253, 248, 0.88);
+  text-shadow: 0 8px 0 rgba(0,0,0,.80);
+}
+
+.tr-hudTimeBig{
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: clamp(56px, 7.2vw, 104px);
+  line-height: 1;
+  font-weight: 1000;
+  letter-spacing: .06em;
+  max-width: 100%;
+}
+
+.tr-hud--active .tr-hudTimeBig--active{
+  text-shadow:
+    0 0 18px rgba(226, 229, 15, 0.3),
+    0 0 44px rgba(255,210,80,.18),
+    0 10px 0 rgba(0,0,0,.78),
+    0 10px 22px rgba(0,0,0,.62),
+    0 0 10px rgba(0,170,255,.16),
+    0 0 22px rgba(0,170,255,.10) !important;
+}
+
+.tr-hudTimeBig--clock{
+  white-space: normal !important;
+  letter-spacing: .02em !important;
+  line-height: 1.15 !important;
+  max-width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 0 10px;
+}
+.tr-hudClockWrap{
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+}
+.tr-hudClockDate{
+  font-weight: 1000;
+  font-size: clamp(18px, 2.55vw, 32px);
+  line-height: 1.12;
+  letter-spacing: .06em;
+  color: rgba(250, 253, 250, 0.94);
+  text-shadow:
+    0 10px 0 rgba(0,0,0,.80),
+    0 10px 9px rgba(0,0,0,.52),
+    0 0 10px rgba(0,170,255,.08);
+  white-space: nowrap;
+}
+.tr-hudClockTime{
+  font-weight: 950;
+  font-size: clamp(18px, 2.0vw, 30px);
+  letter-spacing: .10em;
+  opacity: 1;
+  color: rgba(255,255,255,.88);
+  text-shadow:
+    0 9px 0 rgba(0,0,0,.80),
+    0 10px 22px rgba(0,0,0,.50);
+}
+
+.tr-hudTiles{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tr-hudTiles .tr-rowbox{
+  border-radius: 14px !important;
+  border: 1px solid rgba(0,170,255,.30) !important;
+  background:
+    linear-gradient(180deg, rgba(18,28,50,.92), rgba(6,10,18,.97)),
+    radial-gradient(560px 260px at 50% 55%, rgba(0,170,255,.22) 0%, rgba(0,170,255,.14) 32%, rgba(0,170,255,.08) 54%, rgba(0,0,0,0) 78%),
+    radial-gradient(720px 280px at 50% 0%, rgba(0,170,255,.18) 0%, rgba(0,170,255,.08) 30%, rgba(0,0,0,0) 72%);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.04),
+    inset 0 0 0 3px rgba(0,170,255,.06),
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 0 16px rgba(0,170,255,.10),
+    0 0 46px rgba(0,170,255,.07),
+    0 18px 48px rgba(0,0,0,.54) !important;
+  backdrop-filter: blur(10px);
+  display: grid !important;
+  place-items: center !important;
+  text-align: center !important;
+}
+.tr-hudTiles .tr-rowbox .tr-hudStripSub{
+  text-align: center !important;
+}
+
+.tr-hud--active.tr-hudPanel.tr-card{
+  border-color: rgba(0,170,255,.32);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.06),
+    0 26px 90px rgba(0,0,0,.68),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 0 22px rgba(0,170,255,.14),
+    0 0 78px rgba(0,170,255,.10);
+}
+
+.tr-hud--active .tr-hudStrip{
+  --slab-line: rgba(0,170,255,.44);
+  --slab-innerLine: rgba(0,170,255,.12);
+  --slab-bloom: .115;
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.06),
+    inset 0 0 0 3px var(--slab-innerLine),
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 0 22px rgba(0,170,255,.15),
+    0 0 80px rgba(0,170,255,.10),
+    0 22px 70px rgba(0,0,0,.58);
+}
+
+.tr-hud--active .tr-hudTiles .tr-rowbox{
+  border-color: rgba(0,170,255,.38) !important;
+  background:
+    linear-gradient(180deg, rgba(18,28,50,.92), rgba(6,10,18,.97)),
+    radial-gradient(560px 260px at 50% 55%, rgba(0,170,255,.26) 0%, rgba(0,170,255,.17) 32%, rgba(0,170,255,.10) 56%, rgba(0,0,0,0) 80%),
+    radial-gradient(720px 280px at 50% 0%, rgba(0,170,255,.20) 0%, rgba(0,170,255,.10) 30%, rgba(0,0,0,0) 72%);
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    inset 0 0 0 2px rgba(255,255,255,.05),
+    inset 0 0 0 3px rgba(0,170,255,.08),
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 0 18px rgba(0,170,255,.12),
+    0 0 60px rgba(0,170,255,.09),
+    0 18px 48px rgba(0,0,0,.54) !important;
+}
+
+/* ============================================================
+   FILTER ICONS / PILLS
+   ============================================================ */
+.tr-ico{
+  width: 18px !important;
+  height: 18px !important;
+  object-fit: contain !important;
+  display: inline-block !important;
+  flex: 0 0 auto !important;
+  image-rendering: auto;
+  filter: drop-shadow(0 0 8px rgba(0,170,255,.12));
+}
+
+.tr-filterRow{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.tr-filterGroup{
+  display:grid;
+  gap:8px;
+}
+.tr-filterLabel{
+  font-size: 11px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  font-weight: 900;
+  color: rgba(255,255,255,.62);
+}
+
+.tr-pillOK{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-weight: 950;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: rgba(34,197,94,1);
+}
+.tr-pillMISS{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap: wrap;
+  font-weight: 950;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: rgba(239,68,68,1);
+}
+
+/* ============================================================
+   INPUTS: BLACK
+   ============================================================ */
+.tr-card input,
+.tr-card textarea,
+.tr-card select,
+.tr-modal input,
+.tr-modal textarea,
+.tr-modal select{
+  background: rgba(0,0,0,.62) !important;
+  color: rgba(255,255,255,.94) !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  border-radius: 12px !important;
+  outline: none !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 18px 50px rgba(0,0,0,.35) !important;
+}
+.tr-card input::placeholder,
+.tr-card textarea::placeholder,
+.tr-modal input::placeholder,
+.tr-modal textarea::placeholder{
+  color: rgba(255,255,255,.38) !important;
+}
+.tr-card input:focus,
+.tr-card textarea:focus,
+.tr-card select:focus,
+.tr-modal input:focus,
+.tr-modal textarea:focus,
+.tr-modal select:focus{
+  border-color: rgba(0,170,255,.70) !important;
+  box-shadow:
+    0 0 0 1px rgba(0,170,255,.18) inset,
+    0 0 18px rgba(0,170,255,.14) !important;
+}
+
+/* ============================================================
+   SESSION CHECK-IN
+   ============================================================ */
+.tr-rowbox .tr-checkinGrid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.tr-rowbox .tr-checkinTile{
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background:
+    radial-gradient(520px 160px at 50% 0%, rgba(0,170,255,.08), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 14px 40px rgba(0,0,0,.35);
+  padding: 14px 12px;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+.tr-rowbox .tr-checkinValue{
+  font-weight: 1000;
+  font-size: 24px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+  color: rgba(255,255,255,.94);
+  text-shadow: 0 0 18px rgba(0,170,255,.14);
+}
+@media (max-width: 980px){
+  .tr-rowbox .tr-checkinGrid{ grid-template-columns: 1fr; }
+  .tr-rowbox .tr-checkinValue{ font-size: 22px; }
+}
+
+/* ============================================================
+   ACTIVE EXERCISE HEADER
+   ============================================================ */
+.tr-exerciseHeadRight{
+  display:grid;
+  gap:8px;
+  justify-items:end;
+  text-align:right;
+}
+
+.tr-exerciseCountTop{
+  font-weight: 1100;
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(220,244,255,.96);
+  text-shadow: 0 0 10px rgba(0,170,255,.10);
+}
+
+.tr-painHeadBadge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight:1000;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  font-size:13px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.16));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 12px 30px rgba(0,0,0,.22);
+}
+.tr-painHeadBadge--green{
+  border-color: rgba(34,197,94,.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 18px rgba(34,197,94,.10);
+}
+.tr-painHeadBadge--yellow{
+  border-color: rgba(245,158,11,.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 18px rgba(245,158,11,.10);
+}
+.tr-painHeadBadge--red{
+  border-color: rgba(239,68,68,.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 18px rgba(239,68,68,.12);
+}
+
+.tr-painHeadLabel{
+  color: rgba(255,95,95,.98);
+  font-weight: 1100;
+  text-shadow: 0 0 10px rgba(255,80,80,.18);
+}
+
+.tr-painHeadValue{
+  color: rgba(255,255,255,.98);
+  font-weight: 1100;
+}
+
+.tr-painHeadState{
+  color: rgba(215,241,255,.88);
+  font-weight: 1000;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 980px){
+  .tr-hudStrip{
+    grid-template-areas:
+      "left"
+      "center"
+      "right";
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .tr-hudActionsRow{ justify-self: stretch; justify-content: stretch; }
+  .tr-hudActionBtn{ min-width: 0; width: 100%; }
+
+  .tr-hudTiles{ grid-template-columns: 1fr; }
+  .tr-hudClockDate{ white-space: normal; }
+}
+
+@media (max-width: 520px){
+  .tr-hudTimeBig{ font-size: clamp(52px, 12vw, 72px); letter-spacing: .04em; }
+  .tr-hudClockDate{ font-size: 22px; }
+  .tr-hudClockTime{ font-size: 18px; }
+}
+
+/* ============================================================
+   NEW: allow specific cards to render outside-glows (Bottom HUD)
+   ============================================================ */
+.tr-card--noClip{
+  overflow: visible !important;
+}

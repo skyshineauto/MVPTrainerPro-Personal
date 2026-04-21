@@ -1,0 +1,29 @@
+import React from "react";
+
+export function Button({
+  children,
+  onClick,
+  disabled,
+  variant,
+  type = "button",
+  style,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "secondary";
+  type?: "button" | "submit";
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type={type}
+      className="tr-btn"
+      onClick={onClick}
+      disabled={disabled}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
