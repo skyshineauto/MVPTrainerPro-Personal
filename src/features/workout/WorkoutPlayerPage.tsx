@@ -2197,57 +2197,74 @@ function ExerciseRunner({
     showToast("LAST SET REMOVED.", "ok");
   };
 
-  const savePain = async (nextPain: number) => {
-    setPain(nextPain);
-    await supabase.from("workout_exercises").update({ pain: nextPain }).eq("id", weId);
-    await onChanged();
+ const savePain = async (nextPain: number) => {
+  setPain(nextPain);
+  await supabase
+    .from("workout_exercises")
+    .update({ pain: nextPain })
+    .eq("id", weId);
+
+  if (onChanged) {
+    await Promise.resolve(onChanged());
+  }
+};
+
+async function saveTimedActualMinutes(): Promise<void> {
+  const cur = workoutExercise.prescription_snapshot ?? {};
+  const next = {
+    ...(cur || {}),
+    actual_minutes: Math.max(0, Math.floor(actualMinutes || 0)),
   };
 
-  async function saveTimedActualMinutes(): Promise<void> {
-    const cur = workoutExercise.prescription_snapshot ?? {};
-    const next = { ...(cur || {}), actual_minutes: Math.max(0, Math.floor(actualMinutes || 0)) };
+  await supabase
+    .from("workout_exercises")
+    .update({ prescription_snapshot: next })
+    .eq("id", weId);
 
-    await supabase
-      .from("workout_exercises")
-      .update({ prescription_snapshot: next })
-      .eq("id", weId);
+  if (onChanged) {
+    await Promise.resolve(onChanged());
+  }
+}
 
-    await onChanged();
+const markDone = async () => {
+  if (!painTouched) {
+    showToast("LOG PAIN BEFORE LOCKING DONE.", "err");
+    return;
   }
 
-  const markDone = async () => {
-    if (!painTouched) {
-      showToast("LOG PAIN BEFORE LOCKING DONE.", "err");
-      return;
-    }
+  if (!timed && !allSetsLogged) {
+    showToast("To mark Done: all sets must have reps + weight.", "err");
+    return;
+  }
 
-    if (!timed && !allSetsLogged) {
-      showToast("To mark Done: all sets must have reps + weight.", "err");
-      return;
-    }
+  if (timed) {
+    await saveTimedActualMinutes();
+  }
 
-    if (timed) {
-      await saveTimedActualMinutes();
-    }
+  await supabase
+    .from("workout_exercises")
+    .update({ completed_at: new Date().toISOString() })
+    .eq("id", weId);
 
-    await supabase
-      .from("workout_exercises")
-      .update({ completed_at: new Date().toISOString() })
-      .eq("id", weId);
+  if (onChanged) {
+    await Promise.resolve(onChanged());
+  }
 
-    await onChanged();
-    showToast("LOCKED AS DONE.", "ok");
-  };
+  showToast("LOCKED AS DONE.", "ok");
+};
 
-  const unlock = async () => {
-    await supabase
-      .from("workout_exercises")
-      .update({ completed_at: null })
-      .eq("id", weId);
+const unlock = async () => {
+  await supabase
+    .from("workout_exercises")
+    .update({ completed_at: null })
+    .eq("id", weId);
 
-    await onChanged();
-    showToast("UNLOCKED.", "ok");
-  };
+  if (onChanged) {
+    await Promise.resolve(onChanged());
+  }
+
+  showToast("UNLOCKED.", "ok");
+};
 
   if (loadingSets) return <Card title="Exercise">Loading…</Card>;
 
