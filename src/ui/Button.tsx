@@ -4,7 +4,6 @@ export function Button({
   children,
   onClick,
   disabled,
-  variant,
   type = "button",
   style,
 }: {
