@@ -1643,32 +1643,34 @@ export function WorkoutPlayerPage({ params }: any) {
         <Card title="Workout">No exercises yet. Use Edit to add.</Card>
       )}
 
-      {editing && (
-        <EditSessionPanel
-          items={items}
-          onClose={() => setEditing(false)}
-          onSaveSessionOnly={saveEditSessionOnly}
-          onSaveAllFuture={saveEditAllFuture}
-          onDelete={async (weId) => {
-            await deleteWorkoutExercise(weId);
-            showToast("DELETED FROM THIS SESSION.", "ok");
-          }}
-          onSwap={(weId) => setSwapTargetWeId(weId)}
-          swapTargetWeId={swapTargetWeId}
-          searchQ={searchQ}
-          searchBusy={searchBusy}
-          searchResults={searchResults}
-          onSearch={(v) => runSearch(v)}
-          onPickAdd={addExercise}
-         onPickSwap={async (exerciseId) => {
-  if (!swapTargetWeId) return;
-  await swapExercise(swapTargetWeId, exerciseId);
-}}
-addMuscle={addMuscle}
-addEquip={addEquip}
-setAddMuscle={(v) => setAddMuscle(v)}
-setAddEquip={(v) => setAddEquip(v)}
-justAddedId={justAddedId}
+{editing && (
+  <EditSessionPanel
+    items={items}
+    onClose={() => setEditing(false)}
+    onSaveSessionOnly={saveEditSessionOnly}
+    onSaveAllFuture={saveEditAllFuture}
+    onDelete={async (weId) => {
+      await deleteWorkoutExercise(weId);
+      showToast("DELETED FROM THIS SESSION.", "ok");
+    }}
+    onSwap={(weId) => setSwapTargetWeId(weId)}
+    swapTargetWeId={swapTargetWeId}
+    searchQ={searchQ}
+    searchBusy={searchBusy}
+    searchResults={searchResults}
+    onSearch={(v) => runSearch(v)}
+    onPickAdd={addExercise}
+    onPickSwap={async (exerciseId) => {
+      if (!swapTargetWeId) return;
+      await swapExercise(swapTargetWeId, exerciseId);
+    }}
+    addMuscle={addMuscle}
+    addEquip={addEquip}
+    setAddMuscle={(v) => setAddMuscle(v)}
+    setAddEquip={(v) => setAddEquip(v)}
+    justAddedId={justAddedId}
+  />
+)}
 
       <style>{`
         .tr-btn--nextOrange{
