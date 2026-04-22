@@ -3,7 +3,11 @@ import React, { useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 
-export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
+export function LoginPage({
+  navigate,
+}: {
+  navigate?: (to: string) => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -11,7 +15,6 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [showPw, setShowPw] = useState(false);
 
-  // Put your background image in /public/login-bg.jpg
   const bgUrl = "/login-bg.jpg";
 
   const canSubmit = useMemo(() => {
@@ -35,7 +38,9 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
       });
 
       if (error) throw error;
-      navigate("/");
+
+      if (navigate) navigate("/");
+      else window.location.pathname = "/";
     } catch (e: any) {
       setErr(e?.message ?? "Sign in failed.");
     } finally {
@@ -85,7 +90,6 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
           "linear-gradient(180deg, rgba(2,8,14,.96), rgba(1,5,10,.985))",
       }}
     >
-      {/* Background image */}
       <div
         aria-hidden
         style={{
@@ -104,7 +108,6 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
         }}
       />
 
-      {/* FX layer */}
       <div className="tr-loginFX">
         <div className="tr-loginBokeh">
           {BOKEH.map((p) => (
@@ -160,7 +163,6 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       </div>
 
-      {/* Foreground */}
       <div style={{ position: "relative", width: "min(600px, 100%)", zIndex: 2 }}>
         <div style={{ textAlign: "center", marginBottom: 14 }}>
           <div className="tr-loginHeroTitle">MVP Trainer Pro</div>
@@ -235,7 +237,10 @@ export function LoginPage({ navigate }: { navigate: (to: string) => void }) {
                     <button
                       type="button"
                       className="tr-loginForgot"
-                      onClick={() => navigate("/forgot-password")}
+                      onClick={() => {
+                        if (navigate) navigate("/forgot-password");
+                        else window.location.pathname = "/forgot-password";
+                      }}
                     >
                       Forgot password?
                     </button>
