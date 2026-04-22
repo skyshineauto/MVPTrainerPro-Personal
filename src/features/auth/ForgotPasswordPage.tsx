@@ -3,7 +3,11 @@ import { supabase } from "../../lib/supabase";
 
 type NoticeTone = "idle" | "ok" | "err";
 
-export function ForgotPasswordPage() {
+export function ForgotPasswordPage({
+  navigate,
+}: {
+  navigate?: (to: string) => void;
+}) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [tone, setTone] = useState<NoticeTone>("idle");
@@ -77,7 +81,8 @@ export function ForgotPasswordPage() {
             type="button"
             style={styles.secondaryBtn}
             onClick={() => {
-              window.location.pathname = "/login";
+              if (navigate) navigate("/login");
+              else window.location.pathname = "/login";
             }}
           >
             BACK TO LOGIN
