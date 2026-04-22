@@ -16,7 +16,11 @@ function parseHashTokens() {
   return { access_token, refresh_token, type };
 }
 
-export function ResetPasswordPage() {
+export function ResetPasswordPage({
+  navigate,
+}: {
+  navigate?: (to: string) => void;
+}) {
   const [status, setStatus] = useState<Status>("loading");
   const [message, setMessage] = useState("Preparing secure password reset...");
   const [password, setPassword] = useState("");
@@ -60,11 +64,7 @@ export function ResetPasswordPage() {
           });
           if (error) throw error;
 
-          window.history.replaceState(
-            {},
-            document.title,
-            "/reset-password"
-          );
+          window.history.replaceState({}, document.title, "/reset-password");
 
           if (!alive) return;
           setStatus("ready");
@@ -146,9 +146,7 @@ export function ResetPasswordPage() {
       <div style={styles.card}>
         <div style={styles.kicker}>MVP Trainer</div>
         <h1 style={styles.title}>Reset Password</h1>
-        <p style={styles.sub}>
-          Secure your account with a fresh password.
-        </p>
+        <p style={styles.sub}>Secure your account with a fresh password.</p>
 
         {status === "loading" ? (
           <div style={{ ...styles.notice, ...styles.noticeInfo }}>{message}</div>
@@ -163,7 +161,8 @@ export function ResetPasswordPage() {
                 type="button"
                 style={{ ...styles.secondaryBtn, marginTop: 18 }}
                 onClick={() => {
-                  window.location.pathname = "/forgot-password";
+                  if (navigate) navigate("/forgot-password");
+                  else window.location.pathname = "/forgot-password";
                 }}
               >
                 REQUEST NEW RESET LINK
@@ -216,7 +215,8 @@ export function ResetPasswordPage() {
                 type="button"
                 style={{ ...styles.secondaryBtn, marginTop: 18 }}
                 onClick={() => {
-                  window.location.pathname = "/login";
+                  if (navigate) navigate("/login");
+                  else window.location.pathname = "/login";
                 }}
               >
                 GO TO LOGIN
