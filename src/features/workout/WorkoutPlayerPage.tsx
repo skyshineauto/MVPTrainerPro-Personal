@@ -1660,14 +1660,15 @@ export function WorkoutPlayerPage({ params }: any) {
           searchResults={searchResults}
           onSearch={(v) => runSearch(v)}
           onPickAdd={addExercise}
-          onPickSwap={(exerciseId) => swapTargetWeId && swapExercise(swapTargetWeId, exerciseId)}
-          addMuscle={addMuscle}
-          addEquip={addEquip}
-          setAddMuscle={(v) => setAddMuscle(v)}
-          setAddEquip={(v) => setAddEquip(v)}
-          justAddedId={justAddedId}
-        />
-      )}
+         onPickSwap={async (exerciseId) => {
+  if (!swapTargetWeId) return;
+  await swapExercise(swapTargetWeId, exerciseId);
+}}
+addMuscle={addMuscle}
+addEquip={addEquip}
+setAddMuscle={(v) => setAddMuscle(v)}
+setAddEquip={(v) => setAddEquip(v)}
+justAddedId={justAddedId}
 
       <style>{`
         .tr-btn--nextOrange{
