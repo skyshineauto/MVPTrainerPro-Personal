@@ -1,5 +1,5 @@
 // src/features/progress/ProgressPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
@@ -12,7 +12,6 @@ import icoRate from "../../assets/progress-icons/rate.png";
 import icoFlames from "../../assets/progress-icons/flames.png";
 import icoInProcess from "../../assets/progress-icons/in-process.png";
 import icoWorkout from "../../assets/progress-icons/workout.png";
-// optional alternate for sets/logging:
 import icoReport from "../../assets/progress-icons/report.png";
 
 import icoFlag from "../../assets/progress-icons/flag.png";
