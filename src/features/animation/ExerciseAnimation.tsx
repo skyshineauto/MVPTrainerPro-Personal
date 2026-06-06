@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { poseFor } from "./templates";
 
 type Media = {
@@ -13,7 +14,6 @@ export function ExerciseAnimation({
   templateId: string;
   media?: Media | null;
 }) {
-  // Prefer media first
   const src = useMemo(() => {
     const m = media ?? {};
     return m.video || m.gif || m.poster || "";
@@ -21,7 +21,6 @@ export function ExerciseAnimation({
 
   const isVideo = !!src && /\.(mp4|webm|ogg)(\?|#|$)/i.test(src);
 
-  // If we have media, render it and skip stick animation entirely
   if (src) {
     return (
       <div
@@ -55,7 +54,6 @@ export function ExerciseAnimation({
     );
   }
 
-  // Otherwise, fall back to stick figure canvas
   return <StickCanvas templateId={templateId} />;
 }
 
@@ -76,11 +74,12 @@ function StickCanvas({ templateId }: { templateId: string }) {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const w = canvas.width,
-      h = canvas.height;
+    const w = canvas.width;
+    const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
     ctx.fillStyle = "rgba(0,170,255,0.06)";
@@ -90,7 +89,8 @@ function StickCanvas({ templateId }: { templateId: string }) {
 
     const cx = w / 2;
     const cy = h / 2 + 30;
-    const P = (pt: [number, number]) => [cx + pt[0] * 2, cy + pt[1] * 2] as const;
+    const P = (pt: [number, number]) =>
+      [cx + pt[0] * 2, cy + pt[1] * 2] as const;
 
     const line = (
       a: [number, number],
@@ -98,8 +98,8 @@ function StickCanvas({ templateId }: { templateId: string }) {
       lw = 6,
       col = "rgba(255,255,255,.85)"
     ) => {
-      const A = P(a),
-        B = P(b);
+      const A = P(a);
+      const B = P(b);
       ctx.strokeStyle = col;
       ctx.lineWidth = lw;
       ctx.lineCap = "round";
