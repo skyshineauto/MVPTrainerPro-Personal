@@ -1,4 +1,3 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
 import { poseFor } from "./templates";
 
 type Media = {
