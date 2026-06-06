@@ -1023,64 +1023,117 @@
 }
 
 @media (max-width: 720px) {
+  .bh-root{
+    margin-top: 0;
+  }
+
   .bh-scene {
-    min-height: 476px;
-    padding-bottom: 74px;
+    min-height: auto;
+    padding-bottom: 0;
+    overflow: visible;
+    border-radius: 16px;
   }
 
   .bh-shell {
-    min-height: 302px;
+    min-height: auto;
+    border-radius: 16px;
   }
 
   .bh-grid {
-    gap: 12px;
-    padding: 16px 11px 10px;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px 10px 12px;
+    min-height: auto;
+  }
+
+  .bh-left,
+  .bh-right {
+    min-width: 0;
+  }
+
+  .bh-title {
+    font-size: clamp(18px, 6vw, 24px);
   }
 
   .bh-progressRail {
-    padding: 8px 8px 15px;
+    margin-top: 8px;
+    padding: 8px 8px 12px;
   }
 
-  .bh-gaugeTrack {
-    min-height: 34px;
-    padding-left: 40px;
+  .bh-completed {
+    font-size: 16px;
+    margin-top: 8px;
   }
 
-  .bh-gaugeAnchor {
-    left: 7px;
+  .bh-plaque {
+    grid-template-columns: 34px minmax(0, 1fr);
+    min-height: auto;
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .bh-icon {
     width: 22px;
     height: 22px;
   }
 
-  .bh-gaugeAnchorEmoji {
+  .bh-plaqueLabel {
     font-size: 11px;
   }
 
-  .bh-gaugeSegments {
-    gap: 2px;
-    height: 22px;
+  .bh-plaqueMain {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+    align-items: start;
   }
 
-  .bh-gseg {
-    height: 22px;
+  .bh-plaqueName {
+    font-size: clamp(22px, 10vw, 40px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .bh-plaque {
-    grid-template-columns: 40px minmax(0, 1fr);
-    min-height: 104px;
-    padding: 11px 11px 12px;
+  .bh-plaqueTargetPill {
+    justify-self: start;
+    min-height: 24px;
+    font-size: 11px;
+    padding: 0 8px;
   }
 
-  .bh-icon {
-    width: 26px;
-    height: 26px;
+  .bh-right {
+    min-height: auto;
+    padding: 10px;
   }
 
-  .bh-floor {
-    height: 98px;
+  .bh-panelTitle {
+    white-space: normal;
+    font-size: clamp(14px, 5vw, 18px);
   }
 
-  .bh-floorPlane {
-    top: -18px;
+  .bh-panelRows {
+    margin-top: 8px;
+  }
+
+  .bh-panelRow {
+    min-height: 28px;
+    gap: 8px;
+  }
+
+  .bh-panelLabel,
+  .bh-panelValue {
+    font-size: 12px;
+  }
+
+  .bh-panelValue.is-next {
+    max-width: 140px;
+    font-size: 12px;
+  }
+
+  .bh-floor,
+  .bh-floorPlane,
+  .bh-cardHotspot,
+  .bh-sideEmitter {
+    display: none;
   }
 }
