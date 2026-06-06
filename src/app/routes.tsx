@@ -1,3 +1,5 @@
+import type { ReactElement } from "react";
+
 import { LoginPage } from "../features/auth/LoginPage";
 import { ForgotPasswordPage } from "../features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "../features/auth/ResetPasswordPage";
@@ -8,7 +10,7 @@ import { ExerciseDetailPage } from "../features/library/ExerciseDetailPage";
 import { ProgressPage } from "../features/progress/ProgressPage";
 import { CoachPage } from "../features/coach/CoachPage";
 
-export type Route = { path: string; el: JSX.Element };
+export type Route = { path: string; el: ReactElement };
 
 const goTo = (to: string) => {
   window.location.pathname = to;
