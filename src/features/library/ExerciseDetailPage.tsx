@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
@@ -29,11 +30,19 @@ function isMediaUsable(media: any) {
     const first = media.images[0];
     images0 = typeof first === "string" ? first : first?.url || first?.image || first?.src || null;
   }
-  return isNonEmptyString(gif) || isNonEmptyString(video) || isNonEmptyString(poster) || isNonEmptyString(image) || isNonEmptyString(images0);
+  return (
+    isNonEmptyString(gif) ||
+    isNonEmptyString(video) ||
+    isNonEmptyString(poster) ||
+    isNonEmptyString(image) ||
+    isNonEmptyString(images0)
+  );
 }
 
 async function signedUrlFromPath(path: string, expiresInSeconds = 60 * 30) {
-  const { data, error } = await supabase.storage.from("exercise-media").createSignedUrl(path, expiresInSeconds);
+  const { data, error } = await supabase.storage
+    .from("exercise-media")
+    .createSignedUrl(path, expiresInSeconds);
   if (error) throw error;
   return data.signedUrl;
 }
@@ -45,13 +54,19 @@ function resolveBuiltMedia(ex: any): { gif?: string; video?: string; poster?: st
   const gif = (m.gif as string | undefined) ?? undefined;
   const video = (m.video as string | undefined) ?? undefined;
 
-  let poster = (m.poster as string | undefined) ?? (m.image as string | undefined) ?? undefined;
+  let poster =
+    (m.poster as string | undefined) ??
+    (m.image as string | undefined) ??
+    undefined;
 
   if (!poster && Array.isArray(m.images) && m.images.length > 0) {
     const first = m.images[0];
     if (typeof first === "string") poster = first;
     else if (first && typeof first === "object") {
-      poster = (first.url as string | undefined) || (first.image as string | undefined) || (first.src as string | undefined);
+      poster =
+        (first.url as string | undefined) ||
+        (first.image as string | undefined) ||
+        (first.src as string | undefined);
     }
   }
 
@@ -61,10 +76,11 @@ function resolveBuiltMedia(ex: any): { gif?: string; video?: string; poster?: st
 function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
   const built = useMemo(() => resolveBuiltMedia(ex), [ex]);
 
-  const anyUserEnabled = useMemo(() => userMedia.some((m) => m.use_user_upload), [userMedia]);
+  const anyUserEnabled = useMemo(
+    () => userMedia.some((m) => m.use_user_upload),
+    [userMedia]
+  );
 
-  // choose source:
-  // if user enabled -> user upload (if available), else built
   const resolved = useMemo(() => {
     if (anyUserEnabled) {
       const byKind = new Map<string, UserMediaRow>();
@@ -113,18 +129,32 @@ function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
         setPosterUrl(null);
 
         if (resolved.source === "user_upload") {
-          if (resolved.videoPath) setVideoUrl(await signedUrlFromPath(resolved.videoPath));
-          if (resolved.gifPath) setGifUrl(await signedUrlFromPath(resolved.gifPath));
-          if (resolved.posterPath) setPosterUrl(await signedUrlFromPath(resolved.posterPath));
+          if (resolved.videoPath) {
+            const url = await signedUrlFromPath(resolved.videoPath);
+            if (!cancelled) setVideoUrl(url);
+          }
+          if (resolved.gifPath) {
+            const url = await signedUrlFromPath(resolved.gifPath);
+            if (!cancelled) setGifUrl(url);
+          }
+          if (resolved.posterPath) {
+            const url = await signedUrlFromPath(resolved.posterPath);
+            if (!cancelled) setPosterUrl(url);
+          }
 
-          // If user enabled but none present:
           if (!resolved.videoPath && !resolved.gifPath && !resolved.posterPath) {
-            setLoadFail("Your upload is enabled, but no uploaded media files are present for this exercise.");
+            if (!cancelled) {
+              setLoadFail(
+                "Your upload is enabled, but no uploaded media files are present for this exercise."
+              );
+            }
           }
         } else {
-          setVideoUrl((resolved as any).video ?? null);
-          setGifUrl((resolved as any).gif ?? null);
-          setPosterUrl((resolved as any).poster ?? null);
+          if (!cancelled) {
+            setVideoUrl((resolved as any).video ?? null);
+            setGifUrl((resolved as any).gif ?? null);
+            setPosterUrl((resolved as any).poster ?? null);
+          }
         }
       } catch (e: any) {
         if (!cancelled) setErr(e?.message ?? String(e));
@@ -141,7 +171,9 @@ function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
     const src = resolved.source === "user_upload" ? "YOUR UPLOAD" : "BUILT-IN";
     if (err) return { tone: "err", text: `MEDIA ERROR: ${err}` };
     if (loadFail) return { tone: "err", text: loadFail };
-    if (resolvedType === "none") return { tone: "warn", text: "No media found for the currently selected source." };
+    if (resolvedType === "none") {
+      return { tone: "warn", text: "No media found for the currently selected source." };
+    }
     return { tone: "ok", text: `Using ${src} • ${resolvedType.toUpperCase()}` };
   }, [resolved.source, resolvedType, err, loadFail]);
 
@@ -187,7 +219,11 @@ function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
             playsInline
             controls={false}
             preload="metadata"
-            onError={() => setLoadFail("Video failed to load. The URL may be invalid or blocked. Try uploading your own file.")}
+            onError={() =>
+              setLoadFail(
+                "Video failed to load. The URL may be invalid or blocked. Try uploading your own file."
+              )
+            }
             style={{
               width: "100%",
               height: "auto",
@@ -202,7 +238,11 @@ function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
           <img
             src={gifUrl || posterUrl || ""}
             alt={`${ex?.name ?? "Exercise"} demo`}
-            onError={() => setLoadFail("Image/GIF failed to load. The URL may be invalid or blocked. Try uploading your own file.")}
+            onError={() =>
+              setLoadFail(
+                "Image/GIF failed to load. The URL may be invalid or blocked. Try uploading your own file."
+              )
+            }
             style={{
               width: "100%",
               height: "auto",
@@ -230,17 +270,30 @@ function UploadPill({
   onPick: (file: File) => void;
 }) {
   const isBusy = busy === kind;
-  const label = kind === "gif" ? "Upload GIF" : kind === "video" ? "Upload Video" : "Upload Poster";
+  const label =
+    kind === "gif" ? "Upload GIF" : kind === "video" ? "Upload Video" : "Upload Poster";
 
   return (
     <label
       className={`tr-seg ${isBusy ? "is-active" : ""}`}
-      style={{ height: 44, display: "inline-flex", alignItems: "center", gap: 8, cursor: busy ? "not-allowed" : "pointer" }}
+      style={{
+        height: 44,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        cursor: busy ? "not-allowed" : "pointer",
+      }}
     >
       <span style={{ fontWeight: 900 }}>{isBusy ? "Uploading…" : label}</span>
       <input
         type="file"
-        accept={kind === "video" ? "video/mp4,video/webm,video/quicktime" : kind === "gif" ? "image/gif" : "image/jpeg,image/png,image/webp"}
+        accept={
+          kind === "video"
+            ? "video/mp4,video/webm,video/quicktime"
+            : kind === "gif"
+            ? "image/gif"
+            : "image/jpeg,image/png,image/webp"
+        }
         disabled={!!busy}
         style={{ display: "none" }}
         onChange={(e) => {
@@ -263,8 +316,14 @@ export function ExerciseDetailPage({ params, navigate }: any) {
   const [userMedia, setUserMedia] = useState<UserMediaRow[]>([]);
   const [busyUpload, setBusyUpload] = useState<null | "gif" | "video" | "poster">(null);
 
-  const builtHasUsable = useMemo(() => (ex ? isMediaUsable(ex.media) : false), [ex]);
-  const anyUserEnabled = useMemo(() => userMedia.some((m) => m.use_user_upload), [userMedia]);
+  const builtHasUsable = useMemo(
+    () => (ex ? isMediaUsable(ex.media) : false),
+    [ex]
+  );
+  const anyUserEnabled = useMemo(
+    () => userMedia.some((m) => m.use_user_upload),
+    [userMedia]
+  );
 
   async function loadAll() {
     setLoading(true);
@@ -277,12 +336,18 @@ export function ExerciseDetailPage({ params, navigate }: any) {
       if (uErr) throw uErr;
       if (!u.user) throw new Error("Sign in to view exercise detail.");
 
-      const { data: exData, error: exErr } = await supabase.from("exercises").select("*").eq("id", exerciseId).single();
+      const { data: exData, error: exErr } = await supabase
+        .from("exercises")
+        .select("*")
+        .eq("id", exerciseId)
+        .single();
       if (exErr) throw exErr;
 
       const { data: um, error: umErr } = await supabase
         .from("exercise_user_media")
-        .select("id,user_id,exercise_id,kind,storage_path,use_user_upload,license,attribution,updated_at")
+        .select(
+          "id,user_id,exercise_id,kind,storage_path,use_user_upload,license,attribution,updated_at"
+        )
         .eq("user_id", u.user.id)
         .eq("exercise_id", exerciseId)
         .order("updated_at", { ascending: false });
@@ -290,7 +355,7 @@ export function ExerciseDetailPage({ params, navigate }: any) {
       if (umErr) throw umErr;
 
       setEx(exData);
-      setUserMedia((um ?? []) as any);
+      setUserMedia((um ?? []) as UserMediaRow[]);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
@@ -300,7 +365,6 @@ export function ExerciseDetailPage({ params, navigate }: any) {
 
   useEffect(() => {
     void loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseId]);
 
   async function toggleUseUserUpload(next: boolean) {
@@ -316,7 +380,11 @@ export function ExerciseDetailPage({ params, navigate }: any) {
       return;
     }
 
-    const { error } = await supabase.from("exercise_user_media").update({ use_user_upload: next }).eq("user_id", u.user.id).eq("exercise_id", exerciseId);
+    const { error } = await supabase
+      .from("exercise_user_media")
+      .update({ use_user_upload: next })
+      .eq("user_id", u.user.id)
+      .eq("exercise_id", exerciseId);
 
     if (error) {
       alert(error.message);
@@ -336,15 +404,12 @@ export function ExerciseDetailPage({ params, navigate }: any) {
       const safeName = `${Date.now()}-${kind}.${ext}`;
       const storage_path = `${u.user.id}/${exerciseId}/${safeName}`;
 
-      // 1) Upload to storage
       const up = await supabase.storage.from("exercise-media").upload(storage_path, file, {
         upsert: true,
         contentType: file.type || undefined,
       });
       if (up.error) throw up.error;
 
-      // 2) Insert/update exercise_user_media row
-      // Enable by default if built-in media is missing usable assets; otherwise keep disabled until user toggles.
       const enableByDefault = builtHasUsable ? false : true;
 
       const rpc = await supabase.rpc("rpc_exercise_user_media_upsert", {
@@ -370,11 +435,22 @@ export function ExerciseDetailPage({ params, navigate }: any) {
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <Card title="Exercise Detail" tone="blue" right={<span className="tr-kicker">MEDIA</span>}>
+      <Card
+        title="Exercise Detail"
+        tone="blue"
+        right={<span className="tr-kicker">MEDIA</span>}
+      >
         {loading ? (
           <div className="tr-sub">Loading…</div>
         ) : err ? (
-          <div className="tr-rowbox" style={{ borderColor: "rgba(255,80,80,.35)", background: "rgba(255,80,80,.10)", fontWeight: 900 }}>
+          <div
+            className="tr-rowbox"
+            style={{
+              borderColor: "rgba(255,80,80,.35)",
+              background: "rgba(255,80,80,.10)",
+              fontWeight: 900,
+            }}
+          >
             {err}
           </div>
         ) : ex ? (
@@ -383,22 +459,48 @@ export function ExerciseDetailPage({ params, navigate }: any) {
               <div className="tr-kicker">EXERCISE</div>
               <div style={{ fontWeight: 950, fontSize: 18 }}>{ex.name}</div>
               <div className="tr-sub">
-                {(Array.isArray(ex.primary_muscles) && ex.primary_muscles.length ? ex.primary_muscles.join(", ") : "—")} •{" "}
-                {(Array.isArray(ex.equipment) && ex.equipment.length ? ex.equipment.join(", ") : "—")} • {ex.source ?? "—"}
+                {(Array.isArray(ex.primary_muscles) && ex.primary_muscles.length
+                  ? ex.primary_muscles.join(", ")
+                  : "—")}{" "}
+                •{" "}
+                {(Array.isArray(ex.equipment) && ex.equipment.length
+                  ? ex.equipment.join(", ")
+                  : "—")}{" "}
+                • {ex.source ?? "—"}
               </div>
             </div>
 
             <MediaStage ex={ex} userMedia={userMedia} />
 
-            <div className="tr-row" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div
+              className="tr-row"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ display: "grid", gap: 4 }}>
                 <div className="tr-kicker"></div>
-                <div style={{ fontWeight: 950 }}>{anyUserEnabled ? "" : builtHasUsable ? "Using built-in media" : "Missing media"}</div>
-                <div className="tr-sub">{builtHasUsable ? `Built-in source: ${ex.media?.source ?? "source"}` : ""}</div>
+                <div style={{ fontWeight: 950 }}>
+                  {anyUserEnabled
+                    ? ""
+                    : builtHasUsable
+                    ? "Using built-in media"
+                    : "Missing media"}
+                </div>
+                <div className="tr-sub">
+                  {builtHasUsable ? `Built-in source: ${ex.media?.source ?? "source"}` : ""}
+                </div>
               </div>
 
               {userMedia.length ? (
-                <Button variant="secondary" onClick={() => toggleUseUserUpload(!anyUserEnabled)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => toggleUseUserUpload(!anyUserEnabled)}
+                >
                   {anyUserEnabled ? "Use built-in media" : "Use my upload"}
                 </Button>
               ) : null}
@@ -407,15 +509,25 @@ export function ExerciseDetailPage({ params, navigate }: any) {
             <div className="tr-row" style={{ display: "grid", gap: 10 }}>
               <div style={{ display: "grid", gap: 4 }}>
                 <div className="tr-kicker"></div>
-                <div className="tr-sub">
-                 
-                </div>
+                <div className="tr-sub"></div>
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <UploadPill kind="gif" busy={busyUpload} onPick={(f) => onPickFile("gif", f)} />
-                <UploadPill kind="video" busy={busyUpload} onPick={(f) => onPickFile("video", f)} />
-                <UploadPill kind="poster" busy={busyUpload} onPick={(f) => onPickFile("poster", f)} />
+                <UploadPill
+                  kind="gif"
+                  busy={busyUpload}
+                  onPick={(f) => onPickFile("gif", f)}
+                />
+                <UploadPill
+                  kind="video"
+                  busy={busyUpload}
+                  onPick={(f) => onPickFile("video", f)}
+                />
+                <UploadPill
+                  kind="poster"
+                  busy={busyUpload}
+                  onPick={(f) => onPickFile("poster", f)}
+                />
               </div>
             </div>
           </div>
