@@ -1,5 +1,3 @@
-import React from "react";
-
 export function CheckIcon({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden style={{ flex: "0 0 auto" }}>
