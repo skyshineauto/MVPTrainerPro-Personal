@@ -1,4 +1,5 @@
 // src/features/coach/CoachPage.tsx
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
