@@ -759,6 +759,54 @@ function SessionCompleteOverlay({
           .tr-completeActions .tr-btn{ width:100%; }
           .tr-completeTitle::after{ right: auto; left: 50%; transform: translateX(-50%); }
         }
+        @media (max-width: 720px){
+  .tr-exerciseConsole,
+  .tr-exerciseConsoleRail,
+  .tr-railModule,
+  .tr-setStack,
+  .tr-setRowShell,
+  .tr-setGrid,
+  .tr-qtyRow,
+  .tr-opRow{
+    position: relative;
+    z-index: 40;
+    pointer-events: auto;
+  }
+
+  .tr-opBtn,
+  .tr-qtyBtn,
+  .tr-opInput,
+  .tr-bigInput,
+  .tr-painSlider{
+    position: relative;
+    z-index: 45;
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  .tr-finalActionModule{
+    position: static;
+    bottom: auto;
+    z-index: 1;
+  }
+
+  .tr-finalActionBottom--triple{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-setGrid{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-qtyRow{
+    grid-template-columns: 56px 1fr 56px;
+  }
+
+  .tr-qtyBtn,
+  .tr-bigInput{
+    height: 56px;
+  }
+}
       `}</style>
     </div>
   );
