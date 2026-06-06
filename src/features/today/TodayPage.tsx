@@ -1,4 +1,4 @@
-// src/features/today/TodayPage.tsx
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
@@ -21,7 +21,6 @@ export function TodayPage() {
 
   const [qd, setQd] = useState<QueueDash | null>(null);
 
-  // active/resume state (only when started_at exists)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionType, setActiveSessionType] = useState<string | null>(null);
 
@@ -33,11 +32,14 @@ export function TodayPage() {
       .select("id, session_type")
       .eq("id", sessionId)
       .maybeSingle();
+
     if (error) return null;
     return (sess as any)?.session_type ?? null;
   }
 
-  async function loadLatestSymptomKeyIfNeeded(goalMode: string | null): Promise<SymptomKey | null> {
+  async function loadLatestSymptomKeyIfNeeded(
+    goalMode: string | null
+  ): Promise<SymptomKey | null> {
     if (!isSymptomMode(goalMode)) return null;
 
     const { data: u } = await supabase.auth.getUser();
@@ -73,7 +75,6 @@ export function TodayPage() {
         return;
       }
 
-      // (1) Active workout to RESUME if exists
       const { data: w, error: wErr } = await supabase
         .from("workouts")
         .select("id, scheduled_session_id, started_at")
@@ -94,8 +95,9 @@ export function TodayPage() {
         setActiveSessionType(null);
       }
 
-      // (2) Queue dashboard (single truth)
-      const { data: qdata, error: qErr } = await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
+      const { data: qdata, error: qErr } = await supabase.rpc("rpc_queue_dashboard", {
+        p_keep: 7,
+      });
       if (qErr) throw qErr;
 
       const dash = (qdata ?? null) as any;
@@ -119,14 +121,15 @@ export function TodayPage() {
     }
   }
 
-  useEffect(() => void load(), []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   const hasActiveProgram = !!qd?.activeBlock?.id;
 
   const goal = (qd?.activeBlock?.goal as string) ?? null;
   const goalMode = (qd?.activeBlock?.goal_mode as string) ?? null;
 
-  // ✅ Active label must use the SAME formatter as queue
   const activeLabel = useMemo(() => {
     if (!activeSessionId) return null;
     return formatSessionLabel({
@@ -159,7 +162,13 @@ export function TodayPage() {
     <div style={{ display: "grid", gap: 14 }}>
       <Card title="Workouts">
         {err ? (
-          <div className="tr-rowbox" style={{ borderColor: "rgb(255 80 80 / .35)", background: "rgb(255 80 80 / .10)" }}>
+          <div
+            className="tr-rowbox"
+            style={{
+              borderColor: "rgb(255 80 80 / .35)",
+              background: "rgb(255 80 80 / .10)",
+            }}
+          >
             {err}
           </div>
         ) : null}
@@ -172,17 +181,19 @@ export function TodayPage() {
 
         <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
           <div className="tr-rowbox" style={{ display: "grid", gap: 6 }}>
-            <div className="tr-kicker">{activeSessionId ? "Active workout" : "Next workout"}</div>
-
-            <div style={{ fontWeight: 950, fontSize: 18 }}>
-              {activeSessionId ? (activeLabel ?? "Session") : nextLabel}
+            <div className="tr-kicker">
+              {activeSessionId ? "Active workout" : "Next workout"}
             </div>
 
-            {/* ✅ Removed weird helper text lines per your request */}
+            <div style={{ fontWeight: 950, fontSize: 18 }}>
+              {activeSessionId ? activeLabel ?? "Session" : nextLabel}
+            </div>
 
             <div style={{ marginTop: 8 }}>
               <button
-                className={`tr-btn tr-btn--primary ${activeSessionId ? "tr-btn--glowResume" : "tr-btn--glowStart"}`}
+                className={`tr-btn tr-btn--primary ${
+                  activeSessionId ? "tr-btn--glowResume" : "tr-btn--glowStart"
+                }`}
                 disabled={!activeSessionId && !qd?.nextSession?.id}
                 onClick={onPrimary}
                 style={{ width: "100%", height: 52 }}
@@ -215,12 +226,19 @@ export function TodayPage() {
                   className="tr-rowBtn"
                   onClick={() => (window.location.pathname = `/workout/${s.id}`)}
                 >
-                  <div className="tr-rowbox" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                  <div
+                    className="tr-rowbox"
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                    }}
+                  >
                     <div style={{ display: "grid", gap: 2 }}>
                       <div style={{ fontWeight: 950 }}>
                         #{idx + 1} — {label}
                       </div>
-                      {/* leave this line for now; you didn’t flag it as “weird text” */}
                       <div className="tr-sub">Tap to start this session</div>
                     </div>
                     <div className="tr-kicker" style={{ opacity: 0.9 }}>
@@ -232,15 +250,26 @@ export function TodayPage() {
             })}
           </div>
         ) : (
-          <div className="tr-sub">No queued sessions returned for the active program.</div>
+          <div className="tr-sub">
+            No queued sessions returned for the active program.
+          </div>
         )}
       </Card>
 
       <Card title="Actions">
         <div style={{ display: "grid", gap: 10 }}>
-          <Button onClick={() => (window.location.pathname = "/coach")}>Go to Coach</Button>
-          <Button variant="secondary" onClick={() => (window.location.pathname = "/progress")}>Go to Progress</Button>
-          <Button variant="secondary" onClick={load}>Refresh</Button>
+          <Button onClick={() => (window.location.pathname = "/coach")}>
+            Go to Coach
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => (window.location.pathname = "/progress")}
+          >
+            Go to Progress
+          </Button>
+          <Button variant="secondary" onClick={load}>
+            Refresh
+          </Button>
         </div>
       </Card>
 
