@@ -1,5 +1,4 @@
 // src/features/library/LibraryPage.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 
