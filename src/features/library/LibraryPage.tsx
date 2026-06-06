@@ -1,4 +1,4 @@
-// src/features/library/LibraryPage.tsx
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 
@@ -90,7 +90,6 @@ const EQUIP_BUTTONS: Array<{ key: EquipKey; label: string; icon?: string }> = [
 
 const PAGE_SIZE = 250;
 
-/** Expand only the stairs family (your current pain point). */
 function expandSearchTerms(raw: string): string[] {
   const q = normalizeText(raw);
   if (!q) return [];
@@ -115,20 +114,14 @@ function expandSearchTerms(raw: string): string[] {
     ].forEach((t) => out.add(t));
   }
 
-  // If they type a single token like "sta", don’t explode the query
-  // (synonym expansion should only kick in for meaningful cardio intent)
   return Array.from(out).filter(Boolean);
 }
 
-/** Supabase OR clause builder: name.ilike.%x%,name.ilike.%y% */
 function buildNameOrIlike(terms: string[]) {
   const uniq = Array.from(new Set(terms.map((t) => t.trim()).filter(Boolean)));
-  // Escape % and _ for LIKE: easiest is to just avoid adding them from user input.
-  // Terms here are controlled (normalized + our expansions).
   return uniq.map((t) => `name.ilike.%${t.replace(/%/g, "").replace(/_/g, "")}%`).join(",");
 }
 
-/** Cardio browse OR clause (name-driven). */
 function cardioBrowseOrIlike() {
   const terms = [
     "treadmill",
@@ -182,6 +175,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
   const [toast, setToast] = useState<ToastState>({ open: false, tone: "ok", text: "" });
   const toastTimer = useRef<any>(null);
+
   function showToast(text: string, tone: ToastTone = "ok") {
     try {
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -190,9 +184,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, open: false })), 2400);
   }
 
-  /** ==========================
-   *  CREATE EXERCISE MODAL (unchanged)
-   *  ========================== */
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -255,17 +246,14 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     return decorated.filter((r: any) => {
       const nameNorm = normalizeText(r.name || "");
 
-      // typing search (client-side term match, since we server-query broadly)
       if (term.length >= 2) {
         const family = expandSearchTerms(termRaw).map(normalizeText);
         const ok = family.some((t) => t && nameNorm.includes(t));
         if (!ok) return false;
       }
 
-      // ✅ unified rules (the contract)
       if (!matchFilters(r, muscle, equip)) return false;
 
-      // media filter
       if (media === "ok" && !r.effectiveHasMedia) return false;
       if (media === "missing" && r.effectiveHasMedia) return false;
       if (media === "my_uploads") {
@@ -302,16 +290,13 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
       .order("name", { ascending: true })
       .range(from, to);
 
-    // If user is searching, broaden server query with ORs (synonym expanded).
     if (termNorm.length >= 2) {
       const terms = expandSearchTerms(termRaw);
       query = query.or(buildNameOrIlike(terms));
     } else {
-      // Browse mode: if CARDIO tab, do cardio-first server query so we aren’t trapped in the first alphabet slice.
       if (equip === "cardio") {
         query = query.or(cardioBrowseOrIlike());
       }
-      // For other browse modes, we fetch pages and filter client-side via matchFilters().
     }
 
     const { data: exs, error: exErr } = await query;
@@ -319,7 +304,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
     const list = (exs ?? []) as ExRow[];
 
-    // Pull user media for these IDs
     const { data: u, error: uErr } = await supabase.auth.getUser();
     if (uErr) throw uErr;
     if (!u.user) throw new Error("Sign in first.");
@@ -376,17 +360,13 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     }
   }
 
-  // Initial load
   useEffect(() => {
     void loadInitial();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reload when search/filter changes
   useEffect(() => {
     const t = setTimeout(() => void loadInitial(), 250);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, muscle, equip]);
 
   async function createExercise() {
@@ -474,7 +454,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
             </div>
           </div>
 
-          {/* Filters */}
           <div className="tr-filterGroup">
             <div className="tr-filterLabel">MUSCLE FILTER</div>
             <div className="tr-filterRow">
@@ -498,9 +477,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
                   </button>
                 ))}
               </div>
-              
             </div>
-            
 
             <div className="tr-filterGroup">
               <div className="tr-filterLabel">MEDIA</div>
@@ -518,7 +495,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
                   ⬆︎ MY UPLOADS
                 </button>
               </div>
-          
             </div>
           </div>
         </div>
@@ -573,9 +549,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
         )}
       </Card>
 
-      {/* =========================
-          CREATE EXERCISE MODAL (unchanged UI)
-          ========================= */}
       {createOpen ? (
         <div className="tr-modalOverlay">
           <div className="tr-modal" style={{ width: "min(860px, 100%)" }}>
