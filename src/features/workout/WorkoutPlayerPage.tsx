@@ -3024,6 +3024,93 @@ const unlock = async () => {
         .bha-root{
           margin-top: 0;
         }
+        @media (max-width: 720px){
+  .tr-exerciseConsole{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .tr-exerciseConsoleMedia,
+  .tr-exerciseConsoleRail,
+  .tr-railModule,
+  .tr-setStack,
+  .tr-setRowShell,
+  .tr-setGrid,
+  .tr-qtyRow,
+  .tr-opRow{
+    position: relative !important;
+    z-index: 60 !important;
+    pointer-events: auto !important;
+    overflow: visible !important;
+  }
+
+  .tr-setGrid{
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .tr-qtyRow,
+  .tr-opRow{
+    grid-template-columns: 64px minmax(0,1fr) 64px !important;
+    gap: 8px !important;
+    align-items: center !important;
+  }
+
+  .tr-opBtn,
+  .tr-qtyBtn{
+    position: relative !important;
+    z-index: 80 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+    height: 58px !important;
+    min-height: 58px !important;
+    width: 64px !important;
+    min-width: 64px !important;
+    font-size: 24px !important;
+  }
+
+  .tr-opInput,
+  .tr-bigInput{
+    position: relative !important;
+    z-index: 80 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    height: 58px !important;
+    min-height: 58px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 22px !important;
+    padding: 0 10px !important;
+    text-align: center !important;
+  }
+
+  .tr-painSlider{
+    position: relative !important;
+    z-index: 80 !important;
+    pointer-events: auto !important;
+    touch-action: pan-x !important;
+  }
+
+  .tr-finalActionModule{
+    position: static !important;
+    bottom: auto !important;
+    z-index: 1 !important;
+    margin-top: 12px !important;
+  }
+
+  .tr-finalActionBottom--triple{
+    grid-template-columns: 1fr !important;
+  }
+
+  .tr-doneBtn{
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+}
       `}</style>
     </Card>
   );
