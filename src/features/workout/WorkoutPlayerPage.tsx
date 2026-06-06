@@ -1,8 +1,7 @@
 import BottomHudAdvanced from "./BottomHudAdvanced";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
-import { Chip } from "../../ui/Chip";
 import {
   effectiveHasMedia,
   matchFilters,
