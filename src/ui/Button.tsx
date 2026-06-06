@@ -1,4 +1,4 @@
-import React from "react";
+import { CSSProperties, ReactNode } from "react";
 
 export function Button({
   children,
@@ -6,18 +6,22 @@ export function Button({
   disabled,
   type = "button",
   style,
+  variant = "primary",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   variant?: "primary" | "secondary";
   type?: "button" | "submit";
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }) {
+  const className =
+    variant === "secondary" ? "tr-btn tr-btn--secondary" : "tr-btn tr-btn--primary";
+
   return (
     <button
       type={type}
-      className="tr-btn"
+      className={className}
       onClick={onClick}
       disabled={disabled}
       style={style}
