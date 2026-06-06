@@ -1025,115 +1025,159 @@
 @media (max-width: 720px) {
   .bh-root{
     margin-top: 0;
+    width: 100%;
+    min-width: 0;
   }
 
   .bh-scene {
-    min-height: auto;
-    padding-bottom: 0;
-    overflow: visible;
-    border-radius: 16px;
+    min-height: auto !important;
+    padding-bottom: 0 !important;
+    overflow: visible !important;
+    border-radius: 14px;
   }
 
   .bh-shell {
-    min-height: auto;
-    border-radius: 16px;
+    min-height: auto !important;
+    border-radius: 14px;
+    overflow: hidden;
   }
 
   .bh-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 14px 10px 12px;
-    min-height: auto;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 12px 10px 10px !important;
+    min-height: auto !important;
   }
 
   .bh-left,
   .bh-right {
-    min-width: 0;
+    min-width: 0 !important;
   }
 
   .bh-title {
-    font-size: clamp(18px, 6vw, 24px);
+    font-size: 18px !important;
+    line-height: 1 !important;
+  }
+
+  .bh-streak {
+    width: 100% !important;
+    margin-top: 4px !important;
   }
 
   .bh-progressRail {
-    margin-top: 8px;
-    padding: 8px 8px 12px;
+    margin-top: 6px !important;
+    padding: 8px 8px 10px !important;
+  }
+
+  .bh-gaugeTrack {
+    min-height: 30px !important;
+    padding: 4px 6px 4px 34px !important;
+  }
+
+  .bh-gaugeAnchor {
+    left: 6px !important;
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .bh-gaugeAnchorEmoji {
+    font-size: 9px !important;
+  }
+
+  .bh-gaugeLane,
+  .bh-gaugeSegments,
+  .bh-gseg {
+    height: 20px !important;
   }
 
   .bh-completed {
-    font-size: 16px;
-    margin-top: 8px;
+    font-size: 14px !important;
+    margin-top: 6px !important;
   }
 
   .bh-plaque {
-    grid-template-columns: 34px minmax(0, 1fr);
-    min-height: auto;
-    padding: 10px;
-    gap: 10px;
+    grid-template-columns: 28px minmax(0,1fr) !important;
+    min-height: auto !important;
+    padding: 8px !important;
+    gap: 8px !important;
+  }
+
+  .bh-iconWrap {
+    width: 28px !important;
+    height: 28px !important;
   }
 
   .bh-icon {
-    width: 22px;
-    height: 22px;
+    width: 18px !important;
+    height: 18px !important;
   }
 
   .bh-plaqueLabel {
-    font-size: 11px;
+    font-size: 10px !important;
   }
 
   .bh-plaqueMain {
-    grid-template-columns: 1fr;
-    row-gap: 8px;
-    align-items: start;
+    grid-template-columns: 1fr !important;
+    row-gap: 6px !important;
+    align-items: start !important;
   }
 
   .bh-plaqueName {
-    font-size: clamp(22px, 10vw, 40px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 18px !important;
+    line-height: 1 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: break-word !important;
   }
 
   .bh-plaqueTargetPill {
-    justify-self: start;
-    min-height: 24px;
-    font-size: 11px;
-    padding: 0 8px;
+    justify-self: start !important;
+    min-height: 22px !important;
+    font-size: 10px !important;
+    padding: 0 6px !important;
   }
 
   .bh-right {
-    min-height: auto;
-    padding: 10px;
+    min-height: auto !important;
+    padding: 8px !important;
   }
 
   .bh-panelTitle {
-    white-space: normal;
-    font-size: clamp(14px, 5vw, 18px);
+    white-space: normal !important;
+    font-size: 13px !important;
+    line-height: 1.05 !important;
   }
 
   .bh-panelRows {
-    margin-top: 8px;
+    margin-top: 6px !important;
+    gap: 0 !important;
   }
 
   .bh-panelRow {
-    min-height: 28px;
-    gap: 8px;
+    min-height: 24px !important;
+    gap: 6px !important;
+    padding: 3px 0 !important;
   }
 
   .bh-panelLabel,
   .bh-panelValue {
-    font-size: 12px;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
   }
 
   .bh-panelValue.is-next {
-    max-width: 140px;
-    font-size: 12px;
+    max-width: 120px !important;
+    font-size: 11px !important;
   }
 
   .bh-floor,
   .bh-floorPlane,
   .bh-cardHotspot,
-  .bh-sideEmitter {
-    display: none;
+  .bh-sideEmitter,
+  .bh-topFlare,
+  .bh-topLine,
+  .bh-cornerGlow {
+    display: none !important;
   }
 }
