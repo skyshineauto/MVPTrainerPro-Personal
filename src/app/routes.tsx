@@ -1,6 +1,3 @@
-import React from "react";
-import { useNavigate } from "react-router-dom";
-
 import { LoginPage } from "../features/auth/LoginPage";
 import { ForgotPasswordPage } from "../features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "../features/auth/ResetPasswordPage";
@@ -11,21 +8,22 @@ import { ExerciseDetailPage } from "../features/library/ExerciseDetailPage";
 import { ProgressPage } from "../features/progress/ProgressPage";
 import { CoachPage } from "../features/coach/CoachPage";
 
-export type Route = { path: string; el: React.ReactNode };
+export type Route = { path: string; el: JSX.Element };
+
+const goTo = (to: string) => {
+  window.location.pathname = to;
+};
 
 function LoginPageRoute() {
-  const navigate = useNavigate();
-  return <LoginPage navigate={navigate} />;
+  return <LoginPage navigate={goTo} />;
 }
 
 function LibraryPageRoute() {
-  const navigate = useNavigate();
-  return <LibraryPage navigate={navigate} />;
+  return <LibraryPage navigate={goTo} />;
 }
 
 function CoachPageRoute() {
-  const navigate = useNavigate();
-  return <CoachPage navigate={navigate} />;
+  return <CoachPage navigate={goTo} />;
 }
 
 export const routes: Route[] = [
