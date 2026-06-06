@@ -1,5 +1,4 @@
 // src/features/today/TodayPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
