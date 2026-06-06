@@ -215,43 +215,6 @@ function isMachine(ex: any): boolean {
   return false;
 }
 
-function isFreeWeight(ex: any): boolean {
-  const n = nameOf(ex);
-  const equip = normalizeArr(ex?.equipment);
-
-  if (
-    equip.includes("dumbbell") ||
-    equip.includes("barbell") ||
-    equip.includes("kettlebell") ||
-    equip.includes("ez_bar") ||
-    equip.includes("trap_bar") ||
-    equip.includes("free_weight") ||
-    equip.includes("freeweight") ||
-    equip.includes("body_only") ||
-    equip.includes("bodyweight")
-  ) {
-    return true;
-  }
-
-  if (
-    n.includes("dumbbell") ||
-    n.includes("barbell") ||
-    n.includes("kettlebell") ||
-    n.includes("kb ") ||
-    n.includes(" ez ") ||
-    n.includes("ez-bar") ||
-    n.includes("trap bar") ||
-    n.includes("plate") ||
-    n.includes("bodyweight") ||
-    n.includes("body weight") ||
-    n.includes("body only")
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 function equipClass(ex: any): Exclude<EquipKey, "all"> {
   if (isCardio(ex)) return "cardio";
   if (isMachine(ex)) return "machine";
@@ -310,10 +273,8 @@ export function matchMuscle(ex: any, key: MuscleKey): boolean {
    =========================== */
 
 export function matchFilters(ex: any, muscle: MuscleKey, equip: EquipKey): boolean {
-  // 1) Cardio tab: cardio-only, muscle ignored
   if (equip === "cardio") return isCardio(ex);
 
-  // 2) Machine / Free weight: exclude cardio always
   if (equip === "machine") {
     if (isCardio(ex)) return false;
     return equipClass(ex) === "machine" && matchMuscle(ex, muscle);
@@ -323,9 +284,6 @@ export function matchFilters(ex: any, muscle: MuscleKey, equip: EquipKey): boole
     return equipClass(ex) === "free_weight" && matchMuscle(ex, muscle);
   }
 
-  // 3) Equip = all:
-  // - muscle=all => include EVERYTHING (including cardio)
-  // - muscle!=all => exclude cardio (so Chest doesn’t include treadmill)
   if (equip === "all") {
     if (muscle === "all") return true;
     if (isCardio(ex)) return false;
