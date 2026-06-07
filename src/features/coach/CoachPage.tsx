@@ -1642,6 +1642,144 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           line-height: 1.40;
           font-weight: 800;
         }
+        @media (max-width: 720px){
+  .tr-coachTipConsole{
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .tr-coachTipImageBay{
+    min-height: auto !important;
+    overflow: hidden !important;
+  }
+
+  .tr-coachTipImg{
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: 220px !important;
+    display: block !important;
+    object-fit: cover !important;
+    object-position: center 20% !important;
+  }
+
+  .tr-coachTipScrim,
+  .tr-coachTipSheen{
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    height: 220px !important;
+  }
+
+  .tr-coachTipPlate{
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    transform: none !important;
+    width: auto !important;
+    margin: -28px 12px 0 !important;
+    z-index: 3 !important;
+    padding: 12px !important;
+    border-radius: 16px !important;
+  }
+
+  .tr-coachTipPlateTop{
+    align-items: flex-start !important;
+  }
+
+  .tr-coachTipLive{
+    font-size: 10px !important;
+    letter-spacing: .14em !important;
+  }
+
+  .tr-coachTipCat{
+    font-size: 10px !important;
+    padding: 4px 8px !important;
+  }
+
+  .tr-coachTipTitle{
+    font-size: 18px !important;
+    line-height: 1.12 !important;
+    margin-top: 0 !important;
+  }
+
+  .tr-coachTipBullets{
+    margin-top: 10px !important;
+    gap: 6px !important;
+    padding-left: 18px !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .tr-coachTipWhy{
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    margin-top: 8px !important;
+  }
+
+  .tr-coachDockRail{
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    margin: 12px !important;
+    padding: 12px !important;
+    border-radius: 16px !important;
+  }
+
+  .tr-coachDockInner{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    align-items: stretch !important;
+  }
+
+  .tr-coachDockLabel{
+    margin-right: 0 !important;
+  }
+
+  .tr-coachDockBtns{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .tr-coachDockBtns button{
+    width: 100% !important;
+    height: 48px !important;
+  }
+
+  .tr-coachTipRight{
+    padding: 12px !important;
+  }
+
+  .tr-coachTipStack{
+    gap: 10px !important;
+  }
+
+  .tr-coachQuickTip{
+    padding: 12px !important;
+  }
+
+  .tr-coachQuickTipText{
+    font-size: 16px !important;
+    line-height: 1.16 !important;
+  }
+
+  .tr-coachQuickTipSub{
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+  }
+
+  .tr-programRow{
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+  }
+
+  .tr-programRow .tr-seg{
+    width: 100% !important;
+    justify-self: stretch !important;
+  }
+}
       `}</style>
     </div>
   );
