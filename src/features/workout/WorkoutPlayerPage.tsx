@@ -2500,29 +2500,35 @@ const unlock = async () => {
                 </div>
               </div>
 
-              <div className="tr-setStack">
-                {sets.map((s, i) => (
-                  <div key={s.set_index} className="tr-setRowShell">
-                    <div className="tr-setRowHead">SET {s.set_index}</div>
-                    <div className="tr-setGrid">
-                      <Qty
-                        label="REPS"
-                        value={Number(s.reps ?? 0)}
-                        step={1}
-                        disabled={isDone}
-                        onChange={(v) => upsertSet(i, { reps: v })}
-                      />
-                      <Qty
-                        label="WEIGHT (LB)"
-                        value={Number(s.weight ?? 0)}
-                        step={5}
-                        disabled={isDone}
-                        onChange={(v) => upsertSet(i, { weight: v })}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+             <div className="tr-setStack">
+  {sets.map((s, i) => (
+    <div key={s.set_index} className="tr-setCardMobile">
+      <div className="tr-setCardHead">SET {s.set_index}</div>
+
+      <div className="tr-setFieldBlock">
+        <div className="tr-setFieldLabel">REPS</div>
+        <Qty
+          label=""
+          value={Number(s.reps ?? 0)}
+          step={1}
+          disabled={isDone}
+          onChange={(v) => upsertSet(i, { reps: v })}
+        />
+      </div>
+
+      <div className="tr-setFieldBlock">
+        <div className="tr-setFieldLabel">WEIGHT (LB)</div>
+        <Qty
+          label=""
+          value={Number(s.weight ?? 0)}
+          step={5}
+          disabled={isDone}
+          onChange={(v) => upsertSet(i, { weight: v })}
+        />
+      </div>
+    </div>
+  ))}
+</div>
             </div>
           )}
 
