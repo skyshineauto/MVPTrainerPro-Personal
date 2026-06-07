@@ -229,9 +229,25 @@ const HUD_FORCE_CSS = `
   padding: 12px 18px 14px;
 }
 @media (max-width: 720px){
+  .tr-shellInner{
+    padding-bottom: 112px;
+  }
+
   .tr-bottomNavInner{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
-    padding: 10px 10px 12px;
+    padding: 10px 8px 12px;
+  }
+
+  .tr-bottomNavInner button{
+    min-width: 0 !important;
+    width: 100% !important;
+    padding: 10px 6px !important;
+    border-radius: 14px !important;
+    font-size: 10px !important;
+    line-height: 12px !important;
+    letter-spacing: .06em !important;
   }
 }
 `;
