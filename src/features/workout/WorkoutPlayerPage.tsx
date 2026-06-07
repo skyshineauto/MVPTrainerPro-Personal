@@ -3136,10 +3136,16 @@ function Qty({
   onChange: (v: number) => void;
 }) {
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div className="tr-kicker">{label}</div>
+    <div className="tr-qtyBlock">
+      {label ? <div className="tr-kicker">{label}</div> : null}
+
       <div className="tr-qtyRow tr-opRow">
-        <button className="tr-qtyBtn tr-opBtn" disabled={disabled} onClick={() => onChange(Math.max(0, Number(value) - step))}>
+        <button
+          className="tr-qtyBtn tr-opBtn"
+          disabled={disabled}
+          onClick={() => onChange(Math.max(0, Number(value) - step))}
+          type="button"
+        >
           −
         </button>
 
@@ -3155,7 +3161,12 @@ function Qty({
           }}
         />
 
-        <button className="tr-qtyBtn tr-opBtn" disabled={disabled} onClick={() => onChange(Number(value) + step)}>
+        <button
+          className="tr-qtyBtn tr-opBtn"
+          disabled={disabled}
+          onClick={() => onChange(Number(value) + step)}
+          type="button"
+        >
           +
         </button>
       </div>
