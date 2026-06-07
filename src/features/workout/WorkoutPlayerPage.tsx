@@ -3094,7 +3094,7 @@ const unlock = async () => {
     text-align: center !important;
   }
 
-  .tr-painSlider{
+   .tr-painSlider{
     position: relative !important;
     z-index: 80 !important;
     pointer-events: auto !important;
@@ -3117,7 +3117,91 @@ const unlock = async () => {
     width: 100% !important;
   }
 }
-      `}</style>
+
+.tr-setCardMobile{
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12)),
+    radial-gradient(320px 120px at 0% 0%, rgba(0,170,255,.06), rgba(0,0,0,0) 66%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.tr-setCardHead{
+  font-weight: 1050;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.92);
+  font-size: 13px;
+}
+
+.tr-setFieldBlock{
+  display: grid;
+  gap: 8px;
+}
+
+.tr-setFieldLabel{
+  font-size: 12px;
+  font-weight: 1000;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.70);
+}
+
+.tr-qtyBlock{
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 720px){
+  .tr-setStack{
+    display: grid;
+    gap: 12px;
+  }
+
+  .tr-setCardMobile{
+    padding: 14px 12px;
+    gap: 12px;
+  }
+
+  .tr-setGrid{
+    grid-template-columns: 1fr !important;
+  }
+
+  .tr-qtyRow,
+  .tr-opRow{
+    grid-template-columns: 68px minmax(0,1fr) 68px !important;
+    gap: 10px !important;
+    align-items: center !important;
+  }
+
+  .tr-qtyBtn,
+  .tr-opBtn{
+    height: 60px !important;
+    min-height: 60px !important;
+    width: 68px !important;
+    min-width: 68px !important;
+    font-size: 26px !important;
+    border-radius: 16px !important;
+  }
+
+  .tr-bigInput,
+  .tr-opInput{
+    height: 60px !important;
+    min-height: 60px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 24px !important;
+    font-weight: 1000 !important;
+    text-align: center !important;
+    border-radius: 16px !important;
+    padding: 0 10px !important;
+  }
+}
+`}</style>
     </Card>
   );
 }
