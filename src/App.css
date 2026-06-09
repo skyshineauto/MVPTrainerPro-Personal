@@ -475,21 +475,29 @@ body{
 .tr-modalOverlay{
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.66);
+  background: rgba(0,0,0,.72);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: grid;
-  place-items: center;
-  z-index: 999;
+  align-items: start;
+  justify-items: center;
+  z-index: 5000;
   padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
 .tr-modal{
   width: min(860px, 100%);
+  max-height: calc(100dvh - 36px);
   border-radius: 18px;
   border: 1px solid rgba(255,255,255,.12);
   background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.18));
   box-shadow: 0 26px 90px rgba(0,0,0,.65);
-  overflow: hidden;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
+
 .tr-modalHead{
   display: flex;
   justify-content: space-between;
@@ -497,10 +505,44 @@ body{
   gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255,255,255,.08);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(18,24,34,.96), rgba(10,14,22,.94));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
+
 .tr-modalHead button{
   appearance: none;
   -webkit-appearance: none;
+}
+
+@media (max-width: 720px){
+  .tr-modalOverlay{
+    padding: 10px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .tr-modal{
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    border-radius: 16px;
+  }
+
+  .tr-modalHead{
+    padding: 12px;
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .tr-modalHead > div:last-child{
+    width: 100%;
+    justify-content: stretch !important;
+  }
+
+  .tr-modalHead > div:last-child .tr-btn{
+    width: 100%;
+  }
 }
 
 /* ============================================================
