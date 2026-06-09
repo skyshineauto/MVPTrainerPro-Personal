@@ -1991,7 +1991,7 @@ function EditSessionPanel(props: {
                 {searchBusy ? "Searching…" : mode === "swap" ? "Pick an exercise to swap in." : "Pick an exercise to add."}
               </div>
 
-              <div style={{ display: "grid", gap: 8, maxHeight: 320, overflow: "auto" }}>
+             <div style={{ display: "grid", gap: 8, maxHeight: "50dvh", overflow: "auto" }}>
                 {searchResults.map((r) => (
                   <button
                     key={r.id}
