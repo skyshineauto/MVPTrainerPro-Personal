@@ -861,6 +861,170 @@ html.tr-modal-open .tr-bottomNavWrap{
 }
 
 /* ============================================================
+   EDIT SESSION MOBILE TABS
+   Desktop keeps the existing two-panel layout. Mobile gives each
+   panel the full usable modal body so results are readable and the
+   footer action never leaves the viewport.
+   ============================================================ */
+.tr-editMobileTabs,
+.tr-editFooterCurrentAction{
+  display: none;
+}
+
+.tr-editFooterLoadMore{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 720px){
+  .tr-editModalBody{
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    gap: 7px;
+  }
+
+  .tr-editMobileTabs{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .tr-editMobileTabs .tr-seg{
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    padding: 0 7px;
+    font-size: 9px;
+    line-height: 1.1;
+    letter-spacing: .045em;
+    white-space: normal;
+  }
+
+  .tr-editModalBody > .tr-editCurrentPanel,
+  .tr-editModalBody > .tr-editAddPanel{
+    display: none;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tr-editModal--mobile-current .tr-editCurrentPanel,
+  .tr-editModal--mobile-add .tr-editAddPanel{
+    display: block;
+  }
+
+  .tr-editCurrentPanel > .tr-card,
+  .tr-editAddPanel > .tr-card{
+    height: 100%;
+    min-height: 0;
+  }
+
+  .tr-editCurrentPanel > .tr-card > .tr-card-head,
+  .tr-editAddPanel > .tr-card > .tr-card-head{
+    display: none;
+  }
+
+  .tr-editCurrentPanel > .tr-card > .tr-card-body,
+  .tr-editAddPanel > .tr-card > .tr-card-body{
+    height: 100%;
+    min-height: 0;
+    padding: 7px 8px 8px;
+  }
+
+  .tr-editAddLayout{
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: auto 40px auto minmax(0, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  .tr-editAddLayout > .tr-rowbox:first-child{
+    padding: 6px;
+    gap: 5px !important;
+  }
+
+  .tr-editAddLayout > .tr-rowbox:first-child > div{
+    gap: 3px !important;
+  }
+
+  .tr-editAddLayout > input{
+    height: 40px !important;
+    min-height: 40px;
+  }
+
+  .tr-editAddPanel .tr-chipRow{
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+
+  .tr-editAddPanel .tr-chipRow .tr-seg{
+    height: 34px;
+    min-height: 34px;
+    padding: 0 9px;
+    border-radius: 11px;
+    font-size: 9px;
+    letter-spacing: .045em;
+  }
+
+  .tr-editAddPanel .tr-chipRow .tr-ico{
+    width: 17px;
+    height: 17px;
+  }
+
+  .tr-editAddLayout > .tr-sub{
+    min-height: 14px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .tr-editResultsViewport{
+    height: 100%;
+    min-height: 0;
+    padding: 1px 3px 2px 0;
+    scroll-padding-bottom: 8px;
+  }
+
+  .tr-editResultsViewport .tr-rowbox{
+    min-height: 54px;
+    padding: 7px 8px;
+  }
+
+  .tr-editCurrentList{
+    height: 100%;
+    min-height: 0;
+    padding: 1px 3px 2px 0;
+  }
+
+  .tr-editModal--mobile-current .tr-editFooterCurrentAction{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .tr-editModal--mobile-current .tr-editFooterLoadMore{
+    display: none;
+  }
+
+  .tr-editModal--mobile-add .tr-editFooterCurrentAction{
+    display: none;
+  }
+
+  .tr-editModal--mobile-add .tr-editFooterLoadMore{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .tr-editModalFooter .tr-btn{
+    width: 100%;
+    min-width: 0 !important;
+    height: 44px !important;
+  }
+}
+
+/* ============================================================
    HUD / APP SHELL
    ============================================================ */
 .tr-hudPanel{ margin-bottom: 14px; }
