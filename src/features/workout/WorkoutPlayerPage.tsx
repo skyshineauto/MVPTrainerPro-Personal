@@ -33,6 +33,7 @@ import icoQuads from "../../assets/front.png";
 import icoCalves from "../../assets/muscles.png";
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
+const EDIT_SEARCH_PAGE_SIZE = 200;
 
 type MediaPack = {
   gif?: string | null;
@@ -561,10 +562,16 @@ function SessionCompleteOverlay({
           display:grid;
           place-items:center;
           padding: 18px;
+          overflow: hidden;
         }
         .tr-completeModal{
           position: relative;
-          overflow:hidden;
+          overflow-y:auto;
+          overflow-x:hidden;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-gutter: stable;
+          max-height: calc(100dvh - 36px);
           width:min(960px, 100%);
           border-radius: 30px;
           border: 1px solid rgba(0,220,255,.42);
@@ -748,12 +755,38 @@ function SessionCompleteOverlay({
             justify-items:center;
             text-align:center;
           }
+          .tr-completeCoachWrap{ min-height: 220px; }
+          .tr-completeCoachRing{ width: 190px; height: 190px; }
+          .tr-completeCoachBurst{ width: 230px; height: 230px; }
+          .tr-completeCoach{ width:min(205px, 100%); }
           .tr-completeCopy{ justify-items:center; }
           .tr-completeSub{ max-width: 100%; }
           .tr-completeStatRow{ width:100%; }
-          .tr-completeActions{ justify-content:center; width:100%; }
+          .tr-completeActions{
+            position: sticky;
+            bottom: 0;
+            z-index: 4;
+            justify-content:center;
+            width:100%;
+            padding: 12px;
+            margin: 4px -12px -12px;
+            border-top: 1px solid rgba(255,255,255,.08);
+            background: linear-gradient(180deg, rgba(7,12,20,.88), rgba(4,8,14,.98));
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+          }
         }
         @media (max-width: 620px){
+          .tr-completeOverlay{ padding: 10px; }
+          .tr-completeModal{
+            max-height: calc(100dvh - 20px);
+            border-radius: 22px;
+            padding: 14px;
+          }
+          .tr-completeCoachWrap{ min-height: 165px; }
+          .tr-completeCoachRing{ width: 145px; height: 145px; }
+          .tr-completeCoachBurst{ width: 180px; height: 180px; }
+          .tr-completeCoach{ width:min(160px, 100%); }
           .tr-completeStatRow{ grid-template-columns: 1fr; }
           .tr-completeActions{ flex-direction:column; width:100%; }
           .tr-completeActions .tr-btn{ width:100%; }
@@ -835,7 +868,10 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [searchQ, setSearchQ] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [searchResults, setSearchResults] = useState<DecoratedSearchRow[]>([]);
+  const [searchPage, setSearchPage] = useState(0);
+  const [searchHasMore, setSearchHasMore] = useState(false);
   const [swapTargetWeId, setSwapTargetWeId] = useState<string | null>(null);
 
   const [addMuscle, setAddMuscle] = useState<AddMuscleKey>("all");
@@ -1301,6 +1337,8 @@ export function WorkoutPlayerPage({ params }: any) {
     setSwapTargetWeId(null);
     setSearchQ("");
     setSearchResults([]);
+    setSearchPage(0);
+    setSearchHasMore(false);
     showToast("EXERCISE SWAPPED.", "ok");
   }
 
@@ -1330,28 +1368,34 @@ export function WorkoutPlayerPage({ params }: any) {
     return map;
   }
 
-  async function runSearch(q: string, opts?: { force?: boolean }) {
+  async function runSearch(q: string, opts?: { force?: boolean; append?: boolean }) {
     const termRaw = q.trim();
     const termNorm = normalizeText(termRaw);
+    const append = opts?.append === true;
+    const nextPage = append ? searchPage + 1 : 0;
+
     setSearchQ(q);
 
     const browsing = addMuscle !== "all" || addEquip !== "all";
-    if (!opts?.force) {
-      if (!browsing && termNorm.length < 2) {
-        setSearchResults([]);
-        return;
-      }
+    if (!opts?.force && !browsing && termNorm.length < 2) {
+      setSearchResults([]);
+      setSearchPage(0);
+      setSearchHasMore(false);
+      return;
     }
 
-    setSearchBusy(true);
+    if (append) setSearchLoadingMore(true);
+    else setSearchBusy(true);
+
     try {
-      const limit = termNorm.length >= 2 ? 200 : addEquip === "cardio" ? 500 : browsing ? 350 : 80;
+      const from = nextPage * EDIT_SEARCH_PAGE_SIZE;
+      const to = from + EDIT_SEARCH_PAGE_SIZE - 1;
 
       let query = supabase
         .from("exercises")
         .select("id,name,source,primary_muscles,equipment,media")
         .order("name", { ascending: true })
-        .limit(limit);
+        .range(from, to);
 
       if (termNorm.length >= 2) {
         query = query.or(buildNameOrIlike(expandSearchTerms(termRaw)));
@@ -1387,12 +1431,30 @@ export function WorkoutPlayerPage({ params }: any) {
         };
       });
 
-      setSearchResults(decorated);
+      if (append) {
+        setSearchResults((prev) => {
+          const merged = new Map(prev.map((row) => [row.id, row]));
+          for (const row of decorated) merged.set(row.id, row);
+          return Array.from(merged.values());
+        });
+      } else {
+        setSearchResults(decorated);
+      }
+
+      setSearchPage(nextPage);
+      setSearchHasMore(list.length === EDIT_SEARCH_PAGE_SIZE);
     } catch {
-      setSearchResults([]);
+      if (!append) setSearchResults([]);
+      setSearchHasMore(false);
     } finally {
-      setSearchBusy(false);
+      if (append) setSearchLoadingMore(false);
+      else setSearchBusy(false);
     }
+  }
+
+  async function loadMoreSearchResults() {
+    if (searchBusy || searchLoadingMore || !searchHasMore) return;
+    await runSearch(searchQ, { force: true, append: true });
   }
 
   useEffect(() => {
@@ -1421,6 +1483,8 @@ export function WorkoutPlayerPage({ params }: any) {
     setSwapTargetWeId(null);
     setSearchQ("");
     setSearchResults([]);
+    setSearchPage(0);
+    setSearchHasMore(false);
     showToast("SAVED (THIS SESSION).", "ok");
   }
 
@@ -1466,6 +1530,8 @@ export function WorkoutPlayerPage({ params }: any) {
     setSwapTargetWeId(null);
     setSearchQ("");
     setSearchResults([]);
+    setSearchPage(0);
+    setSearchHasMore(false);
     showToast("SAVED TO ALL FUTURE SESSIONS.", "ok");
   }
 
@@ -1704,8 +1770,11 @@ export function WorkoutPlayerPage({ params }: any) {
     swapTargetWeId={swapTargetWeId}
     searchQ={searchQ}
     searchBusy={searchBusy}
+    searchLoadingMore={searchLoadingMore}
+    searchHasMore={searchHasMore}
     searchResults={searchResults}
     onSearch={(v) => runSearch(v)}
+    onLoadMore={loadMoreSearchResults}
     onPickAdd={addExercise}
     onPickSwap={async (exerciseId) => {
       if (!swapTargetWeId) return;
@@ -1843,8 +1912,11 @@ function EditSessionPanel(props: {
   swapTargetWeId: string | null;
   searchQ: string;
   searchBusy: boolean;
+  searchLoadingMore: boolean;
+  searchHasMore: boolean;
   searchResults: DecoratedSearchRow[];
   onSearch: (q: string) => Promise<void>;
+  onLoadMore: () => Promise<void>;
   onPickAdd: (exerciseId: string) => Promise<void>;
   onPickSwap: (exerciseId: string) => Promise<void>;
   addMuscle: AddMuscleKey;
@@ -1863,8 +1935,11 @@ function EditSessionPanel(props: {
     swapTargetWeId,
     searchQ,
     searchBusy,
+    searchLoadingMore,
+    searchHasMore,
     searchResults,
     onSearch,
+    onLoadMore,
     onPickAdd,
     onPickSwap,
     addMuscle,
@@ -1901,8 +1976,8 @@ function EditSessionPanel(props: {
     (searchQ.trim().length >= 2 || addMuscle !== "all" || addEquip !== "all");
 
   return (
-    <div className="tr-modalOverlay">
-      <div className="tr-modal">
+    <div className="tr-modalOverlay tr-modalOverlay--locked">
+      <div className="tr-modal tr-modal--viewport">
         <div className="tr-modalHead">
           <div style={{ fontWeight: 950 }}>
             Edit Session <span className="tr-sub">({items.length})</span>
@@ -1921,7 +1996,7 @@ function EditSessionPanel(props: {
           </div>
         </div>
 
-        <div style={{ marginTop: 10, display: "grid", gap: 10, padding: "0 16px 16px" }}>
+        <div className="tr-modalBody" style={{ display: "grid", gap: 10, padding: "10px 16px 16px" }}>
           <Card title="Current session exercises" tone="base">
             <div style={{ display: "grid", gap: 8 }}>
               {items.map((we, idx) => (
@@ -1991,7 +2066,7 @@ function EditSessionPanel(props: {
                 {searchBusy ? "Searching…" : mode === "swap" ? "Pick an exercise to swap in." : "Pick an exercise to add."}
               </div>
 
-             <div style={{ display: "grid", gap: 8, maxHeight: "50dvh", overflow: "auto" }}>
+              <div style={{ display: "grid", gap: 8 }}>
                 {searchResults.map((r) => (
                   <button
                     key={r.id}
@@ -2037,6 +2112,19 @@ function EditSessionPanel(props: {
                 ))}
 
                 {showResultsEmptyState ? <div className="tr-sub">No matches.</div> : null}
+
+                {searchHasMore ? (
+                  <div style={{ display: "flex", justifyContent: "center", paddingTop: 4 }}>
+                    <button
+                      className="tr-btn tr-btn--primary"
+                      style={{ height: 44, minWidth: 220 }}
+                      onClick={onLoadMore}
+                      disabled={searchBusy || searchLoadingMore}
+                    >
+                      {searchLoadingMore ? "Loading…" : "Load more"}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </Card>
