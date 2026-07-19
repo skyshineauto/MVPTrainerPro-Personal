@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import {
   formatSessionLabel,
@@ -289,6 +290,8 @@ export function AppShell({
     const html = document.documentElement;
     const scrollY = window.scrollY;
 
+    html.classList.add("tr-modal-open");
+
     const prevBody = {
       position: body.style.position,
       top: body.style.top,
@@ -320,6 +323,7 @@ export function AppShell({
       body.style.overflow = prevBody.overflow;
       html.style.overflow = prevHtml.overflow;
       html.style.overscrollBehavior = prevHtml.overscrollBehavior;
+      html.classList.remove("tr-modal-open");
       window.scrollTo(0, scrollY);
     };
   }, [endOpen]);
@@ -1042,9 +1046,10 @@ export function AppShell({
         </div>
       </div>
 
-      {endOpen ? (
-        <div className="tr-modalOverlay tr-modalOverlay--locked">
-          <div className="tr-modal tr-modal--viewport">
+      {endOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Save workout">
+              <div className="tr-modal tr-modal--viewport">
             <div className="tr-modalHead">
               <div style={{ fontWeight: 950 }}>How was it?</div>
               <button className="tr-btn" onClick={() => setEndOpen(false)} disabled={endBusy}>
@@ -1103,9 +1108,11 @@ export function AppShell({
                 {endBusy ? "Saving…" : "SAVE WORKOUT"}
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       <style>{HUD_FORCE_CSS}</style>
     </div>
