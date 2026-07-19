@@ -36,6 +36,166 @@ import icoCalves from "../../assets/muscles.png";
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
 const EDIT_RESULTS_BATCH_SIZE = 5;
 
+function lockDocumentForModal() {
+  const appWindow = window as any;
+  const existing = appWindow.__mvpTrainerModalLock as
+    | { count: number; syncVisualViewport: () => void; releaseRoot: () => void }
+    | undefined;
+
+  if (existing) {
+    existing.count += 1;
+    existing.syncVisualViewport();
+
+    return () => {
+      existing.count -= 1;
+      if (existing.count <= 0) existing.releaseRoot();
+    };
+  }
+
+  const body = document.body;
+  const html = document.documentElement;
+  const scrollY = window.scrollY;
+  const viewport = window.visualViewport;
+
+  html.classList.add("tr-modal-open");
+
+  const prevBody = {
+    position: body.style.position,
+    top: body.style.top,
+    left: body.style.left,
+    right: body.style.right,
+    width: body.style.width,
+    height: body.style.height,
+    overflow: body.style.overflow,
+    overscrollBehavior: body.style.overscrollBehavior,
+  };
+  const prevHtml = {
+    width: html.style.width,
+    height: html.style.height,
+    overflow: html.style.overflow,
+    overscrollBehavior: html.style.overscrollBehavior,
+  };
+
+  const syncVisualViewport = () => {
+    const height = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
+    const width = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
+    const top = Math.round(viewport?.offsetTop ?? 0);
+    const left = Math.round(viewport?.offsetLeft ?? 0);
+
+    html.style.setProperty("--tr-modal-visual-height", `${height}px`);
+    html.style.setProperty("--tr-modal-visual-width", `${width}px`);
+    html.style.setProperty("--tr-modal-visual-top", `${top}px`);
+    html.style.setProperty("--tr-modal-visual-left", `${left}px`);
+  };
+
+  syncVisualViewport();
+
+  body.style.position = "fixed";
+  body.style.top = `-${scrollY}px`;
+  body.style.left = "0";
+  body.style.right = "0";
+  body.style.width = "100%";
+  body.style.height = "100%";
+  body.style.overflow = "hidden";
+  body.style.overscrollBehavior = "none";
+  html.style.width = "100%";
+  html.style.height = "100%";
+  html.style.overflow = "hidden";
+  html.style.overscrollBehavior = "none";
+
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+
+  const onTouchStart = (event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+  };
+
+  const onTouchMove = (event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    const deltaX = touch.clientX - lastTouchX;
+    const deltaY = touch.clientY - lastTouchY;
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      event.preventDefault();
+      return;
+    }
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) && target.closest(".tr-chipRow")) {
+      return;
+    }
+
+    const scroller = target.closest<HTMLElement>(
+      ".tr-editCurrentList, .tr-editResultsViewport, .tr-completeGrid, .tr-modalBody"
+    );
+
+    if (!scroller || Math.abs(deltaX) > Math.abs(deltaY)) {
+      if (!scroller) event.preventDefault();
+      return;
+    }
+
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (maxScrollTop <= 1) {
+      event.preventDefault();
+      return;
+    }
+
+    const atTop = scroller.scrollTop <= 0;
+    const atBottom = scroller.scrollTop >= maxScrollTop - 1;
+    const pullingPastTop = atTop && deltaY > 0;
+    const pushingPastBottom = atBottom && deltaY < 0;
+
+    if (pullingPastTop || pushingPastBottom) {
+      event.preventDefault();
+    }
+  };
+
+  window.addEventListener("resize", syncVisualViewport);
+  viewport?.addEventListener("resize", syncVisualViewport);
+  viewport?.addEventListener("scroll", syncVisualViewport);
+  document.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
+  document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+
+  const releaseRoot = () => {
+    window.removeEventListener("resize", syncVisualViewport);
+    viewport?.removeEventListener("resize", syncVisualViewport);
+    viewport?.removeEventListener("scroll", syncVisualViewport);
+    document.removeEventListener("touchstart", onTouchStart, true);
+    document.removeEventListener("touchmove", onTouchMove, true);
+
+    body.style.position = prevBody.position;
+    body.style.top = prevBody.top;
+    body.style.left = prevBody.left;
+    body.style.right = prevBody.right;
+    body.style.width = prevBody.width;
+    body.style.height = prevBody.height;
+    body.style.overflow = prevBody.overflow;
+    body.style.overscrollBehavior = prevBody.overscrollBehavior;
+    html.style.width = prevHtml.width;
+    html.style.height = prevHtml.height;
+    html.style.overflow = prevHtml.overflow;
+    html.style.overscrollBehavior = prevHtml.overscrollBehavior;
+    html.classList.remove("tr-modal-open");
+    delete appWindow.__mvpTrainerModalLock;
+    window.scrollTo(0, scrollY);
+  };
+
+  const state = { count: 1, syncVisualViewport, releaseRoot };
+  appWindow.__mvpTrainerModalLock = state;
+
+  return () => {
+    state.count -= 1;
+    if (state.count <= 0) state.releaseRoot();
+  };
+}
+
 type MediaPack = {
   gif?: string | null;
   video?: string | null;
@@ -554,7 +714,12 @@ function SessionCompleteOverlay({
       <style>{`
         .tr-completeOverlay{
           position: fixed;
-          inset: 0;
+          top: var(--tr-modal-visual-top, 0px);
+          left: var(--tr-modal-visual-left, 0px);
+          right: auto;
+          bottom: auto;
+          width: var(--tr-modal-visual-width, 100vw);
+          height: var(--tr-modal-visual-height, 100dvh);
           z-index: 10000;
           background:
             radial-gradient(circle at 50% 40%, rgba(0,170,255,.20), rgba(0,0,0,0) 34%),
@@ -570,9 +735,9 @@ function SessionCompleteOverlay({
           display:flex;
           flex-direction:column;
           width:min(960px, 100%);
-          height:min(720px, calc(100dvh - 36px));
+          height:min(720px, 100%);
           min-height:0;
-          max-height:none;
+          max-height:100%;
           overflow:hidden;
           border-radius: 30px;
           border: 1px solid rgba(0,220,255,.42);
@@ -788,9 +953,9 @@ function SessionCompleteOverlay({
         @media (max-width: 620px){
           .tr-completeOverlay{ padding: 10px; }
           .tr-completeModal{
-            height: calc(100dvh - 20px);
+            height: 100%;
             min-height:0;
-            max-height:none;
+            max-height:100%;
             border-radius: 22px;
             padding: 14px;
           }
@@ -911,47 +1076,7 @@ export function WorkoutPlayerPage({ params }: any) {
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen) return;
-
-    const body = document.body;
-    const html = document.documentElement;
-    const scrollY = window.scrollY;
-
-    html.classList.add("tr-modal-open");
-
-    const prevBody = {
-      position: body.style.position,
-      top: body.style.top,
-      left: body.style.left,
-      right: body.style.right,
-      width: body.style.width,
-      overflow: body.style.overflow,
-    };
-    const prevHtml = {
-      overflow: html.style.overflow,
-      overscrollBehavior: html.style.overscrollBehavior,
-    };
-
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-    html.style.overflow = "hidden";
-    html.style.overscrollBehavior = "none";
-
-    return () => {
-      body.style.position = prevBody.position;
-      body.style.top = prevBody.top;
-      body.style.left = prevBody.left;
-      body.style.right = prevBody.right;
-      body.style.width = prevBody.width;
-      body.style.overflow = prevBody.overflow;
-      html.style.overflow = prevHtml.overflow;
-      html.style.overscrollBehavior = prevHtml.overscrollBehavior;
-      html.classList.remove("tr-modal-open");
-      window.scrollTo(0, scrollY);
-    };
+    return lockDocumentForModal();
   }, [editing, completeOverlayOpen]);
 
   useEffect(() => {
