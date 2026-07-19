@@ -1001,8 +1001,8 @@ export function AppShell({
       </div>
 
       {endOpen ? (
-        <div className="tr-modalOverlay">
-          <div className="tr-modal">
+        <div className="tr-modalOverlay tr-modalOverlay--locked">
+          <div className="tr-modal tr-modal--viewport">
             <div className="tr-modalHead">
               <div style={{ fontWeight: 950 }}>How was it?</div>
               <button className="tr-btn" onClick={() => setEndOpen(false)} disabled={endBusy}>
@@ -1010,7 +1010,7 @@ export function AppShell({
               </button>
             </div>
 
-            <div style={{ marginTop: 12, display: "grid", gap: 12, padding: 16 }}>
+            <div className="tr-modalBody" style={{ display: "grid", gap: 12, padding: 16 }}>
               <div className="tr-rowbox">
                 <div className="tr-kicker">DIFFICULTY (REQUIRED)</div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
@@ -1049,6 +1049,9 @@ export function AppShell({
                 />
               </div>
 
+            </div>
+
+            <div className="tr-modalFooter">
               <button
                 className="tr-btn tr-btn--primary"
                 style={{ height: 52 }}
