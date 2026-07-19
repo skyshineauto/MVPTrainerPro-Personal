@@ -2041,7 +2041,7 @@ function EditSessionPanel(props: {
             Edit Session <span className="tr-sub">({items.length})</span>
           </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div className="tr-editModalActions" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <button className="tr-btn tr-btn--primary" onClick={onSaveSessionOnly}>
               Save (this session)
             </button>
@@ -2055,6 +2055,7 @@ function EditSessionPanel(props: {
         </div>
 
         <div className="tr-modalBody tr-editModalBody">
+          <div className="tr-editCurrentPanel">
           <Card title="Current session exercises" tone="base">
             <div className="tr-editCurrentList">
               {items.map((we, idx) => (
@@ -2082,9 +2083,11 @@ function EditSessionPanel(props: {
               {!items.length ? <div className="tr-sub">No exercises yet.</div> : null}
             </div>
           </Card>
+          </div>
 
+          <div className="tr-editAddPanel">
           <Card title={mode === "swap" ? "Pick replacement" : "Add an exercise"} tone="blue">
-            <div style={{ display: "grid", gap: 10 }}>
+            <div className="tr-editAddLayout" style={{ display: "grid", gap: 10 }}>
               {mode === "add" ? (
                 <div className="tr-rowbox" style={{ display: "grid", gap: 10 }}>
                   <div style={{ display: "grid", gap: 6 }}>
@@ -2174,6 +2177,7 @@ function EditSessionPanel(props: {
               </div>
             </div>
           </Card>
+          </div>
         </div>
 
         <div className="tr-modalFooter tr-modalFooter--center">
@@ -2183,11 +2187,7 @@ function EditSessionPanel(props: {
             onClick={onLoadMore}
             disabled={!searchHasMore || searchBusy || searchLoadingMore}
           >
-            {searchLoadingMore
-              ? "Loading…"
-              : searchHasMore
-              ? "Load more exercises"
-              : "All matching exercises loaded"}
+            {searchLoadingMore ? "Loading…" : "Load more exercises"}
           </button>
         </div>
       </div>
