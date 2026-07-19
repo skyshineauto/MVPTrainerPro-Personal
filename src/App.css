@@ -486,12 +486,21 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 .tr-modalOverlay{
   position: fixed;
-  inset: 0;
+  top: var(--tr-modal-visual-top, 0px);
+  left: var(--tr-modal-visual-left, 0px);
+  right: auto;
+  bottom: auto;
+  width: var(--tr-modal-visual-width, 100vw);
+  height: var(--tr-modal-visual-height, 100dvh);
   z-index: 2147483000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(10px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left));
   overflow: hidden;
   overscroll-behavior: none;
   background: rgba(0,0,0,.76);
@@ -505,9 +514,9 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 .tr-modal{
   width: min(860px, 100%);
-  height: min(900px, calc(100dvh - 36px));
+  height: min(900px, 100%);
   min-height: 0;
-  max-height: calc(100dvh - 36px);
+  max-height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   border-radius: 18px;
@@ -520,9 +529,9 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 .tr-modal--viewport{
   width: min(860px, 100%);
-  height: min(900px, calc(100dvh - 36px));
+  height: min(900px, 100%);
   min-height: 0;
-  max-height: calc(100dvh - 36px);
+  max-height: 100%;
   overflow: hidden;
 }
 
@@ -580,15 +589,21 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 @media (max-width: 720px){
   .tr-modalOverlay{
-    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+    align-items: stretch;
+    justify-content: stretch;
+    padding:
+      max(6px, env(safe-area-inset-top))
+      max(6px, env(safe-area-inset-right))
+      max(6px, env(safe-area-inset-bottom))
+      max(6px, env(safe-area-inset-left));
   }
 
   .tr-modal,
   .tr-modal--viewport{
     width: 100%;
-    height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    height: 100%;
     min-height: 0;
-    max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: 100%;
     border-radius: 16px;
   }
 
@@ -597,16 +612,14 @@ html.tr-modal-open .tr-bottomNavWrap{
     align-items: stretch;
     flex-direction: column;
     gap: 8px;
-    max-height: 42dvh;
+    max-height: 40%;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
 
   .tr-modalHead > div:last-child{
     width: 100%;
-    display: grid !important;
-    grid-template-columns: 1fr;
-    gap: 8px !important;
+    justify-content: stretch !important;
   }
 
   .tr-modalHead > div:last-child .tr-btn,
@@ -616,7 +629,7 @@ html.tr-modal-open .tr-bottomNavWrap{
   }
 
   .tr-modalFooter{
-    padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+    padding: 9px 10px max(10px, env(safe-area-inset-bottom));
   }
 
   .tr-modalFooter .tr-btn{
@@ -628,41 +641,34 @@ html.tr-modal-open .tr-bottomNavWrap{
 @media (max-height: 520px){
   .tr-modalOverlay{
     align-items: stretch;
-    padding-top: 8px;
-    padding-bottom: 8px;
-  }
-
-  .tr-modal,
-  .tr-modal--viewport{
-    height: calc(100dvh - 16px);
-    max-height: calc(100dvh - 16px);
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 
   .tr-modalHead{
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding-top: 7px;
+    padding-bottom: 7px;
   }
 
   .tr-modalFooter{
-    padding-top: 8px;
-    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    padding-top: 7px;
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
   }
 }
 
-
 /* ============================================================
-   EDIT SESSION MODAL: TWO REAL SCROLL BOXES + FIXED LOAD MORE
+   EDIT SESSION MODAL: TWO INTERNAL SCROLL BOXES + FIXED FOOTER
    ============================================================ */
 .tr-editModal{
-  height: min(980px, calc(100dvh - 24px));
-  max-height: calc(100dvh - 24px);
+  height: min(980px, 100%);
+  max-height: 100%;
 }
 
 .tr-editModalBody{
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: minmax(130px, 24%) minmax(0, 1fr);
+  grid-template-rows: minmax(120px, 24%) minmax(0, 1fr);
   gap: 10px;
   padding: 10px 16px 12px;
 }
@@ -692,7 +698,6 @@ html.tr-modal-open .tr-bottomNavWrap{
 .tr-editCurrentList{
   height: 100%;
   min-height: 0;
-  max-height: none;
   display: grid;
   gap: 8px;
   align-content: start;
@@ -715,9 +720,8 @@ html.tr-modal-open .tr-bottomNavWrap{
 }
 
 .tr-editResultsViewport{
-  height: auto;
+  height: 100%;
   min-height: 0;
-  max-height: none;
   display: grid;
   gap: 8px;
   align-content: start;
@@ -746,62 +750,58 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 @media (max-width: 720px){
   .tr-editModal{
-    height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    height: 100%;
+    max-height: 100%;
   }
 
   .tr-editModal .tr-modalHead{
     display: grid;
     grid-template-columns: 1fr;
-    gap: 7px;
+    gap: 6px;
     max-height: none;
     overflow: visible;
-    padding: 8px 10px;
+    padding: 7px 8px;
   }
 
   .tr-editModalActions{
     width: 100%;
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
-    gap: 6px !important;
+    gap: 5px !important;
   }
 
   .tr-editModalActions .tr-btn{
     width: 100%;
     min-width: 0;
-    min-height: 40px;
-    height: 40px;
-    padding: 0 7px;
-    font-size: 9px;
-    line-height: 1.1;
-    letter-spacing: .045em;
+    min-height: 36px;
+    height: 36px;
+    padding: 0 6px;
+    font-size: 8.5px;
+    line-height: 1.08;
+    letter-spacing: .035em;
     white-space: normal;
   }
 
   .tr-editModalActions .tr-btn:last-child{
     grid-column: 1 / -1;
-    min-height: 34px;
-    height: 34px;
+    min-height: 30px;
+    height: 30px;
   }
 
   .tr-editModalBody{
-    display: block;
+    display: grid;
+    grid-template-rows: minmax(96px, 21%) minmax(0, 1fr);
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
-    -webkit-overflow-scrolling: touch;
-    padding: 8px 10px 12px;
+    overflow: hidden;
+    gap: 7px;
+    padding: 7px 8px 8px;
   }
 
-  .tr-editCurrentPanel{
-    height: 160px;
-  }
-
+  .tr-editCurrentPanel,
   .tr-editAddPanel{
-    height: 640px;
-    margin-top: 10px;
+    height: auto;
+    min-height: 0;
+    margin-top: 0;
   }
 
   .tr-editAddPanel .tr-chipRow{
@@ -810,7 +810,7 @@ html.tr-modal-open .tr-bottomNavWrap{
     overflow-y: hidden;
     overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
+    padding-bottom: 3px;
   }
 
   .tr-editAddPanel .tr-chipRow .tr-seg{
@@ -819,15 +819,12 @@ html.tr-modal-open .tr-bottomNavWrap{
 
   .tr-editCurrentPanel > .tr-card > .tr-card-body,
   .tr-editAddPanel > .tr-card > .tr-card-body{
-    padding: 8px 9px 10px;
+    padding: 7px 8px 8px;
   }
 
-  .tr-editCurrentList{
-    gap: 7px;
-  }
-
+  .tr-editCurrentList,
   .tr-editResultsViewport{
-    gap: 7px;
+    gap: 6px;
   }
 
   .tr-editResultsViewport .tr-rowbox{
@@ -836,20 +833,30 @@ html.tr-modal-open .tr-bottomNavWrap{
   }
 }
 
+@media (max-width: 720px) and (max-height: 700px){
+  .tr-editModalBody{
+    grid-template-rows: 84px minmax(0, 1fr);
+  }
+
+  .tr-editModalActions .tr-btn{
+    min-height: 32px;
+    height: 32px;
+  }
+
+  .tr-editModalActions .tr-btn:last-child{
+    min-height: 28px;
+    height: 28px;
+  }
+
+  .tr-modalFooter{
+    padding-top: 7px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
 @media (max-height: 760px) and (min-width: 721px){
   .tr-editModalBody{
-    display: block;
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-
-  .tr-editCurrentPanel{
-    height: 155px;
-  }
-
-  .tr-editAddPanel{
-    height: 620px;
-    margin-top: 10px;
+    grid-template-rows: 130px minmax(0, 1fr);
   }
 }
 
