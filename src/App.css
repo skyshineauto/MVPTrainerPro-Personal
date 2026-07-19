@@ -545,6 +545,65 @@ body{
   }
 }
 
+/* Viewport-safe modal shell used by workout editing and workout saving. */
+.tr-modalOverlay--locked{
+  align-items: center;
+  overflow: hidden;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+}
+
+.tr-modal--viewport{
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 36px);
+  overflow: hidden;
+}
+
+.tr-modal--viewport .tr-modalHead{
+  position: relative;
+  top: auto;
+  flex: 0 0 auto;
+}
+
+.tr-modalBody{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.tr-modalFooter{
+  flex: 0 0 auto;
+  padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(18,24,34,.96), rgba(10,14,22,.98));
+  box-shadow: 0 -18px 44px rgba(0,0,0,.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+@media (max-width: 720px){
+  .tr-modalOverlay--locked{
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .tr-modal--viewport{
+    width: 100%;
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .tr-modalFooter{
+    padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .tr-modalFooter .tr-btn{
+    width: 100%;
+  }
+}
+
 /* ============================================================
    HUD / APP SHELL
    ============================================================ */
