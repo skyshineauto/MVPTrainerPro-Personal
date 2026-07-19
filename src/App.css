@@ -651,35 +651,76 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 
 /* ============================================================
-   EDIT SESSION MODAL: BOUNDED LISTS + FIVE-ROW RESULTS VIEWPORT
+   EDIT SESSION MODAL: TWO REAL SCROLL BOXES + FIXED LOAD MORE
    ============================================================ */
+.tr-editModal{
+  height: min(980px, calc(100dvh - 24px));
+  max-height: calc(100dvh - 24px);
+}
+
 .tr-editModalBody{
+  min-height: 0;
+  overflow: hidden;
   display: grid;
+  grid-template-rows: minmax(130px, 24%) minmax(0, 1fr);
   gap: 10px;
-  align-content: start;
-  padding: 10px 16px 16px;
+  padding: 10px 16px 12px;
+}
+
+.tr-editCurrentPanel,
+.tr-editAddPanel{
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tr-editCurrentPanel > .tr-card,
+.tr-editAddPanel > .tr-card{
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.tr-editCurrentPanel > .tr-card > .tr-card-body,
+.tr-editAddPanel > .tr-card > .tr-card-body{
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 12px 12px;
 }
 
 .tr-editCurrentList{
+  height: 100%;
+  min-height: 0;
+  max-height: none;
   display: grid;
   gap: 8px;
-  max-height: 210px;
-  min-height: 0;
+  align-content: start;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
   padding-right: 4px;
 }
 
+.tr-editAddLayout{
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: grid !important;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 8px !important;
+}
+
 .tr-editResultsViewport{
+  height: auto;
+  min-height: 0;
+  max-height: none;
   display: grid;
   gap: 8px;
   align-content: start;
-  height: 318px;
-  min-height: 318px;
-  max-height: 318px;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -690,7 +731,8 @@ html.tr-modal-open .tr-bottomNavWrap{
 }
 
 .tr-editResultsViewport .tr-rowbox{
-  padding: 9px 10px;
+  min-height: 54px;
+  padding: 8px 10px;
 }
 
 .tr-editResultsViewport .tr-sub{
@@ -698,31 +740,116 @@ html.tr-modal-open .tr-bottomNavWrap{
   line-height: 1.25;
 }
 
+.tr-editModal .tr-modalFooter{
+  flex: 0 0 auto;
+}
+
 @media (max-width: 720px){
+  .tr-editModal{
+    height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .tr-editModal .tr-modalHead{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    max-height: none;
+    overflow: visible;
+    padding: 8px 10px;
+  }
+
+  .tr-editModalActions{
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+
+  .tr-editModalActions .tr-btn{
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    height: 40px;
+    padding: 0 7px;
+    font-size: 9px;
+    line-height: 1.1;
+    letter-spacing: .045em;
+    white-space: normal;
+  }
+
+  .tr-editModalActions .tr-btn:last-child{
+    grid-column: 1 / -1;
+    min-height: 34px;
+    height: 34px;
+  }
+
   .tr-editModalBody{
+    display: block;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
     padding: 8px 10px 12px;
   }
 
+  .tr-editCurrentPanel{
+    height: 160px;
+  }
+
+  .tr-editAddPanel{
+    height: 640px;
+    margin-top: 10px;
+  }
+
+  .tr-editAddPanel .tr-chipRow{
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .tr-editAddPanel .tr-chipRow .tr-seg{
+    flex: 0 0 auto;
+  }
+
+  .tr-editCurrentPanel > .tr-card > .tr-card-body,
+  .tr-editAddPanel > .tr-card > .tr-card-body{
+    padding: 8px 9px 10px;
+  }
+
   .tr-editCurrentList{
-    max-height: 180px;
+    gap: 7px;
   }
 
   .tr-editResultsViewport{
-    height: 310px;
-    min-height: 310px;
-    max-height: 310px;
+    gap: 7px;
+  }
+
+  .tr-editResultsViewport .tr-rowbox{
+    min-height: 50px;
+    padding: 7px 8px;
   }
 }
 
-@media (max-height: 700px){
-  .tr-editCurrentList{
-    max-height: 150px;
+@media (max-height: 760px) and (min-width: 721px){
+  .tr-editModalBody{
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
-  .tr-editResultsViewport{
-    height: 270px;
-    min-height: 270px;
-    max-height: 270px;
+  .tr-editCurrentPanel{
+    height: 155px;
+  }
+
+  .tr-editAddPanel{
+    height: 620px;
+    margin-top: 10px;
   }
 }
 
