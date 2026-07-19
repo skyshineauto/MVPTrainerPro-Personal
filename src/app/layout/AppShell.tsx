@@ -20,6 +20,166 @@ const LS = {
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
 
+function lockDocumentForModal() {
+  const appWindow = window as any;
+  const existing = appWindow.__mvpTrainerModalLock as
+    | { count: number; syncVisualViewport: () => void; releaseRoot: () => void }
+    | undefined;
+
+  if (existing) {
+    existing.count += 1;
+    existing.syncVisualViewport();
+
+    return () => {
+      existing.count -= 1;
+      if (existing.count <= 0) existing.releaseRoot();
+    };
+  }
+
+  const body = document.body;
+  const html = document.documentElement;
+  const scrollY = window.scrollY;
+  const viewport = window.visualViewport;
+
+  html.classList.add("tr-modal-open");
+
+  const prevBody = {
+    position: body.style.position,
+    top: body.style.top,
+    left: body.style.left,
+    right: body.style.right,
+    width: body.style.width,
+    height: body.style.height,
+    overflow: body.style.overflow,
+    overscrollBehavior: body.style.overscrollBehavior,
+  };
+  const prevHtml = {
+    width: html.style.width,
+    height: html.style.height,
+    overflow: html.style.overflow,
+    overscrollBehavior: html.style.overscrollBehavior,
+  };
+
+  const syncVisualViewport = () => {
+    const height = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
+    const width = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
+    const top = Math.round(viewport?.offsetTop ?? 0);
+    const left = Math.round(viewport?.offsetLeft ?? 0);
+
+    html.style.setProperty("--tr-modal-visual-height", `${height}px`);
+    html.style.setProperty("--tr-modal-visual-width", `${width}px`);
+    html.style.setProperty("--tr-modal-visual-top", `${top}px`);
+    html.style.setProperty("--tr-modal-visual-left", `${left}px`);
+  };
+
+  syncVisualViewport();
+
+  body.style.position = "fixed";
+  body.style.top = `-${scrollY}px`;
+  body.style.left = "0";
+  body.style.right = "0";
+  body.style.width = "100%";
+  body.style.height = "100%";
+  body.style.overflow = "hidden";
+  body.style.overscrollBehavior = "none";
+  html.style.width = "100%";
+  html.style.height = "100%";
+  html.style.overflow = "hidden";
+  html.style.overscrollBehavior = "none";
+
+  let lastTouchX = 0;
+  let lastTouchY = 0;
+
+  const onTouchStart = (event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+  };
+
+  const onTouchMove = (event: TouchEvent) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    const deltaX = touch.clientX - lastTouchX;
+    const deltaY = touch.clientY - lastTouchY;
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      event.preventDefault();
+      return;
+    }
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) && target.closest(".tr-chipRow")) {
+      return;
+    }
+
+    const scroller = target.closest<HTMLElement>(
+      ".tr-editCurrentList, .tr-editResultsViewport, .tr-completeGrid, .tr-modalBody"
+    );
+
+    if (!scroller || Math.abs(deltaX) > Math.abs(deltaY)) {
+      if (!scroller) event.preventDefault();
+      return;
+    }
+
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (maxScrollTop <= 1) {
+      event.preventDefault();
+      return;
+    }
+
+    const atTop = scroller.scrollTop <= 0;
+    const atBottom = scroller.scrollTop >= maxScrollTop - 1;
+    const pullingPastTop = atTop && deltaY > 0;
+    const pushingPastBottom = atBottom && deltaY < 0;
+
+    if (pullingPastTop || pushingPastBottom) {
+      event.preventDefault();
+    }
+  };
+
+  window.addEventListener("resize", syncVisualViewport);
+  viewport?.addEventListener("resize", syncVisualViewport);
+  viewport?.addEventListener("scroll", syncVisualViewport);
+  document.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
+  document.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+
+  const releaseRoot = () => {
+    window.removeEventListener("resize", syncVisualViewport);
+    viewport?.removeEventListener("resize", syncVisualViewport);
+    viewport?.removeEventListener("scroll", syncVisualViewport);
+    document.removeEventListener("touchstart", onTouchStart, true);
+    document.removeEventListener("touchmove", onTouchMove, true);
+
+    body.style.position = prevBody.position;
+    body.style.top = prevBody.top;
+    body.style.left = prevBody.left;
+    body.style.right = prevBody.right;
+    body.style.width = prevBody.width;
+    body.style.height = prevBody.height;
+    body.style.overflow = prevBody.overflow;
+    body.style.overscrollBehavior = prevBody.overscrollBehavior;
+    html.style.width = prevHtml.width;
+    html.style.height = prevHtml.height;
+    html.style.overflow = prevHtml.overflow;
+    html.style.overscrollBehavior = prevHtml.overscrollBehavior;
+    html.classList.remove("tr-modal-open");
+    delete appWindow.__mvpTrainerModalLock;
+    window.scrollTo(0, scrollY);
+  };
+
+  const state = { count: 1, syncVisualViewport, releaseRoot };
+  appWindow.__mvpTrainerModalLock = state;
+
+  return () => {
+    state.count -= 1;
+    if (state.count <= 0) state.releaseRoot();
+  };
+}
+
 function lsGet(key: string) {
   try {
     return localStorage.getItem(key);
@@ -285,47 +445,7 @@ export function AppShell({
 
   useEffect(() => {
     if (!endOpen) return;
-
-    const body = document.body;
-    const html = document.documentElement;
-    const scrollY = window.scrollY;
-
-    html.classList.add("tr-modal-open");
-
-    const prevBody = {
-      position: body.style.position,
-      top: body.style.top,
-      left: body.style.left,
-      right: body.style.right,
-      width: body.style.width,
-      overflow: body.style.overflow,
-    };
-    const prevHtml = {
-      overflow: html.style.overflow,
-      overscrollBehavior: html.style.overscrollBehavior,
-    };
-
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-    html.style.overflow = "hidden";
-    html.style.overscrollBehavior = "none";
-
-    return () => {
-      body.style.position = prevBody.position;
-      body.style.top = prevBody.top;
-      body.style.left = prevBody.left;
-      body.style.right = prevBody.right;
-      body.style.width = prevBody.width;
-      body.style.overflow = prevBody.overflow;
-      html.style.overflow = prevHtml.overflow;
-      html.style.overscrollBehavior = prevHtml.overscrollBehavior;
-      html.classList.remove("tr-modal-open");
-      window.scrollTo(0, scrollY);
-    };
+    return lockDocumentForModal();
   }, [endOpen]);
 
   useEffect(() => {
