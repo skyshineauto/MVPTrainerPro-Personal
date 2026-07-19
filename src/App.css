@@ -649,6 +649,83 @@ html.tr-modal-open .tr-bottomNavWrap{
   }
 }
 
+
+/* ============================================================
+   EDIT SESSION MODAL: BOUNDED LISTS + FIVE-ROW RESULTS VIEWPORT
+   ============================================================ */
+.tr-editModalBody{
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 10px 16px 16px;
+}
+
+.tr-editCurrentList{
+  display: grid;
+  gap: 8px;
+  max-height: 210px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+}
+
+.tr-editResultsViewport{
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  height: 318px;
+  min-height: 318px;
+  max-height: 318px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
+.tr-editResultsViewport .tr-rowbox{
+  padding: 9px 10px;
+}
+
+.tr-editResultsViewport .tr-sub{
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+@media (max-width: 720px){
+  .tr-editModalBody{
+    padding: 8px 10px 12px;
+  }
+
+  .tr-editCurrentList{
+    max-height: 180px;
+  }
+
+  .tr-editResultsViewport{
+    height: 310px;
+    min-height: 310px;
+    max-height: 310px;
+  }
+}
+
+@media (max-height: 700px){
+  .tr-editCurrentList{
+    max-height: 150px;
+  }
+
+  .tr-editResultsViewport{
+    height: 270px;
+    min-height: 270px;
+    max-height: 270px;
+  }
+}
+
 /* ============================================================
    HUD / APP SHELL
    ============================================================ */
