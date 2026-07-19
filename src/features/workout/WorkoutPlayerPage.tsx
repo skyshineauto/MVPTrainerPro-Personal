@@ -566,13 +566,13 @@ function SessionCompleteOverlay({
         }
         .tr-completeModal{
           position: relative;
-          overflow-y:auto;
-          overflow-x:hidden;
-          overscroll-behavior: contain;
-          -webkit-overflow-scrolling: touch;
-          scrollbar-gutter: stable;
-          max-height: calc(100dvh - 36px);
+          display:flex;
+          flex-direction:column;
           width:min(960px, 100%);
+          height:min(720px, calc(100dvh - 36px));
+          min-height:0;
+          max-height:none;
+          overflow:hidden;
           border-radius: 30px;
           border: 1px solid rgba(0,220,255,.42);
           background:
@@ -627,6 +627,14 @@ function SessionCompleteOverlay({
         .tr-completeGrid{
           position:relative;
           z-index:1;
+          flex:1 1 0%;
+          min-height:0;
+          overflow-y:auto;
+          overflow-x:hidden;
+          overscroll-behavior-y:contain;
+          touch-action:pan-y;
+          -webkit-overflow-scrolling:touch;
+          scrollbar-gutter:stable;
           display:grid;
           grid-template-columns: minmax(220px, 290px) 1fr;
           gap: 24px;
@@ -779,7 +787,9 @@ function SessionCompleteOverlay({
         @media (max-width: 620px){
           .tr-completeOverlay{ padding: 10px; }
           .tr-completeModal{
-            max-height: calc(100dvh - 20px);
+            height: calc(100dvh - 20px);
+            min-height:0;
+            max-height:none;
             border-radius: 22px;
             padding: 14px;
           }
@@ -896,6 +906,48 @@ export function WorkoutPlayerPage({ params }: any) {
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
+
+  useEffect(() => {
+    if (!editing && !completeOverlayOpen) return;
+
+    const body = document.body;
+    const html = document.documentElement;
+    const scrollY = window.scrollY;
+
+    const prevBody = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    const prevHtml = {
+      overflow: html.style.overflow,
+      overscrollBehavior: html.style.overscrollBehavior,
+    };
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    html.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
+
+    return () => {
+      body.style.position = prevBody.position;
+      body.style.top = prevBody.top;
+      body.style.left = prevBody.left;
+      body.style.right = prevBody.right;
+      body.style.width = prevBody.width;
+      body.style.overflow = prevBody.overflow;
+      html.style.overflow = prevHtml.overflow;
+      html.style.overscrollBehavior = prevHtml.overscrollBehavior;
+      window.scrollTo(0, scrollY);
+    };
+  }, [editing, completeOverlayOpen]);
 
   useEffect(() => {
     try {
@@ -2113,22 +2165,23 @@ function EditSessionPanel(props: {
 
                 {showResultsEmptyState ? <div className="tr-sub">No matches.</div> : null}
 
-                {searchHasMore ? (
-                  <div style={{ display: "flex", justifyContent: "center", paddingTop: 4 }}>
-                    <button
-                      className="tr-btn tr-btn--primary"
-                      style={{ height: 44, minWidth: 220 }}
-                      onClick={onLoadMore}
-                      disabled={searchBusy || searchLoadingMore}
-                    >
-                      {searchLoadingMore ? "Loading…" : "Load more"}
-                    </button>
-                  </div>
-                ) : null}
               </div>
             </div>
           </Card>
         </div>
+
+        {searchHasMore ? (
+          <div className="tr-modalFooter tr-modalFooter--center">
+            <button
+              className="tr-btn tr-btn--primary"
+              style={{ height: 46, minWidth: 240 }}
+              onClick={onLoadMore}
+              disabled={searchBusy || searchLoadingMore}
+            >
+              {searchLoadingMore ? "Loading…" : "Load more exercises"}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <style>{`
