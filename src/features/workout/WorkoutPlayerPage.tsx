@@ -1,5 +1,6 @@
 import BottomHudAdvanced from "./BottomHudAdvanced";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import {
@@ -504,9 +505,9 @@ function SessionCompleteOverlay({
   doneCount: number;
   totalExercises: number;
 }) {
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div className="tr-completeOverlay">
       <div className="tr-completeModal">
         <div className="tr-completeHalo" aria-hidden />
@@ -851,7 +852,8 @@ function SessionCompleteOverlay({
   }
 }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -914,6 +916,8 @@ export function WorkoutPlayerPage({ params }: any) {
     const html = document.documentElement;
     const scrollY = window.scrollY;
 
+    html.classList.add("tr-modal-open");
+
     const prevBody = {
       position: body.style.position,
       top: body.style.top,
@@ -945,6 +949,7 @@ export function WorkoutPlayerPage({ params }: any) {
       body.style.overflow = prevBody.overflow;
       html.style.overflow = prevHtml.overflow;
       html.style.overscrollBehavior = prevHtml.overscrollBehavior;
+      html.classList.remove("tr-modal-open");
       window.scrollTo(0, scrollY);
     };
   }, [editing, completeOverlayOpen]);
@@ -2027,8 +2032,10 @@ function EditSessionPanel(props: {
     !searchResults.length &&
     (searchQ.trim().length >= 2 || addMuscle !== "all" || addEquip !== "all");
 
-  return (
-    <div className="tr-modalOverlay tr-modalOverlay--locked">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit session">
       <div className="tr-modal tr-modal--viewport">
         <div className="tr-modalHead">
           <div style={{ fontWeight: 950 }}>
@@ -2170,24 +2177,27 @@ function EditSessionPanel(props: {
           </Card>
         </div>
 
-        {searchHasMore ? (
-          <div className="tr-modalFooter tr-modalFooter--center">
-            <button
-              className="tr-btn tr-btn--primary"
-              style={{ height: 46, minWidth: 240 }}
-              onClick={onLoadMore}
-              disabled={searchBusy || searchLoadingMore}
-            >
-              {searchLoadingMore ? "Loading…" : "Load more exercises"}
-            </button>
-          </div>
-        ) : null}
+        <div className="tr-modalFooter tr-modalFooter--center">
+          <button
+            className="tr-btn tr-btn--primary"
+            style={{ height: 46, minWidth: 240 }}
+            onClick={onLoadMore}
+            disabled={!searchHasMore || searchBusy || searchLoadingMore}
+          >
+            {searchLoadingMore
+              ? "Loading…"
+              : searchHasMore
+              ? "Load more exercises"
+              : "All matching exercises loaded"}
+          </button>
+        </div>
       </div>
 
       <style>{`
         .tr-chipRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }
 
