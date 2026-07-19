@@ -2131,6 +2131,16 @@ function EditSessionPanel(props: {
   } = props;
 
   const mode = swapTargetWeId ? "swap" : "add";
+  const [mobileTab, setMobileTab] = useState<"current" | "add">("add");
+
+  useEffect(() => {
+    if (swapTargetWeId) setMobileTab("add");
+  }, [swapTargetWeId]);
+
+  function handleSwap(weId: string) {
+    setMobileTab("add");
+    onSwap(weId);
+  }
 
   const dangerStyle: React.CSSProperties = {
     height: 36,
@@ -2160,7 +2170,7 @@ function EditSessionPanel(props: {
 
   return createPortal(
     <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit session">
-      <div className="tr-modal tr-modal--viewport tr-editModal">
+      <div className={`tr-modal tr-modal--viewport tr-editModal tr-editModal--mobile-${mobileTab}`}>
         <div className="tr-modalHead">
           <div style={{ fontWeight: 950 }}>
             Edit Session <span className="tr-sub">({items.length})</span>
@@ -2180,6 +2190,27 @@ function EditSessionPanel(props: {
         </div>
 
         <div className="tr-modalBody tr-editModalBody">
+          <div className="tr-editMobileTabs" role="tablist" aria-label="Edit session sections">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "current"}
+              className={`tr-seg ${mobileTab === "current" ? "is-active" : ""}`}
+              onClick={() => setMobileTab("current")}
+            >
+              Current Session ({items.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "add"}
+              className={`tr-seg ${mobileTab === "add" ? "is-active" : ""}`}
+              onClick={() => setMobileTab("add")}
+            >
+              {mode === "swap" ? "Pick Replacement" : "Add Exercise"}
+            </button>
+          </div>
+
           <div className="tr-editCurrentPanel">
           <Card title="Current session exercises" tone="base">
             <div className="tr-editCurrentList">
@@ -2196,7 +2227,7 @@ function EditSessionPanel(props: {
                     </div>
                   </div>
 
-                  <button className={`tr-seg ${swapTargetWeId === we.id ? "is-active" : ""}`} onClick={() => onSwap(we.id)}>
+                  <button className={`tr-seg ${swapTargetWeId === we.id ? "is-active" : ""}`} onClick={() => handleSwap(we.id)}>
                     Swap
                   </button>
 
@@ -2305,9 +2336,19 @@ function EditSessionPanel(props: {
           </div>
         </div>
 
-        <div className="tr-modalFooter tr-modalFooter--center">
+        <div className="tr-modalFooter tr-modalFooter--center tr-editModalFooter">
           <button
-            className="tr-btn tr-btn--primary"
+            type="button"
+            className="tr-btn tr-btn--primary tr-editFooterCurrentAction"
+            style={{ height: 46, minWidth: 240 }}
+            onClick={() => setMobileTab("add")}
+          >
+            Add Exercise
+          </button>
+
+          <button
+            type="button"
+            className="tr-btn tr-btn--primary tr-editFooterLoadMore"
             style={{ height: 46, minWidth: 240 }}
             onClick={onLoadMore}
             disabled={!searchHasMore || searchBusy || searchLoadingMore}
