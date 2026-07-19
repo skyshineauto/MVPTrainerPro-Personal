@@ -34,7 +34,7 @@ import icoQuads from "../../assets/front.png";
 import icoCalves from "../../assets/muscles.png";
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
-const EDIT_SEARCH_PAGE_SIZE = 200;
+const EDIT_RESULTS_BATCH_SIZE = 5;
 
 type MediaPack = {
   gif?: string | null;
@@ -1425,12 +1425,9 @@ export function WorkoutPlayerPage({ params }: any) {
     return map;
   }
 
-  async function runSearch(q: string, opts?: { force?: boolean; append?: boolean }) {
+  async function runSearch(q: string, opts?: { force?: boolean }) {
     const termRaw = q.trim();
     const termNorm = normalizeText(termRaw);
-    const append = opts?.append === true;
-    const nextPage = append ? searchPage + 1 : 0;
-
     setSearchQ(q);
 
     const browsing = addMuscle !== "all" || addEquip !== "all";
@@ -1441,18 +1438,18 @@ export function WorkoutPlayerPage({ params }: any) {
       return;
     }
 
-    if (append) setSearchLoadingMore(true);
-    else setSearchBusy(true);
-
+    setSearchBusy(true);
     try {
-      const from = nextPage * EDIT_SEARCH_PAGE_SIZE;
-      const to = from + EDIT_SEARCH_PAGE_SIZE - 1;
+      // Preserve the existing category/search behavior. We fetch the same broad
+      // candidate pool, apply the existing matchFilters contract, then reveal
+      // five matching rows at a time inside the fixed-height results viewport.
+      const limit = termNorm.length >= 2 ? 200 : addEquip === "cardio" ? 500 : browsing ? 350 : 80;
 
       let query = supabase
         .from("exercises")
         .select("id,name,source,primary_muscles,equipment,media")
         .order("name", { ascending: true })
-        .range(from, to);
+        .limit(limit);
 
       if (termNorm.length >= 2) {
         query = query.or(buildNameOrIlike(expandSearchTerms(termRaw)));
@@ -1488,30 +1485,32 @@ export function WorkoutPlayerPage({ params }: any) {
         };
       });
 
-      if (append) {
-        setSearchResults((prev) => {
-          const merged = new Map(prev.map((row) => [row.id, row]));
-          for (const row of decorated) merged.set(row.id, row);
-          return Array.from(merged.values());
-        });
-      } else {
-        setSearchResults(decorated);
-      }
-
-      setSearchPage(nextPage);
-      setSearchHasMore(list.length === EDIT_SEARCH_PAGE_SIZE);
+      setSearchResults(decorated);
+      setSearchPage(0);
+      setSearchHasMore(decorated.length > EDIT_RESULTS_BATCH_SIZE);
     } catch {
-      if (!append) setSearchResults([]);
+      setSearchResults([]);
+      setSearchPage(0);
       setSearchHasMore(false);
     } finally {
-      if (append) setSearchLoadingMore(false);
-      else setSearchBusy(false);
+      setSearchBusy(false);
     }
   }
 
   async function loadMoreSearchResults() {
     if (searchBusy || searchLoadingMore || !searchHasMore) return;
-    await runSearch(searchQ, { force: true, append: true });
+
+    setSearchLoadingMore(true);
+    try {
+      setSearchPage((prev) => {
+        const next = prev + 1;
+        const nextVisibleCount = (next + 1) * EDIT_RESULTS_BATCH_SIZE;
+        setSearchHasMore(searchResults.length > nextVisibleCount);
+        return next;
+      });
+    } finally {
+      setSearchLoadingMore(false);
+    }
   }
 
   useEffect(() => {
@@ -1829,7 +1828,7 @@ export function WorkoutPlayerPage({ params }: any) {
     searchBusy={searchBusy}
     searchLoadingMore={searchLoadingMore}
     searchHasMore={searchHasMore}
-    searchResults={searchResults}
+    searchResults={searchResults.slice(0, (searchPage + 1) * EDIT_RESULTS_BATCH_SIZE)}
     onSearch={(v) => runSearch(v)}
     onLoadMore={loadMoreSearchResults}
     onPickAdd={addExercise}
@@ -2036,7 +2035,7 @@ function EditSessionPanel(props: {
 
   return createPortal(
     <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit session">
-      <div className="tr-modal tr-modal--viewport">
+      <div className="tr-modal tr-modal--viewport tr-editModal">
         <div className="tr-modalHead">
           <div style={{ fontWeight: 950 }}>
             Edit Session <span className="tr-sub">({items.length})</span>
@@ -2055,9 +2054,9 @@ function EditSessionPanel(props: {
           </div>
         </div>
 
-        <div className="tr-modalBody" style={{ display: "grid", gap: 10, padding: "10px 16px 16px" }}>
+        <div className="tr-modalBody tr-editModalBody">
           <Card title="Current session exercises" tone="base">
-            <div style={{ display: "grid", gap: 8 }}>
+            <div className="tr-editCurrentList">
               {items.map((we, idx) => (
                 <div key={we.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center" }}>
                   <div style={{ display: "grid", gap: 4 }}>
@@ -2125,7 +2124,7 @@ function EditSessionPanel(props: {
                 {searchBusy ? "Searching…" : mode === "swap" ? "Pick an exercise to swap in." : "Pick an exercise to add."}
               </div>
 
-              <div style={{ display: "grid", gap: 8 }}>
+              <div className="tr-editResultsViewport">
                 {searchResults.map((r) => (
                   <button
                     key={r.id}
