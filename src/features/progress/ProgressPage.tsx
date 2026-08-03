@@ -23,7 +23,7 @@ import icoScale from "../../assets/progress-icons/bathroom-scale.png";
 import icoProtein from "../../assets/progress-icons/protein-shake.png";
 
 type Scope = "active" | "all";
-type Range = 7 | 14 | 30;
+type Range = 7 | 14 | 30 | 90 | "all";
 type Tab = "protein" | "weight" | "volume" | "pain";
 
 type HistorySetRow = {
@@ -97,6 +97,15 @@ function fmtHMS(totalSeconds: number) {
     "0"
   )}m ${String(ss).padStart(2, "0")}s`;
 }
+function rangeLabel(range: Range) {
+  return range === "all" ? "ALL TIME" : `${range}D`;
+}
+function rangeStartISO(range: Range) {
+  return range === "all" ? null : daysAgoISO(range);
+}
+function fmtDecimal(value: number, digits = 1) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "0.0";
+}
 function proteinMultiplier(goal: string | null | undefined) {
   const g = (goal || "").toLowerCase();
   if (g === "cut" || g === "lose_weight") return 1.0;
@@ -113,26 +122,6 @@ function difficultyLabel(d?: string | null, legacyRating?: number | null) {
   if (legacyRating === 2) return "Just right";
   if (legacyRating === 3) return "Too hard";
   return null;
-}
-function startOfWeekISO() {
-  const d = new Date();
-  const day = d.getDay();
-  const diffToMon = (day + 6) % 7;
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - diffToMon);
-  return d.toISOString();
-}
-function startOfMonthISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(1);
-  return d.toISOString();
-}
-function startOfYearISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setMonth(0, 1);
-  return d.toISOString();
 }
 
 function HudIcon({
@@ -224,9 +213,7 @@ export function ProgressPage() {
   const [avgDurationSeconds, setAvgDurationSeconds] = useState(0);
   const [setsLogged, setSetsLogged] = useState(0);
 
-  const [wkCount, setWkCount] = useState(0);
-  const [moCount, setMoCount] = useState(0);
-  const [yrCount, setYrCount] = useState(0);
+  const [periodSpanDays, setPeriodSpanDays] = useState(14);
 
   const [painFlags7d, setPainFlags7d] = useState(0);
   const [painAvgRange, setPainAvgRange] = useState<number | null>(null);
@@ -246,29 +233,6 @@ export function ProgressPage() {
   const [clearText, setClearText] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  async function countWorkoutsSince(params: {
-    userId: string;
-    sinceISO: string;
-    activeSessionIds: string[] | null;
-  }) {
-    const { userId, sinceISO, activeSessionIds } = params;
-
-    let q = supabase
-      .from("workouts")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .not("completed_at", "is", null)
-      .gte("completed_at", sinceISO);
-
-    if (scope === "active" && activeSessionIds && activeSessionIds.length) {
-      q = q.in("scheduled_session_id", activeSessionIds);
-    }
-
-    const { count, error } = await q;
-    if (error) throw error;
-    return count ?? 0;
-  }
 
   async function loadAll() {
     setLoading(true);
@@ -293,7 +257,7 @@ export function ProgressPage() {
         .maybeSingle();
       setGoal((ab?.goal as string) ?? null);
 
-      const fromISO = daysAgoISO(range);
+      const fromISO = rangeStartISO(range);
       const from7ISO = daysAgoISO(7);
 
       let activeSessionIds: string[] | null = null;
@@ -313,9 +277,7 @@ export function ProgressPage() {
           setTotalTimeSeconds(0);
           setAvgDurationSeconds(0);
           setSetsLogged(0);
-          setWkCount(0);
-          setMoCount(0);
-          setYrCount(0);
+          setPeriodSpanDays(range === "all" ? 7 : range);
           setPainFlags7d(0);
           setPainAvgRange(null);
           setPainMaxRange(null);
@@ -329,26 +291,6 @@ export function ProgressPage() {
         }
       }
 
-      const [wk, mo, yr] = await Promise.all([
-        countWorkoutsSince({
-          userId: u.user.id,
-          sinceISO: startOfWeekISO(),
-          activeSessionIds,
-        }),
-        countWorkoutsSince({
-          userId: u.user.id,
-          sinceISO: startOfMonthISO(),
-          activeSessionIds,
-        }),
-        countWorkoutsSince({
-          userId: u.user.id,
-          sinceISO: startOfYearISO(),
-          activeSessionIds,
-        }),
-      ]);
-      setWkCount(wk);
-      setMoCount(mo);
-      setYrCount(yr);
 
       let wQuery = supabase
         .from("workouts")
@@ -357,8 +299,11 @@ export function ProgressPage() {
         )
         .eq("user_id", u.user.id)
         .not("completed_at", "is", null)
-        .gte("completed_at", fromISO)
         .order("completed_at", { ascending: false });
+
+      if (fromISO) {
+        wQuery = wQuery.gte("completed_at", fromISO);
+      }
 
       if (scope === "active" && activeSessionIds) {
         wQuery = wQuery.in("scheduled_session_id", activeSessionIds);
@@ -372,14 +317,35 @@ export function ProgressPage() {
 
       setCompletedCount(wRows.length);
 
+      if (range === "all") {
+        const completedTimes = wRows
+          .map((row: any) => new Date(row.completed_at).getTime())
+          .filter((value: number) => Number.isFinite(value));
+        if (completedTimes.length >= 2) {
+          const minTime = Math.min(...completedTimes);
+          const maxTime = Math.max(...completedTimes);
+          setPeriodSpanDays(Math.max(7, Math.ceil((maxTime - minTime) / 86400000) + 1));
+        } else {
+          setPeriodSpanDays(7);
+        }
+      } else {
+        setPeriodSpanDays(range);
+      }
+
       if (scope === "active" && ab?.id) {
-        const startDate = dateOnly(new Date(Date.now() - range * 86400000));
-        const { data: sched, error: schedErr } = await supabase
+        let schedQuery = supabase
           .from("scheduled_sessions")
           .select("id, date")
           .eq("user_id", u.user.id)
           .eq("program_block_id", ab.id)
-          .gte("date", startDate);
+          .lte("date", dateOnly(new Date()));
+
+        if (range !== "all") {
+          const startDate = dateOnly(new Date(Date.now() - range * 86400000));
+          schedQuery = schedQuery.gte("date", startDate);
+        }
+
+        const { data: sched, error: schedErr } = await schedQuery;
         if (schedErr) throw schedErr;
 
         const denom = (sched ?? []).length;
@@ -844,6 +810,15 @@ export function ProgressPage() {
     return roundProtein(latestBW * proteinMultiplier(goal));
   }, [latestBW, goal]);
 
+  const selectedPeriodLabel = rangeLabel(range);
+  const workoutsPerWeek = useMemo(() => {
+    const weeks = Math.max(1, periodSpanDays / 7);
+    return completedCount / weeks;
+  }, [completedCount, periodSpanDays]);
+  const averageSetsPerWorkout = useMemo(() => {
+    return completedCount > 0 ? setsLogged / completedCount : 0;
+  }, [completedCount, setsLogged]);
+
   async function onClearLogs() {
     setToast(null);
     setErr(null);
@@ -985,39 +960,57 @@ export function ProgressPage() {
           title="Progress"
           right={
             <div className="tr-progressControls">
-              <button
-                className={`tr-seg ${scope === "active" ? "is-active" : ""}`}
-                onClick={() => setScope("active")}
-              >
-                Active Program
-              </button>
-              <button
-                className={`tr-seg ${scope === "all" ? "is-active" : ""}`}
-                onClick={() => setScope("all")}
-              >
-                All Time
-              </button>
+              <div className="tr-progressControlGroup">
+                <span className="tr-progressControlLabel">PROGRAM</span>
+                <button
+                  className={`tr-seg ${scope === "active" ? "is-active" : ""}`}
+                  onClick={() => setScope("active")}
+                >
+                  Current Program
+                </button>
+                <button
+                  className={`tr-seg ${scope === "all" ? "is-active" : ""}`}
+                  onClick={() => setScope("all")}
+                >
+                  All Programs
+                </button>
+              </div>
 
               <span className="tr-progressDivider" />
 
-              <button
-                className={`tr-seg ${range === 7 ? "is-active" : ""}`}
-                onClick={() => setRange(7)}
-              >
-                7d
-              </button>
-              <button
-                className={`tr-seg ${range === 14 ? "is-active" : ""}`}
-                onClick={() => setRange(14)}
-              >
-                14d
-              </button>
-              <button
-                className={`tr-seg ${range === 30 ? "is-active" : ""}`}
-                onClick={() => setRange(30)}
-              >
-                30d
-              </button>
+              <div className="tr-progressControlGroup">
+                <span className="tr-progressControlLabel">PERIOD</span>
+                <button
+                  className={`tr-seg ${range === 7 ? "is-active" : ""}`}
+                  onClick={() => setRange(7)}
+                >
+                  7d
+                </button>
+                <button
+                  className={`tr-seg ${range === 14 ? "is-active" : ""}`}
+                  onClick={() => setRange(14)}
+                >
+                  14d
+                </button>
+                <button
+                  className={`tr-seg ${range === 30 ? "is-active" : ""}`}
+                  onClick={() => setRange(30)}
+                >
+                  30d
+                </button>
+                <button
+                  className={`tr-seg ${range === 90 ? "is-active" : ""}`}
+                  onClick={() => setRange(90)}
+                >
+                  90d
+                </button>
+                <button
+                  className={`tr-seg ${range === "all" ? "is-active" : ""}`}
+                  onClick={() => setRange("all")}
+                >
+                  All Time
+                </button>
+              </div>
             </div>
           }
         >
@@ -1047,69 +1040,68 @@ export function ProgressPage() {
           ) : null}
 
           <div className="tr-moduleFrame">
-            <div className="tr-kpiGrid">
-              <KpiTile
-                icon={icoSchedule}
-                label="WORKOUTS (WEEK)"
-                value={loading ? "—" : wkCount}
-                tone="blue"
-                sub="Mon → Sun"
-              />
-              <KpiTile
-                icon={icoSchedule}
-                label="WORKOUTS (MONTH)"
-                value={loading ? "—" : moCount}
-                tone="blue"
-                sub="This month"
-              />
-              <KpiTile
-                icon={icoSchedule}
-                label="WORKOUTS (YEAR)"
-                value={loading ? "—" : yrCount}
-                tone="blue"
-                sub="This year"
-              />
-
+            <div className="tr-progressSectionLabel">TRAINING OVERVIEW • {selectedPeriodLabel}</div>
+            <div className="tr-kpiGrid tr-kpiGrid--4">
               <KpiTile
                 icon={icoChecked}
-                label={`COMPLETED (${range}d)`}
+                label={`WORKOUTS COMPLETED (${selectedPeriodLabel})`}
                 value={loading ? "—" : completedCount}
-                tone="base"
+                tone="blue"
+                sub={scope === "active" ? "Current program" : "All programs"}
               />
               <KpiTile
-                icon={icoRate}
-                label={`COMPLETION RATE (${range}d)`}
-                value={loading ? "—" : heroCompletion}
+                icon={icoInProcess}
+                label={`TOTAL TRAINING TIME (${selectedPeriodLabel})`}
+                value={loading ? "—" : fmtHMS(totalTimeSeconds)}
                 tone="blue"
-                sub={scope === "active" ? "Scheduled vs done" : "Active program only"}
+                sub="Active training time"
                 hero
               />
               <KpiTile
+                icon={icoWorkout}
+                label={`SETS LOGGED (${selectedPeriodLabel})`}
+                value={loading ? "—" : setsLogged}
+                tone="base"
+                sub={`${fmtDecimal(averageSetsPerWorkout)} avg per workout`}
+              />
+              <KpiTile
                 icon={icoFlames}
-                label="STREAK"
+                label="CURRENT STREAK"
                 value={loading ? "—" : `${streakDays}`}
                 tone={streakDays >= 7 ? "green" : "base"}
-                sub="days"
+                sub="consecutive training days"
               />
+            </div>
 
+            <div className="tr-progressSectionLabel tr-progressSectionLabel--spaced">TRAINING EFFICIENCY</div>
+            <div className="tr-kpiGrid tr-kpiGrid--4">
               <KpiTile
-                icon={icoInProcess}
-                label={`TRAINING TIME (${range}d)`}
-                value={loading ? "—" : fmtHMS(totalTimeSeconds)}
-                tone="base"
+                icon={icoRate}
+                label={`COMPLETION RATE (${selectedPeriodLabel})`}
+                value={loading ? "—" : heroCompletion}
+                tone="blue"
+                sub={scope === "active" ? "Scheduled vs completed" : "Current program only"}
               />
               <KpiTile
                 icon={icoInProcess}
-                label={`AVG DURATION (${range}d)`}
+                label={`AVERAGE WORKOUT (${selectedPeriodLabel})`}
                 value={loading ? "—" : fmtHMS(avgDurationSeconds)}
                 tone="base"
+                sub="Average session duration"
               />
               <KpiTile
-                icon={icoWorkout}
-                label={`SETS LOGGED (${range}d)`}
-                value={loading ? "—" : setsLogged}
+                icon={icoSchedule}
+                label="WORKOUTS PER WEEK"
+                value={loading ? "—" : fmtDecimal(workoutsPerWeek)}
+                tone="base"
+                sub={`Based on ${selectedPeriodLabel.toLowerCase()}`}
+              />
+              <KpiTile
+                icon={icoReport}
+                label={`TOTAL VOLUME (${selectedPeriodLabel})`}
+                value={loading || volumeTotal == null ? "—" : Math.round(volumeTotal).toLocaleString()}
                 tone="blue"
-                sub="reps+weight logged"
+                sub="sum(reps × weight)"
               />
             </div>
           </div>
@@ -1154,7 +1146,7 @@ export function ProgressPage() {
               />
               <KpiTile
                 icon={icoPain}
-                label={`AVG PAIN (${range}D)`}
+                label={`AVG PAIN (${selectedPeriodLabel})`}
                 value={
                   loading ? "—" : painAvgRange == null ? "—" : painAvgRange.toFixed(1)
                 }
@@ -1163,7 +1155,7 @@ export function ProgressPage() {
               />
               <KpiTile
                 icon={icoWarning}
-                label={`MAX PAIN (${range}D)`}
+                label={`MAX PAIN (${selectedPeriodLabel})`}
                 value={loading ? "—" : painMaxRange == null ? "—" : painMaxRange}
                 tone={painTone}
                 sub="peak in range"
@@ -1218,7 +1210,7 @@ export function ProgressPage() {
                 />
                 <KpiTile
                   icon={icoRate}
-                  label={`CHANGE (${range}d)`}
+                  label={`CHANGE (${selectedPeriodLabel})`}
                   value={
                     bwChange == null
                       ? "—"
@@ -1237,7 +1229,7 @@ export function ProgressPage() {
             <div className="tr-moduleFrame">
               <KpiTile
                 icon={icoReport}
-                label={`TOTAL VOLUME (${range}d)`}
+                label={`TOTAL VOLUME (${selectedPeriodLabel})`}
                 value={
                   volumeTotal == null ? "—" : Math.round(volumeTotal).toLocaleString()
                 }
@@ -1384,7 +1376,7 @@ export function ProgressPage() {
               })}
             </div>
           ) : (
-            <div className="tr-sub">No completed sessions in this range.</div>
+            <div className="tr-sub">No completed sessions in this period.</div>
           )}
 
           {clearOpen ? (
@@ -1499,6 +1491,32 @@ export function ProgressPage() {
           flex-wrap:wrap;
           justify-content:flex-end;
         }
+        .tr-progressControlGroup{
+          display:flex;
+          gap:8px;
+          align-items:center;
+          flex-wrap:wrap;
+          justify-content:flex-end;
+        }
+        .tr-progressControlLabel{
+          font-size: 9px;
+          letter-spacing: .20em;
+          text-transform: uppercase;
+          font-weight: 950;
+          color: rgba(255,255,255,.48);
+          margin-right: 2px;
+        }
+        .tr-progressSectionLabel{
+          margin-bottom: 10px;
+          font-size: 10px;
+          letter-spacing: .22em;
+          text-transform: uppercase;
+          font-weight: 950;
+          color: rgba(255,255,255,.58);
+        }
+        .tr-progressSectionLabel--spaced{
+          margin-top: 14px;
+        }
         .tr-progressDivider{
           width: 10px;
           height: 26px;
@@ -1590,15 +1608,48 @@ export function ProgressPage() {
         }
         .tr-kpiGrid--2{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .tr-kpiGrid--3{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .tr-kpiGrid--4{ grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
+        @media (max-width: 1120px){
+          .tr-kpiGrid--4{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
         @media (max-width: 980px){
           .tr-kpiGrid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .tr-kpiGrid--3{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .tr-kpiGrid--2{ grid-template-columns: 1fr; }
+          .tr-progressControls{
+            width: 100%;
+            justify-content: flex-start;
+          }
+          .tr-progressControlGroup{
+            width: 100%;
+            justify-content: flex-start;
+          }
+          .tr-progressDivider{
+            width: 100%;
+            height: 1px;
+            border-left: 0;
+            border-top: 1px solid rgba(255,255,255,.10);
+          }
         }
         @media (max-width: 520px){
           .tr-kpiGrid{ grid-template-columns: 1fr; }
           .tr-kpiGrid--3{ grid-template-columns: 1fr; }
+          .tr-kpiGrid--4{ grid-template-columns: 1fr; }
+          .tr-progressControlGroup{
+            display:grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .tr-progressControlGroup .tr-progressControlLabel{
+            grid-column: 1 / -1;
+          }
+          .tr-progressControlGroup .tr-seg{
+            width: 100%;
+            min-width: 0;
+            padding-left: 8px;
+            padding-right: 8px;
+            font-size: 10px;
+          }
         }
 
         .tr-kpiTile{
