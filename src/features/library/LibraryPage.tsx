@@ -3,11 +3,14 @@ import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 
 import {
+  detailToPrimaryMuscleTag,
   effectiveHasMedia,
+  getMuscleDetailOptions,
   matchFilters,
   resolveRowIcon,
   normalizeText,
   type EquipKey,
+  type MuscleDetailKey,
   type MuscleKey,
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
@@ -32,6 +35,7 @@ type ExRow = {
   name: string;
   source?: string | null;
   primary_muscles?: string[] | null;
+  secondary_muscles?: string[] | null;
   equipment?: string[] | null;
   media?: any;
   template_params?: any;
@@ -164,6 +168,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   const [q, setQ] = useState("");
 
   const [muscle, setMuscle] = useState<MuscleKey>("all");
+  const [muscleDetail, setMuscleDetail] = useState<MuscleDetailKey>("all");
   const [equip, setEquip] = useState<EquipKey>("all");
   const [media, setMedia] = useState<MediaKey>("all");
 
@@ -190,6 +195,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   const [createNotes, setCreateNotes] = useState("");
 
   const [createMuscle, setCreateMuscle] = useState<Exclude<MuscleKey, "all">>("chest");
+  const [createMuscleDetail, setCreateMuscleDetail] = useState<MuscleDetailKey>("all");
   const [createEquip, setCreateEquip] = useState<Exclude<EquipKey, "all">>("free_weight");
 
   const [createSets, setCreateSets] = useState("3");
@@ -201,10 +207,27 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
   const isCreateCardio = createEquip === "cardio";
 
+  const muscleDetailOptions = useMemo(() => getMuscleDetailOptions(muscle), [muscle]);
+  const createMuscleDetailOptions = useMemo(
+    () => getMuscleDetailOptions(createMuscle),
+    [createMuscle]
+  );
+
+  function selectMuscle(next: MuscleKey) {
+    setMuscle(next);
+    setMuscleDetail("all");
+  }
+
+  function selectCreateMuscle(next: Exclude<MuscleKey, "all">) {
+    setCreateMuscle(next);
+    setCreateMuscleDetail("all");
+  }
+
   function resetCreate() {
     setCreateName("");
     setCreateNotes("");
     setCreateMuscle("chest");
+    setCreateMuscleDetail("all");
     setCreateEquip("free_weight");
     setCreateSets("3");
     setCreateRepMin("8");
@@ -252,7 +275,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
         if (!ok) return false;
       }
 
-      if (!matchFilters(r, muscle, equip)) return false;
+      if (!matchFilters(r, muscle, equip, muscleDetail)) return false;
 
       if (media === "ok" && !r.effectiveHasMedia) return false;
       if (media === "missing" && r.effectiveHasMedia) return false;
@@ -265,7 +288,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
       return true;
     });
-  }, [decorated, q, muscle, equip, media, userMediaByExercise]);
+  }, [decorated, q, muscle, muscleDetail, equip, media, userMediaByExercise]);
 
   const missingCount = useMemo(() => filtered.filter((r: any) => !r.effectiveHasMedia).length, [filtered]);
   const okCount = useMemo(() => filtered.filter((r: any) => r.effectiveHasMedia).length, [filtered]);
@@ -286,7 +309,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
     let query = supabase
       .from("exercises")
-      .select("id,name,source,primary_muscles,equipment,media,template_params")
+      .select("id,name,source,primary_muscles,secondary_muscles,equipment,media,template_params")
       .order("name", { ascending: true })
       .range(from, to);
 
@@ -367,7 +390,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   useEffect(() => {
     const t = setTimeout(() => void loadInitial(), 250);
     return () => clearTimeout(t);
-  }, [q, muscle, equip]);
+  }, [q, muscle, muscleDetail, equip]);
 
   async function createExercise() {
     const name = createName.trim();
@@ -386,10 +409,15 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
 
     setCreateBusy(true);
     try {
+      const primaryMuscle = isCreateCardio
+        ? "cardio"
+        : detailToPrimaryMuscleTag(createMuscleDetail, createMuscle);
+
       const payload: any = {
         name,
         equipment: [createEquip],
-        primary_muscles: isCreateCardio ? ["cardio"] : [createMuscle === "abs" ? "core" : createMuscle],
+        primary_muscles: [primaryMuscle],
+        secondary_muscles: [],
         notes: createNotes.trim() ? createNotes.trim() : null,
         description: "",
       };
@@ -458,13 +486,30 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
             <div className="tr-filterLabel">MUSCLE FILTER</div>
             <div className="tr-filterRow">
               {MUSCLE_BUTTONS.map((b) => (
-                <button key={b.key} className={`tr-seg ${muscle === b.key ? "is-active" : ""}`} onClick={() => setMuscle(b.key)}>
+                <button key={b.key} className={`tr-seg ${muscle === b.key ? "is-active" : ""}`} onClick={() => selectMuscle(b.key)}>
                   {b.icon ? <img className="tr-ico" src={b.icon} alt="" /> : null}
                   {b.label}
                 </button>
               ))}
             </div>
           </div>
+
+          {muscleDetailOptions.length > 1 ? (
+            <div className="tr-filterGroup tr-muscleDetailGroup">
+              <div className="tr-filterLabel">TARGET MUSCLE</div>
+              <div className="tr-filterRow tr-muscleDetailRow">
+                {muscleDetailOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    className={`tr-seg ${muscleDetail === option.key ? "is-active" : ""}`}
+                    onClick={() => setMuscleDetail(option.key)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="tr-filterRow" style={{ justifyContent: "space-between" }}>
             <div className="tr-filterGroup">
@@ -574,12 +619,27 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
                   <div style={{ opacity: isCreateCardio ? 0.45 : 1, pointerEvents: isCreateCardio ? "none" : "auto", filter: isCreateCardio ? "grayscale(0.2)" : "none" }}>
                     <div className="tr-filterRow">
                       {MUSCLE_BUTTONS.filter((x) => x.key !== "all").map((b) => (
-                        <button key={b.key} className={`tr-seg ${createMuscle === (b.key as any) ? "is-active" : ""}`} onClick={() => setCreateMuscle(b.key as any)} disabled={createBusy}>
+                        <button key={b.key} className={`tr-seg ${createMuscle === (b.key as any) ? "is-active" : ""}`} onClick={() => selectCreateMuscle(b.key as Exclude<MuscleKey, "all">)} disabled={createBusy}>
                           {b.icon ? <img className="tr-ico" src={b.icon} alt="" /> : null}
                           {b.label}
                         </button>
                       ))}
                     </div>
+
+                    {createMuscleDetailOptions.length > 1 ? (
+                      <div className="tr-filterRow tr-muscleDetailRow" style={{ marginTop: 8 }}>
+                        {createMuscleDetailOptions.map((option) => (
+                          <button
+                            key={option.key}
+                            className={`tr-seg ${createMuscleDetail === option.key ? "is-active" : ""}`}
+                            onClick={() => setCreateMuscleDetail(option.key)}
+                            disabled={createBusy}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   {isCreateCardio ? <div className="tr-sub">Cardio selected: muscle group is disabled.</div> : null}
