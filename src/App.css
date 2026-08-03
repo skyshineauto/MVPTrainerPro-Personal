@@ -1745,3 +1745,274 @@ html.tr-modal-open .tr-bottomNavWrap{
     grid-column: 2;
   }
 }
+/* ============================================================
+   DETAILED MUSCLE FILTERS
+   ============================================================ */
+.tr-muscleDetailGroup{
+  border-radius: 14px;
+  border: 1px solid rgba(0,170,255,.16);
+  background: linear-gradient(180deg, rgba(0,170,255,.055), rgba(0,0,0,.08));
+  padding: 9px 10px 10px;
+}
+
+.tr-muscleDetailRow{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tr-muscleDetailRow .tr-seg{
+  height: 38px;
+  padding: 0 12px;
+  font-size: 10px;
+  letter-spacing: .07em;
+}
+
+/* ============================================================
+   WORKOUTS PAGE: PRE-WORKOUT EDITING
+   ============================================================ */
+.tr-nextWorkoutActions{
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, .36fr);
+  gap: 10px;
+}
+
+.tr-nextWorkoutActions.is-active{
+  grid-template-columns: 1fr;
+}
+
+.tr-queueSessionRow{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.tr-queueSessionCopy{
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tr-queueSessionActions{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.tr-queueSessionActions .tr-btn{
+  height: 42px;
+  min-width: 0;
+}
+
+/* ============================================================
+   PLANNED SESSION EDITOR
+   ============================================================ */
+.tr-plannedEditor .tr-editCurrentList{
+  padding-bottom: 8px;
+}
+
+.tr-plannedExerciseCard{
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(300px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  padding: 10px;
+}
+
+.tr-plannedExerciseMain{
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tr-plannedExerciseTitle{
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-weight: 950;
+}
+
+.tr-plannedExerciseTitle span{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-plannedPrescriptionGrid{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+  gap: 7px;
+}
+
+.tr-plannedPrescriptionGrid label{
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tr-plannedPrescriptionGrid label > span{
+  color: rgba(255,255,255,.55);
+  font-size: 8.5px;
+  font-weight: 950;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tr-plannedPrescriptionGrid input{
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  text-align: center;
+}
+
+.tr-plannedExerciseActions{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
+  gap: 6px;
+}
+
+.tr-plannedExerciseActions .tr-seg,
+.tr-plannedExerciseActions .tr-danger{
+  min-width: 0;
+  height: 36px;
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 9px;
+}
+
+.tr-plannedFilterBox{
+  min-height: 0;
+}
+
+.tr-plannedResultRow{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 980px){
+  .tr-plannedExerciseCard{
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .tr-plannedExerciseActions{
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px){
+  .tr-muscleDetailGroup{
+    padding: 7px 8px 8px;
+  }
+
+  .tr-muscleDetailRow{
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 3px;
+  }
+
+  .tr-muscleDetailRow .tr-seg{
+    flex: 0 0 auto;
+    height: 34px;
+    min-height: 34px;
+    padding: 0 9px;
+    border-radius: 11px;
+    font-size: 9px;
+    letter-spacing: .045em;
+  }
+
+  .tr-nextWorkoutActions{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-queueSessionRow{
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .tr-queueSessionActions{
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tr-queueSessionActions .tr-btn{
+    width: 100%;
+    height: 44px;
+  }
+
+  .tr-plannedExerciseCard{
+    gap: 9px;
+    padding: 9px;
+  }
+
+  .tr-plannedExerciseTitle span{
+    white-space: normal;
+  }
+
+  .tr-plannedPrescriptionGrid{
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .tr-plannedPrescriptionGrid label > span{
+    font-size: 7.5px;
+    letter-spacing: .045em;
+  }
+
+  .tr-plannedPrescriptionGrid input{
+    height: 36px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .tr-plannedExerciseActions{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tr-plannedExerciseActions .tr-seg,
+  .tr-plannedExerciseActions .tr-danger{
+    width: 100%;
+    height: 38px;
+  }
+
+  .tr-plannedEditor .tr-editAddLayout{
+    grid-template-rows: auto 40px auto minmax(0, 1fr) !important;
+  }
+
+  .tr-plannedFilterBox{
+    max-height: 214px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tr-plannedResultRow{
+    gap: 8px;
+  }
+}
+
+@media (max-width: 720px){
+  .tr-editFilterScroll{
+    max-height: 214px;
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+}
