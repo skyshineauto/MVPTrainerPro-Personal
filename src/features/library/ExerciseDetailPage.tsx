@@ -15,6 +15,214 @@ type UserMediaRow = {
   updated_at: string;
 };
 
+
+type ExerciseHistorySet = {
+  set_index: number;
+  reps: number;
+  weight: number;
+  rir: number | null;
+  pain: number | null;
+  form: number | null;
+};
+
+type ExerciseHistorySession = {
+  workoutId: string;
+  workoutExerciseId: string;
+  completedAt: string;
+  templateName: string;
+  pain: number | null;
+  difficulty: string | null;
+  sets: ExerciseHistorySet[];
+  volume: number;
+  estimated1RM: number;
+};
+
+function chunkValues<T>(values: T[], size = 75): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function estimatedOneRepMax(weight: number, reps: number) {
+  if (!(weight > 0) || !(reps > 0)) return 0;
+  if (reps === 1) return weight;
+  return weight * (1 + reps / 30);
+}
+
+function formatNumber(value: number, digits = 0) {
+  if (!Number.isFinite(value)) return "0";
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatWeight(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatHistoryDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function difficultyLabel(value: string | null) {
+  if (value === "too_easy") return "Too easy";
+  if (value === "just_right") return "Just right";
+  if (value === "too_hard") return "Too hard";
+  return "Not rated";
+}
+
+async function loadExerciseHistory(exerciseId: string, userId: string): Promise<ExerciseHistorySession[]> {
+  const { data: exerciseRows, error: exerciseErr } = await supabase
+    .from("workout_exercises")
+    .select("id,workout_id,pain,difficulty,prescription_snapshot")
+    .eq("exercise_id", exerciseId)
+    .limit(250);
+
+  if (exerciseErr) throw exerciseErr;
+  const rows = (exerciseRows ?? []) as any[];
+  if (!rows.length) return [];
+
+  const workoutIds = Array.from(new Set(rows.map((row) => row.workout_id).filter(Boolean)));
+  const workouts: any[] = [];
+  for (const chunk of chunkValues(workoutIds)) {
+    const { data, error } = await supabase
+      .from("workouts")
+      .select("id,completed_at,workout_summary")
+      .eq("user_id", userId)
+      .in("id", chunk)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: false });
+    if (error) throw error;
+    workouts.push(...(data ?? []));
+  }
+
+  const workoutMap = new Map(workouts.map((row: any) => [row.id, row]));
+  const completeRows = rows.filter((row) => workoutMap.has(row.workout_id));
+  if (!completeRows.length) return [];
+
+  const workoutExerciseIds = completeRows.map((row) => row.id);
+  const setRows: any[] = [];
+  for (const chunk of chunkValues(workoutExerciseIds)) {
+    const { data, error } = await supabase
+      .from("workout_sets")
+      .select("workout_exercise_id,set_index,reps,weight,rir,pain,form")
+      .in("workout_exercise_id", chunk)
+      .order("set_index", { ascending: true });
+    if (error) throw error;
+    setRows.push(...(data ?? []));
+  }
+
+  const setsByExercise = new Map<string, ExerciseHistorySet[]>();
+  for (const row of setRows) {
+    const key = (row as any).workout_exercise_id as string;
+    const list = setsByExercise.get(key) ?? [];
+    list.push({
+      set_index: Number((row as any).set_index ?? 0),
+      reps: Number((row as any).reps ?? 0),
+      weight: Number((row as any).weight ?? 0),
+      rir: (row as any).rir != null ? Number((row as any).rir) : null,
+      pain: (row as any).pain != null ? Number((row as any).pain) : null,
+      form: (row as any).form != null ? Number((row as any).form) : null,
+    });
+    setsByExercise.set(key, list);
+  }
+
+  return completeRows
+    .map((row) => {
+      const workout = workoutMap.get(row.workout_id) as any;
+      const sets = (setsByExercise.get(row.id) ?? [])
+        .filter((set) => set.set_index > 0)
+        .sort((a, b) => a.set_index - b.set_index);
+      const volume = sets.reduce(
+        (sum, set) => sum + Math.max(0, set.reps) * Math.max(0, set.weight),
+        0
+      );
+      const bestE1RM = sets.reduce(
+        (best, set) => Math.max(best, estimatedOneRepMax(set.weight, set.reps)),
+        0
+      );
+      const summary = workout?.workout_summary as any;
+
+      return {
+        workoutId: row.workout_id,
+        workoutExerciseId: row.id,
+        completedAt: workout?.completed_at,
+        templateName:
+          typeof summary?.template_name === "string" && summary.template_name.trim()
+            ? summary.template_name.trim()
+            : "Workout",
+        pain: row.pain != null ? Number(row.pain) : null,
+        difficulty: row.difficulty ?? null,
+        sets,
+        volume,
+        estimated1RM: bestE1RM,
+      } as ExerciseHistorySession;
+    })
+    .filter((row) => !!row.completedAt)
+    .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+}
+
+function StrengthTrendChart({ sessions }: { sessions: ExerciseHistorySession[] }) {
+  const points = sessions
+    .filter((session) => session.estimated1RM > 0)
+    .slice()
+    .sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime())
+    .slice(-16);
+
+  if (points.length < 2) {
+    return <div className="tr-sub">Complete at least two strength sessions to unlock the trend chart.</div>;
+  }
+
+  const width = 760;
+  const height = 220;
+  const padX = 42;
+  const padY = 24;
+  const values = points.map((point) => point.estimated1RM);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(1, max - min);
+
+  const coordinates = points.map((point, index) => {
+    const x = padX + (index / Math.max(1, points.length - 1)) * (width - padX * 2);
+    const y = height - padY - ((point.estimated1RM - min) / spread) * (height - padY * 2);
+    return { x, y, point };
+  });
+
+  const path = coordinates.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+
+  return (
+    <div className="tr-exHistoryChartWrap">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Estimated strength trend">
+        <defs>
+          <linearGradient id="trHistoryArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(82,223,255,.34)" />
+            <stop offset="100%" stopColor="rgba(82,223,255,0)" />
+          </linearGradient>
+        </defs>
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} className="tr-exHistoryAxis" />
+        <path
+          d={`${path} L ${coordinates[coordinates.length - 1].x} ${height - padY} L ${coordinates[0].x} ${height - padY} Z`}
+          fill="url(#trHistoryArea)"
+        />
+        <path d={path} className="tr-exHistoryLine" />
+        {coordinates.map(({ x, y, point }) => (
+          <g key={`${point.workoutExerciseId}-${point.completedAt}`}>
+            <circle cx={x} cy={y} r="5" className="tr-exHistoryDot" />
+            <title>{`${formatHistoryDate(point.completedAt)}: ${formatNumber(point.estimated1RM, 1)} lb estimated 1RM`}</title>
+          </g>
+        ))}
+        <text x={padX} y={16} className="tr-exHistoryChartLabel">{formatNumber(max, 1)} lb</text>
+        <text x={padX} y={height - 5} className="tr-exHistoryChartLabel">{formatNumber(min, 1)} lb</text>
+      </svg>
+    </div>
+  );
+}
+
 function isNonEmptyString(x: any) {
   return typeof x === "string" && x.trim().length > 0;
 }
@@ -315,6 +523,8 @@ export function ExerciseDetailPage({ params, navigate }: any) {
   const [ex, setEx] = useState<any>(null);
   const [userMedia, setUserMedia] = useState<UserMediaRow[]>([]);
   const [busyUpload, setBusyUpload] = useState<null | "gif" | "video" | "poster">(null);
+  const [history, setHistory] = useState<ExerciseHistorySession[]>([]);
+  const [expandedSessions, setExpandedSessions] = useState<Record<string, boolean>>({});
 
   const builtHasUsable = useMemo(
     () => (ex ? isMediaUsable(ex.media) : false),
@@ -325,11 +535,54 @@ export function ExerciseDetailPage({ params, navigate }: any) {
     [userMedia]
   );
 
+  const records = useMemo(() => {
+    let bestWeight = 0;
+    let bestReps = 0;
+    let bestSetVolume = 0;
+    let bestEstimated1RM = 0;
+    let bestSessionVolume = 0;
+    let totalSets = 0;
+
+    for (const session of history) {
+      bestSessionVolume = Math.max(bestSessionVolume, session.volume);
+      for (const set of session.sets) {
+        if (!(set.reps > 0) || !(set.weight > 0)) continue;
+        totalSets += 1;
+        bestWeight = Math.max(bestWeight, set.weight);
+        bestReps = Math.max(bestReps, set.reps);
+        bestSetVolume = Math.max(bestSetVolume, set.reps * set.weight);
+        bestEstimated1RM = Math.max(bestEstimated1RM, estimatedOneRepMax(set.weight, set.reps));
+      }
+    }
+
+    const chronological = history
+      .filter((session) => session.estimated1RM > 0)
+      .slice()
+      .sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime());
+    const firstStrength = chronological[0]?.estimated1RM ?? 0;
+    const latestStrength = chronological[chronological.length - 1]?.estimated1RM ?? 0;
+    const strengthChangePct = firstStrength > 0
+      ? ((latestStrength - firstStrength) / firstStrength) * 100
+      : null;
+
+    return {
+      sessions: history.length,
+      totalSets,
+      bestWeight,
+      bestReps,
+      bestSetVolume,
+      bestEstimated1RM,
+      bestSessionVolume,
+      strengthChangePct,
+    };
+  }, [history]);
+
   async function loadAll() {
     setLoading(true);
     setErr(null);
     setEx(null);
     setUserMedia([]);
+    setHistory([]);
 
     try {
       const { data: u, error: uErr } = await supabase.auth.getUser();
@@ -354,8 +607,11 @@ export function ExerciseDetailPage({ params, navigate }: any) {
 
       if (umErr) throw umErr;
 
+      const historyRows = await loadExerciseHistory(exerciseId, u.user.id);
+
       setEx(exData);
       setUserMedia((um ?? []) as UserMediaRow[]);
+      setHistory(historyRows);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
@@ -533,6 +789,137 @@ export function ExerciseDetailPage({ params, navigate }: any) {
           </div>
         ) : (
           <div className="tr-sub">Not found.</div>
+        )}
+      </Card>
+
+      <Card
+        title="Performance Intelligence"
+        tone="blue"
+        right={<span className="tr-kicker">{history.length} COMPLETED SESSIONS</span>}
+      >
+        {loading ? (
+          <div className="tr-sub">Loading performance history…</div>
+        ) : err ? null : history.length ? (
+          <div className="tr-exHistoryOverview">
+            <div className="tr-exHistoryKpis">
+              <div className="tr-exHistoryKpi">
+                <span>Best Weight</span>
+                <strong>{formatWeight(records.bestWeight)} lb</strong>
+              </div>
+              <div className="tr-exHistoryKpi">
+                <span>Best Estimated 1RM</span>
+                <strong>{formatNumber(records.bestEstimated1RM, 1)} lb</strong>
+              </div>
+              <div className="tr-exHistoryKpi">
+                <span>Best Set Volume</span>
+                <strong>{formatNumber(records.bestSetVolume)} lb</strong>
+              </div>
+              <div className="tr-exHistoryKpi">
+                <span>Best Session Volume</span>
+                <strong>{formatNumber(records.bestSessionVolume)} lb</strong>
+              </div>
+              <div className="tr-exHistoryKpi">
+                <span>Most Reps</span>
+                <strong>{records.bestReps}</strong>
+              </div>
+              <div className="tr-exHistoryKpi">
+                <span>Strength Trend</span>
+                <strong>
+                  {records.strengthChangePct == null
+                    ? "—"
+                    : `${records.strengthChangePct >= 0 ? "+" : ""}${formatNumber(records.strengthChangePct, 1)}%`}
+                </strong>
+              </div>
+            </div>
+
+            <div className="tr-exHistoryChartCard">
+              <div className="tr-exHistorySectionHead">
+                <div>
+                  <div className="tr-kicker">ESTIMATED STRENGTH</div>
+                  <div className="tr-exHistorySectionTitle">Performance trend</div>
+                </div>
+                <div className="tr-sub">Last 16 completed sessions</div>
+              </div>
+              <StrengthTrendChart sessions={history} />
+            </div>
+          </div>
+        ) : (
+          <div className="tr-rowbox">
+            <div style={{ fontWeight: 950 }}>No completed history yet</div>
+            <div className="tr-sub" style={{ marginTop: 6 }}>
+              Complete this exercise in a workout to unlock records, trend charts, and set-by-set history.
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Complete Exercise History" tone="base">
+        {loading ? (
+          <div className="tr-sub">Loading…</div>
+        ) : history.length ? (
+          <div className="tr-exHistoryList">
+            {history.map((session, index) => {
+              const expanded = !!expandedSessions[session.workoutExerciseId];
+              const bestSet = session.sets.reduce<ExerciseHistorySet | null>((best, set) => {
+                if (!best) return set;
+                return set.weight * set.reps > best.weight * best.reps ? set : best;
+              }, null);
+
+              return (
+                <div key={session.workoutExerciseId} className="tr-exHistorySession">
+                  <button
+                    type="button"
+                    className="tr-exHistorySessionHead"
+                    onClick={() =>
+                      setExpandedSessions((current) => ({
+                        ...current,
+                        [session.workoutExerciseId]: !expanded,
+                      }))
+                    }
+                  >
+                    <div className="tr-exHistorySessionIndex">{String(index + 1).padStart(2, "0")}</div>
+                    <div className="tr-exHistorySessionCopy">
+                      <strong>{formatHistoryDate(session.completedAt)}</strong>
+                      <span>{session.templateName}</span>
+                    </div>
+                    <div className="tr-exHistorySessionSummary">
+                      <span>{session.sets.length} sets</span>
+                      <span>{formatNumber(session.volume)} lb volume</span>
+                      <span>{bestSet ? `${formatWeight(bestSet.weight)} lb × ${bestSet.reps}` : "No set data"}</span>
+                    </div>
+                    <div className="tr-exHistoryExpand">{expanded ? "−" : "+"}</div>
+                  </button>
+
+                  {expanded ? (
+                    <div className="tr-exHistorySessionBody">
+                      <div className="tr-exHistoryMetaGrid">
+                        <div><span>Pain</span><strong>{session.pain == null ? "—" : `${session.pain}/10`}</strong></div>
+                        <div><span>Difficulty</span><strong>{difficultyLabel(session.difficulty)}</strong></div>
+                        <div><span>Estimated 1RM</span><strong>{formatNumber(session.estimated1RM, 1)} lb</strong></div>
+                        <div><span>Session Volume</span><strong>{formatNumber(session.volume)} lb</strong></div>
+                      </div>
+
+                      <div className="tr-exHistorySets">
+                        {session.sets.map((set) => (
+                          <div key={`${session.workoutExerciseId}-${set.set_index}`} className="tr-exHistorySet">
+                            <span>SET {set.set_index}</span>
+                            <strong>{formatWeight(set.weight)} lb × {set.reps}</strong>
+                            <small>
+                              {set.rir != null ? `RIR ${set.rir}` : "RIR —"}
+                              {set.pain != null ? ` • Pain ${set.pain}/10` : ""}
+                              {set.form != null ? ` • Form ${set.form}` : ""}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="tr-sub">No completed performances for this exercise.</div>
         )}
       </Card>
 
