@@ -547,40 +547,276 @@ function previousWeightForIndex(previous: PreviousPerformance | null, setIndex: 
   return Number(exact?.weight ?? fallback?.weight ?? 0);
 }
 
-function progressionGuidance(previous: PreviousPerformance | null, repMax: number) {
+type ExerciseHistoryStats = {
+  sessions: number;
+  bestWeight: number;
+  bestSetVolume: number;
+  bestEstimated1RM: number;
+  bestSessionVolume: number;
+  maxRepsByWeight: Record<string, number>;
+};
+
+type ProgressionGuidance = {
+  tone: "first" | "repeat" | "increase" | "review";
+  title: string;
+  action: string;
+  why: string;
+  target: string;
+  lastSummary: string;
+  suggestedWeight: number | null;
+  confidence: "BASELINE" | "MODERATE" | "HIGH";
+};
+
+function chunkValues<T>(values: T[], size = 75): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function emptyHistoryStats(): ExerciseHistoryStats {
+  return {
+    sessions: 0,
+    bestWeight: 0,
+    bestSetVolume: 0,
+    bestEstimated1RM: 0,
+    bestSessionVolume: 0,
+    maxRepsByWeight: {},
+  };
+}
+
+function estimatedOneRepMax(weight: number, reps: number) {
+  if (!(weight > 0) || !(reps > 0)) return 0;
+  if (reps === 1) return weight;
+  return weight * (1 + reps / 30);
+}
+
+function roundToIncrement(value: number, increment = 5) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.max(increment, Math.round(value / increment) * increment);
+}
+
+function primaryWorkingWeight(sets: PreviousSetRow[]) {
+  const valid = sets.filter((set) => set.weight > 0 && set.reps > 0);
+  if (!valid.length) return 0;
+
+  const counts = new Map<number, number>();
+  for (const set of valid) counts.set(set.weight, (counts.get(set.weight) ?? 0) + 1);
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? valid[0].weight;
+}
+
+async function loadExerciseHistoryStats(params: {
+  exerciseId: string;
+  currentWorkoutId: string;
+}): Promise<ExerciseHistoryStats> {
+  const { exerciseId, currentWorkoutId } = params;
+  if (!exerciseId) return emptyHistoryStats();
+
+  const { data: u, error: uErr } = await supabase.auth.getUser();
+  if (uErr) throw uErr;
+  if (!u.user) return emptyHistoryStats();
+
+  const { data: exerciseRows, error: exerciseErr } = await supabase
+    .from("workout_exercises")
+    .select("id,workout_id")
+    .eq("exercise_id", exerciseId)
+    .neq("workout_id", currentWorkoutId)
+    .limit(250);
+
+  if (exerciseErr) throw exerciseErr;
+
+  const rows = (exerciseRows ?? []) as Array<{ id: string; workout_id: string }>;
+  if (!rows.length) return emptyHistoryStats();
+
+  const workoutIds = Array.from(new Set(rows.map((row) => row.workout_id).filter(Boolean)));
+  const completedWorkouts: any[] = [];
+  for (const chunk of chunkValues(workoutIds)) {
+    const { data, error } = await supabase
+      .from("workouts")
+      .select("id")
+      .eq("user_id", u.user.id)
+      .in("id", chunk)
+      .not("completed_at", "is", null);
+    if (error) throw error;
+    completedWorkouts.push(...(data ?? []));
+  }
+
+  const completedIds = new Set(completedWorkouts.map((row: any) => row.id));
+  const completedExerciseRows = rows.filter((row) => completedIds.has(row.workout_id));
+  if (!completedExerciseRows.length) return emptyHistoryStats();
+
+  const workoutExerciseIds = completedExerciseRows.map((row) => row.id);
+  const workoutByExercise = new Map(completedExerciseRows.map((row) => [row.id, row.workout_id]));
+
+  const setRows: any[] = [];
+  for (const chunk of chunkValues(workoutExerciseIds)) {
+    const { data, error } = await supabase
+      .from("workout_sets")
+      .select("workout_exercise_id,set_index,reps,weight")
+      .in("workout_exercise_id", chunk);
+    if (error) throw error;
+    setRows.push(...(data ?? []));
+  }
+
+  const stats = emptyHistoryStats();
+  stats.sessions = completedIds.size;
+  const sessionVolumes = new Map<string, number>();
+
+  for (const row of setRows ?? []) {
+    const reps = Number((row as any).reps ?? 0);
+    const weight = Number((row as any).weight ?? 0);
+    if (!(reps > 0) || !(weight > 0)) continue;
+
+    const volume = reps * weight;
+    const e1rm = estimatedOneRepMax(weight, reps);
+    const weightKey = String(Number(weight.toFixed(2)));
+    const workoutId = workoutByExercise.get((row as any).workout_exercise_id);
+
+    stats.bestWeight = Math.max(stats.bestWeight, weight);
+    stats.bestSetVolume = Math.max(stats.bestSetVolume, volume);
+    stats.bestEstimated1RM = Math.max(stats.bestEstimated1RM, e1rm);
+    stats.maxRepsByWeight[weightKey] = Math.max(stats.maxRepsByWeight[weightKey] ?? 0, reps);
+
+    if (workoutId) {
+      sessionVolumes.set(workoutId, (sessionVolumes.get(workoutId) ?? 0) + volume);
+    }
+  }
+
+  stats.bestSessionVolume = Math.max(0, ...Array.from(sessionVolumes.values()));
+  return stats;
+}
+
+function detectPersonalRecords(
+  set: { reps: number; weight: number },
+  history: ExerciseHistoryStats
+) {
+  const reps = Number(set.reps ?? 0);
+  const weight = Number(set.weight ?? 0);
+  if (!(reps > 0) || !(weight > 0) || history.sessions <= 0) return [] as string[];
+
+  const labels: string[] = [];
+  const volume = reps * weight;
+  const e1rm = estimatedOneRepMax(weight, reps);
+  const priorReps = history.maxRepsByWeight[String(Number(weight.toFixed(2)))] ?? 0;
+
+  if (weight > history.bestWeight) labels.push("HEAVIEST WEIGHT PR");
+  if (reps > priorReps) labels.push("REP PR AT THIS WEIGHT");
+  if (volume > history.bestSetVolume) labels.push("SET VOLUME PR");
+  if (e1rm > history.bestEstimated1RM) labels.push("ESTIMATED STRENGTH PR");
+
+  return labels;
+}
+
+function progressionGuidance(
+  previous: PreviousPerformance | null,
+  history: ExerciseHistoryStats,
+  repMin: number,
+  repMax: number,
+  setsTarget: number
+): ProgressionGuidance {
   if (!previous?.sets.length) {
-    return { tone: "first", title: "First time logging this exercise", text: "Choose a controlled starting weight and record every working set." };
+    return {
+      tone: "first",
+      title: "Establish a clean baseline",
+      action: "CHOOSE A CONTROLLED STARTING WEIGHT",
+      why: "There is no completed performance for this exact exercise yet.",
+      target: `${setsTarget} sets of ${repMin}-${repMax} clean reps with 2-3 reps left in reserve.`,
+      lastSummary: "No previous performance",
+      suggestedWeight: null,
+      confidence: "BASELINE",
+    };
   }
 
   const validSets = previous.sets.filter((set) => set.reps > 0 && set.weight > 0);
   if (!validSets.length) {
-    return { tone: "first", title: "No completed strength sets found", text: "Use today to establish a clean baseline." };
+    return {
+      tone: "first",
+      title: "Build the first usable performance",
+      action: "LOG EVERY WORKING SET",
+      why: "The previous session did not contain complete weight-and-rep data.",
+      target: `${setsTarget} complete sets inside the ${repMin}-${repMax} rep range.`,
+      lastSummary: "Previous set data incomplete",
+      suggestedWeight: null,
+      confidence: "BASELINE",
+    };
   }
 
-  const painHigh = Number(previous.pain ?? 0) >= 3;
+  const workingWeight = primaryWorkingWeight(validSets);
+  const totalReps = validSets.reduce((sum, set) => sum + set.reps, 0);
+  const topSets = validSets.filter((set) => set.reps >= repMax).length;
+  const allReachedTop = validSets.length >= setsTarget && topSets === validSets.length;
+  const loggedRir = validSets
+    .map((set) => set.rir)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const averageRir = loggedRir.length
+    ? loggedRir.reduce((sum, value) => sum + value, 0) / loggedRir.length
+    : null;
+  const pain = Number(previous.pain ?? 0);
   const tooHard = previous.difficulty === "too_hard";
-  const reachedTop = validSets.every((set) => set.reps >= repMax);
+  const lastSummary = `${formatLoggedWeight(workingWeight)} lb • ${validSets
+    .map((set) => set.reps)
+    .join(", ")} reps • ${totalReps} total reps`;
 
-  if (painHigh || tooHard) {
+  if (pain >= 7) {
+    return {
+      tone: "review",
+      title: "Pain overrides progression",
+      action: "STOP, REDUCE, OR SWAP",
+      why: `The last performance recorded pain ${pain}/10. Strength progression is not the priority until the movement is comfortable.`,
+      target: "Use a pain-free variation and keep symptoms at 0-2/10.",
+      lastSummary,
+      suggestedWeight: null,
+      confidence: "HIGH",
+    };
+  }
+
+  if (pain >= 3 || tooHard || (averageRir != null && averageRir <= 0.5)) {
+    const reduced = roundToIncrement(workingWeight * 0.95, 5);
     return {
       tone: "review",
       title: "Hold or reduce before progressing",
-      text: "The last performance had elevated pain or was marked too hard. Prioritize control and comfort.",
+      action: reduced > 0 ? `USE ABOUT ${formatLoggedWeight(reduced)} LB` : "HOLD THE CURRENT LOAD",
+      why: pain >= 3
+        ? `The last performance recorded pain ${pain}/10.`
+        : tooHard
+        ? "The last performance was marked Too Hard."
+        : "The recorded RIR was at or near failure.",
+      target: `Complete ${setsTarget} controlled sets inside ${repMin}-${repMax} reps without increasing pain.`,
+      lastSummary,
+      suggestedWeight: reduced || workingWeight || null,
+      confidence: "HIGH",
     };
   }
 
-  if (reachedTop) {
+  if (allReachedTop && (averageRir == null || averageRir >= 1)) {
+    const suggested = roundToIncrement(workingWeight + 5, 5);
     return {
       tone: "increase",
-      title: "Consider the next available weight",
-      text: `All logged sets reached ${repMax} reps last time. Increase only if form and pain remain controlled.`,
+      title: "The rep range was earned",
+      action: `CONSIDER ${formatLoggedWeight(suggested)} LB`,
+      why: `Every logged working set reached the top of the ${repMin}-${repMax} range${
+        averageRir != null ? ` with ${averageRir.toFixed(1)} average RIR` : ""
+      }.`,
+      target: `${setsTarget} sets of at least ${repMin} clean reps at the new weight.`,
+      lastSummary,
+      suggestedWeight: suggested,
+      confidence: history.sessions >= 3 ? "HIGH" : "MODERATE",
     };
   }
 
+  const nextRepGoal = totalReps + Math.max(1, Math.min(3, setsTarget));
   return {
     tone: "repeat",
-    title: "Repeat the last weight",
-    text: `Aim to add clean reps until every working set reaches ${repMax}.`,
+    title: "Own the current weight before adding load",
+    action: workingWeight > 0 ? `REPEAT ${formatLoggedWeight(workingWeight)} LB` : "REPEAT THE LAST LOAD",
+    why: `${topSets}/${validSets.length} sets reached the top of the programmed rep range.`,
+    target: `Beat ${totalReps} total reps. Aim for ${nextRepGoal} while keeping every set inside ${repMin}-${repMax}.`,
+    lastSummary,
+    suggestedWeight: workingWeight || null,
+    confidence: history.sessions >= 2 ? "HIGH" : "MODERATE",
   };
 }
 
@@ -672,6 +908,268 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
         </button>
       </div>
     </div>
+  );
+}
+
+type RestTimerStatus = "idle" | "running" | "paused" | "finished";
+
+type RestTimerState = {
+  status: RestTimerStatus;
+  totalSeconds: number;
+  remainingSeconds: number;
+  deadlineMs: number | null;
+  exerciseName: string;
+  setIndex: number | null;
+};
+
+type RestTimerController = RestTimerState & {
+  start: (seconds: number, exerciseName: string, setIndex: number) => void;
+  addSeconds: (seconds: number) => void;
+  pauseResume: () => void;
+  restart: () => void;
+  skip: () => void;
+};
+
+const REST_TIMER_STORAGE_KEY = "mvp_rest_timer_v1";
+let sharedAudioContext: AudioContext | null = null;
+
+function getRestAudioContext() {
+  if (typeof window === "undefined") return null;
+  const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!Ctx) return null;
+  if (!sharedAudioContext) sharedAudioContext = new Ctx();
+  return sharedAudioContext;
+}
+
+function primeRestAudio() {
+  try {
+    const ctx = getRestAudioContext();
+    if (ctx?.state === "suspended") void ctx.resume();
+  } catch {}
+}
+
+function playRestCompleteAlert() {
+  try {
+    const ctx = getRestAudioContext();
+    if (ctx) {
+      if (ctx.state === "suspended") void ctx.resume();
+      const now = ctx.currentTime;
+      [0, 0.22, 0.44].forEach((offset, index) => {
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = index === 2 ? "square" : "sine";
+        oscillator.frequency.setValueAtTime(index === 2 ? 1046 : 880, now + offset);
+        gain.gain.setValueAtTime(0.0001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.18, now + offset + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.18);
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start(now + offset);
+        oscillator.stop(now + offset + 0.2);
+      });
+    }
+  } catch {}
+
+  try {
+    navigator.vibrate?.([260, 100, 260, 100, 520]);
+  } catch {}
+}
+
+function readStoredRestTimer(): RestTimerState {
+  const idle: RestTimerState = {
+    status: "idle",
+    totalSeconds: 0,
+    remainingSeconds: 0,
+    deadlineMs: null,
+    exerciseName: "",
+    setIndex: null,
+  };
+
+  if (typeof window === "undefined") return idle;
+
+  try {
+    const raw = localStorage.getItem(REST_TIMER_STORAGE_KEY);
+    if (!raw) return idle;
+    const parsed = JSON.parse(raw) as RestTimerState;
+    if (!parsed || !parsed.status) return idle;
+
+    if (parsed.status === "running" && parsed.deadlineMs) {
+      const remaining = Math.max(0, Math.ceil((parsed.deadlineMs - Date.now()) / 1000));
+      return {
+        ...parsed,
+        remainingSeconds: remaining,
+        status: remaining > 0 ? "running" : "finished",
+        deadlineMs: remaining > 0 ? parsed.deadlineMs : null,
+      };
+    }
+
+    return parsed;
+  } catch {
+    return idle;
+  }
+}
+
+function useRestTimer(): RestTimerController {
+  const [timer, setTimer] = useState<RestTimerState>(() => readStoredRestTimer());
+  const alertedRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      if (timer.status === "idle") localStorage.removeItem(REST_TIMER_STORAGE_KEY);
+      else localStorage.setItem(REST_TIMER_STORAGE_KEY, JSON.stringify(timer));
+    } catch {}
+  }, [timer]);
+
+  useEffect(() => {
+    if (timer.status !== "running" || !timer.deadlineMs) return;
+
+    const tick = () => {
+      setTimer((current) => {
+        if (current.status !== "running" || !current.deadlineMs) return current;
+        const remaining = Math.max(0, Math.ceil((current.deadlineMs - Date.now()) / 1000));
+        if (remaining <= 0) {
+          return { ...current, status: "finished", remainingSeconds: 0, deadlineMs: null };
+        }
+        if (remaining === current.remainingSeconds) return current;
+        return { ...current, remainingSeconds: remaining };
+      });
+    };
+
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [timer.status, timer.deadlineMs]);
+
+  useEffect(() => {
+    if (timer.status === "finished" && !alertedRef.current) {
+      alertedRef.current = true;
+      playRestCompleteAlert();
+    }
+    if (timer.status === "running") alertedRef.current = false;
+  }, [timer.status]);
+
+  const start = (seconds: number, exerciseName: string, setIndex: number) => {
+    const total = Math.max(1, Math.floor(Number(seconds) || 0));
+    primeRestAudio();
+    alertedRef.current = false;
+    setTimer({
+      status: "running",
+      totalSeconds: total,
+      remainingSeconds: total,
+      deadlineMs: Date.now() + total * 1000,
+      exerciseName,
+      setIndex,
+    });
+  };
+
+  const addSeconds = (seconds: number) => {
+    setTimer((current) => {
+      if (current.status === "idle") return current;
+      const nextRemaining = Math.max(0, current.remainingSeconds + seconds);
+      if (nextRemaining <= 0) {
+        return { ...current, status: "finished", remainingSeconds: 0, deadlineMs: null };
+      }
+      const running = current.status === "running";
+      return {
+        ...current,
+        status: running ? "running" : "paused",
+        remainingSeconds: nextRemaining,
+        deadlineMs: running ? Date.now() + nextRemaining * 1000 : null,
+      };
+    });
+  };
+
+  const pauseResume = () => {
+    primeRestAudio();
+    setTimer((current) => {
+      if (current.status === "running") {
+        const remaining = current.deadlineMs
+          ? Math.max(0, Math.ceil((current.deadlineMs - Date.now()) / 1000))
+          : current.remainingSeconds;
+        return { ...current, status: "paused", remainingSeconds: remaining, deadlineMs: null };
+      }
+      if (current.status === "paused" || current.status === "finished") {
+        const remaining = current.status === "finished" ? current.totalSeconds : current.remainingSeconds;
+        return {
+          ...current,
+          status: "running",
+          remainingSeconds: remaining,
+          deadlineMs: Date.now() + remaining * 1000,
+        };
+      }
+      return current;
+    });
+  };
+
+  const restart = () => {
+    primeRestAudio();
+    setTimer((current) => {
+      if (current.status === "idle" || current.totalSeconds <= 0) return current;
+      alertedRef.current = false;
+      return {
+        ...current,
+        status: "running",
+        remainingSeconds: current.totalSeconds,
+        deadlineMs: Date.now() + current.totalSeconds * 1000,
+      };
+    });
+  };
+
+  const skip = () => {
+    setTimer({
+      status: "idle",
+      totalSeconds: 0,
+      remainingSeconds: 0,
+      deadlineMs: null,
+      exerciseName: "",
+      setIndex: null,
+    });
+  };
+
+  return { ...timer, start, addSeconds, pauseResume, restart, skip };
+}
+
+function formatRestClock(seconds: number) {
+  const safe = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function RestTimerDock({ timer }: { timer: RestTimerController }) {
+  if (timer.status === "idle" || typeof document === "undefined") return null;
+
+  const progress = timer.totalSeconds > 0
+    ? Math.max(0, Math.min(100, ((timer.totalSeconds - timer.remainingSeconds) / timer.totalSeconds) * 100))
+    : 0;
+  const finished = timer.status === "finished";
+
+  return createPortal(
+    <div className={`tr-restTimerDock ${finished ? "is-finished" : ""}`} role="timer" aria-live="polite">
+      <div className="tr-restTimerProgress" style={{ width: `${progress}%` }} />
+
+      <div className="tr-restTimerIdentity">
+        <div className="tr-restTimerKicker">{finished ? "REST COMPLETE" : "REST TIMER"}</div>
+        <div className="tr-restTimerExercise">
+          {timer.exerciseName || "Exercise"}{timer.setIndex ? ` • Set ${timer.setIndex}` : ""}
+        </div>
+      </div>
+
+      <div className="tr-restTimerClock">{finished ? "GO" : formatRestClock(timer.remainingSeconds)}</div>
+
+      <div className="tr-restTimerActions">
+        <button type="button" onClick={() => timer.addSeconds(-15)} disabled={timer.remainingSeconds <= 15}>−15</button>
+        <button type="button" onClick={timer.pauseResume}>
+          {timer.status === "running" ? "Pause" : finished ? "Restart" : "Resume"}
+        </button>
+        <button type="button" onClick={() => timer.addSeconds(15)}>+15</button>
+        <button type="button" onClick={timer.restart}>Reset</button>
+        <button type="button" className="tr-restTimerSkip" onClick={timer.skip}>
+          {finished ? "Dismiss" : "Skip"}
+        </button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -816,6 +1314,60 @@ function friendlyPainState(pain: number) {
   if (pain <= 2) return "Clear";
   if (pain <= 6) return "Watch";
   return "High";
+}
+
+type WarmupSet = { label: string; weight: number; reps: number };
+type PlateLoad = { perSide: Array<{ plate: number; count: number }>; loadedWeight: number; remainder: number };
+
+function buildWarmupPlan(workingWeight: number): WarmupSet[] {
+  const weight = Math.max(0, Number(workingWeight) || 0);
+  if (weight <= 0) return [];
+
+  const raw = weight >= 135
+    ? [
+        { label: "Warm-up 1", pct: 0.4, reps: 8 },
+        { label: "Warm-up 2", pct: 0.6, reps: 5 },
+        { label: "Warm-up 3", pct: 0.8, reps: 3 },
+      ]
+    : weight >= 70
+    ? [
+        { label: "Warm-up 1", pct: 0.5, reps: 8 },
+        { label: "Warm-up 2", pct: 0.75, reps: 4 },
+      ]
+    : [{ label: "Warm-up 1", pct: 0.55, reps: 8 }];
+
+  const seen = new Set<number>();
+  return raw
+    .map((row) => ({
+      label: row.label,
+      weight: Math.min(weight, roundToIncrement(weight * row.pct, 5)),
+      reps: row.reps,
+    }))
+    .filter((row) => row.weight > 0 && row.weight < weight && !seen.has(row.weight) && seen.add(row.weight));
+}
+
+function calculatePlateLoad(targetWeight: number, barWeight: number): PlateLoad {
+  const target = Math.max(0, Number(targetWeight) || 0);
+  const bar = Math.max(0, Number(barWeight) || 0);
+  const perSideTarget = Math.max(0, (target - bar) / 2);
+  const plates = [45, 25, 10, 5, 2.5];
+  const perSide: Array<{ plate: number; count: number }> = [];
+  let remaining = perSideTarget;
+
+  for (const plate of plates) {
+    const count = Math.floor((remaining + 0.0001) / plate);
+    if (count > 0) {
+      perSide.push({ plate, count });
+      remaining -= count * plate;
+    }
+  }
+
+  const loadedPerSide = perSide.reduce((sum, row) => sum + row.plate * row.count, 0);
+  return {
+    perSide,
+    loadedWeight: bar + loadedPerSide * 2,
+    remainder: Math.max(0, remaining * 2),
+  };
 }
 
 function SessionCompleteOverlay({
@@ -1232,6 +1784,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const [symptomKey, setSymptomKey] = useState<SymptomKey | null>(null);
 
   const [completeOverlayOpen, setCompleteOverlayOpen] = useState(false);
+  const restTimer = useRestTimer();
 
   const doneCount = useMemo(() => items.filter((x) => !!x.completed_at).length, [items]);
   const current = items[activeIdx];
@@ -1985,6 +2538,7 @@ export function WorkoutPlayerPage({ params }: any) {
   return (
     <div style={{ display: "grid", gap: 12, paddingBottom: 156 }}>
       <Toast toast={toast} onClose={() => setToast((t) => ({ ...t, open: false }))} />
+      <RestTimerDock timer={restTimer} />
 
       <SessionCompleteOverlay
         open={completeOverlayOpen}
@@ -2100,6 +2654,7 @@ export function WorkoutPlayerPage({ params }: any) {
           atFirst={atFirst}
           atLast={atLast}
           sessionComplete={sessionComplete}
+          onStartRest={restTimer.start}
         />
       ) : (
         <Card title="Workout">No exercises yet. Use Edit to add.</Card>
@@ -2581,6 +3136,7 @@ function ExerciseRunner({
   atFirst,
   atLast,
   sessionComplete,
+  onStartRest,
 }: {
   workoutExercise: WorkoutExerciseRow;
   item: any;
@@ -2597,6 +3153,7 @@ function ExerciseRunner({
   atFirst: boolean;
   atLast: boolean;
   sessionComplete: boolean;
+  onStartRest: (seconds: number, exerciseName: string, setIndex: number) => void;
 }) {
   const weId = workoutExercise.id;
   const isDone = !!workoutExercise.completed_at;
@@ -2614,6 +3171,11 @@ function ExerciseRunner({
   const [loadingSets, setLoadingSets] = useState(true);
   const [previousPerformance, setPreviousPerformance] = useState<PreviousPerformance | null>(null);
   const [previousLoading, setPreviousLoading] = useState(false);
+  const [historyStats, setHistoryStats] = useState<ExerciseHistoryStats>(() => emptyHistoryStats());
+  const [completedSetIndexes, setCompletedSetIndexes] = useState<number[]>([]);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [calculatorWeight, setCalculatorWeight] = useState(0);
+  const [barWeight, setBarWeight] = useState(45);
 
   const [pain, setPain] = useState<number>(0);
   const [painTouched, setPainTouched] = useState(false);
@@ -2634,6 +3196,16 @@ function ExerciseRunner({
     const dp = durationMinutes(workoutExercise.prescription_snapshot ?? {});
     const act = Number((workoutExercise.prescription_snapshot ?? {})?.actual_minutes);
     setActualMinutes(Number.isFinite(act) && act > 0 ? Math.floor(act) : Math.max(0, Math.floor(dp)));
+    setCalculatorOpen(false);
+    setCalculatorWeight(0);
+
+    try {
+      const saved = sessionStorage.getItem(`mvp_completed_sets:${weId}`);
+      const parsed = saved ? JSON.parse(saved) : [];
+      setCompletedSetIndexes(Array.isArray(parsed) ? parsed.map(Number).filter((n) => n > 0) : []);
+    } catch {
+      setCompletedSetIndexes([]);
+    }
   }, [weId]);
 
   useEffect(() => {
@@ -2652,13 +3224,17 @@ function ExerciseRunner({
       }
 
       try {
-        const [existingResult, previous] = await Promise.all([
+        const [existingResult, previous, history] = await Promise.all([
           supabase
             .from("workout_sets")
             .select("set_index,reps,weight")
             .eq("workout_exercise_id", weId)
             .order("set_index", { ascending: true }),
           loadPreviousPerformance({
+            exerciseId,
+            currentWorkoutId: workoutExercise.workout_id,
+          }),
+          loadExerciseHistoryStats({
             exerciseId,
             currentWorkoutId: workoutExercise.workout_id,
           }),
@@ -2684,11 +3260,17 @@ function ExerciseRunner({
         });
 
         setPreviousPerformance(previous);
+        setHistoryStats(history);
         setSets(filled);
+
+        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget).suggestedWeight;
+        const firstWeight = filled.find((row) => Number(row.weight) > 0)?.weight ?? 0;
+        setCalculatorWeight(Number(firstWeight || suggestedStart || history.bestWeight || 0));
       } catch (error: any) {
         if (!cancelled) {
           console.error("PREVIOUS PERFORMANCE LOAD FAILED:", error);
           setPreviousPerformance(null);
+          setHistoryStats(emptyHistoryStats());
 
           const { data: fallbackRows } = await supabase
             .from("workout_sets")
@@ -2733,9 +3315,31 @@ function ExerciseRunner({
   }, [sets, timed]);
 
   const previousGuidance = useMemo(
-    () => progressionGuidance(previousPerformance, repMax),
-    [previousPerformance, repMax]
+    () => progressionGuidance(previousPerformance, historyStats, repMin, repMax, setsTarget),
+    [previousPerformance, historyStats, repMin, repMax, setsTarget]
   );
+
+  const currentPrLabels = useMemo(() => {
+    const labels = new Set<string>();
+    for (const set of sets) {
+      for (const label of detectPersonalRecords(
+        { reps: Number(set.reps ?? 0), weight: Number(set.weight ?? 0) },
+        historyStats
+      )) {
+        labels.add(label);
+      }
+    }
+
+    const currentSessionVolume = sets.reduce(
+      (sum, set) => sum + Math.max(0, Number(set.reps ?? 0)) * Math.max(0, Number(set.weight ?? 0)),
+      0
+    );
+    if (historyStats.sessions > 0 && currentSessionVolume > historyStats.bestSessionVolume) {
+      labels.add("EXERCISE SESSION VOLUME PR");
+    }
+
+    return Array.from(labels);
+  }, [sets, historyStats]);
 
   const readyToLock = painTouched && (timed || allSetsLogged);
 
@@ -2768,6 +3372,76 @@ function ExerciseRunner({
       },
       { onConflict: "workout_exercise_id,set_index" }
     );
+  };
+
+  const persistCompletedSetIndexes = (indexes: number[]) => {
+    const unique = Array.from(new Set(indexes.map(Number).filter((value) => value > 0))).sort((a, b) => a - b);
+    setCompletedSetIndexes(unique);
+    try {
+      sessionStorage.setItem(`mvp_completed_sets:${weId}`, JSON.stringify(unique));
+    } catch {}
+  };
+
+  const completeSetAndStartRest = async (idx: number) => {
+    if (isDone || timed) return;
+    const row = sets[idx];
+    const reps = Number(row?.reps ?? 0);
+    const weight = Number(row?.weight ?? 0);
+
+    if (!(reps > 0) || !(weight > 0)) {
+      showToast("ENTER REPS AND WEIGHT BEFORE COMPLETING THE SET.", "err");
+      return;
+    }
+
+    await supabase.from("workout_sets").upsert(
+      {
+        workout_exercise_id: weId,
+        set_index: row.set_index,
+        reps,
+        weight,
+      },
+      { onConflict: "workout_exercise_id,set_index" }
+    );
+
+    persistCompletedSetIndexes([...completedSetIndexes, Number(row.set_index)]);
+
+    const prs = detectPersonalRecords({ reps, weight }, historyStats);
+    if (prs.length) {
+      showToast(`NEW PR • ${prs.join(" • ")}`, "ok");
+    } else {
+      showToast(`SET ${row.set_index} LOGGED • REST STARTED.`, "ok");
+    }
+
+    if (restSeconds > 0) {
+      onStartRest(restSeconds, item?.name ?? "Exercise", Number(row.set_index));
+    }
+  };
+
+  const applySuggestedWeight = async () => {
+    const suggested = Number(previousGuidance.suggestedWeight ?? 0);
+    if (!(suggested > 0) || isDone || timed) return;
+
+    const next = sets.map((set) => ({ ...set, weight: suggested }));
+    setSets(next);
+    setCalculatorWeight(suggested);
+
+    const rows = next.map((row) => ({
+      workout_exercise_id: weId,
+      set_index: row.set_index,
+      reps: Number(row.reps ?? 0),
+      weight: suggested,
+    }));
+
+    const { error } = await supabase
+      .from("workout_sets")
+      .upsert(rows, { onConflict: "workout_exercise_id,set_index" });
+
+    if (error) {
+      showToast(error.message, "err");
+      return;
+    }
+
+    showToast(`APPLIED ${formatLoggedWeight(suggested)} LB TO TODAY'S SETS.`, "ok");
   };
 
   const addSet = async () => {
@@ -2890,6 +3564,8 @@ const unlock = async () => {
 
   const pColor = painColor(pain);
   const pct = Math.round((pain / 10) * 100);
+  const warmupPlan = buildWarmupPlan(calculatorWeight);
+  const plateLoad = calculatePlateLoad(calculatorWeight, barWeight);
 
   const detailRows = [
     { key: "sets", label: "Sets", value: timed ? "—" : String(setsTarget) },
@@ -3073,33 +3749,172 @@ const unlock = async () => {
               <div className={`tr-previousPerformance tr-previousPerformance--${previousGuidance.tone}`}>
                 <div className="tr-previousPerformanceHead">
                   <div>
-                    <div className="tr-kicker">LAST PERFORMANCE</div>
+                    <div className="tr-kicker">TRANSPARENT PROGRESSION ASSISTANT</div>
                     <div className="tr-previousPerformanceTitle">{previousGuidance.title}</div>
                   </div>
 
-                  {previousPerformance ? (
-                    <div className="tr-previousPerformanceMeta">
-                      {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
-                    </div>
-                  ) : null}
+                  <div className="tr-progressionConfidence">
+                    {previousGuidance.confidence} CONFIDENCE
+                  </div>
                 </div>
 
                 {previousLoading ? (
-                  <div className="tr-sub">Loading the last completed performance…</div>
-                ) : previousPerformance?.sets.length ? (
-                  <>
-                    <div className="tr-previousSetSummary">
-                      {previousPerformance.sets.map((set) => (
-                        <span key={set.set_index} className="tr-previousSetChip">
-                          S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="tr-previousGuidanceText">{previousGuidance.text}</div>
-                  </>
+                  <div className="tr-sub">Reading your previous performance and records…</div>
                 ) : (
-                  <div className="tr-previousGuidanceText">{previousGuidance.text}</div>
+                  <>
+                    {previousPerformance?.sets.length ? (
+                      <div className="tr-previousSetSummary">
+                        {previousPerformance.sets.map((set) => (
+                          <span key={set.set_index} className="tr-previousSetChip">
+                            S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
+                            {set.rir != null ? ` • RIR ${set.rir}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="tr-progressionGrid">
+                      <div className="tr-progressionCell tr-progressionCell--action">
+                        <div className="tr-kicker">TODAY'S RECOMMENDATION</div>
+                        <div className="tr-progressionAction">{previousGuidance.action}</div>
+                      </div>
+                      <div className="tr-progressionCell">
+                        <div className="tr-kicker">WHY</div>
+                        <div>{previousGuidance.why}</div>
+                      </div>
+                      <div className="tr-progressionCell">
+                        <div className="tr-kicker">TARGET</div>
+                        <div>{previousGuidance.target}</div>
+                      </div>
+                      <div className="tr-progressionCell">
+                        <div className="tr-kicker">LAST TIME</div>
+                        <div>{previousGuidance.lastSummary}</div>
+                        {previousPerformance ? (
+                          <div className="tr-previousPerformanceMeta">
+                            {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="tr-progressionActions">
+                      {previousGuidance.suggestedWeight && !isDone ? (
+                        <button
+                          type="button"
+                          className="tr-btn tr-btn--primary"
+                          onClick={applySuggestedWeight}
+                        >
+                          APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO TODAY'S SETS
+                        </button>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        className="tr-btn tr-btn--blueOutline"
+                        onClick={() => (window.location.pathname = `/library/${exerciseId}`)}
+                      >
+                        OPEN FULL EXERCISE HISTORY
+                      </button>
+                    </div>
+
+                    {currentPrLabels.length ? (
+                      <div className="tr-livePrPanel">
+                        <div className="tr-kicker">LIVE PERSONAL RECORDS</div>
+                        <div className="tr-livePrChips">
+                          {currentPrLabels.map((label) => (
+                            <span key={label} className="tr-livePrChip">★ {label}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
                 )}
+              </div>
+
+              <div className={`tr-trainingCalculator ${calculatorOpen ? "is-open" : ""}`}>
+                <button
+                  type="button"
+                  className="tr-trainingCalculatorToggle"
+                  onClick={() => setCalculatorOpen((value) => !value)}
+                >
+                  <span>
+                    <span className="tr-kicker">TRAINING TOOLS</span>
+                    <strong>Warm-up + Barbell Plate Calculator</strong>
+                  </span>
+                  <span>{calculatorOpen ? "CLOSE" : "OPEN"}</span>
+                </button>
+
+                {calculatorOpen ? (
+                  <div className="tr-trainingCalculatorBody">
+                    <div className="tr-calculatorControls">
+                      <label>
+                        <span className="tr-kicker">WORKING WEIGHT</span>
+                        <input
+                          value={calculatorWeight || ""}
+                          inputMode="decimal"
+                          onChange={(event: any) => {
+                            const value = Number(event.target.value.replace(/[^\d.]/g, ""));
+                            setCalculatorWeight(Number.isFinite(value) ? Math.max(0, value) : 0);
+                          }}
+                          placeholder="Enter weight"
+                        />
+                      </label>
+
+                      <label>
+                        <span className="tr-kicker">BAR WEIGHT</span>
+                        <select value={barWeight} onChange={(event: any) => setBarWeight(Number(event.target.value))}>
+                          <option value={45}>45 lb bar</option>
+                          <option value={35}>35 lb bar</option>
+                          <option value={15}>15 lb training bar</option>
+                          <option value={0}>No bar / machine</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="tr-calculatorGrid">
+                      <div className="tr-calculatorPanel">
+                        <div className="tr-kicker">SUGGESTED WARM-UP SETS</div>
+                        {warmupPlan.length ? (
+                          <div className="tr-warmupRows">
+                            {warmupPlan.map((row) => (
+                              <div key={`${row.label}-${row.weight}`} className="tr-warmupRow">
+                                <span>{row.label}</span>
+                                <strong>{formatLoggedWeight(row.weight)} lb × {row.reps}</strong>
+                              </div>
+                            ))}
+                            <div className="tr-warmupRow is-working">
+                              <span>Working sets</span>
+                              <strong>{formatLoggedWeight(calculatorWeight)} lb • {repMin}-{repMax} reps</strong>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="tr-sub">Enter today's working weight to build the warm-up ladder.</div>
+                        )}
+                      </div>
+
+                      <div className="tr-calculatorPanel">
+                        <div className="tr-kicker">PLATES PER SIDE</div>
+                        {calculatorWeight > barWeight ? (
+                          <>
+                            <div className="tr-plateLoadValue">
+                              {plateLoad.perSide.length
+                                ? plateLoad.perSide.map((row) => `${row.count}×${row.plate}`).join(" + ")
+                                : "No plates required"}
+                            </div>
+                            <div className="tr-sub">
+                              Loaded total: {formatLoggedWeight(plateLoad.loadedWeight)} lb
+                              {plateLoad.remainder > 0.01
+                                ? ` • ${formatLoggedWeight(plateLoad.remainder)} lb below target with available plates`
+                                : " • exact load"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="tr-sub">Working weight must be above the selected bar weight.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
              <div className="tr-setStack">
@@ -3139,6 +3954,17 @@ const unlock = async () => {
           onChange={(v) => upsertSet(i, { weight: v })}
         />
       </div>
+
+      <button
+        type="button"
+        className={`tr-setCompleteBtn ${completedSetIndexes.includes(Number(s.set_index)) ? "is-complete" : ""}`}
+        disabled={isDone}
+        onClick={() => completeSetAndStartRest(i)}
+      >
+        {completedSetIndexes.includes(Number(s.set_index))
+          ? `SET ${s.set_index} LOGGED • START REST AGAIN`
+          : `COMPLETE SET ${s.set_index} • START ${restSeconds}s REST`}
+      </button>
     </div>
   ))}
 </div>
