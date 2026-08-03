@@ -366,6 +366,26 @@ type WorkoutExerciseRow = {
   exercise?: any;
 };
 
+type PreviousSetRow = {
+  set_index: number;
+  reps: number;
+  weight: number;
+  rir?: number | null;
+  pain?: number | null;
+  form?: number | null;
+};
+
+type PreviousPerformance = {
+  workoutId: string;
+  workoutExerciseId: string;
+  completedAt: string;
+  templateName: string;
+  prescriptionSnapshot: any;
+  pain: number | null;
+  difficulty: "too_easy" | "just_right" | "too_hard" | null;
+  sets: PreviousSetRow[];
+};
+
 type SearchExerciseRow = {
   id: string;
   name: string;
@@ -416,6 +436,149 @@ async function loadWorkoutExercisesWithExercises(workoutId: string): Promise<Wor
   for (const ex of exs ?? []) exMap.set((ex as any).id, ex);
 
   return rows.map((r) => ({ ...r, exercise: exMap.get(r.exercise_id) || null }));
+}
+
+function formatPreviousDate(ts: string | null | undefined) {
+  if (!ts) return "Previous workout";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "Previous workout";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatLoggedWeight(weight: number) {
+  if (!Number.isFinite(weight)) return "0";
+  return Number.isInteger(weight) ? String(weight) : String(Number(weight.toFixed(2)));
+}
+
+async function loadPreviousPerformance(params: {
+  exerciseId: string;
+  currentWorkoutId: string;
+}): Promise<PreviousPerformance | null> {
+  const { exerciseId, currentWorkoutId } = params;
+  if (!exerciseId) return null;
+
+  const { data: u, error: uErr } = await supabase.auth.getUser();
+  if (uErr) throw uErr;
+  if (!u.user) return null;
+
+  const { data: matchingRows, error: matchingErr } = await supabase
+    .from("workout_exercises")
+    .select("id, workout_id, exercise_id, prescription_snapshot, pain, difficulty")
+    .eq("exercise_id", exerciseId)
+    .neq("workout_id", currentWorkoutId);
+
+  if (matchingErr) throw matchingErr;
+
+  const matchingExercises = (matchingRows ?? []) as any[];
+  const workoutIds = Array.from(
+    new Set(matchingExercises.map((row) => row.workout_id).filter(Boolean))
+  );
+  if (!workoutIds.length) return null;
+
+  const { data: completedWorkouts, error: workoutErr } = await supabase
+    .from("workouts")
+    .select("id, completed_at, workout_summary")
+    .eq("user_id", u.user.id)
+    .in("id", workoutIds)
+    .not("completed_at", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1);
+
+  if (workoutErr) throw workoutErr;
+
+  const previousWorkout = (completedWorkouts ?? [])[0] as any;
+  if (!previousWorkout) return null;
+
+  const previousExercise = matchingExercises.find(
+    (row) => row.workout_id === previousWorkout.id
+  );
+  if (!previousExercise?.id) return null;
+
+  const { data: setRows, error: setsErr } = await supabase
+    .from("workout_sets")
+    .select("set_index,reps,weight,rir,pain,form")
+    .eq("workout_exercise_id", previousExercise.id)
+    .order("set_index", { ascending: true });
+
+  if (setsErr) throw setsErr;
+
+  const summary = previousWorkout.workout_summary as any;
+
+  return {
+    workoutId: previousWorkout.id,
+    workoutExerciseId: previousExercise.id,
+    completedAt: previousWorkout.completed_at,
+    templateName:
+      typeof summary?.template_name === "string" && summary.template_name.trim()
+        ? summary.template_name.trim()
+        : "Previous workout",
+    prescriptionSnapshot: previousExercise.prescription_snapshot ?? {},
+    pain:
+      previousExercise.pain != null && Number.isFinite(Number(previousExercise.pain))
+        ? Number(previousExercise.pain)
+        : null,
+    difficulty: (previousExercise.difficulty as PreviousPerformance["difficulty"]) ?? null,
+    sets: ((setRows ?? []) as any[])
+      .map((row) => ({
+        set_index: Number(row.set_index ?? 0),
+        reps: Number(row.reps ?? 0),
+        weight: Number(row.weight ?? 0),
+        rir: row.rir != null ? Number(row.rir) : null,
+        pain: row.pain != null ? Number(row.pain) : null,
+        form: row.form != null ? Number(row.form) : null,
+      }))
+      .filter((row) => row.set_index > 0)
+      .sort((a, b) => a.set_index - b.set_index),
+  };
+}
+
+function previousSetForIndex(previous: PreviousPerformance | null, setIndex: number) {
+  if (!previous?.sets.length) return null;
+  return previous.sets.find((set) => set.set_index === setIndex) ?? null;
+}
+
+function previousWeightForIndex(previous: PreviousPerformance | null, setIndex: number) {
+  if (!previous?.sets.length) return 0;
+  const exact = previousSetForIndex(previous, setIndex);
+  const fallback = previous.sets[previous.sets.length - 1];
+  return Number(exact?.weight ?? fallback?.weight ?? 0);
+}
+
+function progressionGuidance(previous: PreviousPerformance | null, repMax: number) {
+  if (!previous?.sets.length) {
+    return { tone: "first", title: "First time logging this exercise", text: "Choose a controlled starting weight and record every working set." };
+  }
+
+  const validSets = previous.sets.filter((set) => set.reps > 0 && set.weight > 0);
+  if (!validSets.length) {
+    return { tone: "first", title: "No completed strength sets found", text: "Use today to establish a clean baseline." };
+  }
+
+  const painHigh = Number(previous.pain ?? 0) >= 3;
+  const tooHard = previous.difficulty === "too_hard";
+  const reachedTop = validSets.every((set) => set.reps >= repMax);
+
+  if (painHigh || tooHard) {
+    return {
+      tone: "review",
+      title: "Hold or reduce before progressing",
+      text: "The last performance had elevated pain or was marked too hard. Prioritize control and comfort.",
+    };
+  }
+
+  if (reachedTop) {
+    return {
+      tone: "increase",
+      title: "Consider the next available weight",
+      text: `All logged sets reached ${repMax} reps last time. Increase only if form and pain remain controlled.`,
+    };
+  }
+
+  return {
+    tone: "repeat",
+    title: "Repeat the last weight",
+    text: `Aim to add clean reps until every working set reaches ${repMax}.`,
+  };
 }
 
 async function buildUserUploadMediaMap(exerciseIds: string[]): Promise<Record<string, MediaPack>> {
@@ -2404,6 +2567,7 @@ function ExerciseRunner({
 
   const pres = item?.prescription_snapshot ?? {};
   const timed = isTimed(pres);
+  const exerciseId = workoutExercise.exercise_id || item?.exercise_id || item?.id || "";
 
   const setsTarget = Number(pres.sets ?? 3);
   const repMin = Number(pres.rep_min ?? 8);
@@ -2412,6 +2576,8 @@ function ExerciseRunner({
 
   const [sets, setSets] = useState<any[]>([]);
   const [loadingSets, setLoadingSets] = useState(true);
+  const [previousPerformance, setPreviousPerformance] = useState<PreviousPerformance | null>(null);
+  const [previousLoading, setPreviousLoading] = useState(false);
 
   const [pain, setPain] = useState<number>(0);
   const [painTouched, setPainTouched] = useState(false);
@@ -2439,49 +2605,101 @@ function ExerciseRunner({
 
     (async () => {
       setLoadingSets(true);
+      setPreviousLoading(true);
+      setPreviousPerformance(null);
 
       if (timed) {
         setSets([]);
         setLoadingSets(false);
+        setPreviousLoading(false);
         return;
       }
 
-      const { data: existing } = await supabase
-        .from("workout_sets")
-        .select("set_index,reps,weight")
-        .eq("workout_exercise_id", weId)
-        .order("set_index", { ascending: true });
+      try {
+        const [existingResult, previous] = await Promise.all([
+          supabase
+            .from("workout_sets")
+            .select("set_index,reps,weight")
+            .eq("workout_exercise_id", weId)
+            .order("set_index", { ascending: true }),
+          loadPreviousPerformance({
+            exerciseId,
+            currentWorkoutId: workoutExercise.workout_id,
+          }),
+        ]);
 
-      if (cancelled) return;
+        if (existingResult.error) throw existingResult.error;
+        if (cancelled) return;
 
-      const rows = (existing ?? []) as any[];
-      const maxExisting = rows.reduce((m, r) => Math.max(m, Number(r.set_index) || 0), 0);
-      const total = Math.max(setsTarget, maxExisting);
+        const rows = (existingResult.data ?? []) as any[];
+        const maxExisting = rows.reduce((m, r) => Math.max(m, Number(r.set_index) || 0), 0);
+        const total = Math.max(setsTarget, maxExisting);
 
-      const filled = Array.from({ length: total }, (_, i) => {
-        const idx = i + 1;
-        const found = rows.find((r) => Number(r.set_index) === idx);
-        return {
-          set_index: idx,
-          reps: Number(found?.reps ?? 0),
-          weight: Number(found?.weight ?? 0),
-        };
-      });
+        const filled = Array.from({ length: total }, (_, i) => {
+          const idx = i + 1;
+          const found = rows.find((r) => Number(r.set_index) === idx);
+          const savedWeight = Number(found?.weight ?? 0);
 
-      setSets(filled);
-      setLoadingSets(false);
+          return {
+            set_index: idx,
+            reps: Number(found?.reps ?? 0),
+            weight: savedWeight > 0 ? savedWeight : previousWeightForIndex(previous, idx),
+          };
+        });
+
+        setPreviousPerformance(previous);
+        setSets(filled);
+      } catch (error: any) {
+        if (!cancelled) {
+          console.error("PREVIOUS PERFORMANCE LOAD FAILED:", error);
+          setPreviousPerformance(null);
+
+          const { data: fallbackRows } = await supabase
+            .from("workout_sets")
+            .select("set_index,reps,weight")
+            .eq("workout_exercise_id", weId)
+            .order("set_index", { ascending: true });
+
+          if (cancelled) return;
+
+          const rows = (fallbackRows ?? []) as any[];
+          const maxExisting = rows.reduce((m, r) => Math.max(m, Number(r.set_index) || 0), 0);
+          const total = Math.max(setsTarget, maxExisting);
+          setSets(
+            Array.from({ length: total }, (_, i) => {
+              const idx = i + 1;
+              const found = rows.find((r) => Number(r.set_index) === idx);
+              return {
+                set_index: idx,
+                reps: Number(found?.reps ?? 0),
+                weight: Number(found?.weight ?? 0),
+              };
+            })
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingSets(false);
+          setPreviousLoading(false);
+        }
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [weId, setsTarget, timed]);
+  }, [weId, exerciseId, workoutExercise.workout_id, setsTarget, timed]);
 
   const allSetsLogged = useMemo(() => {
     if (timed) return true;
     if (!sets.length) return false;
     return sets.every((s) => Number(s.reps) > 0 && Number(s.weight) > 0);
   }, [sets, timed]);
+
+  const previousGuidance = useMemo(
+    () => progressionGuidance(previousPerformance, repMax),
+    [previousPerformance, repMax]
+  );
 
   const readyToLock = painTouched && (timed || allSetsLogged);
 
@@ -2816,10 +3034,53 @@ const unlock = async () => {
                 </div>
               </div>
 
+              <div className={`tr-previousPerformance tr-previousPerformance--${previousGuidance.tone}`}>
+                <div className="tr-previousPerformanceHead">
+                  <div>
+                    <div className="tr-kicker">LAST PERFORMANCE</div>
+                    <div className="tr-previousPerformanceTitle">{previousGuidance.title}</div>
+                  </div>
+
+                  {previousPerformance ? (
+                    <div className="tr-previousPerformanceMeta">
+                      {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
+                    </div>
+                  ) : null}
+                </div>
+
+                {previousLoading ? (
+                  <div className="tr-sub">Loading the last completed performance…</div>
+                ) : previousPerformance?.sets.length ? (
+                  <>
+                    <div className="tr-previousSetSummary">
+                      {previousPerformance.sets.map((set) => (
+                        <span key={set.set_index} className="tr-previousSetChip">
+                          S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="tr-previousGuidanceText">{previousGuidance.text}</div>
+                  </>
+                ) : (
+                  <div className="tr-previousGuidanceText">{previousGuidance.text}</div>
+                )}
+              </div>
+
              <div className="tr-setStack">
   {sets.map((s, i) => (
     <div key={s.set_index} className="tr-setCardMobile">
-      <div className="tr-setCardHead">SET {s.set_index}</div>
+      <div className="tr-setCardHead">
+        <span>SET {s.set_index}</span>
+        <span className="tr-setPreviousValue">
+          PREVIOUS:{" "}
+          {(() => {
+            const previousSet = previousSetForIndex(previousPerformance, Number(s.set_index));
+            return previousSet
+              ? `${formatLoggedWeight(previousSet.weight)} lb × ${previousSet.reps}`
+              : "—";
+          })()}
+        </span>
+      </div>
 
       <div className="tr-setFieldBlock">
         <div className="tr-setFieldLabel">REPS</div>
