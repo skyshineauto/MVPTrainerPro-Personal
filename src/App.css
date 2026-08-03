@@ -1483,3 +1483,265 @@ html.tr-modal-open .tr-bottomNavWrap{
 .tr-card--noClip{
   overflow: visible !important;
 }
+/* ============================================================
+   PREVIOUS PERFORMANCE + SET-BY-SET HISTORY
+   ============================================================ */
+.tr-previousPerformance{
+  margin: 2px 0 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,170,255,.28);
+  background:
+    radial-gradient(520px 180px at 0% 0%, rgba(0,170,255,.12), rgba(0,0,0,0) 68%),
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(0,0,0,.16));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 16px 42px rgba(0,0,0,.30),
+    0 0 22px rgba(0,170,255,.07);
+  padding: 13px;
+  display: grid;
+  gap: 10px;
+}
+
+.tr-previousPerformance--increase{
+  border-color: rgba(34,197,94,.38);
+  background:
+    radial-gradient(520px 180px at 0% 0%, rgba(34,197,94,.12), rgba(0,0,0,0) 68%),
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(0,0,0,.16));
+}
+
+.tr-previousPerformance--review{
+  border-color: rgba(245,158,11,.42);
+  background:
+    radial-gradient(520px 180px at 0% 0%, rgba(245,158,11,.12), rgba(0,0,0,0) 68%),
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(0,0,0,.16));
+}
+
+.tr-previousPerformanceHead{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tr-previousPerformanceTitle{
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 1050;
+  line-height: 1.2;
+  color: rgba(255,255,255,.96);
+}
+
+.tr-previousPerformanceMeta{
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: rgba(210,239,255,.75);
+  text-align: right;
+}
+
+.tr-previousSetSummary{
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.tr-previousSetChip{
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,170,255,.28);
+  background: rgba(0,170,255,.08);
+  color: rgba(235,250,255,.94);
+  font-size: 11px;
+  font-weight: 1000;
+  letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-previousGuidanceText{
+  color: rgba(255,255,255,.70);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tr-setCardMobile .tr-setCardHead{
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.tr-setPreviousValue{
+  color: rgba(190,232,255,.88);
+  font-size: 11px;
+  font-weight: 1000;
+  letter-spacing: .08em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tr-historyDetailsToggle{
+  width: 100%;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,170,255,.30);
+  background: linear-gradient(180deg, rgba(0,170,255,.12), rgba(0,0,0,.14));
+  color: rgba(235,250,255,.94);
+  font-weight: 1000;
+  font-size: 11px;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease, transform .14s ease;
+}
+
+.tr-historyDetailsToggle:hover,
+.tr-historyDetailsToggle.is-open{
+  border-color: rgba(0,170,255,.68);
+  background: linear-gradient(180deg, rgba(0,170,255,.20), rgba(0,0,0,.14));
+}
+
+.tr-historyExerciseList{
+  margin-top: 2px;
+  display: grid;
+  gap: 10px;
+}
+
+.tr-historyExerciseCard{
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(460px 140px at 0% 0%, rgba(0,170,255,.07), rgba(0,0,0,0) 70%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.13));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.tr-historyExerciseHead{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tr-historyExerciseName{
+  font-size: 14px;
+  font-weight: 1050;
+  color: rgba(255,255,255,.95);
+}
+
+.tr-historyExerciseMeta{
+  margin-top: 3px;
+  color: rgba(255,255,255,.58);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tr-historySetCount{
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,170,255,.24);
+  background: rgba(0,170,255,.07);
+  color: rgba(215,243,255,.88);
+  font-size: 10px;
+  font-weight: 1000;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+}
+
+.tr-historySetGrid{
+  display: grid;
+  gap: 7px;
+}
+
+.tr-historySetRow{
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 11px;
+  border: 1px solid rgba(255,255,255,.075);
+  background: rgba(0,0,0,.18);
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-historySetNumber{
+  color: rgba(255,255,255,.56);
+  font-size: 10px;
+  font-weight: 1000;
+  letter-spacing: .13em;
+}
+
+.tr-historySetResult{
+  color: rgba(240,251,255,.96);
+  font-size: 13px;
+  font-weight: 1050;
+}
+
+.tr-historySetExtra{
+  color: rgba(190,232,255,.75);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .07em;
+}
+
+.tr-historyTimedResult,
+.tr-historyNoSets,
+.tr-historyNoDetails{
+  border-radius: 11px;
+  border: 1px dashed rgba(255,255,255,.12);
+  padding: 10px;
+  color: rgba(255,255,255,.62);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px){
+  .tr-previousPerformance{
+    padding: 11px;
+  }
+
+  .tr-previousPerformanceHead{
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .tr-previousPerformanceMeta{
+    text-align: left;
+  }
+
+  .tr-previousSetChip{
+    flex: 1 1 calc(50% - 7px);
+    min-width: 128px;
+  }
+
+  .tr-setCardMobile .tr-setCardHead{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    justify-items: start !important;
+  }
+
+  .tr-setPreviousValue{
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .tr-historySetRow{
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  .tr-historySetExtra{
+    grid-column: 2;
+  }
+}
