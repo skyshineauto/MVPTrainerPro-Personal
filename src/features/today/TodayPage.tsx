@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
+import { PlannedSessionEditor } from "./PlannedSessionEditor";
 import {
   formatSessionLabel,
   inferSymptomKey,
@@ -18,13 +19,11 @@ type QueueDash = {
 export function TodayPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
   const [qd, setQd] = useState<QueueDash | null>(null);
-
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionType, setActiveSessionType] = useState<string | null>(null);
-
   const [symptomKey, setSymptomKey] = useState<SymptomKey | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 
   async function resolveSessionType(sessionId: string): Promise<string | null> {
     const { data: sess, error } = await supabase
@@ -126,7 +125,6 @@ export function TodayPage() {
   }, []);
 
   const hasActiveProgram = !!qd?.activeBlock?.id;
-
   const goal = (qd?.activeBlock?.goal as string) ?? null;
   const goalMode = (qd?.activeBlock?.goal_mode as string) ?? null;
 
@@ -157,6 +155,8 @@ export function TodayPage() {
     const nextId = qd?.nextSession?.id as string | undefined;
     if (nextId) window.location.pathname = `/workout/${nextId}`;
   };
+
+  const nextSessionId = (qd?.nextSession?.id as string | undefined) ?? null;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -189,17 +189,27 @@ export function TodayPage() {
               {activeSessionId ? activeLabel ?? "Session" : nextLabel}
             </div>
 
-            <div style={{ marginTop: 8 }}>
+            <div className={`tr-nextWorkoutActions ${activeSessionId ? "is-active" : ""}`}>
               <button
                 className={`tr-btn tr-btn--primary ${
                   activeSessionId ? "tr-btn--glowResume" : "tr-btn--glowStart"
                 }`}
-                disabled={!activeSessionId && !qd?.nextSession?.id}
+                disabled={!activeSessionId && !nextSessionId}
                 onClick={onPrimary}
-                style={{ width: "100%", height: 52 }}
+                style={{ height: 52 }}
               >
                 {activeSessionId ? "RESUME WORKOUT" : "START WORKOUT"}
               </button>
+
+              {!activeSessionId && nextSessionId ? (
+                <button
+                  className="tr-btn tr-btn--blueOutline"
+                  style={{ height: 52 }}
+                  onClick={() => setEditingSessionId(nextSessionId)}
+                >
+                  EDIT WORKOUT
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -221,31 +231,29 @@ export function TodayPage() {
               });
 
               return (
-                <button
-                  key={s.id}
-                  className="tr-rowBtn"
-                  onClick={() => (window.location.pathname = `/workout/${s.id}`)}
-                >
-                  <div
-                    className="tr-rowbox"
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      alignItems: "center",
-                    }}
-                  >
-                    <div style={{ display: "grid", gap: 2 }}>
-                      <div style={{ fontWeight: 950 }}>
-                        #{idx + 1} — {label}
-                      </div>
-                      <div className="tr-sub">Tap to start this session</div>
+                <div key={s.id} className="tr-rowbox tr-queueSessionRow">
+                  <div className="tr-queueSessionCopy">
+                    <div style={{ fontWeight: 950 }}>
+                      #{idx + 1} — {label}
                     </div>
-                    <div className="tr-kicker" style={{ opacity: 0.9 }}>
-                      QUEUED
-                    </div>
+                    <div className="tr-sub">Plan it now or start when you are ready.</div>
                   </div>
-                </button>
+
+                  <div className="tr-queueSessionActions">
+                    <button
+                      className="tr-btn tr-btn--primary"
+                      onClick={() => (window.location.pathname = `/workout/${s.id}`)}
+                    >
+                      START
+                    </button>
+                    <button
+                      className="tr-btn tr-btn--blueOutline"
+                      onClick={() => setEditingSessionId(s.id)}
+                    >
+                      EDIT
+                    </button>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -258,20 +266,21 @@ export function TodayPage() {
 
       <Card title="Actions">
         <div style={{ display: "grid", gap: 10 }}>
-          <Button onClick={() => (window.location.pathname = "/coach")}>
-            Go to Coach
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => (window.location.pathname = "/progress")}
-          >
+          <Button onClick={() => (window.location.pathname = "/coach")}>Go to Coach</Button>
+          <Button variant="secondary" onClick={() => (window.location.pathname = "/progress")}>
             Go to Progress
           </Button>
-          <Button variant="secondary" onClick={load}>
-            Refresh
-          </Button>
+          <Button variant="secondary" onClick={load}>Refresh</Button>
         </div>
       </Card>
+
+      {editingSessionId ? (
+        <PlannedSessionEditor
+          sessionId={editingSessionId}
+          onClose={() => setEditingSessionId(null)}
+          onSaved={load}
+        />
+      ) : null}
 
       <style>{`
         .tr-btn--glowStart{
