@@ -5,10 +5,12 @@ import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import {
   effectiveHasMedia,
+  getMuscleDetailOptions,
   matchFilters,
   normalizeText,
   resolveRowIcon,
   type EquipKey,
+  type MuscleDetailKey,
   type MuscleKey,
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
@@ -133,7 +135,7 @@ function lockDocumentForModal() {
     }
 
     const scroller = target.closest<HTMLElement>(
-      ".tr-editCurrentList, .tr-editResultsViewport, .tr-completeGrid, .tr-modalBody"
+      ".tr-editCurrentList, .tr-editResultsViewport, .tr-editFilterScroll, .tr-completeGrid, .tr-modalBody"
     );
 
     if (!scroller || Math.abs(deltaX) > Math.abs(deltaY)) {
@@ -391,6 +393,7 @@ type SearchExerciseRow = {
   name: string;
   source?: string | null;
   primary_muscles?: string[] | null;
+  secondary_muscles?: string[] | null;
   equipment?: string[] | null;
   media?: any;
 };
@@ -1215,6 +1218,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const [swapTargetWeId, setSwapTargetWeId] = useState<string | null>(null);
 
   const [addMuscle, setAddMuscle] = useState<AddMuscleKey>("all");
+  const [addMuscleDetail, setAddMuscleDetail] = useState<MuscleDetailKey>("all");
   const [addEquip, setAddEquip] = useState<AddEquipKey>("all");
 
   const [justAddedId, setJustAddedId] = useState<string | null>(null);
@@ -1718,7 +1722,7 @@ export function WorkoutPlayerPage({ params }: any) {
     const termNorm = normalizeText(termRaw);
     setSearchQ(q);
 
-    const browsing = addMuscle !== "all" || addEquip !== "all";
+    const browsing = addMuscle !== "all" || addMuscleDetail !== "all" || addEquip !== "all";
     if (!opts?.force && !browsing && termNorm.length < 2) {
       setSearchResults([]);
       setSearchPage(0);
@@ -1731,11 +1735,11 @@ export function WorkoutPlayerPage({ params }: any) {
       // Preserve the existing category/search behavior. We fetch the same broad
       // candidate pool, apply the existing matchFilters contract, then reveal
       // five matching rows at a time inside the fixed-height results viewport.
-      const limit = termNorm.length >= 2 ? 200 : addEquip === "cardio" ? 500 : browsing ? 350 : 80;
+      const limit = 1000;
 
       let query = supabase
         .from("exercises")
-        .select("id,name,source,primary_muscles,equipment,media")
+        .select("id,name,source,primary_muscles,secondary_muscles,equipment,media")
         .order("name", { ascending: true })
         .limit(limit);
 
@@ -1754,7 +1758,8 @@ export function WorkoutPlayerPage({ params }: any) {
         matchFilters(
           r,
           addMuscle === "all" ? "all" : (addMuscle as any),
-          addEquip === "all" ? "all" : (addEquip as any)
+          addEquip === "all" ? "all" : (addEquip as any),
+          addMuscleDetail
         )
       );
 
@@ -1818,7 +1823,7 @@ export function WorkoutPlayerPage({ params }: any) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [editing, addMuscle, addEquip]);
+  }, [editing, addMuscle, addMuscleDetail, addEquip]);
 
   async function saveEditSessionOnly() {
     await reindexWorkoutExercises();
@@ -2125,8 +2130,13 @@ export function WorkoutPlayerPage({ params }: any) {
       await swapExercise(swapTargetWeId, exerciseId);
     }}
     addMuscle={addMuscle}
+    addMuscleDetail={addMuscleDetail}
     addEquip={addEquip}
-    setAddMuscle={(v) => setAddMuscle(v)}
+    setAddMuscle={(v) => {
+      setAddMuscle(v);
+      setAddMuscleDetail("all");
+    }}
+    setAddMuscleDetail={(v) => setAddMuscleDetail(v)}
     setAddEquip={(v) => setAddEquip(v)}
     justAddedId={justAddedId}
   />
@@ -2264,8 +2274,10 @@ function EditSessionPanel(props: {
   onPickAdd: (exerciseId: string) => Promise<void>;
   onPickSwap: (exerciseId: string) => Promise<void>;
   addMuscle: AddMuscleKey;
+  addMuscleDetail: MuscleDetailKey;
   addEquip: AddEquipKey;
   setAddMuscle: (v: AddMuscleKey) => void;
+  setAddMuscleDetail: (v: MuscleDetailKey) => void;
   setAddEquip: (v: AddEquipKey) => void;
   justAddedId: string | null;
 }) {
@@ -2287,14 +2299,20 @@ function EditSessionPanel(props: {
     onPickAdd,
     onPickSwap,
     addMuscle,
+    addMuscleDetail,
     addEquip,
     setAddMuscle,
+    setAddMuscleDetail,
     setAddEquip,
     justAddedId,
   } = props;
 
   const mode = swapTargetWeId ? "swap" : "add";
   const [mobileTab, setMobileTab] = useState<"current" | "add">("add");
+  const addMuscleDetailOptions = useMemo(
+    () => getMuscleDetailOptions(addMuscle as MuscleKey),
+    [addMuscle]
+  );
 
   useEffect(() => {
     if (swapTargetWeId) setMobileTab("add");
@@ -2327,7 +2345,10 @@ function EditSessionPanel(props: {
   const showResultsEmptyState =
     !searchBusy &&
     !searchResults.length &&
-    (searchQ.trim().length >= 2 || addMuscle !== "all" || addEquip !== "all");
+    (searchQ.trim().length >= 2 ||
+      addMuscle !== "all" ||
+      addMuscleDetail !== "all" ||
+      addEquip !== "all");
 
   if (typeof document === "undefined") return null;
 
@@ -2408,7 +2429,7 @@ function EditSessionPanel(props: {
           <Card title={mode === "swap" ? "Pick replacement" : "Add an exercise"} tone="blue">
             <div className="tr-editAddLayout" style={{ display: "grid", gap: 10 }}>
               {mode === "add" ? (
-                <div className="tr-rowbox" style={{ display: "grid", gap: 10 }}>
+                <div className="tr-rowbox tr-editFilterScroll" style={{ display: "grid", gap: 10 }}>
                   <div style={{ display: "grid", gap: 6 }}>
                     <div className="tr-kicker">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
@@ -2421,6 +2442,21 @@ function EditSessionPanel(props: {
                         </button>
                       ))}
                     </div>
+
+                    {addMuscleDetailOptions.length > 1 ? (
+                      <div className="tr-chipRow tr-chipRow--wrap tr-muscleDetailRow">
+                        {addMuscleDetailOptions.map((option) => (
+                          <button
+                            key={option.key}
+                            className={`tr-seg ${addMuscleDetail === option.key ? "is-active" : ""}`}
+                            onClick={() => setAddMuscleDetail(option.key)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
                     <div className="tr-sub">Muscle ignored in cardio mode (per contract).</div>
                   </div>
 
