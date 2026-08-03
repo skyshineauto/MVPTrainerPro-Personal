@@ -106,6 +106,11 @@ function rangeStartISO(range: Range) {
 function fmtDecimal(value: number, digits = 1) {
   return Number.isFinite(value) ? value.toFixed(digits) : "0.0";
 }
+function estimatedOneRepMax(weight: number, reps: number) {
+  if (!(weight > 0) || !(reps > 0)) return 0;
+  if (reps === 1) return weight;
+  return weight * (1 + reps / 30);
+}
 function proteinMultiplier(goal: string | null | undefined) {
   const g = (goal || "").toLowerCase();
   if (g === "cut" || g === "lose_weight") return 1.0;
@@ -222,6 +227,10 @@ export function ProgressPage() {
   const [latestBW, setLatestBW] = useState<number | null>(null);
   const [bwChange, setBwChange] = useState<number | null>(null);
   const [volumeTotal, setVolumeTotal] = useState<number | null>(null);
+  const [bestWeightInRange, setBestWeightInRange] = useState(0);
+  const [bestSetVolumeInRange, setBestSetVolumeInRange] = useState(0);
+  const [bestEstimated1RMInRange, setBestEstimated1RMInRange] = useState(0);
+  const [exercisesTrainedInRange, setExercisesTrainedInRange] = useState(0);
   const [painRows, setPainRows] = useState<
     Array<{ name: string; avg: number; max: number; count: number }>
   >([]);
@@ -284,6 +293,10 @@ export function ProgressPage() {
           setLatestBW(null);
           setBwChange(null);
           setVolumeTotal(0);
+          setBestWeightInRange(0);
+          setBestSetVolumeInRange(0);
+          setBestEstimated1RMInRange(0);
+          setExercisesTrainedInRange(0);
           setPainRows([]);
           setHistory([]);
           setLoading(false);
@@ -532,7 +545,7 @@ export function ProgressPage() {
       if (wIds.length) {
         const { data: weids, error: weidErr } = await supabase
           .from("workout_exercises")
-          .select("id, workout_id")
+          .select("id, workout_id, exercise_id")
           .in("workout_id", wIds);
         if (weidErr) throw weidErr;
 
@@ -546,24 +559,56 @@ export function ProgressPage() {
 
           let vol = 0;
           let setsOk = 0;
+          let bestWeight = 0;
+          let bestSetVolume = 0;
+          let bestE1RM = 0;
+          const exerciseIds = new Set<string>();
+          const exerciseByWorkoutExercise = new Map<string, string>();
+
+          for (const row of weids ?? []) {
+            const workoutExerciseId = (row as any).id as string;
+            const exerciseId = (row as any).exercise_id as string;
+            if (workoutExerciseId && exerciseId) {
+              exerciseByWorkoutExercise.set(workoutExerciseId, exerciseId);
+            }
+          }
 
           for (const s of sets ?? []) {
             const reps = Number((s as any).reps ?? 0);
             const wt = Number((s as any).weight ?? 0);
             if (reps > 0 && wt > 0) {
-              vol += reps * wt;
+              const setVolume = reps * wt;
+              vol += setVolume;
               setsOk += 1;
+              bestWeight = Math.max(bestWeight, wt);
+              bestSetVolume = Math.max(bestSetVolume, setVolume);
+              bestE1RM = Math.max(bestE1RM, estimatedOneRepMax(wt, reps));
+
+              const exerciseId = exerciseByWorkoutExercise.get((s as any).workout_exercise_id);
+              if (exerciseId) exerciseIds.add(exerciseId);
             }
           }
           setVolumeTotal(vol);
           setSetsLogged(setsOk);
+          setBestWeightInRange(bestWeight);
+          setBestSetVolumeInRange(bestSetVolume);
+          setBestEstimated1RMInRange(bestE1RM);
+          setExercisesTrainedInRange(exerciseIds.size);
         } else {
           setVolumeTotal(0);
           setSetsLogged(0);
+          setBestWeightInRange(0);
+          setBestSetVolumeInRange(0);
+          setBestEstimated1RMInRange(0);
+          setExercisesTrainedInRange(0);
         }
       } else {
         setVolumeTotal(0);
         setSetsLogged(0);
+        setBestWeightInRange(0);
+        setBestSetVolumeInRange(0);
+        setBestEstimated1RMInRange(0);
+        setExercisesTrainedInRange(0);
       }
 
       if (wRows.length) {
@@ -1102,6 +1147,38 @@ export function ProgressPage() {
                 value={loading || volumeTotal == null ? "—" : Math.round(volumeTotal).toLocaleString()}
                 tone="blue"
                 sub="sum(reps × weight)"
+              />
+            </div>
+
+            <div className="tr-progressSectionLabel tr-progressSectionLabel--spaced">PERSONAL RECORD SNAPSHOT</div>
+            <div className="tr-kpiGrid tr-kpiGrid--4">
+              <KpiTile
+                icon={icoTarget}
+                label={`HEAVIEST SET (${selectedPeriodLabel})`}
+                value={loading || bestWeightInRange <= 0 ? "—" : `${fmtDecimal(bestWeightInRange, bestWeightInRange % 1 ? 1 : 0)} lb`}
+                tone="green"
+                sub="highest weight logged"
+              />
+              <KpiTile
+                icon={icoReport}
+                label={`BEST SET VOLUME (${selectedPeriodLabel})`}
+                value={loading || bestSetVolumeInRange <= 0 ? "—" : `${Math.round(bestSetVolumeInRange).toLocaleString()} lb`}
+                tone="green"
+                sub="best single set • reps × weight"
+              />
+              <KpiTile
+                icon={icoRate}
+                label={`BEST EST. 1RM (${selectedPeriodLabel})`}
+                value={loading || bestEstimated1RMInRange <= 0 ? "—" : `${fmtDecimal(bestEstimated1RMInRange, 1)} lb`}
+                tone="green"
+                sub="Epley estimate"
+              />
+              <KpiTile
+                icon={icoWorkout}
+                label={`EXERCISES TRAINED (${selectedPeriodLabel})`}
+                value={loading ? "—" : exercisesTrainedInRange}
+                tone="base"
+                sub="unique strength movements"
               />
             </div>
           </div>
