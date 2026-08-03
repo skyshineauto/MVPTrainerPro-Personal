@@ -26,6 +26,44 @@ type Scope = "active" | "all";
 type Range = 7 | 14 | 30;
 type Tab = "protein" | "weight" | "volume" | "pain";
 
+type HistorySetRow = {
+  set_index: number;
+  reps: number;
+  weight: number;
+  rir: number | null;
+  pain: number | null;
+  form: number | null;
+};
+
+type HistoryExerciseRow = {
+  workout_exercise_id: string;
+  exercise_id: string;
+  name: string;
+  order_index: number;
+  prescription_snapshot: any;
+  pain: number | null;
+  difficulty: string | null;
+  sets: HistorySetRow[];
+};
+
+type HistoryRow = {
+  id: string;
+  completed_at: string;
+  template_name: string;
+  session_seconds: number;
+  bodyweight_lb: number | null;
+  protein_target_g: number | null;
+  pain_max: number;
+  pain_avg: number;
+  volume_total: number;
+  post_difficulty: string | null;
+  session_rating: number | null;
+  post_notes: string | null;
+  notes: string | null;
+  workout_summary: any | null;
+  exercises: HistoryExerciseRow[];
+};
+
 function daysAgoISO(days: number) {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -201,24 +239,8 @@ export function ProgressPage() {
     Array<{ name: string; avg: number; max: number; count: number }>
   >([]);
 
-  const [history, setHistory] = useState<
-    Array<{
-      id: string;
-      completed_at: string;
-      template_name: string;
-      session_seconds: number;
-      bodyweight_lb: number | null;
-      protein_target_g: number | null;
-      pain_max: number;
-      pain_avg: number;
-      volume_total: number;
-      post_difficulty: string | null;
-      session_rating: number | null;
-      post_notes: string | null;
-      notes: string | null;
-      workout_summary: any | null;
-    }>
-  >([]);
+  const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Record<string, boolean>>({});
 
   const [clearOpen, setClearOpen] = useState(false);
   const [clearText, setClearText] = useState("");
@@ -667,6 +689,91 @@ export function ProgressPage() {
           }
         }
 
+        const detailByWorkout = new Map<string, HistoryExerciseRow[]>();
+        if (topIds.length) {
+          const { data: detailExerciseRows, error: detailExerciseErr } = await supabase
+            .from("workout_exercises")
+            .select("id,workout_id,exercise_id,order_index,prescription_snapshot,pain,difficulty")
+            .in("workout_id", topIds)
+            .order("order_index", { ascending: true });
+
+          if (detailExerciseErr) throw detailExerciseErr;
+
+          const detailRows = (detailExerciseRows ?? []) as any[];
+          const detailExerciseIds = Array.from(
+            new Set(detailRows.map((row) => row.exercise_id).filter(Boolean))
+          );
+
+          const detailNameMap = new Map<string, string>();
+          if (detailExerciseIds.length) {
+            const { data: detailNames, error: detailNameErr } = await supabase
+              .from("exercises")
+              .select("id,name")
+              .in("id", detailExerciseIds);
+
+            if (detailNameErr) throw detailNameErr;
+            for (const row of detailNames ?? []) {
+              detailNameMap.set((row as any).id, (row as any).name);
+            }
+          }
+
+          const detailWeIds = detailRows.map((row) => row.id).filter(Boolean);
+          const setsByWorkoutExercise = new Map<string, HistorySetRow[]>();
+
+          if (detailWeIds.length) {
+            const { data: detailSets, error: detailSetsErr } = await supabase
+              .from("workout_sets")
+              .select("workout_exercise_id,set_index,reps,weight,rir,pain,form")
+              .in("workout_exercise_id", detailWeIds)
+              .order("set_index", { ascending: true });
+
+            if (detailSetsErr) throw detailSetsErr;
+
+            for (const row of detailSets ?? []) {
+              const workoutExerciseId = (row as any).workout_exercise_id as string;
+              if (!workoutExerciseId) continue;
+
+              const list = setsByWorkoutExercise.get(workoutExerciseId) ?? [];
+              list.push({
+                set_index: Number((row as any).set_index ?? 0),
+                reps: Number((row as any).reps ?? 0),
+                weight: Number((row as any).weight ?? 0),
+                rir: (row as any).rir != null ? Number((row as any).rir) : null,
+                pain: (row as any).pain != null ? Number((row as any).pain) : null,
+                form: (row as any).form != null ? Number((row as any).form) : null,
+              });
+              setsByWorkoutExercise.set(workoutExerciseId, list);
+            }
+          }
+
+          for (const row of detailRows) {
+            const workoutId = row.workout_id as string;
+            if (!workoutId) continue;
+
+            const list = detailByWorkout.get(workoutId) ?? [];
+            list.push({
+              workout_exercise_id: row.id,
+              exercise_id: row.exercise_id,
+              name: detailNameMap.get(row.exercise_id) ?? row.exercise_id ?? "Exercise",
+              order_index: Number(row.order_index ?? 0),
+              prescription_snapshot: row.prescription_snapshot ?? {},
+              pain: row.pain != null ? Number(row.pain) : null,
+              difficulty: row.difficulty != null ? String(row.difficulty) : null,
+              sets: (setsByWorkoutExercise.get(row.id) ?? []).sort(
+                (a, b) => a.set_index - b.set_index
+              ),
+            });
+            detailByWorkout.set(workoutId, list);
+          }
+
+          for (const [workoutId, exerciseRows] of detailByWorkout) {
+            detailByWorkout.set(
+              workoutId,
+              exerciseRows.sort((a, b) => a.order_index - b.order_index)
+            );
+          }
+        }
+
         const out = top.map((w: any) => {
           const sess = sessMap.get(w.scheduled_session_id);
           const tmplName = sess?.template_id
@@ -707,10 +814,16 @@ export function ProgressPage() {
             post_notes: (w.post_notes as string) ?? null,
             notes: (w.notes as string) ?? null,
             workout_summary: (w.workout_summary as any) ?? null,
+            exercises: detailByWorkout.get(w.id) ?? [],
           };
         });
 
         setHistory(out);
+        setExpandedHistoryIds((previous) => {
+          if (!out.length) return {};
+          if (Object.keys(previous).some((id) => out.some((row) => row.id === id))) return previous;
+          return { [out[0].id]: true };
+        });
       } else {
         setHistory([]);
       }
@@ -764,13 +877,16 @@ export function ProgressPage() {
     }
   }
 
-  function renderExerciseList(h: any) {
-    const s = h.workout_summary;
-    const ex = s?.exercises;
-    if (!Array.isArray(ex) || ex.length === 0) return null;
+  function renderExerciseList(h: HistoryRow) {
+    const detailedNames = h.exercises.map((exercise) => exercise.name).filter(Boolean);
+    const summaryNames = Array.isArray(h.workout_summary?.exercises)
+      ? h.workout_summary.exercises
+      : [];
+    const names = detailedNames.length ? detailedNames : summaryNames;
+    if (!names.length) return null;
 
-    const top = ex.slice(0, 10);
-    const extra = ex.length - top.length;
+    const top = names.slice(0, 10);
+    const extra = names.length - top.length;
 
     return (
       <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
@@ -781,6 +897,76 @@ export function ProgressPage() {
         </div>
       </div>
     );
+  }
+
+  function renderExerciseDetails(h: HistoryRow) {
+    if (!h.exercises.length) {
+      return (
+        <div className="tr-historyNoDetails">
+          No set-by-set rows were found for this completed session.
+        </div>
+      );
+    }
+
+    return (
+      <div className="tr-historyExerciseList">
+        {h.exercises.map((exercise) => {
+          const actualMinutes = Number(exercise.prescription_snapshot?.actual_minutes ?? 0);
+          const durationMinutes = Number(
+            exercise.prescription_snapshot?.duration_minutes ??
+              (Number(exercise.prescription_snapshot?.duration_seconds ?? 0) > 0
+                ? Math.round(Number(exercise.prescription_snapshot.duration_seconds) / 60)
+                : 0)
+          );
+
+          return (
+            <div key={exercise.workout_exercise_id} className="tr-historyExerciseCard">
+              <div className="tr-historyExerciseHead">
+                <div>
+                  <div className="tr-historyExerciseName">{exercise.name}</div>
+                  <div className="tr-historyExerciseMeta">
+                    {exercise.pain != null ? `Pain ${exercise.pain}/10` : "Pain —"}
+                    {exercise.difficulty ? ` • ${difficultyLabel(exercise.difficulty) ?? exercise.difficulty}` : ""}
+                  </div>
+                </div>
+
+                {exercise.sets.length ? (
+                  <div className="tr-historySetCount">{exercise.sets.length} sets</div>
+                ) : null}
+              </div>
+
+              {exercise.sets.length ? (
+                <div className="tr-historySetGrid">
+                  {exercise.sets.map((set) => (
+                    <div key={set.set_index} className="tr-historySetRow">
+                      <span className="tr-historySetNumber">SET {set.set_index}</span>
+                      <span className="tr-historySetResult">
+                        {Number.isInteger(set.weight) ? set.weight : Number(set.weight.toFixed(2))} lb × {set.reps}
+                      </span>
+                      {set.rir != null ? <span className="tr-historySetExtra">RIR {set.rir}</span> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : actualMinutes > 0 || durationMinutes > 0 ? (
+                <div className="tr-historyTimedResult">
+                  Actual {actualMinutes > 0 ? actualMinutes : durationMinutes} min
+                  {durationMinutes > 0 ? ` • Target ${durationMinutes} min` : ""}
+                </div>
+              ) : (
+                <div className="tr-historyNoSets">No strength sets were recorded.</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function toggleHistoryDetails(workoutId: string) {
+    setExpandedHistoryIds((previous) => ({
+      ...previous,
+      [workoutId]: !previous[workoutId],
+    }));
   }
 
   const painTone = useMemo(() => {
@@ -1132,6 +1318,7 @@ export function ProgressPage() {
               {history.map((h) => {
                 const diff = difficultyLabel(h.post_difficulty, h.session_rating);
                 const note = (h.post_notes || h.notes || "").trim() || null;
+                const detailsOpen = !!expandedHistoryIds[h.id];
 
                 return (
                   <div
@@ -1173,6 +1360,16 @@ export function ProgressPage() {
                     <div className="tr-sub">avg pain {h.pain_avg.toFixed(1)}</div>
 
                     {renderExerciseList(h)}
+
+                    <button
+                      type="button"
+                      className={`tr-historyDetailsToggle ${detailsOpen ? "is-open" : ""}`}
+                      onClick={() => toggleHistoryDetails(h.id)}
+                    >
+                      {detailsOpen ? "HIDE SET DETAILS" : "SHOW SET DETAILS"}
+                    </button>
+
+                    {detailsOpen ? renderExerciseDetails(h) : null}
 
                     {note ? (
                       <div style={{ marginTop: 8 }}>
