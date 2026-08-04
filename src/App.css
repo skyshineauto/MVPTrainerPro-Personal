@@ -3352,3 +3352,356 @@ html.tr-modal-open .tr-bottomNavWrap{
     padding-right: 7px !important;
   }
 }
+
+/* ============================================================
+   WORKOUT EXERCISE NAVIGATOR
+   ============================================================ */
+.tr-exerciseNavigator{
+  display:grid;
+  gap:12px;
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+
+.tr-exerciseNavigatorHead{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.tr-exerciseNavigatorSummary{
+  margin-top:4px;
+  font-weight:1000;
+  color:rgba(255,255,255,.94);
+}
+
+.tr-exerciseNavigatorLegend{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  align-items:center;
+  color:rgba(220,235,245,.70);
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+
+.tr-exerciseNavigatorLegend span{
+  display:inline-flex;
+  gap:6px;
+  align-items:center;
+}
+
+.tr-exerciseNavigatorLegend i{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.25);
+  box-shadow:0 0 10px rgba(255,255,255,.08);
+}
+
+.tr-exerciseNavigatorLegend i.is-complete{
+  background:rgba(34,197,94,.95);
+  box-shadow:0 0 12px rgba(34,197,94,.30);
+}
+
+.tr-exerciseNavigatorLegend i.is-current{
+  background:rgba(0,170,255,.98);
+  box-shadow:0 0 12px rgba(0,170,255,.34);
+}
+
+.tr-exerciseNavigatorRail{
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  overscroll-behavior-inline:contain;
+  scroll-snap-type:x proximity;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(0,170,255,.35) rgba(255,255,255,.04);
+  padding:2px 2px 8px;
+}
+
+.tr-exerciseNavigatorItem{
+  flex:0 0 auto;
+  min-width:190px;
+  max-width:270px;
+  min-height:58px;
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr);
+  align-items:center;
+  gap:10px;
+  scroll-snap-align:center;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.12);
+  background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.15));
+  color:rgba(255,255,255,.86);
+  padding:10px 12px;
+  cursor:pointer;
+  text-align:left;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 12px 28px rgba(0,0,0,.28);
+  transition:transform .14s ease, border-color .14s ease, background .14s ease, box-shadow .14s ease;
+}
+
+.tr-exerciseNavigatorItem:hover{
+  transform:translateY(-1px);
+}
+
+.tr-exerciseNavigatorIcon{
+  width:32px;
+  height:32px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(0,0,0,.28);
+  font-weight:1000;
+  font-size:13px;
+}
+
+.tr-exerciseNavigatorName{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:950;
+  letter-spacing:.01em;
+}
+
+.tr-exerciseNavigatorItem.is-current{
+  border-color:rgba(0,170,255,.82);
+  background:linear-gradient(180deg, rgba(0,170,255,.22), rgba(0,80,145,.12));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 20px rgba(0,170,255,.18), 0 16px 36px rgba(0,0,0,.34);
+  color:#fff;
+}
+
+.tr-exerciseNavigatorItem.is-current .tr-exerciseNavigatorIcon{
+  border-color:rgba(90,215,255,.84);
+  background:rgba(0,170,255,.20);
+  box-shadow:0 0 14px rgba(0,170,255,.20);
+}
+
+.tr-exerciseNavigatorItem.is-complete{
+  border-color:rgba(34,197,94,.62);
+  background:linear-gradient(180deg, rgba(34,197,94,.17), rgba(0,80,45,.11));
+  color:rgba(225,255,238,.96);
+}
+
+.tr-exerciseNavigatorItem.is-complete .tr-exerciseNavigatorIcon{
+  border-color:rgba(34,197,94,.72);
+  background:rgba(34,197,94,.18);
+  color:rgba(215,255,232,.98);
+  box-shadow:0 0 14px rgba(34,197,94,.16);
+}
+
+.tr-exerciseNavigatorItem.is-warning{
+  border-color:rgba(255,150,35,.62);
+  background:linear-gradient(180deg, rgba(255,140,0,.17), rgba(90,45,0,.10));
+  color:rgba(255,238,215,.96);
+}
+
+.tr-exerciseNavigatorItem.is-warning .tr-exerciseNavigatorIcon{
+  border-color:rgba(255,150,35,.70);
+  background:rgba(255,140,0,.15);
+  color:rgba(255,225,185,.98);
+}
+
+/* ============================================================
+   SOUND & ALERTS
+   ============================================================ */
+.tr-soundAlertsPage{
+  display:grid;
+  gap:14px;
+  padding-bottom:40px;
+}
+
+.tr-soundAlertsIntro{
+  display:grid;
+  grid-template-columns:52px minmax(0,1fr);
+  gap:14px;
+  align-items:center;
+  border-radius:16px;
+  border:1px solid rgba(0,170,255,.18);
+  background:linear-gradient(180deg, rgba(0,170,255,.09), rgba(0,0,0,.10));
+  padding:14px;
+}
+
+.tr-soundAlertsIntroIcon{
+  width:52px;
+  height:52px;
+  border-radius:16px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(0,170,255,.34);
+  background:rgba(0,170,255,.12);
+  color:rgba(190,235,255,.98);
+  font-size:28px;
+  font-weight:1000;
+  box-shadow:0 0 20px rgba(0,170,255,.12);
+}
+
+.tr-soundAlertsIntroTitle{
+  margin-bottom:5px;
+  font-weight:1000;
+  letter-spacing:.12em;
+  color:rgba(255,255,255,.96);
+}
+
+.tr-soundAlertsNotice{
+  border-radius:14px;
+  padding:12px 14px;
+  font-weight:900;
+  line-height:1.4;
+}
+
+.tr-soundAlertsNotice.is-ok{
+  border:1px solid rgba(34,197,94,.30);
+  background:rgba(34,197,94,.10);
+  color:rgba(225,255,238,.96);
+}
+
+.tr-soundAlertsNotice.is-err{
+  border:1px solid rgba(255,90,90,.30);
+  background:rgba(255,90,90,.10);
+  color:rgba(255,230,230,.96);
+}
+
+.tr-soundAlertsGrid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:12px;
+}
+
+.tr-soundAlertCard{
+  min-width:0;
+  display:grid;
+  align-content:start;
+  gap:12px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.11);
+  background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.13));
+  padding:15px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 18px 46px rgba(0,0,0,.28);
+}
+
+.tr-soundAlertCardTop{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+}
+
+.tr-soundAlertTitle{
+  margin-top:4px;
+  font-size:18px;
+  font-weight:1000;
+  color:rgba(255,255,255,.96);
+}
+
+.tr-soundAlertStatus{
+  flex:0 0 auto;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);
+  padding:6px 8px;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.10em;
+}
+
+.tr-soundAlertStatus.is-custom{
+  border-color:rgba(34,197,94,.38);
+  background:rgba(34,197,94,.10);
+  color:rgba(215,255,232,.96);
+}
+
+.tr-soundAlertStatus.is-built-in{
+  border-color:rgba(0,170,255,.30);
+  background:rgba(0,170,255,.08);
+  color:rgba(190,235,255,.94);
+}
+
+.tr-soundAlertFile{
+  min-width:0;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(0,0,0,.18);
+  padding:11px 12px;
+}
+
+.tr-soundAlertFileLabel{
+  color:rgba(255,255,255,.52);
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.14em;
+}
+
+.tr-soundAlertFileName{
+  margin-top:5px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:900;
+  color:rgba(255,255,255,.90);
+}
+
+.tr-soundAlertHiddenInput{
+  position:absolute;
+  width:1px;
+  height:1px;
+  overflow:hidden;
+  clip:rect(0 0 0 0);
+  white-space:nowrap;
+  clip-path:inset(50%);
+}
+
+.tr-soundAlertActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+
+.tr-soundAlertActions .tr-btn{
+  width:100%;
+  min-width:0;
+  padding-inline:10px;
+  font-size:11px;
+}
+
+.tr-soundAlertRemove{
+  grid-column:1 / -1;
+  border-color:rgba(255,90,90,.24) !important;
+  color:rgba(255,220,220,.92) !important;
+}
+
+@media (max-width: 900px){
+  .tr-soundAlertsGrid{
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width: 640px){
+  .tr-exerciseNavigatorLegend{
+    display:none;
+  }
+
+  .tr-exerciseNavigatorItem{
+    min-width:76vw;
+    max-width:300px;
+  }
+
+  .tr-soundAlertsIntro{
+    grid-template-columns:44px minmax(0,1fr);
+    padding:12px;
+  }
+
+  .tr-soundAlertsIntroIcon{
+    width:44px;
+    height:44px;
+    border-radius:14px;
+    font-size:24px;
+  }
+}
