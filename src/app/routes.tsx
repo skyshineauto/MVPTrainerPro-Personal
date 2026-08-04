@@ -10,6 +10,7 @@ import { ExerciseDetailPage } from "../features/library/ExerciseDetailPage";
 import { ProgressPage } from "../features/progress/ProgressPage";
 import { CoachPage } from "../features/coach/CoachPage";
 import { SoundAlertsPage } from "../features/settings/SoundAlertsPage";
+import { MusicPage } from "../features/music/MusicPage";
 
 export type Route = { path: string; el: ReactElement };
 
@@ -40,5 +41,6 @@ export const routes: Route[] = [
   { path: "/library/:exerciseId", el: <ExerciseDetailPage /> },
   { path: "/progress", el: <ProgressPage /> },
   { path: "/sound-alerts", el: <SoundAlertsPage /> },
+  { path: "/music", el: <MusicPage /> },
   { path: "/coach", el: <CoachPageRoute /> },
 ];
