@@ -1,19 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-type Status = "loading" | "ready" | "success" | "error";
+type PageState = "loading" | "ready" | "success" | "fatal";
 
 function parseHashTokens() {
-  const raw = window.location.hash.startsWith("#")
+  const rawHash = window.location.hash.startsWith("#")
     ? window.location.hash.slice(1)
     : window.location.hash;
 
-  const params = new URLSearchParams(raw);
-  const access_token = params.get("access_token");
-  const refresh_token = params.get("refresh_token");
-  const type = params.get("type");
+  const params = new URLSearchParams(rawHash);
 
-  return { access_token, refresh_token, type };
+  return {
+    accessToken: params.get("access_token"),
+    refreshToken: params.get("refresh_token"),
+    type: params.get("type"),
+  };
 }
 
 export function ResetPasswordPage({
@@ -21,53 +22,77 @@ export function ResetPasswordPage({
 }: {
   navigate?: (to: string) => void;
 }) {
-  const [status, setStatus] = useState<Status>("loading");
-  const [message, setMessage] = useState("Preparing secure password reset...");
+  const [pageState, setPageState] = useState<PageState>("loading");
+  const [message, setMessage] = useState(
+    "Preparing secure password reset..."
+  );
+  const [formError, setFormError] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const hasRecoveryParams = useMemo(() => {
+  const hasRecoveryParameters = useMemo(() => {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("code");
-    const { access_token, refresh_token, type } = parseHashTokens();
+    const { accessToken, refreshToken, type } = parseHashTokens();
 
     return Boolean(
-      code || (type === "recovery" && access_token && refresh_token)
+      code ||
+        (type === "recovery" && accessToken && refreshToken)
     );
   }, []);
 
   useEffect(() => {
     let alive = true;
 
-    async function bootstrap() {
+    async function prepareRecoverySession() {
       try {
         const url = new URL(window.location.href);
         const code = url.searchParams.get("code");
 
         if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          const { error } =
+            await supabase.auth.exchangeCodeForSession(code);
+
           if (error) throw error;
 
+          window.history.replaceState(
+            {},
+            document.title,
+            "/reset-password"
+          );
+
           if (!alive) return;
-          setStatus("ready");
+
+          setPageState("ready");
           setMessage("Enter your new password below.");
           return;
         }
 
-        const { access_token, refresh_token, type } = parseHashTokens();
+        const { accessToken, refreshToken, type } =
+          parseHashTokens();
 
-        if (type === "recovery" && access_token && refresh_token) {
+        if (
+          type === "recovery" &&
+          accessToken &&
+          refreshToken
+        ) {
           const { error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
+            access_token: accessToken,
+            refresh_token: refreshToken,
           });
+
           if (error) throw error;
 
-          window.history.replaceState({}, document.title, "/reset-password");
+          window.history.replaceState(
+            {},
+            document.title,
+            "/reset-password"
+          );
 
           if (!alive) return;
-          setStatus("ready");
+
+          setPageState("ready");
           setMessage("Enter your new password below.");
           return;
         }
@@ -76,66 +101,91 @@ export function ResetPasswordPage({
           data: { session },
         } = await supabase.auth.getSession();
 
+        // This also allows a user who is already signed in to set a new
+        // password from the recovery page.
         if (session) {
           if (!alive) return;
-          setStatus("ready");
+
+          setPageState("ready");
           setMessage("Enter your new password below.");
           return;
         }
 
-        throw new Error("Recovery link is missing or invalid.");
-      } catch (err: any) {
+        throw new Error(
+          "This recovery link is invalid or has expired. Request a new one."
+        );
+      } catch (error: any) {
         if (!alive) return;
-        setStatus("error");
+
+        setPageState("fatal");
         setMessage(
-          err?.message ||
+          error?.message ||
             "This recovery link is invalid or has expired. Request a new one."
         );
       }
     }
 
-    void bootstrap();
+    void prepareRecoverySession();
 
     return () => {
       alive = false;
     };
   }, []);
 
-  async function updatePassword(e: React.FormEvent) {
-    e.preventDefault();
+  async function updatePassword(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
 
-    if (status !== "ready") return;
-
-    if (!password || password.length < 8) {
-      setStatus("error");
-      setMessage("Password must be at least 8 characters.");
+    if (pageState !== "ready" || busy) {
       return;
     }
 
-    if (password !== confirm) {
-      setStatus("error");
-      setMessage("Passwords do not match.");
+    setFormError("");
+
+    if (password.length < 8) {
+      setFormError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setFormError("Passwords do not match.");
       return;
     }
 
     setBusy(true);
-    setStatus("ready");
     setMessage("Updating password...");
 
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      const { error } = await supabase.auth.updateUser({
+        password,
+      });
+
       if (error) throw error;
 
-      setStatus("success");
-      setMessage("Password updated successfully. You can sign in now.");
       setPassword("");
-      setConfirm("");
-    } catch (err: any) {
-      setStatus("error");
-      setMessage(err?.message || "Could not update password.");
+      setConfirmPassword("");
+      setPageState("success");
+      setMessage(
+        "Password updated successfully. Your account is ready."
+      );
+    } catch (error: any) {
+      setFormError(
+        error?.message || "Could not update password."
+      );
+      setMessage("Enter your new password below.");
     } finally {
       setBusy(false);
     }
+  }
+
+  function goTo(path: string) {
+    if (navigate) {
+      navigate(path);
+      return;
+    }
+
+    window.location.pathname = path;
   }
 
   return (
@@ -146,84 +196,167 @@ export function ResetPasswordPage({
       <div style={styles.card}>
         <div style={styles.kicker}>MVP Trainer</div>
         <h1 style={styles.title}>Reset Password</h1>
-        <p style={styles.sub}>Secure your account with a fresh password.</p>
+        <p style={styles.sub}>
+          Secure your account with a fresh password.
+        </p>
 
-        {status === "loading" ? (
-          <div style={{ ...styles.notice, ...styles.noticeInfo }}>{message}</div>
+        {pageState === "loading" ? (
+          <div
+            style={{
+              ...styles.notice,
+              ...styles.noticeInfo,
+            }}
+          >
+            {message}
+          </div>
         ) : null}
 
-        {status === "error" ? (
-          <>
-            <div style={{ ...styles.notice, ...styles.noticeErr }}>{message}</div>
-
-            {!hasRecoveryParams ? (
-              <button
-                type="button"
-                style={{ ...styles.secondaryBtn, marginTop: 18 }}
-                onClick={() => {
-                  if (navigate) navigate("/forgot-password");
-                  else window.location.pathname = "/forgot-password";
-                }}
-              >
-                REQUEST NEW RESET LINK
-              </button>
-            ) : null}
-          </>
-        ) : null}
-
-        {(status === "ready" || status === "success") && (
+        {pageState === "fatal" ? (
           <>
             <div
               style={{
                 ...styles.notice,
-                ...(status === "success" ? styles.noticeOk : styles.noticeInfo),
+                ...styles.noticeErr,
               }}
             >
               {message}
             </div>
 
-            {status === "ready" && (
-              <form onSubmit={updatePassword} style={{ ...styles.form, marginTop: 18 }}>
-                <label style={styles.label}>New password</label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Minimum 8 characters"
-                  style={styles.input}
-                />
+            <button
+              type="button"
+              style={{
+                ...styles.secondaryBtn,
+                marginTop: 18,
+              }}
+              onClick={() => goTo("/forgot-password")}
+            >
+              REQUEST NEW RESET LINK
+            </button>
 
-                <label style={styles.label}>Confirm password</label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  placeholder="Re-enter password"
-                  style={styles.input}
-                />
+            <button
+              type="button"
+              style={{
+                ...styles.textBtn,
+                marginTop: 10,
+              }}
+              onClick={() => goTo("/login")}
+            >
+              BACK TO LOGIN
+            </button>
+          </>
+        ) : null}
 
-                <button type="submit" disabled={busy} style={styles.primaryBtn}>
-                  {busy ? "UPDATING..." : "UPDATE PASSWORD"}
-                </button>
-              </form>
-            )}
+        {pageState === "ready" ? (
+          <>
+            <div
+              style={{
+                ...styles.notice,
+                ...styles.noticeInfo,
+              }}
+            >
+              {message}
+            </div>
 
-            {status === "success" && (
-              <button
-                type="button"
-                style={{ ...styles.secondaryBtn, marginTop: 18 }}
-                onClick={() => {
-                  if (navigate) navigate("/login");
-                  else window.location.pathname = "/login";
+            {formError ? (
+              <div
+                style={{
+                  ...styles.notice,
+                  ...styles.noticeErr,
+                  marginTop: 12,
                 }}
               >
-                GO TO LOGIN
+                {formError}
+              </div>
+            ) : null}
+
+            <form
+              onSubmit={updatePassword}
+              style={{
+                ...styles.form,
+                marginTop: 18,
+              }}
+            >
+              <label style={styles.label}>
+                New password
+              </label>
+
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
+                placeholder="Minimum 8 characters"
+                style={styles.input}
+                disabled={busy}
+              />
+
+              <label style={styles.label}>
+                Confirm password
+              </label>
+
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(event.target.value)
+                }
+                placeholder="Re-enter password"
+                style={styles.input}
+                disabled={busy}
+              />
+
+              <button
+                type="submit"
+                disabled={busy}
+                style={{
+                  ...styles.primaryBtn,
+                  opacity: busy ? 0.65 : 1,
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+              >
+                {busy
+                  ? "UPDATING..."
+                  : "UPDATE PASSWORD"}
               </button>
-            )}
+            </form>
           </>
-        )}
+        ) : null}
+
+        {pageState === "success" ? (
+          <>
+            <div
+              style={{
+                ...styles.notice,
+                ...styles.noticeOk,
+              }}
+            >
+              {message}
+            </div>
+
+            <button
+              type="button"
+              style={{
+                ...styles.primaryBtn,
+                width: "100%",
+                marginTop: 18,
+              }}
+              onClick={() => goTo("/")}
+            >
+              RETURN TO MVP TRAINER
+            </button>
+          </>
+        ) : null}
+
+        {!hasRecoveryParameters &&
+        pageState === "ready" ? (
+          <div style={styles.sessionNote}>
+            You are already signed in. Saving will update the
+            password for the current MVP Trainer account.
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -315,11 +448,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     fontWeight: 700,
     outline: "none",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,.04)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,.04)",
   },
   primaryBtn: {
     height: 52,
-    marginTop: 8,
     borderRadius: 14,
     border: "1px solid rgba(0,170,255,.46)",
     background:
@@ -343,6 +476,17 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     width: "100%",
   },
+  textBtn: {
+    width: "100%",
+    border: 0,
+    background: "transparent",
+    color: "rgba(120,220,255,.92)",
+    fontWeight: 900,
+    letterSpacing: ".10em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    padding: 10,
+  },
   notice: {
     borderRadius: 14,
     padding: "12px 14px",
@@ -363,5 +507,12 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,90,90,.28)",
     background: "rgba(255,90,90,.10)",
     color: "rgba(255,230,230,.96)",
+  },
+  sessionNote: {
+    marginTop: 14,
+    color: "rgba(210,230,242,.68)",
+    fontSize: 13,
+    lineHeight: 1.45,
+    textAlign: "center",
   },
 };
