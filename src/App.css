@@ -3276,3 +3276,79 @@ html.tr-modal-open .tr-bottomNavWrap{
     width: 100%;
   }
 }
+
+/* ============================================================
+   PLANNED SESSION EDITOR: DESKTOP / TABLET LANDSCAPE OVERRIDE
+   Keeps phones on the tabbed layout, but gives every wider screen
+   the full-height two-column workspace instead of the old 24% row.
+   ============================================================ */
+@media (min-width: 721px){
+  .tr-plannedEditor{
+    width: min(1320px, calc(100vw - 24px)) !important;
+    height: min(920px, calc(100dvh - 24px)) !important;
+    max-width: none !important;
+  }
+
+  .tr-plannedEditor .tr-editModalBody{
+    display: grid !important;
+    grid-template-columns: minmax(0, .94fr) minmax(0, 1.06fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 14px !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding: 14px 16px 16px !important;
+  }
+
+  .tr-plannedEditor .tr-editMobileTabs{
+    display: none !important;
+  }
+
+  .tr-plannedEditor .tr-editCurrentPanel,
+  .tr-plannedEditor .tr-editAddPanel{
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .tr-plannedEditor .tr-editCurrentPanel > .tr-card,
+  .tr-plannedEditor .tr-editAddPanel > .tr-card{
+    height: 100% !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+  }
+
+  .tr-plannedEditor .tr-editCurrentPanel > .tr-card > .tr-card-body,
+  .tr-plannedEditor .tr-editAddPanel > .tr-card > .tr-card-body{
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .tr-plannedEditor .tr-editCurrentList{
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    align-content: start !important;
+    gap: 8px !important;
+    padding-right: 7px !important;
+  }
+
+  .tr-plannedEditor .tr-editAddLayout{
+    height: 100% !important;
+    min-height: 0 !important;
+    grid-template-rows: auto 44px auto minmax(0, 1fr) !important;
+  }
+
+  .tr-plannedEditor .tr-editResultsViewport{
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    padding-right: 7px !important;
+  }
+}
