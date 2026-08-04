@@ -243,7 +243,7 @@ export function MusicMiniPlayer({
 
   return (
     <section
-      className={`tr-audioDeck ${player.playing ? "is-playing" : ""}`}
+      className={`tr-audioDeck ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
       aria-label="MVP Trainer music console"
     >
       <div className="tr-audioDeckTop">
@@ -338,7 +338,7 @@ export function MusicMiniPlayer({
               type="button"
               className="tr-audioTransportButton"
               onClick={() => run(previousMusicTrack)}
-              disabled={!player.tracks.length}
+              disabled={!player.tracks.length || player.loading || queueBusy}
               aria-label="Previous song"
             >
               <span className="tr-audioTransportFace"><PlayerIcon name="back" /></span>
@@ -351,6 +351,7 @@ export function MusicMiniPlayer({
               type="button"
               className="tr-audioTransportButton tr-audioTransportButton--primary"
               onClick={() => run(player.playing ? pauseMusic : playMusic)}
+              disabled={player.loading || queueBusy}
               aria-label={player.playing ? "Pause music" : "Play music"}
             >
               <span className="tr-audioTransportFace">
@@ -365,7 +366,7 @@ export function MusicMiniPlayer({
               type="button"
               className="tr-audioTransportButton"
               onClick={() => stopMusic()}
-              disabled={!track}
+              disabled={!track || player.loading || queueBusy}
               aria-label="Stop music"
             >
               <span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span>
@@ -378,7 +379,7 @@ export function MusicMiniPlayer({
               type="button"
               className="tr-audioTransportButton"
               onClick={() => run(() => nextMusicTrack())}
-              disabled={!player.tracks.length}
+              disabled={!player.tracks.length || player.loading || queueBusy}
               aria-label="Next song"
             >
               <span className="tr-audioTransportFace"><PlayerIcon name="next" /></span>
