@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
+import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExerciseModal";
 import {
   getMuscleDetailOptions,
   matchFilters,
@@ -104,7 +105,11 @@ function positiveInt(value: unknown, fallback: number, minimum = 0) {
 }
 
 function defaultPrescription(exercise?: ExerciseRow | null) {
-  const p = exercise?.template_params ?? {};
+  const params = exercise?.template_params ?? {};
+  const p =
+    params?.default_prescription && typeof params.default_prescription === "object"
+      ? params.default_prescription
+      : params;
   return {
     sets: positiveInt(p.sets, 3, 1),
     rep_min: positiveInt(p.rep_min, 8, 1),
@@ -252,6 +257,7 @@ export function PlannedSessionEditor({
   const [muscleDetail, setMuscleDetail] = useState<MuscleDetailKey>("all");
   const [equip, setEquip] = useState<EquipKey>("all");
   const [visibleCount, setVisibleCount] = useState(RESULTS_BATCH_SIZE);
+  const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
 
   useEffect(() => lockDocumentForPlanner(), []);
 
@@ -437,6 +443,36 @@ export function PlannedSessionEditor({
         },
       ])
     );
+  }
+
+  async function handleCreatedExercise(
+    exercise: CreatedExercise,
+    addToSession: boolean
+  ) {
+    const normalized: ExerciseRow = {
+      id: exercise.id,
+      name: exercise.name,
+      source: exercise.source ?? "custom",
+      primary_muscles: exercise.primary_muscles ?? [],
+      secondary_muscles: exercise.secondary_muscles ?? [],
+      equipment: exercise.equipment ?? [],
+      media: exercise.media ?? null,
+      template_params: exercise.template_params ?? {},
+    };
+
+    setCatalog((current) => {
+      const withoutDuplicate = current.filter((item) => item.id !== normalized.id);
+      return [...withoutDuplicate, normalized].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+    });
+
+    setQuery(normalized.name);
+    setVisibleCount(RESULTS_BATCH_SIZE);
+
+    if (addToSession) {
+      pickExercise(normalized);
+    }
   }
 
   async function createTemplateFromDraft(label: string) {
@@ -691,6 +727,19 @@ export function PlannedSessionEditor({
             <Card title={swapIndex != null ? "Pick replacement" : "Add an exercise"} tone="blue">
               <div className="tr-editAddLayout">
                 <div className="tr-rowbox tr-plannedFilterBox tr-editFilterScroll" style={{ display: "grid", gap: 8 }}>
+                  <div className="tr-createInlineBar">
+                    <div>
+                      <div className="tr-kicker">CUSTOM EXERCISE</div>
+                      <div className="tr-sub">Create one with media and workout defaults.</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="tr-btn tr-btn--blueOutline"
+                      onClick={() => setCreateExerciseOpen(true)}
+                    >
+                      + Create New Exercise
+                    </button>
+                  </div>
                   <div style={{ display: "grid", gap: 6 }}>
                     <div className="tr-kicker">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
@@ -798,6 +847,14 @@ export function PlannedSessionEditor({
           </button>
         </div>
       </div>
+
+      <CreateExerciseModal
+        open={createExerciseOpen}
+        onClose={() => setCreateExerciseOpen(false)}
+        onCreated={handleCreatedExercise}
+        allowAddToSession
+        addActionLabel={swapIndex != null ? "Save & Use as Replacement" : "Save & Add to Session"}
+      />
     </div>,
     document.body
   );
