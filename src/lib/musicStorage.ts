@@ -207,7 +207,7 @@ export async function uploadMusicTrack(
 
 export async function updateMusicTrack(
   trackId: string,
-  patch: Pick<MusicTrack, "title" | "artist"> | Partial<Pick<MusicTrack, "title" | "artist" | "sort_order">>
+  patch: Partial<Pick<MusicTrack, "title" | "artist" | "sort_order">>
 ): Promise<MusicTrack> {
   const userId = await requireUserId();
   const title = patch.title?.trim();
