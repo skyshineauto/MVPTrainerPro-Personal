@@ -4,12 +4,20 @@ import {
   listMusicTracks,
   type MusicTrack,
 } from "./musicStorage";
+import {
+  getMusicPlaylist,
+  listMusicPlaylistTrackLinks,
+  type MusicPlaylist,
+} from "./playlistStorage";
 
 export type MusicRepeatMode = "off" | "all" | "one";
 
 export type MusicPlayerState = {
+  libraryTracks: MusicTrack[];
   tracks: MusicTrack[];
   currentTrack: MusicTrack | null;
+  activePlaylistId: string | null;
+  activePlaylistName: string | null;
   loading: boolean;
   playing: boolean;
   currentTime: number;
@@ -25,12 +33,17 @@ const STORAGE_KEYS = {
   currentTime: "mvp_music_current_time",
   shuffle: "mvp_music_shuffle",
   repeat: "mvp_music_repeat",
+  activePlaylistId: "mvp_music_active_playlist_id",
+  activePlaylistName: "mvp_music_active_playlist_name",
 };
 
 const listeners = new Set<() => void>();
 let state: MusicPlayerState = {
+  libraryTracks: [],
   tracks: [],
   currentTrack: null,
+  activePlaylistId: readStored(STORAGE_KEYS.activePlaylistId) || null,
+  activePlaylistName: readStored(STORAGE_KEYS.activePlaylistName) || null,
   loading: false,
   playing: false,
   currentTime: 0,
@@ -48,21 +61,21 @@ let mediaSourceConnected = false;
 let loadingTrackId: string | null = null;
 let timeSaveTimer = 0;
 
-function readBoolean(key: string) {
+function readStored(key: string) {
   try {
-    return localStorage.getItem(key) === "true";
+    return localStorage.getItem(key) ?? "";
   } catch {
-    return false;
+    return "";
   }
 }
 
+function readBoolean(key: string) {
+  return readStored(key) === "true";
+}
+
 function readRepeatMode(): MusicRepeatMode {
-  try {
-    const value = localStorage.getItem(STORAGE_KEYS.repeat);
-    return value === "all" || value === "one" ? value : "off";
-  } catch {
-    return "off";
-  }
+  const value = readStored(STORAGE_KEYS.repeat);
+  return value === "all" || value === "one" ? value : "off";
 }
 
 function emit(patch: Partial<MusicPlayerState>) {
@@ -73,6 +86,14 @@ function emit(patch: Partial<MusicPlayerState>) {
 function savePlayerSetting(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
+  } catch {
+    // Storage is optional.
+  }
+}
+
+function removePlayerSetting(key: string) {
+  try {
+    localStorage.removeItem(key);
   } catch {
     // Storage is optional.
   }
@@ -109,7 +130,7 @@ function configureMediaSession() {
       ? new MediaMetadata({
           title: current.title,
           artist: current.artist || "MVP Trainer Music",
-          album: "MVP Trainer",
+          album: state.activePlaylistName || "MVP Trainer",
         })
       : null;
   } catch {
@@ -122,6 +143,9 @@ function configureMediaSession() {
     ["previoustrack", () => void previousMusicTrack()],
     ["nexttrack", () => void nextMusicTrack()],
     ["stop", stopMusic],
+    ["seekto", (details) => {
+      if (typeof details.seekTime === "number") seekMusic(details.seekTime);
+    }],
   ];
 
   for (const [action, handler] of handlers) {
@@ -193,9 +217,7 @@ function connectMusicGain() {
 async function unlockMusicAudio() {
   connectMusicGain();
   const context = getAudioContext();
-  if (context?.state === "suspended") {
-    await context.resume();
-  }
+  if (context?.state === "suspended") await context.resume();
 }
 
 function getCurrentIndex() {
@@ -223,7 +245,6 @@ function nextShuffleIndex() {
   while (nextIndex === currentIndex) {
     nextIndex = Math.floor(Math.random() * count);
   }
-
   return nextIndex;
 }
 
@@ -232,7 +253,6 @@ async function handleTrackEnded() {
     await playMusicTrack(state.currentTrack.id, 0);
     return;
   }
-
   await nextMusicTrack(true);
 }
 
@@ -247,8 +267,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     const url = await getMusicTrackSignedUrl(track);
     if (loadingTrackId !== track.id) return;
 
-    const currentSource = audio.dataset.trackId;
-    if (currentSource !== track.id || audio.src !== url) {
+    if (audio.dataset.trackId !== track.id || audio.src !== url) {
       audio.pause();
       audio.src = url;
       audio.dataset.trackId = track.id;
@@ -277,38 +296,68 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
   }
 }
 
+async function resolveSavedQueue(libraryTracks: MusicTrack[]) {
+  const savedPlaylistId = readStored(STORAGE_KEYS.activePlaylistId);
+  if (!savedPlaylistId) {
+    return {
+      tracks: libraryTracks,
+      playlistId: null as string | null,
+      playlistName: null as string | null,
+    };
+  }
+
+  try {
+    const [playlist, links] = await Promise.all([
+      getMusicPlaylist(savedPlaylistId),
+      listMusicPlaylistTrackLinks(savedPlaylistId),
+    ]);
+    if (!playlist) throw new Error("Playlist no longer exists.");
+
+    const byId = new Map(libraryTracks.map((track) => [track.id, track]));
+    const tracks = links
+      .map((link) => byId.get(link.track_id))
+      .filter((track): track is MusicTrack => Boolean(track));
+
+    if (!tracks.length) throw new Error("Playlist is empty.");
+    return { tracks, playlistId: playlist.id, playlistName: playlist.name };
+  } catch {
+    removePlayerSetting(STORAGE_KEYS.activePlaylistId);
+    removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+    return {
+      tracks: libraryTracks,
+      playlistId: null as string | null,
+      playlistName: null as string | null,
+    };
+  }
+}
+
 export async function loadMusicLibrary(force = false) {
-  if (state.loading) return state.tracks;
-  if (state.libraryLoaded && !force) return state.tracks;
+  if (state.loading) return state.libraryTracks;
+  if (state.libraryLoaded && !force) return state.libraryTracks;
 
   emit({ loading: true, error: null });
   try {
-    const tracks = await listMusicTracks();
-    let currentTrack = state.currentTrack;
-
-    if (currentTrack) {
-      currentTrack = tracks.find((track) => track.id === currentTrack?.id) ?? null;
-    }
-
-    if (!currentTrack) {
-      let savedId = "";
-      try {
-        savedId = localStorage.getItem(STORAGE_KEYS.currentTrackId) ?? "";
-      } catch {
-        savedId = "";
-      }
-      currentTrack = tracks.find((track) => track.id === savedId) ?? tracks[0] ?? null;
-    }
+    const libraryTracks = await listMusicTracks();
+    const queue = await resolveSavedQueue(libraryTracks);
+    const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
+    const currentTrack =
+      queue.tracks.find((track) => track.id === state.currentTrack?.id) ??
+      queue.tracks.find((track) => track.id === savedTrackId) ??
+      queue.tracks[0] ??
+      null;
 
     emit({
-      tracks,
+      libraryTracks,
+      tracks: queue.tracks,
+      activePlaylistId: queue.playlistId,
+      activePlaylistName: queue.playlistName,
       currentTrack,
       loading: false,
       libraryLoaded: true,
       error: null,
     });
     configureMediaSession();
-    return tracks;
+    return libraryTracks;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Could not load your music library.";
     emit({ loading: false, libraryLoaded: true, error: message });
@@ -316,25 +365,81 @@ export async function loadMusicLibrary(force = false) {
   }
 }
 
-export function replaceMusicLibrary(tracks: MusicTrack[]) {
+export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
+  const activeIds = new Set(state.tracks.map((track) => track.id));
+  const tracks = state.activePlaylistId
+    ? libraryTracks.filter((track) => activeIds.has(track.id))
+    : libraryTracks;
   const currentTrack = state.currentTrack
-    ? tracks.find((track) => track.id === state.currentTrack?.id) ?? null
+    ? tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null
     : tracks[0] ?? null;
 
   if (state.currentTrack && !currentTrack) stopMusic();
-  emit({ tracks, currentTrack, libraryLoaded: true });
+  emit({ libraryTracks, tracks, currentTrack, libraryLoaded: true });
   configureMediaSession();
+}
+
+export function activateAllMusicTracks() {
+  savePlayerSetting(STORAGE_KEYS.activePlaylistId, "");
+  savePlayerSetting(STORAGE_KEYS.activePlaylistName, "");
+  removePlayerSetting(STORAGE_KEYS.activePlaylistId);
+  removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+  const currentTrack =
+    state.libraryTracks.find((track) => track.id === state.currentTrack?.id) ??
+    state.libraryTracks[0] ??
+    null;
+  emit({
+    tracks: state.libraryTracks,
+    currentTrack,
+    activePlaylistId: null,
+    activePlaylistName: null,
+  });
+  configureMediaSession();
+}
+
+export function activateMusicPlaylistQueue(
+  playlist: Pick<MusicPlaylist, "id" | "name">,
+  tracks: MusicTrack[]
+) {
+  savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id);
+  savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
+  const currentTrack =
+    tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
+  emit({
+    tracks,
+    currentTrack,
+    activePlaylistId: playlist.id,
+    activePlaylistName: playlist.name,
+    error: tracks.length ? null : "This playlist has no songs.",
+  });
+  configureMediaSession();
+}
+
+export async function playMusicPlaylist(
+  playlist: Pick<MusicPlaylist, "id" | "name">,
+  tracks: MusicTrack[],
+  startTrackId?: string
+) {
+  activateMusicPlaylistQueue(playlist, tracks);
+  const startTrack = tracks.find((track) => track.id === startTrackId) ?? tracks[0];
+  if (!startTrack) throw new Error("Add songs to this playlist before playing it.");
+  await playMusicTrack(startTrack.id, 0);
 }
 
 export async function playMusicTrack(trackId: string, startAt = 0) {
   if (!state.libraryLoaded) await loadMusicLibrary();
-  const track = state.tracks.find((item) => item.id === trackId);
+  const track =
+    state.tracks.find((item) => item.id === trackId) ??
+    state.libraryTracks.find((item) => item.id === trackId);
   if (!track) throw new Error("Song not found in your music library.");
+
+  if (!state.tracks.some((item) => item.id === trackId)) {
+    activateAllMusicTracks();
+  }
 
   await unlockMusicAudio();
   await loadTrack(track, startAt);
-  const audio = ensureAudioElement();
-  await audio.play();
+  await ensureAudioElement().play();
 }
 
 export async function playMusic() {
@@ -349,12 +454,7 @@ export async function playMusic() {
   }
 
   if (audio.dataset.trackId !== track.id || !audio.src) {
-    let savedTime = 0;
-    try {
-      savedTime = Number(localStorage.getItem(STORAGE_KEYS.currentTime) ?? 0);
-    } catch {
-      savedTime = 0;
-    }
+    const savedTime = Number(readStored(STORAGE_KEYS.currentTime) || 0);
     await loadTrack(track, Number.isFinite(savedTime) ? savedTime : 0);
   }
 
@@ -377,6 +477,19 @@ export function stopMusic() {
   emit({ playing: false, currentTime: 0 });
 }
 
+export function seekMusic(seconds: number) {
+  const audio = ensureAudioElement();
+  const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration;
+  const next = Math.max(0, Math.min(Number(seconds) || 0, Math.max(0, duration || 0)));
+  try {
+    audio.currentTime = next;
+    emit({ currentTime: next });
+    savePlayerSetting(STORAGE_KEYS.currentTime, String(next));
+  } catch {
+    // Ignore unavailable seeking until metadata exists.
+  }
+}
+
 export async function nextMusicTrack(fromEnded = false) {
   if (!state.libraryLoaded) await loadMusicLibrary();
   const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1);
@@ -393,15 +506,14 @@ export async function nextMusicTrack(fromEnded = false) {
 export async function previousMusicTrack() {
   const audio = ensureAudioElement();
   if (audio.currentTime > 5) {
-    audio.currentTime = 0;
-    emit({ currentTime: 0 });
+    seekMusic(0);
     return;
   }
 
   if (!state.libraryLoaded) await loadMusicLibrary();
   const index = nextSequentialIndex(-1);
   if (index < 0) {
-    audio.currentTime = 0;
+    seekMusic(0);
     return;
   }
 
