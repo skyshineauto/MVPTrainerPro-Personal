@@ -3,7 +3,6 @@ import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 
 import {
-  detailToPrimaryMuscleTag,
   effectiveHasMedia,
   getMuscleDetailOptions,
   matchFilters,
@@ -15,6 +14,7 @@ import {
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
 import { AlertIcon, CheckIcon } from "../../lib/exerciseIcons";
+import { CreateExerciseModal } from "./CreateExerciseModal";
 
 /** Icons for filter pills */
 import icoChest from "../../assets/gym.png";
@@ -190,54 +190,15 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   }
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createBusy, setCreateBusy] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createNotes, setCreateNotes] = useState("");
-
-  const [createMuscle, setCreateMuscle] = useState<Exclude<MuscleKey, "all">>("chest");
-  const [createMuscleDetail, setCreateMuscleDetail] = useState<MuscleDetailKey>("all");
-  const [createEquip, setCreateEquip] = useState<Exclude<EquipKey, "all">>("free_weight");
-
-  const [createSets, setCreateSets] = useState("3");
-  const [createRepMin, setCreateRepMin] = useState("8");
-  const [createRepMax, setCreateRepMax] = useState("12");
-  const [createRest, setCreateRest] = useState("90");
-
-  const [createCardioMins, setCreateCardioMins] = useState("10");
-
-  const isCreateCardio = createEquip === "cardio";
 
   const muscleDetailOptions = useMemo(() => getMuscleDetailOptions(muscle), [muscle]);
-  const createMuscleDetailOptions = useMemo(
-    () => getMuscleDetailOptions(createMuscle),
-    [createMuscle]
-  );
 
   function selectMuscle(next: MuscleKey) {
     setMuscle(next);
     setMuscleDetail("all");
   }
 
-  function selectCreateMuscle(next: Exclude<MuscleKey, "all">) {
-    setCreateMuscle(next);
-    setCreateMuscleDetail("all");
-  }
-
-  function resetCreate() {
-    setCreateName("");
-    setCreateNotes("");
-    setCreateMuscle("chest");
-    setCreateMuscleDetail("all");
-    setCreateEquip("free_weight");
-    setCreateSets("3");
-    setCreateRepMin("8");
-    setCreateRepMax("12");
-    setCreateRest("90");
-    setCreateCardioMins("10");
-  }
-
   function openCreate() {
-    resetCreate();
     setCreateOpen(true);
   }
 
@@ -392,64 +353,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     return () => clearTimeout(t);
   }, [q, muscle, muscleDetail, equip]);
 
-  async function createExercise() {
-    const name = createName.trim();
-    if (!name) {
-      showToast("NAME IS REQUIRED.", "err");
-      return;
-    }
-
-    if (isCreateCardio) {
-      const mins = Number(createCardioMins.trim());
-      if (!Number.isFinite(mins) || mins <= 0) {
-        showToast("CARDIO DURATION (MINUTES) IS REQUIRED.", "err");
-        return;
-      }
-    }
-
-    setCreateBusy(true);
-    try {
-      const primaryMuscle = isCreateCardio
-        ? "cardio"
-        : detailToPrimaryMuscleTag(createMuscleDetail, createMuscle);
-
-      const payload: any = {
-        name,
-        equipment: [createEquip],
-        primary_muscles: [primaryMuscle],
-        secondary_muscles: [],
-        notes: createNotes.trim() ? createNotes.trim() : null,
-        description: "",
-      };
-
-      if (isCreateCardio) {
-        payload.duration_minutes = Math.max(1, Math.floor(Number(createCardioMins.trim() || "0")));
-      } else {
-        payload.sets = Math.max(1, Math.floor(Number(createSets.trim() || "3")));
-        payload.rep_min = Math.max(1, Math.floor(Number(createRepMin.trim() || "8")));
-        payload.rep_max = Math.max(1, Math.floor(Number(createRepMax.trim() || "12")));
-        payload.rest_seconds = Math.max(0, Math.floor(Number(createRest.trim() || "90")));
-        payload.rir_min = 2;
-        payload.rir_max = 3;
-      }
-
-      const { data: newId, error } = await supabase.rpc("rpc_exercise_create_custom", { p_payload: payload });
-      if (error) throw error;
-
-      const id = typeof newId === "string" ? newId : (newId as any)?.id || null;
-      if (!id) throw new Error("Create succeeded but no id returned.");
-
-      showToast("EXERCISE CREATED.", "ok");
-      setCreateOpen(false);
-
-      await loadInitial();
-      navigate(`/library/${id}`);
-    } catch (e: any) {
-      showToast(e?.message ?? "CREATE FAILED.", "err");
-    } finally {
-      setCreateBusy(false);
-    }
-  }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -594,136 +497,17 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
         )}
       </Card>
 
-      {createOpen ? (
-        <div className="tr-modalOverlay">
-          <div className="tr-modal" style={{ width: "min(860px, 100%)" }}>
-            <div className="tr-modalHead">
-              <div style={{ fontWeight: 950 }}>Create Exercise</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button className="tr-btn" style={{ height: 44 }} onClick={() => setCreateOpen(false)} disabled={createBusy}>
-                  Close
-                </button>
-              </div>
-            </div>
+      <CreateExerciseModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={async (exercise) => {
+          showToast("EXERCISE CREATED WITH DEFAULTS AND MEDIA.", "ok");
+          setQ(exercise.name);
+          await loadInitial();
+        }}
+      />
 
-            <div style={{ padding: 16, display: "grid", gap: 12 }}>
-              <div className="tr-rowbox" style={{ display: "grid", gap: 10 }}>
-                <div style={{ display: "grid", gap: 6 }}>
-                  <div className="tr-kicker">EXERCISE NAME (REQUIRED)</div>
-                  <input value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="e.g., Dumbbell Bench Press" style={{ height: 46 }} />
-                </div>
 
-                <div style={{ display: "grid", gap: 6 }}>
-                  <div className="tr-kicker">MUSCLE GROUP (REQUIRED)</div>
-
-                  <div style={{ opacity: isCreateCardio ? 0.45 : 1, pointerEvents: isCreateCardio ? "none" : "auto", filter: isCreateCardio ? "grayscale(0.2)" : "none" }}>
-                    <div className="tr-filterRow">
-                      {MUSCLE_BUTTONS.filter((x) => x.key !== "all").map((b) => (
-                        <button key={b.key} className={`tr-seg ${createMuscle === (b.key as any) ? "is-active" : ""}`} onClick={() => selectCreateMuscle(b.key as Exclude<MuscleKey, "all">)} disabled={createBusy}>
-                          {b.icon ? <img className="tr-ico" src={b.icon} alt="" /> : null}
-                          {b.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {createMuscleDetailOptions.length > 1 ? (
-                      <div className="tr-filterRow tr-muscleDetailRow" style={{ marginTop: 8 }}>
-                        {createMuscleDetailOptions.map((option) => (
-                          <button
-                            key={option.key}
-                            className={`tr-seg ${createMuscleDetail === option.key ? "is-active" : ""}`}
-                            onClick={() => setCreateMuscleDetail(option.key)}
-                            disabled={createBusy}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {isCreateCardio ? <div className="tr-sub">Cardio selected: muscle group is disabled.</div> : null}
-                </div>
-
-                <div style={{ display: "grid", gap: 6 }}>
-                  <div className="tr-kicker">EQUIPMENT (REQUIRED)</div>
-                  <div className="tr-filterRow">
-                    {EQUIP_BUTTONS.filter((x) => x.key !== "all").map((b) => (
-                      <button key={b.key} className={`tr-seg ${createEquip === (b.key as any) ? "is-active" : ""}`} onClick={() => setCreateEquip(b.key as any)} disabled={createBusy}>
-                        {b.icon ? <img className="tr-ico" src={b.icon} alt="" /> : null}
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {isCreateCardio ? (
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div className="tr-kicker">DURATION (MINUTES) — REQUIRED FOR CARDIO</div>
-                    <input value={createCardioMins} onChange={(e) => setCreateCardioMins(e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g., 10" style={{ height: 46, width: "min(240px, 100%)" }} inputMode="numeric" disabled={createBusy} />
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <div className="tr-kicker">DEFAULTS (STRENGTH)</div>
-                    <div className="tr-sub">These defaults are used when you add this exercise into a session.</div>
-
-                    <div className="tr-two">
-                      <div>
-                        <div className="tr-kicker">SETS</div>
-                        <input value={createSets} onChange={(e) => setCreateSets(e.target.value.replace(/[^\d]/g, ""))} style={{ height: 46, width: "100%" }} disabled={createBusy} />
-                      </div>
-                      <div>
-                        <div className="tr-kicker">REST (SECONDS)</div>
-                        <input value={createRest} onChange={(e) => setCreateRest(e.target.value.replace(/[^\d]/g, ""))} style={{ height: 46, width: "100%" }} disabled={createBusy} />
-                      </div>
-                    </div>
-
-                    <div className="tr-two">
-                      <div>
-                        <div className="tr-kicker">REP MIN</div>
-                        <input value={createRepMin} onChange={(e) => setCreateRepMin(e.target.value.replace(/[^\d]/g, ""))} style={{ height: 46, width: "100%" }} disabled={createBusy} />
-                      </div>
-                      <div>
-                        <div className="tr-kicker">REP MAX</div>
-                        <input value={createRepMax} onChange={(e) => setCreateRepMax(e.target.value.replace(/[^\d]/g, ""))} style={{ height: 46, width: "100%" }} disabled={createBusy} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ display: "grid", gap: 6 }}>
-                  <div className="tr-kicker">NOTES (OPTIONAL)</div>
-                  <textarea value={createNotes} onChange={(e) => setCreateNotes(e.target.value)} placeholder="Anything special (form cues, setup, pain notes, etc.)" style={{ width: "100%", minHeight: 110, resize: "vertical" }} disabled={createBusy} />
-                </div>
-
-                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button className="tr-btn" style={{ height: 46 }} onClick={() => setCreateOpen(false)} disabled={createBusy}>
-                    Cancel
-                  </button>
-                  <button className="tr-btn tr-btn--primary" style={{ height: 46, minWidth: 220 }} onClick={createExercise} disabled={createBusy}>
-                    {createBusy ? "Saving…" : "Save Exercise"}
-                  </button>
-                </div>
-
-                <div className="tr-sub" style={{ marginTop: 2 }}>
-                  After saving, you’ll be taken to the Exercise Detail page to upload media (GIF/video/poster).
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <style>{`
-        .tr-two{
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-        @media (max-width: 980px){
-          .tr-two{ grid-template-columns: 1fr; }
-        }
-      `}</style>
     </div>
   );
 }
