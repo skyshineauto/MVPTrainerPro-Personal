@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import {
   getMusicTrackSignedUrl,
   listMusicTracks,
+  recordMusicTrackPlayed,
+  recordMusicTrackSkipped,
   type MusicTrack,
 } from "./musicStorage";
 import {
@@ -11,6 +13,60 @@ import {
 } from "./playlistStorage";
 
 export type MusicRepeatMode = "off" | "all" | "one";
+export type MusicEqPreset =
+  | "flat"
+  | "power"
+  | "deep_bass"
+  | "rock"
+  | "metal"
+  | "vocal"
+  | "reduced_treble"
+  | "custom";
+
+export const MUSIC_EQ_FREQUENCIES = [
+  60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000,
+] as const;
+
+export const MUSIC_EQ_PRESETS: Record<
+  Exclude<MusicEqPreset, "custom">,
+  { label: string; gains: number[]; preamp: number }
+> = {
+  flat: {
+    label: "Flat",
+    gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    preamp: 0,
+  },
+  power: {
+    label: "Power Training",
+    gains: [5, 4, 2, 0, 1, 2, 3, 4, 3, 2],
+    preamp: -2,
+  },
+  deep_bass: {
+    label: "Deep Bass",
+    gains: [7, 6, 4, 1, 0, 0, 0, 1, 1, 0],
+    preamp: -3,
+  },
+  rock: {
+    label: "Rock",
+    gains: [4, 3, 1, -1, 0, 2, 4, 5, 4, 3],
+    preamp: -2,
+  },
+  metal: {
+    label: "Metal",
+    gains: [4, 3, 0, -2, 0, 3, 5, 6, 5, 3],
+    preamp: -3,
+  },
+  vocal: {
+    label: "Vocal Clarity",
+    gains: [-2, -1, 0, 1, 3, 5, 4, 2, 0, -1],
+    preamp: -1,
+  },
+  reduced_treble: {
+    label: "Reduced Treble",
+    gains: [2, 2, 1, 0, 0, 0, -1, -3, -5, -6],
+    preamp: 0,
+  },
+};
 
 export type MusicPlayerState = {
   libraryTracks: MusicTrack[];
@@ -26,6 +82,10 @@ export type MusicPlayerState = {
   repeat: MusicRepeatMode;
   error: string | null;
   libraryLoaded: boolean;
+  eqEnabled: boolean;
+  eqPreset: MusicEqPreset;
+  eqGains: number[];
+  preampDb: number;
 };
 
 const STORAGE_KEYS = {
@@ -35,9 +95,67 @@ const STORAGE_KEYS = {
   repeat: "mvp_music_repeat",
   activePlaylistId: "mvp_music_active_playlist_id",
   activePlaylistName: "mvp_music_active_playlist_name",
+  eqEnabled: "mvp_music_eq_enabled",
+  eqPreset: "mvp_music_eq_preset",
+  eqGains: "mvp_music_eq_gains",
+  preampDb: "mvp_music_eq_preamp_db",
 };
 
 const listeners = new Set<() => void>();
+
+function readStored(key: string) {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function readBoolean(key: string, fallback = false) {
+  const value = readStored(key);
+  if (!value) return fallback;
+  return value === "true";
+}
+
+function readRepeatMode(): MusicRepeatMode {
+  const value = readStored(STORAGE_KEYS.repeat);
+  return value === "all" || value === "one" ? value : "off";
+}
+
+function readEqPreset(): MusicEqPreset {
+  const value = readStored(STORAGE_KEYS.eqPreset) as MusicEqPreset;
+  if (value === "custom" || Object.prototype.hasOwnProperty.call(MUSIC_EQ_PRESETS, value)) {
+    return value;
+  }
+  return "power";
+}
+
+function readEqGains(preset: MusicEqPreset) {
+  try {
+    const parsed = JSON.parse(readStored(STORAGE_KEYS.eqGains));
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === MUSIC_EQ_FREQUENCIES.length &&
+      parsed.every((value) => Number.isFinite(Number(value)))
+    ) {
+      return parsed.map((value) => Math.max(-12, Math.min(12, Number(value))));
+    }
+  } catch {
+    // Use the preset below.
+  }
+
+  if (preset !== "custom") return [...MUSIC_EQ_PRESETS[preset].gains];
+  return [...MUSIC_EQ_PRESETS.flat.gains];
+}
+
+function readPreamp(preset: MusicEqPreset) {
+  const value = Number(readStored(STORAGE_KEYS.preampDb));
+  if (Number.isFinite(value)) return Math.max(-12, Math.min(6, value));
+  return preset !== "custom" ? MUSIC_EQ_PRESETS[preset].preamp : 0;
+}
+
+const initialPreset = readEqPreset();
+
 let state: MusicPlayerState = {
   libraryTracks: [],
   tracks: [],
@@ -52,31 +170,23 @@ let state: MusicPlayerState = {
   repeat: readRepeatMode(),
   error: null,
   libraryLoaded: false,
+  eqEnabled: readBoolean(STORAGE_KEYS.eqEnabled, true),
+  eqPreset: initialPreset,
+  eqGains: readEqGains(initialPreset),
+  preampDb: readPreamp(initialPreset),
 };
 
 let audioElement: HTMLAudioElement | null = null;
 let audioContext: AudioContext | null = null;
+let mediaSource: MediaElementAudioSourceNode | null = null;
+let preampGain: GainNode | null = null;
+let equalizerFilters: BiquadFilterNode[] = [];
+let analyserNode: AnalyserNode | null = null;
 let musicGain: GainNode | null = null;
 let mediaSourceConnected = false;
 let loadingTrackId: string | null = null;
 let timeSaveTimer = 0;
-
-function readStored(key: string) {
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function readBoolean(key: string) {
-  return readStored(key) === "true";
-}
-
-function readRepeatMode(): MusicRepeatMode {
-  const value = readStored(STORAGE_KEYS.repeat);
-  return value === "all" || value === "one" ? value : "off";
-}
+let recordedPlayToken = "";
 
 function emit(patch: Partial<MusicPlayerState>) {
   state = { ...state, ...patch };
@@ -104,7 +214,10 @@ function savePlaybackPosition() {
   const now = Date.now();
   if (now - timeSaveTimer < 1500) return;
   timeSaveTimer = now;
-  savePlayerSetting(STORAGE_KEYS.currentTime, String(audioElement.currentTime || 0));
+  savePlayerSetting(
+    STORAGE_KEYS.currentTime,
+    String(audioElement.currentTime || 0)
+  );
 }
 
 function getAudioContext() {
@@ -117,6 +230,28 @@ function getAudioContext() {
   if (!Context) return null;
   if (!audioContext) audioContext = new Context();
   return audioContext;
+}
+
+function dbToGain(db: number) {
+  return Math.pow(10, db / 20);
+}
+
+function applyEqGraphSettings() {
+  if (!audioContext || !mediaSourceConnected) return;
+  const now = audioContext.currentTime;
+  const enabled = state.eqEnabled;
+
+  if (preampGain) {
+    const target = enabled ? dbToGain(state.preampDb) : 1;
+    preampGain.gain.cancelScheduledValues(now);
+    preampGain.gain.setTargetAtTime(target, now, 0.02);
+  }
+
+  equalizerFilters.forEach((filter, index) => {
+    const gain = enabled ? Number(state.eqGains[index] || 0) : 0;
+    filter.gain.cancelScheduledValues(now);
+    filter.gain.setTargetAtTime(gain, now, 0.02);
+  });
 }
 
 function configureMediaSession() {
@@ -137,7 +272,9 @@ function configureMediaSession() {
     // Metadata is optional.
   }
 
-  const handlers: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+  const handlers: Array<
+    [MediaSessionAction, MediaSessionActionHandler | null]
+  > = [
     ["play", () => void playMusic()],
     ["pause", pauseMusic],
     ["previoustrack", () => void previousMusicTrack()],
@@ -167,6 +304,13 @@ function ensureAudioElement() {
   audio.addEventListener("play", () => {
     emit({ playing: true, error: null });
     configureMediaSession();
+
+    const trackId = audio.dataset.trackId;
+    const token = trackId ? `${trackId}:${audio.src}` : "";
+    if (trackId && token !== recordedPlayToken) {
+      recordedPlayToken = token;
+      void recordMusicTrackPlayed(trackId).catch(() => undefined);
+    }
   });
   audio.addEventListener("pause", () => emit({ playing: false }));
   audio.addEventListener("loadedmetadata", () => {
@@ -182,6 +326,7 @@ function ensureAudioElement() {
     savePlaybackPosition();
   });
   audio.addEventListener("ended", () => {
+    recordedPlayToken = "";
     emit({ playing: false, currentTime: 0 });
     void handleTrackEnded();
   });
@@ -197,32 +342,64 @@ function ensureAudioElement() {
   return audio;
 }
 
-function connectMusicGain() {
+function connectMusicGraph() {
   const audio = ensureAudioElement();
   const context = getAudioContext();
   if (!context || mediaSourceConnected) return;
 
   try {
-    const source = context.createMediaElementSource(audio);
+    mediaSource = context.createMediaElementSource(audio);
+    preampGain = context.createGain();
+    equalizerFilters = MUSIC_EQ_FREQUENCIES.map((frequency) => {
+      const filter = context.createBiquadFilter();
+      filter.type = "peaking";
+      filter.frequency.value = Math.min(
+        frequency,
+        Math.max(20, context.sampleRate / 2 - 20)
+      );
+      filter.Q.value = 1.05;
+      filter.gain.value = 0;
+      return filter;
+    });
+    analyserNode = context.createAnalyser();
+    analyserNode.fftSize = 256;
+    analyserNode.smoothingTimeConstant = 0.78;
     musicGain = context.createGain();
     musicGain.gain.value = 1;
-    source.connect(musicGain);
+
+    let node: AudioNode = mediaSource;
+    node.connect(preampGain);
+    node = preampGain;
+
+    for (const filter of equalizerFilters) {
+      node.connect(filter);
+      node = filter;
+    }
+
+    node.connect(analyserNode);
+    analyserNode.connect(musicGain);
     musicGain.connect(context.destination);
     mediaSourceConnected = true;
+    applyEqGraphSettings();
   } catch (error) {
-    console.warn("Music gain connection unavailable; using direct audio output.", error);
+    console.warn(
+      "Music equalizer connection unavailable; using direct audio output.",
+      error
+    );
   }
 }
 
 async function unlockMusicAudio() {
-  connectMusicGain();
+  connectMusicGraph();
   const context = getAudioContext();
   if (context?.state === "suspended") await context.resume();
 }
 
 function getCurrentIndex() {
   if (!state.currentTrack) return -1;
-  return state.tracks.findIndex((track) => track.id === state.currentTrack?.id);
+  return state.tracks.findIndex(
+    (track) => track.id === state.currentTrack?.id
+  );
 }
 
 function nextSequentialIndex(direction: 1 | -1) {
@@ -269,6 +446,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
 
     if (audio.dataset.trackId !== track.id || audio.src !== url) {
       audio.pause();
+      recordedPlayToken = "";
       audio.src = url;
       audio.dataset.trackId = track.id;
       audio.load();
@@ -277,7 +455,10 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     const seekWhenReady = () => {
       const target = Math.max(0, Number(startAt) || 0);
       if (target > 0 && Number.isFinite(audio.duration)) {
-        audio.currentTime = Math.min(target, Math.max(0, audio.duration - 0.25));
+        audio.currentTime = Math.min(
+          target,
+          Math.max(0, audio.duration - 0.25)
+        );
       } else {
         audio.currentTime = target;
       }
@@ -288,7 +469,8 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
 
     emit({ loading: false, currentTime: startAt });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Could not load this song.";
+    const message =
+      error instanceof Error ? error.message : "Could not load this song.";
     emit({ loading: false, playing: false, error: message });
     throw error;
   } finally {
@@ -359,7 +541,10 @@ export async function loadMusicLibrary(force = false) {
     configureMediaSession();
     return libraryTracks;
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Could not load your music library.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Could not load your music library.";
     emit({ loading: false, libraryLoaded: true, error: message });
     return [];
   }
@@ -371,7 +556,9 @@ export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
     ? libraryTracks.filter((track) => activeIds.has(track.id))
     : libraryTracks;
   const currentTrack = state.currentTrack
-    ? tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null
+    ? tracks.find((track) => track.id === state.currentTrack?.id) ??
+      tracks[0] ??
+      null
     : tracks[0] ?? null;
 
   if (state.currentTrack && !currentTrack) stopMusic();
@@ -380,12 +567,12 @@ export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
 }
 
 export function activateAllMusicTracks() {
-  savePlayerSetting(STORAGE_KEYS.activePlaylistId, "");
-  savePlayerSetting(STORAGE_KEYS.activePlaylistName, "");
   removePlayerSetting(STORAGE_KEYS.activePlaylistId);
   removePlayerSetting(STORAGE_KEYS.activePlaylistName);
   const currentTrack =
-    state.libraryTracks.find((track) => track.id === state.currentTrack?.id) ??
+    state.libraryTracks.find(
+      (track) => track.id === state.currentTrack?.id
+    ) ??
     state.libraryTracks[0] ??
     null;
   emit({
@@ -404,7 +591,9 @@ export function activateMusicPlaylistQueue(
   savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id);
   savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
   const currentTrack =
-    tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
+    tracks.find((track) => track.id === state.currentTrack?.id) ??
+    tracks[0] ??
+    null;
   emit({
     tracks,
     currentTrack,
@@ -421,8 +610,10 @@ export async function playMusicPlaylist(
   startTrackId?: string
 ) {
   activateMusicPlaylistQueue(playlist, tracks);
-  const startTrack = tracks.find((track) => track.id === startTrackId) ?? tracks[0];
-  if (!startTrack) throw new Error("Add songs to this playlist before playing it.");
+  const startTrack =
+    tracks.find((track) => track.id === startTrackId) ?? tracks[0];
+  if (!startTrack)
+    throw new Error("Add songs to this playlist before playing it.");
   await playMusicTrack(startTrack.id, 0);
 }
 
@@ -479,8 +670,13 @@ export function stopMusic() {
 
 export function seekMusic(seconds: number) {
   const audio = ensureAudioElement();
-  const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration;
-  const next = Math.max(0, Math.min(Number(seconds) || 0, Math.max(0, duration || 0)));
+  const duration = Number.isFinite(audio.duration)
+    ? audio.duration
+    : state.duration;
+  const next = Math.max(
+    0,
+    Math.min(Number(seconds) || 0, Math.max(0, duration || 0))
+  );
   try {
     audio.currentTime = next;
     emit({ currentTime: next });
@@ -490,9 +686,25 @@ export function seekMusic(seconds: number) {
   }
 }
 
+function shouldRecordSkip() {
+  const audio = ensureAudioElement();
+  const duration = Number.isFinite(audio.duration)
+    ? audio.duration
+    : state.duration;
+  const threshold = Math.max(30, (duration || 0) * 0.35);
+  return Boolean(state.currentTrack && audio.currentTime < threshold);
+}
+
 export async function nextMusicTrack(fromEnded = false) {
   if (!state.libraryLoaded) await loadMusicLibrary();
-  const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1);
+
+  if (!fromEnded && shouldRecordSkip() && state.currentTrack) {
+    void recordMusicTrackSkipped(state.currentTrack.id).catch(() => undefined);
+  }
+
+  const index = state.shuffle
+    ? nextShuffleIndex()
+    : nextSequentialIndex(1);
 
   if (index < 0) {
     if (fromEnded) stopMusic();
@@ -529,9 +741,85 @@ export function toggleMusicShuffle() {
 
 export function cycleMusicRepeat() {
   const repeat: MusicRepeatMode =
-    state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off";
+    state.repeat === "off"
+      ? "all"
+      : state.repeat === "all"
+        ? "one"
+        : "off";
   savePlayerSetting(STORAGE_KEYS.repeat, repeat);
   emit({ repeat });
+}
+
+export function setMusicEqEnabled(enabled: boolean) {
+  savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled));
+  emit({ eqEnabled: enabled });
+  applyEqGraphSettings();
+}
+
+export function applyMusicEqPreset(preset: MusicEqPreset) {
+  if (preset === "custom") {
+    savePlayerSetting(STORAGE_KEYS.eqPreset, preset);
+    emit({ eqPreset: preset });
+    return;
+  }
+
+  const definition = MUSIC_EQ_PRESETS[preset];
+  const gains = [...definition.gains];
+  savePlayerSetting(STORAGE_KEYS.eqPreset, preset);
+  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
+  savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+  emit({
+    eqPreset: preset,
+    eqGains: gains,
+    preampDb: definition.preamp,
+  });
+  applyEqGraphSettings();
+}
+
+export function setMusicEqBand(index: number, gainDb: number) {
+  if (index < 0 || index >= MUSIC_EQ_FREQUENCIES.length) return;
+  const gains = [...state.eqGains];
+  gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0));
+  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
+  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
+  emit({ eqPreset: "custom", eqGains: gains });
+  applyEqGraphSettings();
+}
+
+export function setMusicPreamp(preampDb: number) {
+  const next = Math.max(-12, Math.min(6, Number(preampDb) || 0));
+  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
+  savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
+  emit({ eqPreset: "custom", preampDb: next });
+  applyEqGraphSettings();
+}
+
+export function getMusicVisualizerLevels(barCount = 32) {
+  const count = Math.max(4, Math.min(64, Math.floor(barCount)));
+  if (!analyserNode || !state.playing) return Array(count).fill(0) as number[];
+
+  const data = new Uint8Array(analyserNode.frequencyBinCount);
+  analyserNode.getByteFrequencyData(data);
+  const levels: number[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const startRatio = index / count;
+    const endRatio = (index + 1) / count;
+    const start = Math.floor(Math.pow(startRatio, 1.7) * data.length);
+    const end = Math.max(
+      start + 1,
+      Math.floor(Math.pow(endRatio, 1.7) * data.length)
+    );
+    let total = 0;
+    let samples = 0;
+    for (let bin = start; bin < Math.min(end, data.length); bin += 1) {
+      total += data[bin];
+      samples += 1;
+    }
+    levels.push(samples ? Math.min(1, total / samples / 220) : 0);
+  }
+
+  return levels;
 }
 
 function fadeGainTo(target: number, milliseconds: number) {
@@ -541,10 +829,14 @@ function fadeGainTo(target: number, milliseconds: number) {
   musicGain.gain.cancelScheduledValues(now);
   musicGain.gain.setValueAtTime(musicGain.gain.value, now);
   musicGain.gain.linearRampToValueAtTime(target, now + seconds);
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds + 20));
+  return new Promise<void>((resolve) =>
+    window.setTimeout(resolve, milliseconds + 20)
+  );
 }
 
-export async function playWithMusicDucked(playAlert: () => Promise<void>) {
+export async function playWithMusicDucked(
+  playAlert: () => Promise<void>
+) {
   const audio = ensureAudioElement();
   const wasPlaying = !audio.paused && !audio.ended && Boolean(audio.src);
 
@@ -553,7 +845,7 @@ export async function playWithMusicDucked(playAlert: () => Promise<void>) {
     return;
   }
 
-  connectMusicGain();
+  connectMusicGraph();
 
   if (musicGain && audioContext) {
     const originalGain = musicGain.gain.value;
