@@ -1,7 +1,9 @@
 import BottomHudAdvanced from "./BottomHudAdvanced";
+import { ExerciseNavigator } from "./ExerciseNavigator";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
+import { playWorkoutAlert, primeWorkoutAudio } from "../../lib/workoutAudio";
 import { Card } from "../../ui/Card";
 import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExerciseModal";
 import {
@@ -932,49 +934,6 @@ type RestTimerController = RestTimerState & {
 };
 
 const REST_TIMER_STORAGE_KEY = "mvp_rest_timer_v1";
-let sharedAudioContext: AudioContext | null = null;
-
-function getRestAudioContext() {
-  if (typeof window === "undefined") return null;
-  const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
-  if (!Ctx) return null;
-  if (!sharedAudioContext) sharedAudioContext = new Ctx();
-  return sharedAudioContext;
-}
-
-function primeRestAudio() {
-  try {
-    const ctx = getRestAudioContext();
-    if (ctx?.state === "suspended") void ctx.resume();
-  } catch {}
-}
-
-function playRestCompleteAlert() {
-  try {
-    const ctx = getRestAudioContext();
-    if (ctx) {
-      if (ctx.state === "suspended") void ctx.resume();
-      const now = ctx.currentTime;
-      [0, 0.22, 0.44].forEach((offset, index) => {
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
-        oscillator.type = index === 2 ? "square" : "sine";
-        oscillator.frequency.setValueAtTime(index === 2 ? 1046 : 880, now + offset);
-        gain.gain.setValueAtTime(0.0001, now + offset);
-        gain.gain.exponentialRampToValueAtTime(0.18, now + offset + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.18);
-        oscillator.connect(gain);
-        gain.connect(ctx.destination);
-        oscillator.start(now + offset);
-        oscillator.stop(now + offset + 0.2);
-      });
-    }
-  } catch {}
-
-  try {
-    navigator.vibrate?.([260, 100, 260, 100, 520]);
-  } catch {}
-}
 
 function readStoredRestTimer(): RestTimerState {
   const idle: RestTimerState = {
@@ -1044,14 +1003,14 @@ function useRestTimer(): RestTimerController {
   useEffect(() => {
     if (timer.status === "finished" && !alertedRef.current) {
       alertedRef.current = true;
-      playRestCompleteAlert();
+      void playWorkoutAlert("rest_complete");
     }
     if (timer.status === "running") alertedRef.current = false;
   }, [timer.status]);
 
   const start = (seconds: number, exerciseName: string, setIndex: number) => {
     const total = Math.max(1, Math.floor(Number(seconds) || 0));
-    primeRestAudio();
+    primeWorkoutAudio();
     alertedRef.current = false;
     setTimer({
       status: "running",
@@ -1081,7 +1040,7 @@ function useRestTimer(): RestTimerController {
   };
 
   const pauseResume = () => {
-    primeRestAudio();
+    primeWorkoutAudio();
     setTimer((current) => {
       if (current.status === "running") {
         const remaining = current.deadlineMs
@@ -1103,7 +1062,7 @@ function useRestTimer(): RestTimerController {
   };
 
   const restart = () => {
-    primeRestAudio();
+    primeWorkoutAudio();
     setTimer((current) => {
       if (current.status === "idle" || current.totalSeconds <= 0) return current;
       alertedRef.current = false;
@@ -1741,7 +1700,7 @@ function SessionCompleteOverlay({
   );
 }
 
-export function WorkoutPlayerPage({ params }: any) {
+export function WorkoutPlayerPage({ params, navigate }: any) {
   const sessionId = params?.sessionId as string;
 
   const [payload, setPayload] = useState<any>(null);
@@ -1795,6 +1754,20 @@ export function WorkoutPlayerPage({ params }: any) {
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
+
+  const navigatorItems = useMemo(
+    () =>
+      items.map((row, index) => ({
+        id: row.id,
+        name:
+          row.exercise?.name ??
+          row.exercise?.title ??
+          `Exercise ${index + 1}`,
+        completed: Boolean(row.completed_at),
+        pain: Math.max(0, Number(row.pain ?? 0)),
+      })),
+    [items]
+  );
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen) return;
@@ -1899,6 +1872,7 @@ export function WorkoutPlayerPage({ params }: any) {
       completedOverlayArmedRef.current = true;
       setCompleteOverlayOpen(true);
       showToast("SESSION COMPLETE — REWARD READY.", "ok");
+      void playWorkoutAlert("workout_complete");
     }
 
     if (!sessionComplete) {
@@ -2121,8 +2095,8 @@ export function WorkoutPlayerPage({ params }: any) {
     }
   }
 
-  async function reloadWorkoutExercisesKeepIndex() {
-    if (!workoutId) return;
+  async function reloadWorkoutExercisesKeepIndex(): Promise<WorkoutExerciseRow[]> {
+    if (!workoutId) return [];
 
     const nextItems = await loadWorkoutExercisesWithExercises(workoutId);
     setItems(nextItems);
@@ -2131,6 +2105,45 @@ export function WorkoutPlayerPage({ params }: any) {
     const exIds = Array.from(new Set(nextItems.map((r) => r.exercise_id).filter(Boolean)));
     const upMap = await buildUserUploadMediaMap(exIds);
     setUserUploadMap(upMap);
+    return nextItems;
+  }
+
+  async function handleExerciseCompleted(completedExerciseId: string) {
+    if (!workoutId) return;
+
+    const nextItems = await loadWorkoutExercisesWithExercises(workoutId);
+    setItems(nextItems);
+
+    const completedIndex = nextItems.findIndex((row) => row.id === completedExerciseId);
+    const completedTotal = nextItems.filter((row) => Boolean(row.completed_at)).length;
+    const allComplete = nextItems.length > 0 && completedTotal === nextItems.length;
+
+    if (allComplete) {
+      setActiveIdx(Math.max(0, completedIndex));
+      showToast(`WORKOUT COMPLETE • ${completedTotal}/${nextItems.length} FINISHED.`, "ok");
+    } else {
+      let nextIncompleteIndex = nextItems.findIndex(
+        (row, index) => index > completedIndex && !row.completed_at
+      );
+
+      if (nextIncompleteIndex < 0) {
+        nextIncompleteIndex = nextItems.findIndex((row) => !row.completed_at);
+      }
+
+      if (nextIncompleteIndex >= 0) {
+        setActiveIdx(nextIncompleteIndex);
+      }
+
+      showToast(
+        `EXERCISE COMPLETE • ${completedTotal}/${nextItems.length} FINISHED.`,
+        "ok"
+      );
+      void playWorkoutAlert("exercise_complete");
+    }
+
+    const exIds = Array.from(new Set(nextItems.map((row) => row.exercise_id).filter(Boolean)));
+    const uploadMap = await buildUserUploadMediaMap(exIds);
+    setUserUploadMap(uploadMap);
   }
 
   async function reindexWorkoutExercises() {
@@ -2584,7 +2597,18 @@ export function WorkoutPlayerPage({ params }: any) {
         title={sessionLabel}
         tone="blue"
         right={
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="tr-seg"
+              onClick={() => {
+                if (navigate) navigate("/sound-alerts");
+                else window.location.pathname = "/sound-alerts";
+              }}
+              style={{ height: 44 }}
+            >
+              Alert Sounds
+            </button>
             <button className="tr-seg is-active" onClick={() => setEditing(true)} style={{ height: 44 }}>
               Edit
             </button>
@@ -2647,6 +2671,12 @@ export function WorkoutPlayerPage({ params }: any) {
             </div>
           </div>
         </div>
+
+        <ExerciseNavigator
+          items={navigatorItems}
+          activeIndex={activeIdx}
+          onSelect={setActiveIdx}
+        />
       </Card>
 
       {current && currentRunnerItem ? (
@@ -2656,6 +2686,7 @@ export function WorkoutPlayerPage({ params }: any) {
           items={items}
           activeIdx={activeIdx}
           onChanged={reloadWorkoutExercisesKeepIndex}
+          onExerciseCompleted={handleExerciseCompleted}
           showToast={showToast}
           exerciseIndex={activeIdx + 1}
           totalExercises={items.length}
@@ -3162,6 +3193,7 @@ function ExerciseRunner({
   items,
   activeIdx,
   onChanged,
+  onExerciseCompleted,
   showToast,
   exerciseIndex,
   totalExercises,
@@ -3178,7 +3210,8 @@ function ExerciseRunner({
   item: any;
   items: WorkoutExerciseRow[];
   activeIdx: number;
-  onChanged: () => Promise<void>;
+  onChanged: () => Promise<WorkoutExerciseRow[]>;
+  onExerciseCompleted: (workoutExerciseId: string) => Promise<void>;
   showToast: (msg: string, tone?: ToastTone) => void;
   exerciseIndex: number;
   totalExercises: number;
@@ -3557,6 +3590,8 @@ async function saveTimedActualMinutes(): Promise<void> {
 }
 
 const markDone = async () => {
+  primeWorkoutAudio();
+
   if (!painTouched) {
     showToast("LOG PAIN BEFORE LOCKING DONE.", "err");
     return;
@@ -3571,28 +3606,31 @@ const markDone = async () => {
     await saveTimedActualMinutes();
   }
 
-  await supabase
+  const { error } = await supabase
     .from("workout_exercises")
     .update({ completed_at: new Date().toISOString() })
     .eq("id", weId);
 
-  if (onChanged) {
-    await Promise.resolve(onChanged());
+  if (error) {
+    showToast(error.message, "err");
+    return;
   }
 
-  showToast("LOCKED AS DONE.", "ok");
+  await onExerciseCompleted(weId);
 };
 
 const unlock = async () => {
-  await supabase
+  const { error } = await supabase
     .from("workout_exercises")
     .update({ completed_at: null })
     .eq("id", weId);
 
-  if (onChanged) {
-    await Promise.resolve(onChanged());
+  if (error) {
+    showToast(error.message, "err");
+    return;
   }
 
+  await onChanged();
   showToast("UNLOCKED.", "ok");
 };
 
