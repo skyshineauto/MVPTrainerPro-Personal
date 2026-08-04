@@ -2786,3 +2786,493 @@ html.tr-modal-open .tr-bottomNavWrap{
     grid-template-columns:1fr;
   }
 }
+/* ============================================================
+   CREATE EXERCISE: SHARED LIBRARY / PLANNER / ACTIVE EDITOR
+   ============================================================ */
+.tr-createExerciseOverlay{
+  z-index: 2147483600;
+  background:
+    radial-gradient(900px 520px at 50% 18%, rgba(0,170,255,.16), transparent 66%),
+    rgba(0,0,0,.84);
+}
+
+.tr-createExerciseModal{
+  width: min(1080px, 100%);
+  height: min(930px, 100%);
+  max-height: 100%;
+}
+
+.tr-createExerciseBody{
+  padding: 14px 16px 18px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.tr-createExerciseError,
+.tr-createExerciseStatus{
+  border-radius: 14px;
+  padding: 11px 13px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.4;
+}
+
+.tr-createExerciseError{
+  border: 1px solid rgba(255,80,80,.42);
+  background: rgba(255,80,80,.11);
+  color: rgba(255,210,210,.96);
+}
+
+.tr-createExerciseStatus{
+  border: 1px solid rgba(0,170,255,.42);
+  background: rgba(0,170,255,.11);
+  color: rgba(215,247,255,.96);
+}
+
+.tr-createSection{
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(620px 180px at 0% 0%, rgba(0,170,255,.08), transparent 68%),
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 18px 46px rgba(0,0,0,.22);
+}
+
+.tr-createSectionHead{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tr-createSectionTitle{
+  margin-top: 3px;
+  color: rgba(255,255,255,.96);
+  font-size: 17px;
+  font-weight: 1000;
+  letter-spacing: .015em;
+}
+
+.tr-createModeSwitch{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  min-width: 260px;
+}
+
+.tr-createField{
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.tr-createField > span{
+  color: rgba(255,255,255,.60);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.tr-createField input,
+.tr-createField textarea{
+  width: 100%;
+  min-width: 0;
+}
+
+.tr-createField input{
+  height: 46px;
+}
+
+.tr-createField textarea{
+  min-height: 116px;
+  resize: vertical;
+}
+
+.tr-createField--full{
+  width: 100%;
+}
+
+.tr-createChoiceRow{
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.tr-createChoiceRow .tr-seg{
+  height: 39px;
+  padding: 0 11px;
+  font-size: 10px;
+  letter-spacing: .07em;
+}
+
+.tr-createSecondaryToggle{
+  display: flex;
+  align-items: center;
+}
+
+.tr-createSecondaryToggle label{
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: rgba(255,255,255,.82);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.tr-createSecondaryToggle input{
+  width: 18px;
+  height: 18px;
+  accent-color: rgb(0,170,255);
+}
+
+.tr-createSecondaryGrid{
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,170,255,.20);
+  background: rgba(0,170,255,.055);
+}
+
+.tr-createPrescriptionGrid{
+  display: grid;
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  gap: 9px;
+}
+
+.tr-createPrescriptionGrid--cardio{
+  grid-template-columns: minmax(160px, 260px);
+}
+
+.tr-createPrescriptionGrid input{
+  text-align: center;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-createMediaGrid{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tr-createMediaTile{
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 150px auto auto;
+  gap: 9px;
+  padding: 10px;
+  border-radius: 15px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.13));
+}
+
+.tr-createMediaTile.has-file{
+  border-color: rgba(0,170,255,.38);
+  box-shadow: inset 0 0 0 1px rgba(0,170,255,.07);
+}
+
+.tr-createMediaPreview{
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0,170,255,.09), transparent 68%),
+    rgba(0,0,0,.24);
+}
+
+.tr-createMediaPreview img,
+.tr-createMediaPreview video{
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.tr-createMediaPlaceholder{
+  padding: 12px;
+  color: rgba(255,255,255,.42);
+  font-size: 11px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.tr-createMediaCopy{
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.tr-createMediaName{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-createMediaActions{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.tr-createMediaActions .tr-btn{
+  min-width: 0;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.tr-createMediaActions input[type="file"]{
+  display: none;
+}
+
+.tr-createNotesGrid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tr-createExerciseFooter{
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.tr-createExerciseFooter .tr-btn{
+  min-width: 170px;
+}
+
+.tr-createInlineBar{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.tr-createInlineBar > div{
+  min-width: 0;
+}
+
+.tr-createInlineBar .tr-btn{
+  flex: 0 0 auto;
+  height: 40px;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   PLANNED EDITOR: TRUE DESKTOP TWO-COLUMN WORKSPACE
+   ============================================================ */
+@media (min-width: 1024px){
+  .tr-plannedEditor{
+    width: min(1320px, calc(100vw - 32px));
+    height: min(900px, calc(100dvh - 32px));
+  }
+
+  .tr-plannedEditor .tr-editModalBody{
+    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 14px;
+    padding: 14px 16px 16px;
+  }
+
+  .tr-plannedEditor .tr-editCurrentPanel,
+  .tr-plannedEditor .tr-editAddPanel{
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tr-plannedEditor .tr-editCurrentPanel > .tr-card,
+  .tr-plannedEditor .tr-editAddPanel > .tr-card{
+    height: 100%;
+  }
+
+  .tr-plannedEditor .tr-editCurrentList{
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+    padding-right: 7px;
+  }
+
+  .tr-plannedEditor .tr-plannedExerciseCard{
+    grid-template-columns: minmax(0, 1fr) 148px;
+    grid-template-areas:
+      "main actions"
+      "prescription prescription";
+    gap: 8px 10px;
+    align-items: center;
+    padding: 9px 10px;
+  }
+
+  .tr-plannedEditor .tr-plannedExerciseMain{
+    grid-area: main;
+  }
+
+  .tr-plannedEditor .tr-plannedPrescriptionGrid{
+    grid-area: prescription;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .tr-plannedEditor .tr-plannedExerciseActions{
+    grid-area: actions;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .tr-plannedEditor .tr-plannedExerciseActions .tr-seg,
+  .tr-plannedEditor .tr-plannedExerciseActions .tr-danger{
+    width: 100%;
+    height: 34px;
+    padding-left: 5px;
+    padding-right: 5px;
+    font-size: 8px;
+  }
+
+  .tr-plannedEditor .tr-plannedPrescriptionGrid input{
+    height: 35px;
+  }
+
+  .tr-plannedEditor .tr-editAddLayout{
+    grid-template-rows: auto 44px auto minmax(0, 1fr) !important;
+    gap: 9px !important;
+  }
+
+  .tr-plannedEditor .tr-plannedFilterBox{
+    max-height: 300px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .tr-plannedEditor .tr-editResultsViewport{
+    padding-right: 7px;
+  }
+}
+
+@media (max-width: 900px){
+  .tr-createExerciseModal{
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+  }
+
+  .tr-createPrescriptionGrid{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tr-createMediaGrid{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-createMediaTile{
+    grid-template-columns: 170px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+  }
+
+  .tr-createMediaPreview{
+    grid-row: 1 / 3;
+    min-height: 130px;
+  }
+}
+
+@media (max-width: 720px){
+  .tr-createExerciseBody{
+    padding: 9px;
+    gap: 9px;
+  }
+
+  .tr-createSection{
+    padding: 11px;
+    border-radius: 15px;
+  }
+
+  .tr-createSectionHead{
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tr-createModeSwitch{
+    width: 100%;
+    min-width: 0;
+  }
+
+  .tr-createChoiceRow{
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 3px;
+  }
+
+  .tr-createChoiceRow .tr-seg{
+    flex: 0 0 auto;
+  }
+
+  .tr-createPrescriptionGrid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tr-createPrescriptionGrid--cardio{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-createMediaTile{
+    grid-template-columns: 1fr;
+    grid-template-rows: 150px auto auto;
+  }
+
+  .tr-createMediaPreview{
+    grid-row: auto;
+  }
+
+  .tr-createNotesGrid{
+    grid-template-columns: 1fr;
+  }
+
+  .tr-createExerciseFooter{
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .tr-createExerciseFooter .tr-btn{
+    width: 100%;
+    min-width: 0;
+  }
+
+  .tr-createInlineBar{
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tr-createInlineBar .tr-btn{
+    width: 100%;
+  }
+}
