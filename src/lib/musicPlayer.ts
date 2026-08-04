@@ -362,8 +362,8 @@ function connectMusicGraph() {
       return filter;
     });
     analyserNode = context.createAnalyser();
-    analyserNode.fftSize = 256;
-    analyserNode.smoothingTimeConstant = 0.78;
+    analyserNode.fftSize = 1024;
+    analyserNode.smoothingTimeConstant = 0.72;
     musicGain = context.createGain();
     musicGain.gain.value = 1;
 
@@ -794,29 +794,60 @@ export function setMusicPreamp(preampDb: number) {
   applyEqGraphSettings();
 }
 
+let visualizerEnvelope: number[] = [];
+
 export function getMusicVisualizerLevels(barCount = 32) {
-  const count = Math.max(4, Math.min(64, Math.floor(barCount)));
-  if (!analyserNode || !state.playing) return Array(count).fill(0) as number[];
+  const count = Math.max(8, Math.min(64, Math.floor(barCount)));
+
+  if (visualizerEnvelope.length !== count) {
+    visualizerEnvelope = Array(count).fill(0);
+  }
+
+  if (!analyserNode || !audioContext) {
+    return visualizerEnvelope.map((value, index) => {
+      const next = Math.max(0, value * 0.82 - index * 0.00015);
+      visualizerEnvelope[index] = next;
+      return next;
+    });
+  }
 
   const data = new Uint8Array(analyserNode.frequencyBinCount);
   analyserNode.getByteFrequencyData(data);
+
+  const nyquist = audioContext.sampleRate / 2;
+  const minHz = 35;
+  const maxHz = Math.min(18000, nyquist * 0.92);
+  const ratio = maxHz / minHz;
   const levels: number[] = [];
 
   for (let index = 0; index < count; index += 1) {
-    const startRatio = index / count;
-    const endRatio = (index + 1) / count;
-    const start = Math.floor(Math.pow(startRatio, 1.7) * data.length);
-    const end = Math.max(
-      start + 1,
-      Math.floor(Math.pow(endRatio, 1.7) * data.length)
-    );
-    let total = 0;
-    let samples = 0;
-    for (let bin = start; bin < Math.min(end, data.length); bin += 1) {
-      total += data[bin];
-      samples += 1;
+    const lowHz = minHz * Math.pow(ratio, index / count);
+    const highHz = minHz * Math.pow(ratio, (index + 1) / count);
+    const lowBin = Math.max(0, Math.floor((lowHz / nyquist) * data.length));
+    const highBin = Math.max(lowBin + 1, Math.ceil((highHz / nyquist) * data.length));
+
+    let weightedTotal = 0;
+    let weightTotal = 0;
+    for (let bin = lowBin; bin < Math.min(highBin, data.length); bin += 1) {
+      const center = (lowBin + highBin - 1) / 2;
+      const distance = Math.abs(bin - center) / Math.max(1, (highBin - lowBin) / 2);
+      const weight = 1 - Math.min(0.72, distance * 0.72);
+      weightedTotal += data[bin] * weight;
+      weightTotal += weight;
     }
-    levels.push(samples ? Math.min(1, total / samples / 220) : 0);
+
+    const raw = weightTotal ? weightedTotal / weightTotal / 255 : 0;
+    const lowFrequencyLift = index < count * 0.22 ? 1.13 : 1;
+    const highFrequencyLift = index > count * 0.68 ? 1.18 : 1;
+    const shaped = Math.min(1, Math.pow(raw * lowFrequencyLift * highFrequencyLift, 0.82));
+    const previous = visualizerEnvelope[index] || 0;
+    const attack = shaped > previous ? 0.58 : 0.18;
+    const next = state.playing
+      ? previous + (shaped - previous) * attack
+      : Math.max(0, previous * 0.84 - 0.006);
+
+    visualizerEnvelope[index] = next;
+    levels.push(next);
   }
 
   return levels;
