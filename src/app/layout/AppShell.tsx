@@ -927,22 +927,42 @@ export function AppShell({
           <div className="tr-topTitle">MVP Trainer Pro</div>
 
           {user ? (
-            <button
-              onClick={signOut}
-              disabled={busy}
-              style={{
-                background: "transparent",
-                color: "rgba(255,255,255,.85)",
-                border: "1px solid rgba(255,255,255,.12)",
-                borderRadius: 12,
-                padding: "8px 10px",
-                cursor: "pointer",
-                fontWeight: 900,
-                opacity: busy ? 0.7 : 1,
-              }}
-            >
-              SIGN OUT
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => navigate("/sound-alerts")}
+                style={{
+                  background: "rgba(0,170,255,.10)",
+                  color: "rgba(190,235,255,.96)",
+                  border: "1px solid rgba(0,170,255,.28)",
+                  borderRadius: 12,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                  letterSpacing: ".06em",
+                }}
+              >
+                SOUND & ALERTS
+              </button>
+
+              <button
+                type="button"
+                onClick={signOut}
+                disabled={busy}
+                style={{
+                  background: "transparent",
+                  color: "rgba(255,255,255,.85)",
+                  border: "1px solid rgba(255,255,255,.12)",
+                  borderRadius: 12,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                  opacity: busy ? 0.7 : 1,
+                }}
+              >
+                SIGN OUT
+              </button>
+            </div>
           ) : null}
         </div>
 
