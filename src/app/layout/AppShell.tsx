@@ -7,6 +7,7 @@ import {
   isSymptomMode,
   type SymptomKey,
 } from "../../lib/sessionLabel";
+import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
 
 const LS = {
   isPaused: "mvp_is_paused",
@@ -930,6 +931,23 @@ export function AppShell({
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"
+                onClick={() => navigate("/music")}
+                style={{
+                  background: "rgba(255,145,0,.12)",
+                  color: "rgba(255,235,205,.98)",
+                  border: "1px solid rgba(255,145,0,.38)",
+                  borderRadius: 12,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                  letterSpacing: ".06em",
+                }}
+              >
+                MY MUSIC
+              </button>
+
+              <button
+                type="button"
                 onClick={() => navigate("/sound-alerts")}
                 style={{
                   background: "rgba(0,170,255,.10)",
@@ -1012,6 +1030,8 @@ export function AppShell({
             .tr-topTitle::after{ animation: none; opacity: 0; }
           }
         `}</style>
+
+        {user ? <MusicMiniPlayer navigate={navigate} /> : null}
 
         {msg ? (
           <div
