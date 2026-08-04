@@ -23,13 +23,18 @@ type BottomHudAdvancedProps = {
 
 function initialCollapsed() {
   if (typeof window === "undefined") return false;
+
+  // The mobile HUD always starts compact when a session screen opens.
+  // Desktop still remembers the user's preferred open or collapsed state.
+  if (window.matchMedia("(max-width: 720px)").matches) return true;
+
   try {
     const saved = window.localStorage.getItem("mvp_session_hud_collapsed");
     if (saved != null) return saved === "true";
   } catch {
     // Persistence is optional.
   }
-  return window.matchMedia("(max-width: 720px)").matches;
+  return false;
 }
 
 export default function BottomHudAdvanced({
