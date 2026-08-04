@@ -300,7 +300,10 @@ async function incrementTrackCounter(
   if (readError) throw readError;
   if (!data) return;
 
-  const nextValue = Math.max(0, Number(data[field] || 0)) + 1;
+  const counterRow = data as Partial<
+    Record<"play_count" | "skip_count", number | null>
+  >;
+  const nextValue = Math.max(0, Number(counterRow[field] ?? 0)) + 1;
   const patch: Record<string, string | number> = {
     [field]: nextValue,
     updated_at: new Date().toISOString(),
