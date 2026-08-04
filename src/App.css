@@ -6964,3 +6964,280 @@ body{
     height:58px !important;
   }
 }
+
+/* ========================================================================== */
+/* MOBILE WORKFLOW POLISH V5: SESSION EDITOR, NAVIGATOR, AUDIO TRANSPORT       */
+/* ========================================================================== */
+
+.tr-mobileExercisePickerBar{
+  display:none;
+}
+
+.tr-audioDeck.is-busy .tr-audioTransportButton,
+.tr-audioDeck.is-busy .tr-audioModeButton{
+  cursor:progress;
+}
+
+.tr-audioDeck.is-busy .tr-audioTransportButton:not(.tr-audioTransportButton--primary){
+  opacity:.58;
+}
+
+@media (max-width:760px){
+  .tr-workoutSessionCard{
+    width:100%;
+    min-width:0;
+  }
+
+  .tr-workoutSessionCard .tr-card-head{
+    display:grid;
+    grid-template-columns:1fr;
+    align-items:stretch;
+    gap:10px;
+  }
+
+  .tr-workoutSessionCard .tr-card-right{
+    width:100%;
+    min-width:0;
+  }
+
+  .tr-workoutSessionCard .tr-sessionActionBar{
+    width:100%;
+    min-width:0;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:8px;
+  }
+
+  .tr-workoutSessionCard .tr-sessionActionBar .tr-seg{
+    min-width:0;
+    padding:0 8px !important;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:8.5px;
+    letter-spacing:.055em;
+  }
+
+  .tr-workoutSessionCard .tr-sessionActionBar .tr-seg:nth-child(2){
+    font-size:0;
+  }
+
+  .tr-workoutSessionCard .tr-sessionActionBar .tr-seg:nth-child(2)::after{
+    content:"ALERTS";
+    font-size:8.5px;
+    letter-spacing:.055em;
+  }
+
+  .tr-exerciseNavigator{
+    min-width:0;
+    overflow:hidden;
+  }
+
+  .tr-exerciseNavigatorRail{
+    display:grid !important;
+    grid-auto-flow:column;
+    grid-auto-columns:100% !important;
+    gap:10px;
+    width:100%;
+    max-width:100%;
+    overflow-x:auto;
+    overflow-y:hidden;
+    scroll-snap-type:x mandatory;
+    scroll-padding-inline:0;
+    overscroll-behavior-x:contain;
+    scrollbar-width:none;
+  }
+
+  .tr-exerciseNavigatorRail::-webkit-scrollbar{
+    display:none;
+  }
+
+  .tr-exerciseNavigatorItem{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    scroll-snap-align:start;
+    scroll-snap-stop:always;
+  }
+
+  .tr-previousPerformance.is-open .tr-progressionBody{
+    padding-bottom:18px;
+  }
+
+  .tr-progressionGrid{
+    grid-template-columns:1fr !important;
+  }
+
+  .tr-progressionCell{
+    padding:12px !important;
+  }
+
+  .tr-progressionActions{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:9px !important;
+    padding-bottom:8px;
+  }
+
+  .tr-progressionActions .tr-btn{
+    width:100%;
+    min-width:0;
+    white-space:normal;
+    line-height:1.25;
+  }
+
+  .tr-editModal--sessionPicker{
+    border-radius:0 !important;
+  }
+
+  .tr-editModal--sessionPicker .tr-modalHead{
+    flex:0 0 auto;
+    padding:8px 10px;
+    gap:6px;
+  }
+
+  .tr-editModal--sessionPicker.tr-editModal--mobile-add .tr-editModalActions{
+    grid-template-columns:1fr !important;
+  }
+
+  .tr-editModal--sessionPicker.tr-editModal--mobile-add .tr-editModalActions .tr-btn:not(:last-child){
+    display:none;
+  }
+
+  .tr-editModal--sessionPicker.tr-editModal--mobile-add .tr-editModalActions .tr-btn:last-child{
+    grid-column:auto;
+    height:34px;
+    min-height:34px;
+  }
+
+  .tr-editModal--sessionPicker .tr-editModalBody{
+    padding:7px 8px 8px;
+  }
+
+  .tr-editModal--sessionPicker .tr-editAddLayout{
+    grid-template-rows:auto auto 40px auto minmax(0,1fr) !important;
+    gap:7px !important;
+  }
+
+  .tr-mobileExercisePickerBar{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+
+  .tr-mobileExercisePickerBar .tr-btn{
+    width:100%;
+    min-width:0;
+    height:40px;
+    padding:0 8px;
+    font-size:9px;
+  }
+
+  .tr-editModal--sessionPicker .tr-editFilterScroll.is-collapsed{
+    display:none !important;
+  }
+
+  .tr-editModal--sessionPicker .tr-editFilterScroll.is-open{
+    display:grid !important;
+    max-height:190px;
+    overflow-y:auto !important;
+  }
+
+  .tr-editModal--sessionPicker .tr-createInlineBar{
+    display:none !important;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport{
+    min-height:0;
+    height:100%;
+    padding:0 2px 10px 0;
+    gap:7px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowBtn{
+    width:100%;
+    min-width:0;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox{
+    min-height:66px;
+    width:100%;
+    min-width:0;
+    padding:9px 10px;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox > div:first-child{
+    min-width:0;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox > div:first-child > div:first-child{
+    min-width:0;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox > div:first-child > div:first-child > div{
+    min-width:0;
+    white-space:normal;
+    line-height:1.15;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-pillOK,
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-pillMISS{
+    font-size:8px;
+    white-space:nowrap;
+  }
+
+  .tr-editModal--sessionPicker.tr-editModal--mobile-add .tr-editModalFooter{
+    display:none !important;
+  }
+
+  .tr-editModal--sessionPicker.tr-editModal--mobile-current .tr-editModalFooter{
+    display:flex;
+  }
+
+  .tr-editModal--sessionPicker .tr-editMobileTabs{
+    position:sticky;
+    top:0;
+    z-index:4;
+    background:linear-gradient(180deg,rgba(12,18,27,.99),rgba(9,14,21,.97));
+    padding-bottom:2px;
+  }
+
+  .tr-shellInner{
+    padding-bottom:calc(180px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-bottom:calc(180px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width:430px){
+  .tr-workoutSessionCard .tr-sessionActionBar .tr-seg,
+  .tr-workoutSessionCard .tr-sessionActionBar .tr-seg:nth-child(2)::after{
+    font-size:8px;
+    letter-spacing:.035em;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox{
+    min-height:62px;
+    padding:8px;
+  }
+}
+
+@media (max-width:760px){
+  .tr-editModal--sessionPicker .tr-editAddLayout{
+    display:flex !important;
+    flex-direction:column;
+    min-height:0;
+  }
+
+  .tr-editModal--sessionPicker .tr-editAddLayout > input{
+    flex:0 0 40px;
+  }
+
+  .tr-editModal--sessionPicker .tr-editAddLayout > .tr-sub{
+    flex:0 0 auto;
+  }
+
+  .tr-editModal--sessionPicker .tr-editResultsViewport{
+    flex:1 1 auto;
+  }
+}
