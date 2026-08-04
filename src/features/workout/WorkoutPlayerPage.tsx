@@ -43,7 +43,7 @@ import icoQuads from "../../assets/front.png";
 import icoCalves from "../../assets/muscles.png";
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
-const EDIT_RESULTS_BATCH_SIZE = 5;
+const EDIT_RESULTS_BATCH_SIZE = 14;
 
 function lockDocumentForModal() {
   const appWindow = window as any;
@@ -1732,6 +1732,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   const [searchResults, setSearchResults] = useState<DecoratedSearchRow[]>([]);
   const [searchPage, setSearchPage] = useState(0);
   const [searchHasMore, setSearchHasMore] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [swapTargetWeId, setSwapTargetWeId] = useState<string | null>(null);
 
   const [addMuscle, setAddMuscle] = useState<AddMuscleKey>("all");
@@ -2267,30 +2268,41 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     setSearchResults([]);
     setSearchPage(0);
     setSearchHasMore(false);
+    setSearchError(null);
     showToast("EXERCISE SWAPPED.", "ok");
   }
 
   async function loadUserMediaRowsForExercises(exerciseIds: string[]): Promise<Map<string, UserMediaLite[]>> {
     const map = new Map<string, UserMediaLite[]>();
-    if (!exerciseIds.length) return map;
+    const uniqueIds = Array.from(new Set(exerciseIds.filter(Boolean)));
+    if (!uniqueIds.length) return map;
 
     const { data: u, error: uErr } = await supabase.auth.getUser();
     if (uErr) throw uErr;
     if (!u.user) return map;
 
-    const { data: rows, error } = await supabase
-      .from("exercise_user_media")
-      .select("exercise_id,kind,storage_path,use_user_upload")
-      .eq("user_id", u.user.id)
-      .in("exercise_id", exerciseIds);
+    // Supabase serializes `.in(...)` values into the request URL. Sending the
+    // entire exercise library at once can exceed Safari/proxy URL limits and
+    // make the in-session picker look empty. Load user-media metadata in small
+    // batches so the exercise rows always render on mobile.
+    const chunkSize = 80;
 
-    if (error) throw error;
+    for (let start = 0; start < uniqueIds.length; start += chunkSize) {
+      const chunk = uniqueIds.slice(start, start + chunkSize);
+      const { data: rows, error } = await supabase
+        .from("exercise_user_media")
+        .select("exercise_id,kind,storage_path,use_user_upload")
+        .eq("user_id", u.user.id)
+        .in("exercise_id", chunk);
 
-    for (const r of rows ?? []) {
-      const exId = (r as any).exercise_id as string;
-      const list = map.get(exId) ?? [];
-      list.push(r as any);
-      map.set(exId, list);
+      if (error) throw error;
+
+      for (const r of rows ?? []) {
+        const exId = (r as any).exercise_id as string;
+        const list = map.get(exId) ?? [];
+        list.push(r as any);
+        map.set(exId, list);
+      }
     }
 
     return map;
@@ -2300,6 +2312,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     const termRaw = q.trim();
     const termNorm = normalizeText(termRaw);
     setSearchQ(q);
+    setSearchError(null);
 
     const browsing = addMuscle !== "all" || addMuscleDetail !== "all" || addEquip !== "all";
     if (!opts?.force && !browsing && termNorm.length < 2) {
@@ -2311,16 +2324,14 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
 
     setSearchBusy(true);
     try {
-      // Preserve the existing category/search behavior. We fetch the same broad
-      // candidate pool, apply the existing matchFilters contract, then reveal
-      // five matching rows at a time inside the fixed-height results viewport.
-      const limit = 1000;
+      const from = 0;
+      const to = 999;
 
       let query = supabase
         .from("exercises")
         .select("id,name,source,primary_muscles,secondary_muscles,equipment,media")
         .order("name", { ascending: true })
-        .limit(limit);
+        .range(from, to);
 
       if (termNorm.length >= 2) {
         query = query.or(buildNameOrIlike(expandSearchTerms(termRaw)));
@@ -2328,42 +2339,75 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
         query = query.or(cardioBrowseOrIlike());
       }
 
-      const { data, error } = await query;
+      let { data, error } = await query;
+
+      if (error) {
+        let fallbackQuery = supabase
+          .from("exercises")
+          .select("id,name,source,primary_muscles,secondary_muscles,equipment")
+          .order("name", { ascending: true })
+          .range(from, to);
+
+        if (termNorm.length >= 2) {
+          fallbackQuery = fallbackQuery.or(buildNameOrIlike(expandSearchTerms(termRaw)));
+        } else if (addEquip === "cardio") {
+          fallbackQuery = fallbackQuery.or(cardioBrowseOrIlike());
+        }
+
+        const fallback = await fallbackQuery;
+        data = fallback.data as any;
+        error = fallback.error;
+      }
+
       if (error) throw error;
 
       const list = (data ?? []) as SearchExerciseRow[];
-
-      const local = list.filter((r) =>
+      const local = list.filter((row) =>
         matchFilters(
-          r,
+          row,
           addMuscle === "all" ? "all" : (addMuscle as any),
           addEquip === "all" ? "all" : (addEquip as any),
           addMuscleDetail
         )
       );
 
-      const ids = local.map((x) => x.id).filter(Boolean);
-      const userMap = await loadUserMediaRowsForExercises(ids);
-
-      const decorated: DecoratedSearchRow[] = local.map((r) => {
-        const uRows = userMap.get(r.id) ?? [];
-        const ok = effectiveHasMedia(r, uRows);
-        const ic = resolveRowIcon(r);
+      const baseDecorated: DecoratedSearchRow[] = local.map((row) => {
+        const icon = resolveRowIcon(row);
         return {
-          ...r,
-          effectiveHasMedia: ok,
-          icon: ic.icon,
-          iconAlt: ic.alt,
+          ...row,
+          effectiveHasMedia: effectiveHasMedia(row, []),
+          icon: icon.icon,
+          iconAlt: icon.alt,
         };
       });
 
-      setSearchResults(decorated);
+      setSearchResults(baseDecorated);
       setSearchPage(0);
-      setSearchHasMore(decorated.length > EDIT_RESULTS_BATCH_SIZE);
-    } catch {
+      setSearchHasMore(baseDecorated.length > EDIT_RESULTS_BATCH_SIZE);
+
+      if (!local.length) return;
+
+      try {
+        const userMap = await loadUserMediaRowsForExercises(
+          local.map((row) => row.id).filter(Boolean)
+        );
+
+        const enhanced = baseDecorated.map((row) => ({
+          ...row,
+          effectiveHasMedia: effectiveHasMedia(row, userMap.get(row.id) ?? []),
+        }));
+
+        setSearchResults(enhanced);
+        setSearchHasMore(enhanced.length > EDIT_RESULTS_BATCH_SIZE);
+      } catch (mediaError) {
+        console.warn("Could not enhance active-session exercise media status.", mediaError);
+      }
+    } catch (error: any) {
+      console.error("Active-session exercise picker failed to load.", error);
       setSearchResults([]);
       setSearchPage(0);
       setSearchHasMore(false);
+      setSearchError(error?.message ?? "Exercises could not be loaded.");
     } finally {
       setSearchBusy(false);
     }
@@ -2413,6 +2457,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     setSearchResults([]);
     setSearchPage(0);
     setSearchHasMore(false);
+    setSearchError(null);
     showToast("SAVED (THIS SESSION).", "ok");
   }
 
@@ -2731,8 +2776,10 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     searchBusy={searchBusy}
     searchLoadingMore={searchLoadingMore}
     searchHasMore={searchHasMore}
+    searchError={searchError}
     searchResults={searchResults.slice(0, (searchPage + 1) * EDIT_RESULTS_BATCH_SIZE)}
     onSearch={(v) => runSearch(v)}
+    onRetry={() => runSearch(searchQ, { force: true })}
     onLoadMore={loadMoreSearchResults}
     onPickAdd={addExercise}
     onCreateNew={() => setCreateExerciseOpen(true)}
@@ -2956,8 +3003,10 @@ function EditSessionPanel(props: {
   searchBusy: boolean;
   searchLoadingMore: boolean;
   searchHasMore: boolean;
+  searchError: string | null;
   searchResults: DecoratedSearchRow[];
   onSearch: (q: string) => Promise<void>;
+  onRetry: () => Promise<void>;
   onLoadMore: () => Promise<void>;
   onPickAdd: (exerciseId: string) => Promise<void>;
   onCreateNew: () => void;
@@ -2982,8 +3031,10 @@ function EditSessionPanel(props: {
     searchBusy,
     searchLoadingMore,
     searchHasMore,
+    searchError,
     searchResults,
     onSearch,
+    onRetry,
     onLoadMore,
     onPickAdd,
     onCreateNew,
@@ -3022,6 +3073,11 @@ function EditSessionPanel(props: {
     if (remaining <= 180) void onLoadMore();
   }
 
+  function selectBroadMuscle(nextMuscle: AddMuscleKey) {
+    setAddMuscle(nextMuscle);
+    setAddMuscleDetail("all");
+  }
+
   const dangerStyle: React.CSSProperties = {
     height: 36,
     borderRadius: 12,
@@ -3043,11 +3099,8 @@ function EditSessionPanel(props: {
 
   const showResultsEmptyState =
     !searchBusy &&
-    !searchResults.length &&
-    (searchQ.trim().length >= 2 ||
-      addMuscle !== "all" ||
-      addMuscleDetail !== "all" ||
-      addEquip !== "all");
+    !searchError &&
+    !searchResults.length;
 
   if (typeof document === "undefined") return null;
 
@@ -3162,11 +3215,11 @@ function EditSessionPanel(props: {
                   <div style={{ display: "grid", gap: 6 }}>
                     <div className="tr-kicker">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
-                      <button className={`tr-seg ${addMuscle === "all" ? "is-active" : ""}`} onClick={() => setAddMuscle("all")}>
+                      <button className={`tr-seg ${addMuscle === "all" ? "is-active" : ""}`} onClick={() => selectBroadMuscle("all")}>
                         ALL
                       </button>
                       {MUSCLE_CHIPS.map((m) => (
-                        <button key={m.key} className={`tr-seg ${addMuscle === m.key ? "is-active" : ""}`} onClick={() => setAddMuscle(m.key)}>
+                        <button key={m.key} className={`tr-seg ${addMuscle === m.key ? "is-active" : ""}`} onClick={() => selectBroadMuscle(m.key)}>
                           <IconImg src={m.icon} alt={m.label} /> {m.label}
                         </button>
                       ))}
@@ -3256,7 +3309,23 @@ function EditSessionPanel(props: {
                   </button>
                 ))}
 
-                {showResultsEmptyState ? <div className="tr-sub">No matches.</div> : null}
+                {searchBusy && !searchResults.length ? (
+                  <div className="tr-pickerStatus">Loading exercises…</div>
+                ) : null}
+
+                {searchError ? (
+                  <div className="tr-pickerError" role="alert">
+                    <strong>Exercises did not load.</strong>
+                    <span>{searchError}</span>
+                    <button type="button" className="tr-btn tr-btn--primary" onClick={() => void onRetry()}>
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
+
+                {showResultsEmptyState ? (
+                  <div className="tr-pickerStatus">No exercises match these filters.</div>
+                ) : null}
 
               </div>
             </div>
