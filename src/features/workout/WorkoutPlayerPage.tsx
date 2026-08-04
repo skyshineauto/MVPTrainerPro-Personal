@@ -2604,6 +2604,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
         </div>
       </Card>
 
+      <div className="tr-workoutSessionCard">
       <Card
         title={sessionLabel}
         tone="blue"
@@ -2688,6 +2689,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
           onSelect={setActiveIdx}
         />
       </Card>
+      </div>
 
       {current && currentRunnerItem ? (
         <ExerciseRunner
@@ -2997,6 +2999,7 @@ function EditSessionPanel(props: {
 
   const mode = swapTargetWeId ? "swap" : "add";
   const [mobileTab, setMobileTab] = useState<"current" | "add">("add");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const addMuscleDetailOptions = useMemo(
     () => getMuscleDetailOptions(addMuscle as MuscleKey),
     [addMuscle]
@@ -3008,7 +3011,15 @@ function EditSessionPanel(props: {
 
   function handleSwap(weId: string) {
     setMobileTab("add");
+    setMobileFiltersOpen(false);
     onSwap(weId);
+  }
+
+  function handleResultsScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (!searchHasMore || searchBusy || searchLoadingMore) return;
+    const viewport = event.currentTarget;
+    const remaining = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (remaining <= 180) void onLoadMore();
   }
 
   const dangerStyle: React.CSSProperties = {
@@ -3042,7 +3053,7 @@ function EditSessionPanel(props: {
 
   return createPortal(
     <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit session">
-      <div className={`tr-modal tr-modal--viewport tr-editModal tr-editModal--mobile-${mobileTab}`}>
+      <div className={`tr-modal tr-modal--viewport tr-editModal tr-editModal--sessionPicker tr-editModal--mobile-${mobileTab}`}>
         <div className="tr-modalHead">
           <div style={{ fontWeight: 950 }}>
             Edit Session <span className="tr-sub">({items.length})</span>
@@ -3116,8 +3127,24 @@ function EditSessionPanel(props: {
           <div className="tr-editAddPanel">
           <Card title={mode === "swap" ? "Pick replacement" : "Add an exercise"} tone="blue">
             <div className="tr-editAddLayout" style={{ display: "grid", gap: 10 }}>
+              <div className="tr-mobileExercisePickerBar">
+                {mode === "add" ? (
+                  <button
+                    type="button"
+                    className={`tr-btn ${mobileFiltersOpen ? "tr-btn--primary" : "tr-btn--blueOutline"}`}
+                    onClick={() => setMobileFiltersOpen((value) => !value)}
+                    aria-expanded={mobileFiltersOpen}
+                  >
+                    {mobileFiltersOpen ? "Hide Filters" : "Filters"}
+                  </button>
+                ) : <span />}
+                <button type="button" className="tr-btn tr-btn--blueOutline" onClick={onCreateNew}>
+                  + New Exercise
+                </button>
+              </div>
+
               {mode === "add" ? (
-                <div className="tr-rowbox tr-editFilterScroll" style={{ display: "grid", gap: 10 }}>
+                <div className={`tr-rowbox tr-editFilterScroll ${mobileFiltersOpen ? "is-open" : "is-collapsed"}`} style={{ display: "grid", gap: 10 }}>
                   <div className="tr-createInlineBar">
                     <div>
                       <div className="tr-kicker">CUSTOM EXERCISE</div>
@@ -3184,7 +3211,7 @@ function EditSessionPanel(props: {
                 {searchBusy ? "Searching…" : mode === "swap" ? "Pick an exercise to swap in." : "Pick an exercise to add."}
               </div>
 
-              <div className="tr-editResultsViewport">
+              <div className="tr-editResultsViewport" onScroll={handleResultsScroll}>
                 {searchResults.map((r) => (
                   <button
                     key={r.id}
