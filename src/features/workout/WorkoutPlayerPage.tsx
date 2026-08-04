@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
+import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExerciseModal";
 import {
   effectiveHasMedia,
   getMuscleDetailOptions,
@@ -1760,6 +1761,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const [proteinTarget, setProteinTarget] = useState<number | null>(null);
 
   const [editing, setEditing] = useState(false);
+  const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
 
   const [searchQ, setSearchQ] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
@@ -2437,6 +2439,16 @@ export function WorkoutPlayerPage({ params }: any) {
     showToast("SAVED TO ALL FUTURE SESSIONS.", "ok");
   }
 
+  async function handleCreatedExercise(
+    exercise: CreatedExercise,
+    addToSession: boolean
+  ) {
+    if (addToSession) {
+      await addExercise(exercise.id);
+    }
+    await runSearch(exercise.name, { force: true });
+  }
+
   const currentRunnerItem = useMemo(() => {
     if (!current) return null;
 
@@ -2680,6 +2692,7 @@ export function WorkoutPlayerPage({ params }: any) {
     onSearch={(v) => runSearch(v)}
     onLoadMore={loadMoreSearchResults}
     onPickAdd={addExercise}
+    onCreateNew={() => setCreateExerciseOpen(true)}
     onPickSwap={async (exerciseId) => {
       if (!swapTargetWeId) return;
       await swapExercise(swapTargetWeId, exerciseId);
@@ -2696,6 +2709,13 @@ export function WorkoutPlayerPage({ params }: any) {
     justAddedId={justAddedId}
   />
 )}
+
+      <CreateExerciseModal
+        open={createExerciseOpen}
+        onClose={() => setCreateExerciseOpen(false)}
+        onCreated={handleCreatedExercise}
+        allowAddToSession
+      />
 
       <style>{`
         .tr-btn--nextOrange{
@@ -2827,6 +2847,7 @@ function EditSessionPanel(props: {
   onSearch: (q: string) => Promise<void>;
   onLoadMore: () => Promise<void>;
   onPickAdd: (exerciseId: string) => Promise<void>;
+  onCreateNew: () => void;
   onPickSwap: (exerciseId: string) => Promise<void>;
   addMuscle: AddMuscleKey;
   addMuscleDetail: MuscleDetailKey;
@@ -2852,6 +2873,7 @@ function EditSessionPanel(props: {
     onSearch,
     onLoadMore,
     onPickAdd,
+    onCreateNew,
     onPickSwap,
     addMuscle,
     addMuscleDetail,
@@ -2985,6 +3007,20 @@ function EditSessionPanel(props: {
             <div className="tr-editAddLayout" style={{ display: "grid", gap: 10 }}>
               {mode === "add" ? (
                 <div className="tr-rowbox tr-editFilterScroll" style={{ display: "grid", gap: 10 }}>
+                  <div className="tr-createInlineBar">
+                    <div>
+                      <div className="tr-kicker">CUSTOM EXERCISE</div>
+                      <div className="tr-sub">Create it with defaults and media, then add it now.</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="tr-btn tr-btn--blueOutline"
+                      onClick={onCreateNew}
+                    >
+                      + Create New Exercise
+                    </button>
+                  </div>
+
                   <div style={{ display: "grid", gap: 6 }}>
                     <div className="tr-kicker">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
