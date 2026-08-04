@@ -187,6 +187,29 @@ let mediaSourceConnected = false;
 let loadingTrackId: string | null = null;
 let timeSaveTimer = 0;
 let recordedPlayToken = "";
+let transportQueue: Promise<void> = Promise.resolve();
+const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
+
+async function resolveTrackUrl(track: MusicTrack) {
+  const cached = signedUrlCache.get(track.id);
+  if (cached && Date.now() - cached.cachedAt < 10 * 60 * 1000) {
+    return cached.url;
+  }
+
+  const url = await getMusicTrackSignedUrl(track);
+  signedUrlCache.set(track.id, { url, cachedAt: Date.now() });
+  return url;
+}
+
+function preloadUpcomingTrack() {
+  const currentIndex = getCurrentIndex();
+  if (currentIndex < 0 || state.tracks.length < 2) return;
+  const nextIndex = currentIndex + 1 < state.tracks.length ? currentIndex + 1 : 0;
+  const nextTrack = state.tracks[nextIndex];
+  if (nextTrack && nextTrack.id !== state.currentTrack?.id) {
+    void resolveTrackUrl(nextTrack).catch(() => undefined);
+  }
+}
 
 function emit(patch: Partial<MusicPlayerState>) {
   state = { ...state, ...patch };
@@ -441,7 +464,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
   configureMediaSession();
 
   try {
-    const url = await getMusicTrackSignedUrl(track);
+    const url = await resolveTrackUrl(track);
     if (loadingTrackId !== track.id) return;
 
     if (audio.dataset.trackId !== track.id || audio.src !== url) {
@@ -468,6 +491,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     else audio.addEventListener("loadedmetadata", seekWhenReady, { once: true });
 
     emit({ loading: false, currentTime: startAt });
+    preloadUpcomingTrack();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Could not load this song.";
@@ -617,7 +641,7 @@ export async function playMusicPlaylist(
   await playMusicTrack(startTrack.id, 0);
 }
 
-export async function playMusicTrack(trackId: string, startAt = 0) {
+async function performPlayMusicTrack(trackId: string, startAt = 0) {
   if (!state.libraryLoaded) await loadMusicLibrary();
   const track =
     state.tracks.find((item) => item.id === trackId) ??
@@ -631,6 +655,14 @@ export async function playMusicTrack(trackId: string, startAt = 0) {
   await unlockMusicAudio();
   await loadTrack(track, startAt);
   await ensureAudioElement().play();
+}
+
+export function playMusicTrack(trackId: string, startAt = 0) {
+  const operation = transportQueue
+    .catch(() => undefined)
+    .then(() => performPlayMusicTrack(trackId, startAt));
+  transportQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 export async function playMusic() {
