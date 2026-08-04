@@ -3,7 +3,11 @@ import { ExerciseNavigator } from "./ExerciseNavigator";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
-import { playWorkoutAlert, primeWorkoutAudio } from "../../lib/workoutAudio";
+import {
+  playWorkoutAlert,
+  preloadWorkoutAlerts,
+  primeWorkoutAudio,
+} from "../../lib/workoutAudio";
 import { Card } from "../../ui/Card";
 import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExerciseModal";
 import {
@@ -1747,6 +1751,10 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   const [completeOverlayOpen, setCompleteOverlayOpen] = useState(false);
   const restTimer = useRestTimer();
 
+  useEffect(() => {
+    void preloadWorkoutAlerts();
+  }, []);
+
   const doneCount = useMemo(() => items.filter((x) => !!x.completed_at).length, [items]);
   const current = items[activeIdx];
   const nextUp = items[activeIdx + 1];
@@ -2041,6 +2049,9 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   }, [sessionId]);
 
   async function startWorkoutNow() {
+    primeWorkoutAudio();
+    void preloadWorkoutAlerts();
+
     if (!workoutId) return;
 
     const t = gateWeight.trim();
@@ -2600,6 +2611,17 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
+              className="tr-seg tr-seg--musicOrange"
+              onClick={() => {
+                if (navigate) navigate("/music");
+                else window.location.pathname = "/music";
+              }}
+              style={{ height: 44 }}
+            >
+              Music
+            </button>
+            <button
+              type="button"
               className="tr-seg"
               onClick={() => {
                 if (navigate) navigate("/sound-alerts");
@@ -2773,6 +2795,76 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
             0 18px 55px rgba(0,0,0,.45),
             0 0 18px rgba(255,140,0,.22),
             0 0 34px rgba(255,80,80,.12) !important;
+        }
+        .tr-progressionToggle{
+          width: 100%;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+          text-align: left;
+          cursor: pointer;
+        }
+        .tr-progressionToggleText{
+          min-width: 0;
+          display: grid;
+          gap: 4px;
+        }
+        .tr-progressionToggleRight{
+          flex: 0 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .tr-progressionChevron{
+          width: 32px;
+          height: 32px;
+          border-radius: 10px;
+          display: grid;
+          place-items: center;
+          border: 1px solid rgba(0,170,255,.38);
+          background: rgba(0,170,255,.10);
+          color: rgba(180,235,255,.98);
+          font-size: 13px;
+        }
+        .tr-progressionToggleLabel{
+          color: rgba(190,225,242,.76);
+          font-size: 11px;
+          font-weight: 1000;
+          letter-spacing: .12em;
+        }
+        .tr-progressionBody{
+          display: grid;
+          gap: 12px;
+          margin-top: 12px;
+        }
+        .tr-previousPerformance.is-collapsed{
+          padding-top: 12px;
+          padding-bottom: 12px;
+        }
+        @media (max-width: 720px){
+          .tr-progressionToggle{
+            align-items: flex-start;
+          }
+          .tr-progressionToggleRight{
+            gap: 6px;
+          }
+          .tr-progressionToggleLabel{
+            display: none;
+          }
+          .tr-progressionConfidence{
+            font-size: 9px !important;
+            white-space: nowrap;
+          }
+          .tr-progressionChevron{
+            width: 30px;
+            height: 30px;
+          }
         }
         .tr-doneCountPill{
           padding: 0 14px;
@@ -3243,6 +3335,24 @@ function ExerciseRunner({
   const [historyStats, setHistoryStats] = useState<ExerciseHistoryStats>(() => emptyHistoryStats());
   const [completedSetIndexes, setCompletedSetIndexes] = useState<number[]>([]);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [progressionOpen, setProgressionOpen] = useState(() => {
+    try {
+      return localStorage.getItem("mvp_progression_assistant_open") !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "mvp_progression_assistant_open",
+        progressionOpen ? "true" : "false"
+      );
+    } catch {
+      // Persistence is optional.
+    }
+  }, [progressionOpen]);
   const [calculatorWeight, setCalculatorWeight] = useState(0);
   const [barWeight, setBarWeight] = useState(45);
 
@@ -3266,6 +3376,7 @@ function ExerciseRunner({
     const act = Number((workoutExercise.prescription_snapshot ?? {})?.actual_minutes);
     setActualMinutes(Number.isFinite(act) && act > 0 ? Math.floor(act) : Math.max(0, Math.floor(dp)));
     setCalculatorOpen(false);
+    setProgressionOpen(true);
     setCalculatorWeight(0);
 
     try {
@@ -3452,6 +3563,9 @@ function ExerciseRunner({
   };
 
   const completeSetAndStartRest = async (idx: number) => {
+    primeWorkoutAudio();
+    void preloadWorkoutAlerts();
+
     if (isDone || timed) return;
     const row = sets[idx];
     const reps = Number(row?.reps ?? 0);
@@ -3591,6 +3705,7 @@ async function saveTimedActualMinutes(): Promise<void> {
 
 const markDone = async () => {
   primeWorkoutAudio();
+  void preloadWorkoutAlerts();
 
   if (!painTouched) {
     showToast("LOG PAIN BEFORE LOCKING DONE.", "err");
@@ -3820,89 +3935,110 @@ const unlock = async () => {
                 </div>
               </div>
 
-              <div className={`tr-previousPerformance tr-previousPerformance--${previousGuidance.tone}`}>
-                <div className="tr-previousPerformanceHead">
-                  <div>
-                    <div className="tr-kicker">TRANSPARENT PROGRESSION ASSISTANT</div>
-                    <div className="tr-previousPerformanceTitle">{previousGuidance.title}</div>
-                  </div>
+              <div
+                className={`tr-previousPerformance tr-previousPerformance--${previousGuidance.tone} ${
+                  progressionOpen ? "is-open" : "is-collapsed"
+                }`}
+              >
+                <button
+                  type="button"
+                  className="tr-progressionToggle"
+                  onClick={() => setProgressionOpen((value) => !value)}
+                  aria-expanded={progressionOpen}
+                >
+                  <span className="tr-progressionToggleText">
+                    <span className="tr-kicker">TRANSPARENT PROGRESSION ASSISTANT</span>
+                    <span className="tr-previousPerformanceTitle">{previousGuidance.title}</span>
+                  </span>
 
-                  <div className="tr-progressionConfidence">
-                    {previousGuidance.confidence} CONFIDENCE
-                  </div>
-                </div>
+                  <span className="tr-progressionToggleRight">
+                    <span className="tr-progressionConfidence">
+                      {previousGuidance.confidence} CONFIDENCE
+                    </span>
+                    <span className="tr-progressionChevron" aria-hidden>
+                      {progressionOpen ? "▲" : "▼"}
+                    </span>
+                    <span className="tr-progressionToggleLabel">
+                      {progressionOpen ? "MINIMIZE" : "EXPAND"}
+                    </span>
+                  </span>
+                </button>
 
-                {previousLoading ? (
-                  <div className="tr-sub">Reading your previous performance and records…</div>
-                ) : (
-                  <>
-                    {previousPerformance?.sets.length ? (
-                      <div className="tr-previousSetSummary">
-                        {previousPerformance.sets.map((set) => (
-                          <span key={set.set_index} className="tr-previousSetChip">
-                            S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
-                            {set.rir != null ? ` • RIR ${set.rir}` : ""}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <div className="tr-progressionGrid">
-                      <div className="tr-progressionCell tr-progressionCell--action">
-                        <div className="tr-kicker">TODAY'S RECOMMENDATION</div>
-                        <div className="tr-progressionAction">{previousGuidance.action}</div>
-                      </div>
-                      <div className="tr-progressionCell">
-                        <div className="tr-kicker">WHY</div>
-                        <div>{previousGuidance.why}</div>
-                      </div>
-                      <div className="tr-progressionCell">
-                        <div className="tr-kicker">TARGET</div>
-                        <div>{previousGuidance.target}</div>
-                      </div>
-                      <div className="tr-progressionCell">
-                        <div className="tr-kicker">LAST TIME</div>
-                        <div>{previousGuidance.lastSummary}</div>
-                        {previousPerformance ? (
-                          <div className="tr-previousPerformanceMeta">
-                            {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
+                {progressionOpen ? (
+                  <div className="tr-progressionBody">
+                    {previousLoading ? (
+                      <div className="tr-sub">Reading your previous performance and records…</div>
+                    ) : (
+                      <>
+                        {previousPerformance?.sets.length ? (
+                          <div className="tr-previousSetSummary">
+                            {previousPerformance.sets.map((set) => (
+                              <span key={set.set_index} className="tr-previousSetChip">
+                                S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
+                                {set.rir != null ? ` • RIR ${set.rir}` : ""}
+                              </span>
+                            ))}
                           </div>
                         ) : null}
-                      </div>
-                    </div>
 
-                    <div className="tr-progressionActions">
-                      {previousGuidance.suggestedWeight && !isDone ? (
-                        <button
-                          type="button"
-                          className="tr-btn tr-btn--primary"
-                          onClick={applySuggestedWeight}
-                        >
-                          APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO TODAY'S SETS
-                        </button>
-                      ) : null}
-
-                      <button
-                        type="button"
-                        className="tr-btn tr-btn--blueOutline"
-                        onClick={() => (window.location.pathname = `/library/${exerciseId}`)}
-                      >
-                        OPEN FULL EXERCISE HISTORY
-                      </button>
-                    </div>
-
-                    {currentPrLabels.length ? (
-                      <div className="tr-livePrPanel">
-                        <div className="tr-kicker">LIVE PERSONAL RECORDS</div>
-                        <div className="tr-livePrChips">
-                          {currentPrLabels.map((label) => (
-                            <span key={label} className="tr-livePrChip">★ {label}</span>
-                          ))}
+                        <div className="tr-progressionGrid">
+                          <div className="tr-progressionCell tr-progressionCell--action">
+                            <div className="tr-kicker">TODAY'S RECOMMENDATION</div>
+                            <div className="tr-progressionAction">{previousGuidance.action}</div>
+                          </div>
+                          <div className="tr-progressionCell">
+                            <div className="tr-kicker">WHY</div>
+                            <div>{previousGuidance.why}</div>
+                          </div>
+                          <div className="tr-progressionCell">
+                            <div className="tr-kicker">TARGET</div>
+                            <div>{previousGuidance.target}</div>
+                          </div>
+                          <div className="tr-progressionCell">
+                            <div className="tr-kicker">LAST TIME</div>
+                            <div>{previousGuidance.lastSummary}</div>
+                            {previousPerformance ? (
+                              <div className="tr-previousPerformanceMeta">
+                                {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
-                  </>
-                )}
+
+                        <div className="tr-progressionActions">
+                          {previousGuidance.suggestedWeight && !isDone ? (
+                            <button
+                              type="button"
+                              className="tr-btn tr-btn--progressionApply"
+                              onClick={applySuggestedWeight}
+                            >
+                              APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO TODAY'S SETS
+                            </button>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            className="tr-btn tr-btn--blueOutline"
+                            onClick={() => (window.location.pathname = `/library/${exerciseId}`)}
+                          >
+                            OPEN FULL EXERCISE HISTORY
+                          </button>
+                        </div>
+
+                        {currentPrLabels.length ? (
+                          <div className="tr-livePrPanel">
+                            <div className="tr-kicker">LIVE PERSONAL RECORDS</div>
+                            <div className="tr-livePrChips">
+                              {currentPrLabels.map((label) => (
+                                <span key={label} className="tr-livePrChip">★ {label}</span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               <div className={`tr-trainingCalculator ${calculatorOpen ? "is-open" : ""}`}>
