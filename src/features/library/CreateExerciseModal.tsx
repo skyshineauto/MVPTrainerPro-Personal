@@ -268,8 +268,7 @@ export function CreateExerciseModal({
   const [repMin, setRepMin] = useState("8");
   const [repMax, setRepMax] = useState("12");
   const [restSeconds, setRestSeconds] = useState("90");
-  const [rirMin, setRirMin] = useState("2");
-  const [rirMax, setRirMax] = useState("3");
+  const [targetRepsLeft, setTargetRepsLeft] = useState("2");
   const [durationMinutes, setDurationMinutes] = useState("10");
 
   const [instructions, setInstructions] = useState("");
@@ -310,8 +309,7 @@ export function CreateExerciseModal({
     setRepMin("8");
     setRepMax("12");
     setRestSeconds("90");
-    setRirMin("2");
-    setRirMax("3");
+    setTargetRepsLeft("2");
     setDurationMinutes("10");
     setInstructions("");
     setNotes("");
@@ -373,16 +371,11 @@ export function CreateExerciseModal({
     const minimumReps = positiveInt(repMin, 8, 1);
     const maximumReps = positiveInt(repMax, 12, 1);
     const rest = positiveInt(restSeconds, 90, 0);
-    const minRir = positiveInt(rirMin, 2, 0);
-    const maxRir = positiveInt(rirMax, 3, 0);
+    const repsLeftTarget = Math.min(5, positiveInt(targetRepsLeft, 2, 0));
     const minutes = positiveInt(durationMinutes, 10, 1);
 
     if (mode === "strength" && minimumReps > maximumReps) {
       setError("Minimum reps cannot be higher than maximum reps.");
-      return;
-    }
-    if (mode === "strength" && minRir > maxRir) {
-      setError("Minimum RIR cannot be higher than maximum RIR.");
       return;
     }
 
@@ -422,8 +415,11 @@ export function CreateExerciseModal({
         payload.rep_min = minimumReps;
         payload.rep_max = maximumReps;
         payload.rest_seconds = rest;
-        payload.rir_min = minRir;
-        payload.rir_max = maxRir;
+        // The database/RPC still expects a minimum and maximum.
+        // Store the single clear target in both fields so the rest of the app
+        // remains compatible without asking the user to manage a range.
+        payload.rir_min = repsLeftTarget;
+        payload.rir_max = repsLeftTarget;
       }
 
       const createResult = await supabase.rpc("rpc_exercise_create_custom", {
@@ -660,7 +656,7 @@ export function CreateExerciseModal({
               <div>
                 <div className="tr-kicker">DEFAULT PRESCRIPTION</div>
                 <div className="tr-createSectionTitle">
-                  {mode === "cardio" ? "Cardio target" : "Sets, reps, rest, and effort"}
+                  {mode === "cardio" ? "Cardio target" : "Sets, reps, rest, and target effort"}
                 </div>
               </div>
             </div>
@@ -715,23 +711,20 @@ export function CreateExerciseModal({
                     disabled={busy}
                   />
                 </label>
-                <label className="tr-createField">
-                  <span>RIR MIN</span>
+                <label className="tr-createField" style={{ gridColumn: "span 2" }}>
+                  <span>TARGET REPS LEFT</span>
                   <input
                     inputMode="numeric"
-                    value={rirMin}
-                    onChange={(event) => setRirMin(event.target.value.replace(/[^\d]/g, ""))}
+                    value={targetRepsLeft}
+                    onChange={(event) =>
+                      setTargetRepsLeft(event.target.value.replace(/[^\d]/g, ""))
+                    }
                     disabled={busy}
+                    aria-describedby="tr-target-reps-left-help"
                   />
-                </label>
-                <label className="tr-createField">
-                  <span>RIR MAX</span>
-                  <input
-                    inputMode="numeric"
-                    value={rirMax}
-                    onChange={(event) => setRirMax(event.target.value.replace(/[^\d]/g, ""))}
-                    disabled={busy}
-                  />
+                  <div id="tr-target-reps-left-help" className="tr-sub">
+                    Default: 2. Finish each working set with about this many clean reps still possible.
+                  </div>
                 </label>
               </div>
             )}
