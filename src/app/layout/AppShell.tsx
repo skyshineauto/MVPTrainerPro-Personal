@@ -342,17 +342,27 @@ const HUD_FORCE_CSS = `
 .tr-shellRoot{
   position: relative;
   isolation: isolate;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: clip;
   background: #0b0d10;
   color: rgba(255,255,255,.92);
 }
 .tr-shellInner{
   position: relative;
   z-index: 1;
+  width: 100%;
   max-width: 1120px;
+  min-width: 0;
   margin: 0 auto;
-  padding: 16px 18px;
-  padding-bottom: 128px;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    calc(128px + env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
 }
 .tr-bottomNavWrap{
   position: fixed;
@@ -388,18 +398,31 @@ const HUD_FORCE_CSS = `
   margin: 0 auto;
   display: flex;
   gap: 10px;
-  padding: 12px 18px 14px;
+  padding:
+    12px
+    max(18px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
 }
 @media (max-width: 720px){
   .tr-shellInner{
-    padding-bottom: 112px;
+    max-width: none;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      calc(108px + env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
   }
 
   .tr-bottomNavInner{
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px 8px 12px;
+    gap: 7px;
+    padding:
+      9px
+      max(8px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
   }
 
   .tr-bottomNavInner button{
