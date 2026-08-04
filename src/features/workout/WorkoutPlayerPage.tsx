@@ -2608,7 +2608,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
         title={sessionLabel}
         tone="blue"
         right={
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="tr-sessionActionBar">
             <button
               type="button"
               className="tr-seg tr-seg--musicOrange"
@@ -2637,17 +2637,9 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
           </div>
         }
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1.4fr 1fr",
-            gap: 10,
-            alignItems: "center",
-            marginBottom: 10,
-          }}
-        >
+        <div className="tr-sessionStepRow">
           <div />
-          <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+          <div className="tr-sessionStepControls">
             <button
               onClick={prev}
               className={`tr-seg ${atLast ? "tr-btn--prevOrange" : ""}`}
@@ -2673,24 +2665,20 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
           <div />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 1fr", gap: 10, alignItems: "center" }}>
-          <div style={{ display: "grid", gap: 4 }}>
+        <div className="tr-sessionOverviewGrid">
+          <div className="tr-sessionOverviewCell">
             <div className="tr-kicker">WORKOUT</div>
-            <div style={{ fontWeight: 1000 }}>
-              Exercise {items.length ? activeIdx + 1 : 0}/{items.length}
-            </div>
+            <strong>Exercise {items.length ? activeIdx + 1 : 0}/{items.length}</strong>
           </div>
 
-          <div style={{ textAlign: "center", display: "grid", gap: 4 }}>
-            <div className="tr-kicker">CURRENT</div>
-            <div style={{ fontWeight: 1000 }}>{current?.exercise?.name ?? "Not set"}</div>
+          <div className="tr-sessionOverviewCell is-current">
+            <div className="tr-kicker">{current?.completed_at ? "REVIEWING" : "CURRENT"}</div>
+            <strong>{current?.exercise?.name ?? "Not set"}</strong>
           </div>
 
-          <div style={{ textAlign: "right", display: "grid", gap: 4 }}>
+          <div className="tr-sessionOverviewCell is-next">
             <div className="tr-kicker">NEXT UP</div>
-            <div style={{ fontWeight: 1000 }}>
-              {nextUp?.exercise?.name ?? (items.length ? "End" : "Not set")}
-            </div>
+            <strong>{nextUp?.exercise?.name ?? (items.length ? "End" : "Not set")}</strong>
           </div>
         </div>
 
@@ -3336,11 +3324,18 @@ function ExerciseRunner({
   const [completedSetIndexes, setCompletedSetIndexes] = useState<number[]>([]);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [progressionOpen, setProgressionOpen] = useState(() => {
+    const isMobile =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 720px)").matches;
+
     try {
-      return localStorage.getItem("mvp_progression_assistant_open") !== "false";
+      const saved = localStorage.getItem("mvp_progression_assistant_open");
+      if (saved != null) return saved === "true" && !isMobile;
     } catch {
-      return true;
+      // Persistence is optional.
     }
+
+    return !isMobile;
   });
 
   useEffect(() => {
@@ -3376,7 +3371,12 @@ function ExerciseRunner({
     const act = Number((workoutExercise.prescription_snapshot ?? {})?.actual_minutes);
     setActualMinutes(Number.isFinite(act) && act > 0 ? Math.floor(act) : Math.max(0, Math.floor(dp)));
     setCalculatorOpen(false);
-    setProgressionOpen(true);
+    setProgressionOpen(
+      !(
+        typeof window !== "undefined" &&
+        window.matchMedia("(max-width: 720px)").matches
+      )
+    );
     setCalculatorWeight(0);
 
     try {
@@ -4239,6 +4239,7 @@ const unlock = async () => {
       <div style={{ marginTop: 28 }}>
         <BottomHudAdvanced
           sessionComplete={sessionComplete}
+          reviewingComplete={isDone}
           doneCount={doneCount}
           totalExercises={totalExercises}
           progressCells={progressCells}
