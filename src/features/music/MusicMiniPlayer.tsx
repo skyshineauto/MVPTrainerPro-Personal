@@ -72,6 +72,7 @@ function PlayerIcon({ name }: { name: IconName }) {
 
 function Spectrum({ playing }: { playing: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const peaksRef = useRef<number[]>([]);
 
   useEffect(() => {
     let frame = 0;
@@ -90,22 +91,65 @@ function Spectrum({ playing }: { playing: boolean }) {
       const context = canvas.getContext("2d");
       if (!context) return;
       context.clearRect(0, 0, width, height);
-      const levels = getMusicVisualizerLevels(36);
-      const gap = Math.max(2 * ratio, width * 0.004);
-      const barWidth = Math.max(1.5 * ratio, (width - gap * (levels.length - 1)) / levels.length);
-      const gradient = context.createLinearGradient(0, height, 0, 0);
-      gradient.addColorStop(0, "rgba(0, 164, 255, .82)");
-      gradient.addColorStop(0.58, "rgba(255, 157, 28, .95)");
-      gradient.addColorStop(1, "rgba(255, 220, 126, 1)");
-      context.fillStyle = gradient;
+      const levels = getMusicVisualizerLevels(44);
+      if (peaksRef.current.length !== levels.length) {
+        peaksRef.current = Array(levels.length).fill(0);
+      }
+
+      const horizontalPadding = 5 * ratio;
+      const usableWidth = Math.max(1, width - horizontalPadding * 2);
+      const gap = Math.max(1.6 * ratio, usableWidth * 0.0032);
+      const barWidth = Math.max(
+        1.6 * ratio,
+        (usableWidth - gap * (levels.length - 1)) / levels.length
+      );
+
+      context.save();
+      context.strokeStyle = "rgba(140, 205, 235, .075)";
+      context.lineWidth = Math.max(1, ratio * 0.55);
+      for (let line = 1; line <= 3; line += 1) {
+        const y = (height / 4) * line;
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+      }
+      context.restore();
 
       levels.forEach((level, index) => {
-        const idle = playing ? 0 : 0.025 + (index % 5) * 0.006;
-        const normalized = Math.max(idle, level);
-        const barHeight = Math.max(2 * ratio, normalized * height * 0.95);
-        const x = index * (barWidth + gap);
-        const y = height - barHeight;
-        context.fillRect(x, y, barWidth, barHeight);
+        const frequencyPosition = index / Math.max(1, levels.length - 1);
+        const idleWave = playing
+          ? 0
+          : 0.018 + Math.sin(index * 0.72 + performance.now() / 620) * 0.008;
+        const normalized = Math.max(idleWave, level);
+        const barHeight = Math.max(2 * ratio, normalized * height * 0.88);
+        const x = horizontalPadding + index * (barWidth + gap);
+        const y = height - barHeight - 3 * ratio;
+
+        const hue = 32 + frequencyPosition * 166;
+        const saturation = 92 - frequencyPosition * 18;
+        const lightness = 56 + normalized * 12;
+        const barGradient = context.createLinearGradient(0, height, 0, y);
+        barGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, 38%, .78)`);
+        barGradient.addColorStop(0.62, `hsla(${hue}, ${saturation}%, ${lightness}%, .96)`);
+        barGradient.addColorStop(1, `hsla(${Math.min(205, hue + 10)}, 92%, 78%, 1)`);
+
+        context.fillStyle = barGradient;
+        context.shadowColor = `hsla(${hue}, 90%, 58%, .28)`;
+        context.shadowBlur = normalized > 0.22 ? 7 * ratio : 0;
+        context.beginPath();
+        context.roundRect(x, y, barWidth, barHeight, Math.max(1, barWidth * 0.34));
+        context.fill();
+
+        const previousPeak = peaksRef.current[index] || 0;
+        const nextPeak = Math.max(normalized, previousPeak - (playing ? 0.012 : 0.028));
+        peaksRef.current[index] = nextPeak;
+        const peakY = height - nextPeak * height * 0.88 - 5 * ratio;
+        context.shadowBlur = 0;
+        context.fillStyle = frequencyPosition < 0.35
+          ? "rgba(255, 211, 132, .92)"
+          : "rgba(153, 230, 255, .92)";
+        context.fillRect(x, Math.max(1, peakY), barWidth, Math.max(1, 1.2 * ratio));
       });
 
       frame = window.requestAnimationFrame(draw);
@@ -115,7 +159,18 @@ function Spectrum({ playing }: { playing: boolean }) {
     return () => window.cancelAnimationFrame(frame);
   }, [playing]);
 
-  return <canvas ref={canvasRef} className="tr-audioSpectrum" aria-label="Live music spectrum" />;
+  return (
+    <div className="tr-audioSpectrumPanel" aria-label="Live music spectrum from low to high frequencies">
+      <canvas ref={canvasRef} className="tr-audioSpectrum" />
+      <div className="tr-audioSpectrumScale" aria-hidden>
+        <span>LOW</span>
+        <span>LOW-MID</span>
+        <span>MID</span>
+        <span>HIGH-MID</span>
+        <span>HIGH</span>
+      </div>
+    </div>
+  );
 }
 
 export function MusicMiniPlayer({
@@ -277,45 +332,59 @@ export function MusicMiniPlayer({
           <span>SHUFFLE</span>
         </button>
 
-        <div className="tr-audioTransport">
-          <button
-            type="button"
-            className="tr-audioTransportButton"
-            onClick={() => run(previousMusicTrack)}
-            disabled={!player.tracks.length}
-            aria-label="Previous song"
-          >
-            <PlayerIcon name="back" />
-          </button>
+        <div className="tr-audioTransport" aria-label="Music transport controls">
+          <div className="tr-audioTransportUnit">
+            <button
+              type="button"
+              className="tr-audioTransportButton"
+              onClick={() => run(previousMusicTrack)}
+              disabled={!player.tracks.length}
+              aria-label="Previous song"
+            >
+              <span className="tr-audioTransportFace"><PlayerIcon name="back" /></span>
+            </button>
+            <span>PREVIOUS</span>
+          </div>
 
-          <button
-            type="button"
-            className="tr-audioTransportButton tr-audioTransportButton--primary"
-            onClick={() => run(player.playing ? pauseMusic : playMusic)}
-            aria-label={player.playing ? "Pause music" : "Play music"}
-          >
-            <PlayerIcon name={player.playing ? "pause" : "play"} />
-          </button>
+          <div className="tr-audioTransportUnit is-primary">
+            <button
+              type="button"
+              className="tr-audioTransportButton tr-audioTransportButton--primary"
+              onClick={() => run(player.playing ? pauseMusic : playMusic)}
+              aria-label={player.playing ? "Pause music" : "Play music"}
+            >
+              <span className="tr-audioTransportFace">
+                <PlayerIcon name={player.playing ? "pause" : "play"} />
+              </span>
+            </button>
+            <span>{player.playing ? "PAUSE" : "PLAY"}</span>
+          </div>
 
-          <button
-            type="button"
-            className="tr-audioTransportButton"
-            onClick={() => stopMusic()}
-            disabled={!track}
-            aria-label="Stop music"
-          >
-            <PlayerIcon name="stop" />
-          </button>
+          <div className="tr-audioTransportUnit">
+            <button
+              type="button"
+              className="tr-audioTransportButton"
+              onClick={() => stopMusic()}
+              disabled={!track}
+              aria-label="Stop music"
+            >
+              <span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span>
+            </button>
+            <span>STOP</span>
+          </div>
 
-          <button
-            type="button"
-            className="tr-audioTransportButton"
-            onClick={() => run(() => nextMusicTrack())}
-            disabled={!player.tracks.length}
-            aria-label="Next song"
-          >
-            <PlayerIcon name="next" />
-          </button>
+          <div className="tr-audioTransportUnit">
+            <button
+              type="button"
+              className="tr-audioTransportButton"
+              onClick={() => run(() => nextMusicTrack())}
+              disabled={!player.tracks.length}
+              aria-label="Next song"
+            >
+              <span className="tr-audioTransportFace"><PlayerIcon name="next" /></span>
+            </button>
+            <span>NEXT</span>
+          </div>
         </div>
 
         <button
