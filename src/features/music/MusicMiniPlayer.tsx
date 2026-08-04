@@ -7,6 +7,7 @@ import {
   pauseMusic,
   playMusic,
   previousMusicTrack,
+  seekMusic,
   stopMusic,
   toggleMusicShuffle,
   useMusicPlayer,
@@ -33,19 +34,29 @@ export function MusicMiniPlayer({
   };
 
   const track = player.currentTrack;
-  const progressMax = Math.max(1, player.duration || track?.duration_seconds || 1);
-  const progressValue = Math.min(progressMax, Math.max(0, player.currentTime));
+  const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
+  const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
+  const queueLabel = player.activePlaylistName || "All Songs";
 
   return (
-    <section className="tr-musicMini" aria-label="MVP Trainer music player">
+    <section className={`tr-musicMini ${player.playing ? "is-playing" : ""}`} aria-label="MVP Trainer music player">
       <button
         type="button"
         className="tr-musicMiniInfo"
         onClick={() => navigate("/music")}
         title="Open My Music"
       >
-        <span className="tr-musicMiniIcon" aria-hidden>♫</span>
+        <span className="tr-musicMiniArtwork" aria-hidden>
+          <span className="tr-musicMiniNote">♫</span>
+          <span className="tr-musicMiniEqualizer">
+            <i />
+            <i />
+            <i />
+          </span>
+        </span>
+
         <span className="tr-musicMiniText">
+          <span className="tr-musicMiniEyebrow">NOW PLAYING</span>
           <span className="tr-musicMiniTitle">
             {track?.title || (player.loading ? "Loading music…" : "My Music")}
           </span>
@@ -57,12 +68,11 @@ export function MusicMiniPlayer({
         </span>
       </button>
 
-      <div className="tr-musicMiniProgress" aria-hidden>
-        <span
-          style={{
-            width: `${Math.max(0, Math.min(100, (progressValue / progressMax) * 100))}%`,
-          }}
-        />
+      <div className="tr-musicMiniQueue">
+        <span>QUEUE</span>
+        <button type="button" onClick={() => navigate("/music")}>
+          {queueLabel}
+        </button>
       </div>
 
       <div className="tr-musicMiniControls">
@@ -130,10 +140,19 @@ export function MusicMiniPlayer({
         </button>
       </div>
 
-      <div className="tr-musicMiniStatus">
-        <span>{formatMusicTime(player.currentTime)}</span>
-        <button type="button" onClick={() => navigate("/music")}>MY MUSIC</button>
-        <span>{formatMusicTime(player.duration || track?.duration_seconds || 0)}</span>
+      <div className="tr-musicMiniTimeline">
+        <span>{formatMusicTime(currentTime)}</span>
+        <input
+          type="range"
+          min="0"
+          max={Math.max(1, duration)}
+          step="1"
+          value={Math.min(Math.max(1, duration), currentTime)}
+          onChange={(event) => seekMusic(Number(event.target.value))}
+          disabled={!track || !duration}
+          aria-label="Music playback position"
+        />
+        <span>{formatMusicTime(duration)}</span>
       </div>
 
       {player.error ? <div className="tr-musicMiniError">{player.error}</div> : null}
