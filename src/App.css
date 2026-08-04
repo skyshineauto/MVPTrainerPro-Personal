@@ -6369,3 +6369,598 @@ body{
   .tr-smartIntensity{grid-template-columns:1fr;}
   .tr-smartIntensity > span{grid-column:1;}
 }
+
+/* ========================================================================== */
+/* PRO MOBILE WORKOUT + HUD + AUDIO CONSOLE V4                               */
+/* ========================================================================== */
+
+.tr-sessionActionBar{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.tr-sessionStepRow{
+  display:grid;
+  grid-template-columns:1fr 1.4fr 1fr;
+  align-items:center;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.tr-sessionStepControls{
+  display:grid;
+  grid-template-columns:minmax(72px,auto) minmax(130px,auto) minmax(72px,auto);
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+}
+
+.tr-sessionOverviewGrid{
+  display:grid;
+  grid-template-columns:1fr 1.4fr 1fr;
+  align-items:stretch;
+  gap:10px;
+}
+
+.tr-sessionOverviewCell{
+  min-width:0;
+  display:grid;
+  align-content:center;
+  gap:5px;
+  padding:11px 12px;
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,.08));
+}
+
+.tr-sessionOverviewCell strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:rgba(245,249,252,.95);
+  font-size:13px;
+  font-weight:950;
+}
+
+.tr-sessionOverviewCell.is-current{
+  text-align:center;
+  border-color:rgba(0,174,255,.20);
+  background:linear-gradient(180deg,rgba(0,165,240,.055),rgba(0,0,0,.09));
+}
+
+.tr-sessionOverviewCell.is-next{
+  text-align:right;
+}
+
+.tr-previousPerformance,
+.tr-previousPerformance *,
+.tr-progressionBody,
+.tr-progressionGrid,
+.tr-progressionCell{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+
+.tr-previousPerformance.is-open{
+  overflow:hidden !important;
+  contain:paint;
+}
+
+.tr-progressionToggle{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center !important;
+}
+
+.tr-progressionToggleRight{
+  min-width:0;
+  max-width:100%;
+}
+
+.tr-progressionBody{
+  overflow:hidden;
+}
+
+.tr-btn--progressionApply{
+  border-color:rgba(255,177,58,.78) !important;
+  color:#fff6e8 !important;
+  background:
+    linear-gradient(180deg,rgba(255,185,70,.34),rgba(205,82,2,.30)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.19),
+    inset 0 -1px 0 rgba(74,25,0,.65),
+    0 12px 30px rgba(0,0,0,.28),
+    0 0 22px rgba(255,136,12,.15) !important;
+}
+
+.tr-btn--progressionApply:hover{
+  border-color:rgba(255,205,116,.95) !important;
+  transform:translateY(-1px);
+}
+
+.tr-audioSpectrumPanel{
+  position:relative;
+  z-index:1;
+  display:grid;
+  gap:4px;
+  padding:8px 9px 6px;
+  overflow:hidden;
+  border:1px solid rgba(0,160,235,.13);
+  border-radius:13px;
+  background:
+    radial-gradient(420px 90px at 18% 100%,rgba(255,145,0,.10),transparent 70%),
+    radial-gradient(420px 90px at 82% 100%,rgba(0,170,255,.10),transparent 70%),
+    linear-gradient(180deg,rgba(0,0,0,.24),rgba(0,0,0,.43));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.03),
+    inset 0 -1px 0 rgba(0,150,225,.08);
+}
+
+.tr-audioSpectrumPanel::before{
+  content:"FREQUENCY SPECTRUM";
+  position:absolute;
+  top:6px;
+  right:9px;
+  z-index:2;
+  color:rgba(185,214,229,.30);
+  font-size:7px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.16em;
+  pointer-events:none;
+}
+
+.tr-audioSpectrum{
+  height:58px !important;
+  border-radius:8px !important;
+  background:
+    repeating-linear-gradient(90deg,transparent 0 10%,rgba(255,255,255,.025) calc(10% + 1px),transparent calc(10% + 2px)),
+    repeating-linear-gradient(0deg,transparent 0 12px,rgba(255,255,255,.025) 13px,transparent 14px) !important;
+  box-shadow:none !important;
+}
+
+.tr-audioSpectrumScale{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  align-items:center;
+  color:rgba(190,213,226,.38);
+  font-size:7px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.11em;
+}
+
+.tr-audioSpectrumScale span:nth-child(1){text-align:left;color:rgba(255,185,83,.60);}
+.tr-audioSpectrumScale span:nth-child(2),
+.tr-audioSpectrumScale span:nth-child(3),
+.tr-audioSpectrumScale span:nth-child(4){text-align:center;}
+.tr-audioSpectrumScale span:nth-child(5){text-align:right;color:rgba(104,211,255,.64);}
+
+.tr-audioControls{
+  grid-template-columns:minmax(128px,1fr) auto minmax(128px,1fr) !important;
+  gap:18px !important;
+}
+
+.tr-audioTransport{
+  gap:12px !important;
+}
+
+.tr-audioTransportUnit{
+  min-width:48px;
+  display:grid;
+  justify-items:center;
+  gap:6px;
+}
+
+.tr-audioTransportUnit > span{
+  color:rgba(198,217,228,.46);
+  font-size:7px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.13em;
+}
+
+.tr-audioTransportButton{
+  position:relative;
+  width:50px !important;
+  height:50px !important;
+  padding:4px !important;
+  border-radius:17px !important;
+  border:1px solid rgba(175,208,225,.18) !important;
+  color:rgba(238,247,252,.92) !important;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.115),rgba(255,255,255,.025) 42%,rgba(0,0,0,.35)) !important;
+  box-shadow:
+    0 10px 24px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.14),
+    inset 0 -1px 0 rgba(0,0,0,.70) !important;
+}
+
+.tr-audioTransportButton::before{
+  content:"";
+  position:absolute;
+  inset:4px;
+  border-radius:13px;
+  border:1px solid rgba(255,255,255,.055);
+  background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,.16));
+  pointer-events:none;
+}
+
+.tr-audioTransportFace{
+  position:relative;
+  z-index:1;
+  width:100%;
+  height:100%;
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+}
+
+.tr-audioTransportButton:hover{
+  border-color:rgba(89,205,255,.50) !important;
+  color:#fff !important;
+  box-shadow:
+    0 12px 26px rgba(0,0,0,.38),
+    0 0 18px rgba(0,170,255,.10),
+    inset 0 1px 0 rgba(255,255,255,.16) !important;
+}
+
+.tr-audioTransportButton--primary{
+  width:70px !important;
+  height:70px !important;
+  padding:5px !important;
+  border-radius:22px !important;
+  border-color:rgba(255,214,145,.92) !important;
+  color:#170d03 !important;
+  background:
+    linear-gradient(145deg,#ffe1a1 0%,#ffad2c 36%,#ef7c08 72%,#9c3d00 100%) !important;
+  box-shadow:
+    0 14px 34px rgba(255,119,0,.30),
+    0 0 0 1px rgba(255,152,25,.18),
+    inset 0 2px 0 rgba(255,255,255,.56),
+    inset 0 -5px 12px rgba(80,24,0,.32) !important;
+}
+
+.tr-audioTransportButton--primary::before{
+  inset:5px;
+  border-radius:17px;
+  border-color:rgba(255,244,221,.34);
+  background:
+    radial-gradient(circle at 34% 22%,rgba(255,255,255,.60) 0 5%,transparent 6%),
+    linear-gradient(180deg,rgba(255,255,255,.18),rgba(95,30,0,.10));
+}
+
+.tr-audioTransportUnit.is-primary > span{
+  color:rgba(255,190,86,.78);
+}
+
+.tr-audioModeButton{
+  min-height:44px !important;
+  border-radius:14px !important;
+  border-color:rgba(175,208,225,.15) !important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.075),rgba(0,0,0,.24)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 10px 22px rgba(0,0,0,.25) !important;
+}
+
+.tr-audioModeButton.is-active{
+  color:#ffd084 !important;
+  border-color:rgba(255,164,30,.55) !important;
+  background:
+    radial-gradient(240px 70px at 50% 0%,rgba(255,172,47,.16),transparent 72%),
+    linear-gradient(180deg,rgba(255,136,0,.15),rgba(48,19,0,.22)) !important;
+}
+
+@media (max-width:760px){
+  html,
+  body,
+  #root,
+  .tr-shellRoot,
+  .tr-shellInner{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    overflow-x:hidden !important;
+  }
+
+  body{
+    padding:0 !important;
+  }
+
+  .tr-shellInner{
+    padding-left:max(10px,env(safe-area-inset-left)) !important;
+    padding-right:max(10px,env(safe-area-inset-right)) !important;
+    padding-bottom:calc(156px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-bottom:calc(156px + env(safe-area-inset-bottom));
+  }
+
+  .tr-sessionActionBar{
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:7px;
+  }
+
+  .tr-sessionActionBar .tr-seg{
+    width:100%;
+    min-width:0;
+    height:40px !important;
+    padding:0 7px !important;
+    white-space:nowrap;
+    font-size:9px;
+    letter-spacing:.07em;
+  }
+
+  .tr-sessionStepRow{
+    grid-template-columns:1fr;
+    gap:0;
+    margin-bottom:10px;
+  }
+
+  .tr-sessionStepRow > div:first-child,
+  .tr-sessionStepRow > div:last-child{
+    display:none;
+  }
+
+  .tr-sessionStepControls{
+    width:100%;
+    grid-template-columns:minmax(0,.82fr) minmax(0,1.35fr) minmax(0,.82fr);
+    gap:7px;
+  }
+
+  .tr-sessionStepControls .tr-seg,
+  .tr-sessionStepControls .tr-doneCountPill{
+    width:100%;
+    min-width:0;
+    height:40px !important;
+    padding:0 8px !important;
+    font-size:10px;
+    letter-spacing:.07em;
+  }
+
+  .tr-sessionOverviewGrid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:6px;
+  }
+
+  .tr-sessionOverviewCell{
+    min-height:70px;
+    padding:9px 7px;
+    text-align:left !important;
+  }
+
+  .tr-sessionOverviewCell .tr-kicker{
+    font-size:8px !important;
+    letter-spacing:.11em !important;
+  }
+
+  .tr-sessionOverviewCell strong{
+    white-space:normal;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    font-size:11px;
+    line-height:1.18;
+  }
+
+  .tr-exerciseNavigatorHead{
+    align-items:flex-start;
+  }
+
+  .tr-exerciseNavigatorRail{
+    grid-auto-columns:minmax(205px,82%) !important;
+    scroll-snap-type:x mandatory;
+    scroll-padding-left:0;
+    overscroll-behavior-x:contain;
+  }
+
+  .tr-exerciseNavigatorItem{
+    width:100% !important;
+    min-width:0 !important;
+    scroll-snap-align:start;
+  }
+
+  .tr-previousPerformance.is-open{
+    width:100%;
+    max-width:100%;
+    overflow:hidden !important;
+    border-right-color:rgba(0,170,255,.18) !important;
+  }
+
+  .tr-progressionToggle{
+    grid-template-columns:minmax(0,1fr) auto !important;
+    align-items:start !important;
+    gap:8px !important;
+  }
+
+  .tr-progressionToggleText{
+    gap:5px !important;
+  }
+
+  .tr-progressionToggleRight{
+    display:grid !important;
+    grid-template-columns:auto 32px;
+    align-items:center;
+    gap:6px !important;
+  }
+
+  .tr-progressionConfidence{
+    max-width:150px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:8px !important;
+    letter-spacing:.08em !important;
+    padding:6px 8px !important;
+  }
+
+  .tr-progressionChevron{
+    width:32px !important;
+    height:32px !important;
+    flex:0 0 32px;
+  }
+
+  .tr-progressionBody{
+    width:100%;
+    max-width:100%;
+    overflow:hidden;
+  }
+
+  .tr-progressionGrid{
+    width:100%;
+    grid-template-columns:1fr !important;
+    gap:9px !important;
+  }
+
+  .tr-progressionCell{
+    width:100%;
+    padding:11px !important;
+    overflow-wrap:anywhere;
+  }
+
+  .tr-progressionAction{
+    font-size:15px !important;
+  }
+
+  .tr-finalActionBottom--triple{
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    gap:7px !important;
+  }
+
+  .tr-finalActionBottom--triple .tr-btn{
+    min-width:0 !important;
+    width:100% !important;
+    height:44px !important;
+    padding:0 7px !important;
+    font-size:9px !important;
+    letter-spacing:.07em !important;
+  }
+
+  .tr-hudPanel,
+  .tr-hudStrip,
+  .tr-hudTiles,
+  .tr-hudTiles .tr-rowbox{
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  .tr-hudKicker,
+  .tr-hudStripSub,
+  .tr-hudPanel strong,
+  .tr-hudPanel .tr-rowbox{
+    text-shadow:none !important;
+  }
+
+  .tr-hudTimeBig{
+    font-size:clamp(48px,15vw,70px) !important;
+    letter-spacing:.015em !important;
+  }
+
+  .tr-audioDeck{
+    gap:10px !important;
+    padding:12px !important;
+    border-radius:18px !important;
+  }
+
+  .tr-audioSpectrumPanel{
+    padding:7px 7px 5px;
+  }
+
+  .tr-audioSpectrum{
+    height:50px !important;
+  }
+
+  .tr-audioSpectrumScale{
+    font-size:6px;
+    letter-spacing:.07em;
+  }
+
+  .tr-audioControls{
+    grid-template-columns:1fr 1fr !important;
+    grid-template-areas:
+      "transport transport"
+      "shuffle repeat" !important;
+    gap:10px !important;
+  }
+
+  .tr-audioTransport{
+    width:100%;
+    display:grid !important;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    justify-items:center;
+    gap:6px !important;
+  }
+
+  .tr-audioTransportUnit{
+    width:100%;
+    min-width:0;
+  }
+
+  .tr-audioTransportButton{
+    width:46px !important;
+    height:46px !important;
+    border-radius:15px !important;
+  }
+
+  .tr-audioTransportButton--primary{
+    width:62px !important;
+    height:62px !important;
+    border-radius:20px !important;
+  }
+
+  .tr-audioTransportUnit > span{
+    font-size:6px;
+    letter-spacing:.08em;
+  }
+
+  .tr-audioModeButton{
+    width:100%;
+    min-height:42px !important;
+  }
+}
+
+@media (max-width:430px){
+  .tr-sessionActionBar .tr-seg{
+    font-size:8px;
+    padding-inline:5px !important;
+  }
+
+  .tr-sessionOverviewCell{
+    min-height:66px;
+    padding:8px 6px;
+  }
+
+  .tr-exerciseNavigatorRail{
+    grid-auto-columns:minmax(190px,88%) !important;
+  }
+
+  .tr-audioDeckTop{
+    grid-template-columns:50px minmax(0,1fr) 44px !important;
+  }
+
+  .tr-audioArtwork{
+    width:50px !important;
+    height:50px !important;
+  }
+
+  .tr-audioIdentity strong{
+    font-size:15px !important;
+  }
+
+  .tr-audioTransportButton{
+    width:43px !important;
+    height:43px !important;
+  }
+
+  .tr-audioTransportButton--primary{
+    width:58px !important;
+    height:58px !important;
+  }
+}
