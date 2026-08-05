@@ -59,6 +59,15 @@ export function primeWorkoutAudio() {
 }
 
 function alertPattern(alertType: AlertSoundType) {
+  if (alertType === "workout_start") {
+    return [
+      { frequency: 392, offset: 0, duration: 0.15, type: "triangle" as OscillatorType },
+      { frequency: 523, offset: 0.16, duration: 0.15, type: "triangle" as OscillatorType },
+      { frequency: 659, offset: 0.32, duration: 0.17, type: "triangle" as OscillatorType },
+      { frequency: 784, offset: 0.5, duration: 0.3, type: "sine" as OscillatorType },
+    ];
+  }
+
   if (alertType === "exercise_complete") {
     return [
       { frequency: 660, offset: 0, duration: 0.17, type: "sine" as OscillatorType },
@@ -116,6 +125,7 @@ async function playBuiltInAlert(alertType: AlertSoundType) {
 }
 
 function vibrationPattern(alertType: AlertSoundType) {
+  if (alertType === "workout_start") return [90, 45, 90, 45, 180];
   if (alertType === "workout_complete") return [180, 80, 180, 80, 420];
   if (alertType === "exercise_complete") return [180, 80, 280];
   return [260, 100, 260, 100, 520];
@@ -192,7 +202,7 @@ async function playUploadedWithHtmlAudio(url: string) {
   });
 }
 
-/** Pre-download and decode one custom sound so timer playback is immediate. */
+/** Pre-download and decode one custom sound so playback is immediate. */
 export async function preloadWorkoutAlert(alertType: AlertSoundType) {
   try {
     const signedUrl = await getAlertSoundSignedUrl(alertType);
@@ -218,7 +228,9 @@ async function playSelectedAlert(
   alertType: AlertSoundType
 ): Promise<"uploaded" | "built_in"> {
   try {
-    const signedUrl = preloadedAlertUrls.get(alertType) ?? (await getAlertSoundSignedUrl(alertType));
+    const signedUrl =
+      preloadedAlertUrls.get(alertType) ?? (await getAlertSoundSignedUrl(alertType));
+
     if (signedUrl) {
       try {
         await playUploadedWithWebAudio(signedUrl);
