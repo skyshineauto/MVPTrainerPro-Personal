@@ -1,5 +1,4 @@
 import BottomHudAdvanced from "./BottomHudAdvanced";
-import { ExerciseNavigator } from "./ExerciseNavigator";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
@@ -412,7 +411,7 @@ type DecoratedSearchRow = SearchExerciseRow & {
 };
 
 function defaultPrescription() {
-  return { sets: 3, rep_min: 8, rep_max: 12, rest_seconds: 90, rir_min: 2, rir_max: 3 };
+  return { sets: 3, rep_min: 8, rep_max: 12, rest_seconds: 60, rir_min: 2, rir_max: 3 };
 }
 
 function proteinMultiplier(goal: string | null | undefined) {
@@ -1008,7 +1007,21 @@ function useRestTimer(): RestTimerController {
     if (timer.status === "finished" && !alertedRef.current) {
       alertedRef.current = true;
       void playWorkoutAlert("rest_complete");
+
+      const dismissId = window.setTimeout(() => {
+        setTimer({
+          status: "idle",
+          totalSeconds: 0,
+          remainingSeconds: 0,
+          deadlineMs: null,
+          exerciseName: "",
+          setIndex: null,
+        });
+      }, 1900);
+
+      return () => window.clearTimeout(dismissId);
     }
+
     if (timer.status === "running") alertedRef.current = false;
   }, [timer.status]);
 
@@ -1107,31 +1120,46 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
     ? Math.max(0, Math.min(100, ((timer.totalSeconds - timer.remainingSeconds) / timer.totalSeconds) * 100))
     : 0;
   const finished = timer.status === "finished";
+  const nextSet = timer.setIndex != null ? timer.setIndex + 1 : null;
 
   return createPortal(
-    <div className={`tr-restTimerDock ${finished ? "is-finished" : ""}`} role="timer" aria-live="polite">
+    <div
+      className={`tr-restTimerDock tr-restTimerDock--pro ${finished ? "is-finished" : ""}`}
+      role="timer"
+      aria-live="polite"
+    >
       <div className="tr-restTimerProgress" style={{ width: `${progress}%` }} />
 
       <div className="tr-restTimerIdentity">
-        <div className="tr-restTimerKicker">{finished ? "REST COMPLETE" : "REST TIMER"}</div>
+        <div className="tr-restTimerKicker">{finished ? "REST COMPLETE" : "REST"}</div>
         <div className="tr-restTimerExercise">
-          {timer.exerciseName || "Exercise"}{timer.setIndex ? ` • Set ${timer.setIndex}` : ""}
+          {finished
+            ? `${nextSet ? `SET ${nextSet}` : "NEXT SET"} READY`
+            : `${timer.exerciseName || "Exercise"}${nextSet ? ` • Next: Set ${nextSet}` : ""}`}
         </div>
       </div>
 
-      <div className="tr-restTimerClock">{finished ? "GO" : formatRestClock(timer.remainingSeconds)}</div>
-
-      <div className="tr-restTimerActions">
-        <button type="button" onClick={() => timer.addSeconds(-15)} disabled={timer.remainingSeconds <= 15}>−15</button>
-        <button type="button" onClick={timer.pauseResume}>
-          {timer.status === "running" ? "Pause" : finished ? "Restart" : "Resume"}
-        </button>
-        <button type="button" onClick={() => timer.addSeconds(15)}>+15</button>
-        <button type="button" onClick={timer.restart}>Reset</button>
-        <button type="button" className="tr-restTimerSkip" onClick={timer.skip}>
-          {finished ? "Dismiss" : "Skip"}
-        </button>
+      <div className="tr-restTimerClock">
+        {finished ? "READY" : formatRestClock(timer.remainingSeconds)}
       </div>
+
+      {!finished ? (
+        <div className="tr-restTimerActions tr-restTimerActions--simple">
+          <button
+            type="button"
+            onClick={() => timer.addSeconds(-15)}
+            disabled={timer.remainingSeconds <= 15}
+          >
+            −15 SEC
+          </button>
+          <button type="button" className="tr-restTimerSkip" onClick={timer.skip}>
+            SKIP
+          </button>
+          <button type="button" onClick={() => timer.addSeconds(15)}>
+            +15 SEC
+          </button>
+        </div>
+      ) : null}
     </div>,
     document.body
   );
@@ -1271,7 +1299,7 @@ function targetLabelFromPrescription(pres: any, timed: boolean) {
 
 function restOrDurationLabel(pres: any, timed: boolean) {
   if (timed) return `${durationMinutes(pres)} min target`;
-  return `${Number(pres?.rest_seconds ?? 90)}s rest`;
+  return `${Number(pres?.rest_seconds ?? 60)}s rest`;
 }
 
 function friendlyPainState(pain: number) {
@@ -1332,6 +1360,61 @@ function calculatePlateLoad(targetWeight: number, barWeight: number): PlateLoad 
     loadedWeight: bar + loadedPerSide * 2,
     remainder: Math.max(0, remaining * 2),
   };
+}
+
+function SessionStartOverlay({
+  open,
+  sessionLabel,
+}: {
+  open: boolean;
+  sessionLabel: string;
+}) {
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="tr-sessionStartOverlay" role="status" aria-live="assertive">
+      <div className="tr-sessionStartPulse" aria-hidden />
+      <div className="tr-sessionStartMark">▶</div>
+      <div className="tr-sessionStartKicker">SESSION STARTED</div>
+      <div className="tr-sessionStartTitle">{sessionLabel}</div>
+      <div className="tr-sessionStartSub">LET'S WORK</div>
+    </div>,
+    document.body
+  );
+}
+
+function ExerciseCompleteOverlay({
+  notice,
+  onContinue,
+}: {
+  notice: {
+    name: string;
+    nextName: string;
+    done: number;
+    total: number;
+  } | null;
+  onContinue: () => void;
+}) {
+  if (!notice || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="tr-exerciseCompleteOverlay" role="status" aria-live="assertive">
+      <div className="tr-exerciseCompleteCard">
+        <div className="tr-exerciseCompleteCheck">✓</div>
+        <div className="tr-exerciseCompleteKicker">EXERCISE COMPLETE</div>
+        <div className="tr-exerciseCompleteName">{notice.name}</div>
+        <div className="tr-exerciseCompleteProgress">
+          {notice.done} OF {notice.total} COMPLETE
+        </div>
+        <button type="button" className="tr-btn tr-btn--primary" onClick={onContinue}>
+          {notice.nextName === "End"
+            ? "VIEW WORKOUT SUMMARY"
+            : `CONTINUE TO ${notice.nextName.toUpperCase()} →`}
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 function SessionCompleteOverlay({
@@ -1750,6 +1833,14 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   const [symptomKey, setSymptomKey] = useState<SymptomKey | null>(null);
 
   const [completeOverlayOpen, setCompleteOverlayOpen] = useState(false);
+  const [sessionStartOverlayOpen, setSessionStartOverlayOpen] = useState(false);
+  const [exerciseCompleteNotice, setExerciseCompleteNotice] = useState<{
+    name: string;
+    nextName: string;
+    done: number;
+    total: number;
+  } | null>(null);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
   const restTimer = useRestTimer();
 
   useEffect(() => {
@@ -1779,9 +1870,9 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   );
 
   useEffect(() => {
-    if (!editing && !completeOverlayOpen) return;
+    if (!editing && !completeOverlayOpen && !roadmapOpen) return;
     return lockDocumentForModal();
-  }, [editing, completeOverlayOpen]);
+  }, [editing, completeOverlayOpen, roadmapOpen]);
 
   useEffect(() => {
     try {
@@ -1946,7 +2037,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
             sets: it.sets ?? 3,
             rep_min: it.rep_min ?? 8,
             rep_max: it.rep_max ?? 12,
-            rest_seconds: it.rest_seconds ?? 90,
+            rest_seconds: it.rest_seconds ?? 60,
             rir_min: it.rir_min ?? 2,
             rir_max: it.rir_max ?? 3,
           },
@@ -1987,6 +2078,9 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     setProteinTarget(null);
     setTemplateId(null);
     setCompleteOverlayOpen(false);
+    setSessionStartOverlayOpen(false);
+    setExerciseCompleteNotice(null);
+    setRoadmapOpen(false);
 
     try {
       const { data: u, error: uErr } = await supabase.auth.getUser();
@@ -2099,6 +2193,9 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
       setProteinTarget(w > 0 ? roundProtein(w * proteinMultiplier(goal)) : null);
 
       await hydrateAfterStart(workoutId);
+      setSessionStartOverlayOpen(true);
+      void playWorkoutAlert("workout_start");
+      window.setTimeout(() => setSessionStartOverlayOpen(false), 1800);
     } catch (e: any) {
       setLoadErr(e?.message ?? String(e));
       setGateOpen(true);
@@ -2129,9 +2226,19 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     const completedIndex = nextItems.findIndex((row) => row.id === completedExerciseId);
     const completedTotal = nextItems.filter((row) => Boolean(row.completed_at)).length;
     const allComplete = nextItems.length > 0 && completedTotal === nextItems.length;
+    const completedName =
+      nextItems[completedIndex]?.exercise?.name ??
+      nextItems[completedIndex]?.exercise?.title ??
+      "Exercise";
 
     if (allComplete) {
       setActiveIdx(Math.max(0, completedIndex));
+      setExerciseCompleteNotice({
+        name: completedName,
+        nextName: "End",
+        done: completedTotal,
+        total: nextItems.length,
+      });
       showToast(`WORKOUT COMPLETE • ${completedTotal}/${nextItems.length} FINISHED.`, "ok");
     } else {
       let nextIncompleteIndex = nextItems.findIndex(
@@ -2145,6 +2252,18 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
       if (nextIncompleteIndex >= 0) {
         setActiveIdx(nextIncompleteIndex);
       }
+
+      const nextExerciseName =
+        nextItems[nextIncompleteIndex]?.exercise?.name ??
+        nextItems[nextIncompleteIndex]?.exercise?.title ??
+        "Next exercise";
+
+      setExerciseCompleteNotice({
+        name: completedName,
+        nextName: nextExerciseName,
+        done: completedTotal,
+        total: nextItems.length,
+      });
 
       showToast(
         `EXERCISE COMPLETE • ${completedTotal}/${nextItems.length} FINISHED.`,
@@ -2584,34 +2703,110 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   }
 
   if (gateOpen) {
+    const numericGateWeight = Number(gateWeight);
+    const gateProteinTarget =
+      Number.isFinite(numericGateWeight) && numericGateWeight > 0
+        ? roundProtein(numericGateWeight * proteinMultiplier(goal))
+        : null;
+
     return (
-      <div style={{ display: "grid", gap: 12, paddingBottom: 156 }}>
+      <div className="tr-preWorkoutPage">
         <Toast toast={toast} onClose={() => setToast((t) => ({ ...t, open: false }))} />
-        <Card title="Start Workout" tone="blue">
-          <div className="tr-rowbox" style={{ display: "grid", gap: 10 }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <div className="tr-kicker">WEIGHT (LB) — REQUIRED</div>
-              <div className="tr-sub">Enter your weight to start. Timer begins only after you start.</div>
+
+        <section className="tr-preWorkoutConsole" aria-labelledby="pre-workout-title">
+          <div className="tr-preWorkoutTop">
+            <div>
+              <div className="tr-kicker">PRE-WORKOUT CHECK-IN</div>
+              <h1 id="pre-workout-title">{sessionLabel}</h1>
+              <div className="tr-preWorkoutMeta">
+                <span>SESSION READY</span>
+                <span>60 SEC DEFAULT REST</span>
+              </div>
             </div>
+            <div className="tr-readyBadge">
+              <span className="tr-readyDot" aria-hidden />
+              READY TO TRAIN
+            </div>
+          </div>
 
-            <input
-              value={gateWeight}
-              onChange={(e) => setGateWeight(e.target.value.replace(/[^\d.]/g, ""))}
-              placeholder="e.g. 185"
-              style={{ height: 52, width: "min(320px, 100%)", fontSize: 18, fontWeight: 950 }}
-              inputMode="decimal"
-              autoFocus
-            />
+          <div className="tr-preWorkoutWeightPanel">
+            <div className="tr-kicker">TODAY'S BODY WEIGHT</div>
+            <div className="tr-weightStepper">
+              <button
+                type="button"
+                aria-label="Decrease body weight by half a pound"
+                onClick={() => {
+                  const currentValue = Number(gateWeight) || 0;
+                  setGateWeight(String(Math.max(0, Number((currentValue - 0.5).toFixed(1)))));
+                }}
+              >
+                −
+              </button>
 
-            <button className="tr-btn tr-btn--primary" style={{ height: 56 }} onClick={startWorkoutNow}>
-              START WORKOUT
+              <label className="tr-weightInputWrap">
+                <input
+                  value={gateWeight}
+                  onChange={(e) => setGateWeight(e.target.value.replace(/[^\d.]/g, ""))}
+                  placeholder="185.0"
+                  inputMode="decimal"
+                  autoFocus
+                  aria-label="Today's body weight in pounds"
+                />
+                <span>LB</span>
+              </label>
+
+              <button
+                type="button"
+                aria-label="Increase body weight by half a pound"
+                onClick={() => {
+                  const currentValue = Number(gateWeight) || 0;
+                  setGateWeight(String(Number((currentValue + 0.5).toFixed(1))));
+                }}
+              >
+                +
+              </button>
+            </div>
+            <div className="tr-preWorkoutHint">
+              Confirm today's weight. The timer begins only after the workout starts.
+            </div>
+          </div>
+
+          <div className="tr-preWorkoutMetrics">
+            <div className="tr-preMetric">
+              <span>BODY WEIGHT</span>
+              <strong>
+                {Number.isFinite(numericGateWeight) && numericGateWeight > 0
+                  ? `${numericGateWeight} lb`
+                  : "Required"}
+              </strong>
+              <small>Today's check-in</small>
+            </div>
+            <div className="tr-preMetric">
+              <span>PROTEIN TARGET</span>
+              <strong>{gateProteinTarget != null ? `${gateProteinTarget} g` : "Pending"}</strong>
+              <small>Based on current goal</small>
+            </div>
+            <div className="tr-preMetric">
+              <span>READINESS</span>
+              <strong>READY</strong>
+              <small>Start when prepared</small>
+            </div>
+          </div>
+
+          <div className="tr-preWorkoutActions">
+            <button
+              className="tr-btn tr-btn--primary tr-startWorkoutButton"
+              onClick={startWorkoutNow}
+            >
+              <span className="tr-startWorkoutIcon">▶</span>
+              START {sessionLabel.toUpperCase()}
             </button>
 
-            <button className="tr-btn" onClick={() => (window.location.pathname = "/")}>
-              Cancel
+            <button className="tr-btn tr-btn--quiet" onClick={() => (window.location.pathname = "/")}>
+              REVIEW LATER
             </button>
           </div>
-        </Card>
+        </section>
       </div>
     );
   }
@@ -2621,6 +2816,16 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
       <Toast toast={toast} onClose={() => setToast((t) => ({ ...t, open: false }))} />
       <RestTimerDock timer={restTimer} />
 
+      <SessionStartOverlay
+        open={sessionStartOverlayOpen}
+        sessionLabel={sessionLabel}
+      />
+
+      <ExerciseCompleteOverlay
+        notice={exerciseCompleteNotice}
+        onContinue={() => setExerciseCompleteNotice(null)}
+      />
+
       <SessionCompleteOverlay
         open={completeOverlayOpen}
         onReview={() => setCompleteOverlayOpen(false)}
@@ -2629,112 +2834,208 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
         totalExercises={items.length}
       />
 
-      <Card title="Session Check-in" tone="blue">
-        <div className="tr-rowbox">
-          <div className="tr-checkinGrid tr-checkinGrid--tight">
-            <div className="tr-checkinTile tr-checkinTile--tight">
-              <div className="tr-kicker">WEIGHT (LB)</div>
-              <div className="tr-checkinValue tr-checkinValue--tight">
-                {startedWeight != null ? `${startedWeight} lb` : "Not set"}
+      <section className="tr-proSessionConsole">
+        <div className="tr-proUtilityToolbar" aria-label="Workout utilities">
+          <button
+            type="button"
+            className="tr-proUtilityButton tr-proUtilityButton--music"
+            onClick={() => {
+              if (navigate) navigate("/music");
+              else window.location.pathname = "/music";
+            }}
+          >
+            <span className="tr-proUtilityIcon" aria-hidden>♫</span>
+            <span>MUSIC</span>
+          </button>
+
+          <button
+            type="button"
+            className="tr-proUtilityButton tr-proUtilityButton--alerts"
+            onClick={() => {
+              if (navigate) navigate("/sound-alerts");
+              else window.location.pathname = "/sound-alerts";
+            }}
+          >
+            <span className="tr-proUtilityIcon" aria-hidden>◉</span>
+            <span>ALERTS</span>
+          </button>
+
+          <button
+            type="button"
+            className="tr-proUtilityButton tr-proUtilityButton--edit"
+            onClick={() => setEditing(true)}
+          >
+            <span className="tr-proUtilityIcon" aria-hidden>✎</span>
+            <span>EDIT SESSION</span>
+          </button>
+        </div>
+
+        <div className={`tr-currentExerciseHero ${current?.completed_at ? "is-reviewing" : ""}`}>
+          <div className="tr-currentExerciseHeader">
+            <div>
+              <div className="tr-kicker">
+                {current?.completed_at ? "REVIEWING COMPLETED EXERCISE" : "CURRENT EXERCISE"}
+              </div>
+              <div className="tr-currentExerciseCount">
+                {items.length ? activeIdx + 1 : 0} OF {items.length}
               </div>
             </div>
+            <div className={`tr-sessionState ${current?.completed_at ? "is-complete" : "is-active"}`}>
+              <span aria-hidden />
+              {current?.completed_at ? "COMPLETED" : "IN PROGRESS"}
+            </div>
+          </div>
 
-            <div className="tr-checkinTile tr-checkinTile--tight">
-              <div className="tr-kicker">PROTEIN TARGET</div>
-              <div className="tr-checkinValue tr-checkinValue--tight">
-                {proteinTarget != null ? `${proteinTarget}g` : "Not set"}
+          <div className="tr-currentExerciseName">
+            {current?.exercise?.name ?? current?.exercise?.title ?? "Not set"}
+          </div>
+
+          <div className="tr-currentExercisePrescription">
+            <div>
+              <span>SETS</span>
+              <strong>{Number(current?.prescription_snapshot?.sets ?? 3)}</strong>
+            </div>
+            <div>
+              <span>REPS</span>
+              <strong>
+                {Number(current?.prescription_snapshot?.rep_min ?? 8)}–
+                {Number(current?.prescription_snapshot?.rep_max ?? 12)}
+              </strong>
+            </div>
+            <div>
+              <span>REST</span>
+              <strong>{Number(current?.prescription_snapshot?.rest_seconds ?? 60)} SEC</strong>
+            </div>
+          </div>
+
+          <div className="tr-currentExerciseNext">
+            <span>NEXT</span>
+            <strong>{nextUp?.exercise?.name ?? nextUp?.exercise?.title ?? "Workout finish"}</strong>
+          </div>
+        </div>
+
+        <div className="tr-performanceMetricRail">
+          <div className="tr-performanceMetric">
+            <span className="tr-performanceMetricIcon" aria-hidden>⚖</span>
+            <div>
+              <span>BODY WEIGHT</span>
+              <strong>{startedWeight != null ? `${startedWeight} lb` : "Not set"}</strong>
+              <small>Today's check-in</small>
+            </div>
+          </div>
+
+          <div className="tr-performanceMetric tr-performanceMetric--protein">
+            <span className="tr-performanceMetricIcon" aria-hidden>◒</span>
+            <div>
+              <span>PROTEIN TARGET</span>
+              <strong>{proteinTarget != null ? `${proteinTarget} g` : "Not set"}</strong>
+              <small>Daily target</small>
+            </div>
+          </div>
+
+          <div className="tr-performanceMetric tr-performanceMetric--status">
+            <span className="tr-performanceMetricIcon" aria-hidden>●</span>
+            <div>
+              <span>SESSION</span>
+              <strong>{sessionComplete ? "COMPLETE" : "IN PROGRESS"}</strong>
+              <small>{doneCount} of {items.length} complete</small>
+            </div>
+          </div>
+        </div>
+
+        <div className="tr-sessionRoadmap">
+          <div className="tr-sessionRoadmapHeader">
+            <div>
+              <div className="tr-kicker">SESSION PROGRESS</div>
+              <strong>{doneCount} / {items.length}</strong>
+            </div>
+            <button type="button" onClick={() => setRoadmapOpen(true)}>
+              VIEW FULL SESSION
+            </button>
+          </div>
+
+          <div className="tr-sessionRoadmapRail" aria-label={`${doneCount} of ${items.length} exercises complete`}>
+            {items.map((row, index) => {
+              const complete = Boolean(row.completed_at);
+              const active = index === activeIdx;
+              const nextMarker = index === activeIdx + 1 && !complete;
+              return (
+                <button
+                  type="button"
+                  key={row.id}
+                  className={[
+                    "tr-sessionRoadmapNode",
+                    complete ? "is-complete" : "",
+                    active ? "is-current" : "",
+                    nextMarker ? "is-next" : "",
+                  ].filter(Boolean).join(" ")}
+                  onClick={() => setActiveIdx(index)}
+                  aria-label={`${index + 1}. ${row.exercise?.name ?? "Exercise"}${complete ? ", completed" : active ? ", current" : ""}`}
+                >
+                  <span>{complete ? "✓" : index + 1}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="tr-sessionRoadmapNames">
+            <div>
+              <span>CURRENT</span>
+              <strong>{current?.exercise?.name ?? "Not set"}</strong>
+            </div>
+            <div>
+              <span>NEXT</span>
+              <strong>{nextUp?.exercise?.name ?? "Workout finish"}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {roadmapOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div className="tr-fullSessionOverlay">
+              <div className="tr-fullSessionSheet">
+                <div className="tr-fullSessionHeader">
+                  <div>
+                    <div className="tr-kicker">FULL SESSION</div>
+                    <h2>{sessionLabel}</h2>
+                  </div>
+                  <button type="button" onClick={() => setRoadmapOpen(false)}>CLOSE</button>
+                </div>
+
+                <div className="tr-fullSessionList">
+                  {items.map((row, index) => {
+                    const complete = Boolean(row.completed_at);
+                    const active = index === activeIdx;
+                    return (
+                      <button
+                        type="button"
+                        key={row.id}
+                        className={`tr-fullSessionExercise ${complete ? "is-complete" : ""} ${active ? "is-current" : ""}`}
+                        onClick={() => {
+                          setActiveIdx(index);
+                          setRoadmapOpen(false);
+                        }}
+                      >
+                        <span className="tr-fullSessionNumber">
+                          {complete ? "✓" : index + 1}
+                        </span>
+                        <span className="tr-fullSessionCopy">
+                          <strong>{row.exercise?.name ?? row.exercise?.title ?? `Exercise ${index + 1}`}</strong>
+                          <small>
+                            {complete ? "Completed" : active ? "Current exercise" : "Upcoming"}
+                          </small>
+                        </span>
+                        <span className="tr-fullSessionArrow">›</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <div className="tr-workoutSessionCard">
-      <Card
-        title={sessionLabel}
-        tone="blue"
-        right={
-          <div className="tr-sessionActionBar">
-            <button
-              type="button"
-              className="tr-seg tr-seg--musicOrange"
-              onClick={() => {
-                if (navigate) navigate("/music");
-                else window.location.pathname = "/music";
-              }}
-              style={{ height: 44 }}
-            >
-              Music
-            </button>
-            <button
-              type="button"
-              className="tr-seg"
-              onClick={() => {
-                if (navigate) navigate("/sound-alerts");
-                else window.location.pathname = "/sound-alerts";
-              }}
-              style={{ height: 44 }}
-            >
-              Alert Sounds
-            </button>
-            <button className="tr-seg is-active" onClick={() => setEditing(true)} style={{ height: 44 }}>
-              Edit
-            </button>
-          </div>
-        }
-      >
-        <div className="tr-sessionStepRow">
-          <div />
-          <div className="tr-sessionStepControls">
-            <button
-              onClick={prev}
-              className={`tr-seg ${atLast ? "tr-btn--prevOrange" : ""}`}
-              disabled={atFirst}
-              style={{ height: 40 }}
-            >
-              Prev
-            </button>
-
-            <div className="tr-doneCountPill" style={{ height: 40 }}>
-              DONE {doneCount}/{items.length}
-            </div>
-
-            <button
-              onClick={next}
-              className={`tr-seg ${!atLast ? "tr-btn--nextOrange" : ""}`}
-              disabled={atLast}
-              style={{ height: 40 }}
-            >
-              Next
-            </button>
-          </div>
-          <div />
-        </div>
-
-        <div className="tr-sessionOverviewGrid">
-          <div className="tr-sessionOverviewCell">
-            <div className="tr-kicker">WORKOUT</div>
-            <strong>Exercise {items.length ? activeIdx + 1 : 0}/{items.length}</strong>
-          </div>
-
-          <div className="tr-sessionOverviewCell is-current">
-            <div className="tr-kicker">{current?.completed_at ? "REVIEWING" : "CURRENT"}</div>
-            <strong>{current?.exercise?.name ?? "Not set"}</strong>
-          </div>
-
-          <div className="tr-sessionOverviewCell is-next">
-            <div className="tr-kicker">NEXT UP</div>
-            <strong>{nextUp?.exercise?.name ?? (items.length ? "End" : "Not set")}</strong>
-          </div>
-        </div>
-
-        <ExerciseNavigator
-          items={navigatorItems}
-          activeIndex={activeIdx}
-          onSelect={setActiveIdx}
-        />
-      </Card>
-      </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       {current && currentRunnerItem ? (
         <ExerciseRunner
@@ -3410,7 +3711,7 @@ function ExerciseRunner({
   const setsTarget = Number(pres.sets ?? 3);
   const repMin = Number(pres.rep_min ?? 8);
   const repMax = Number(pres.rep_max ?? 12);
-  const restSeconds = Number(pres.rest_seconds ?? 90);
+  const restSeconds = Number(pres.rest_seconds ?? 60);
 
   const [sets, setSets] = useState<any[]>([]);
   const [loadingSets, setLoadingSets] = useState(true);
@@ -4043,7 +4344,7 @@ const unlock = async () => {
                   aria-expanded={progressionOpen}
                 >
                   <span className="tr-progressionToggleText">
-                    <span className="tr-kicker">TRANSPARENT PROGRESSION ASSISTANT</span>
+                    <span className="tr-kicker">SMART PROGRESSION</span>
                     <span className="tr-previousPerformanceTitle">{previousGuidance.title}</span>
                   </span>
 
@@ -4055,7 +4356,7 @@ const unlock = async () => {
                       {progressionOpen ? "▲" : "▼"}
                     </span>
                     <span className="tr-progressionToggleLabel">
-                      {progressionOpen ? "MINIMIZE" : "EXPAND"}
+                      {progressionOpen ? "HIDE DETAILS" : "DETAILS"}
                     </span>
                   </span>
                 </button>
@@ -4268,8 +4569,8 @@ const unlock = async () => {
         onClick={() => completeSetAndStartRest(i)}
       >
         {completedSetIndexes.includes(Number(s.set_index))
-          ? `SET ${s.set_index} LOGGED • START REST AGAIN`
-          : `COMPLETE SET ${s.set_index} • START ${restSeconds}s REST`}
+          ? `SET ${s.set_index} SAVED • RESTART REST`
+          : `SAVE SET ${s.set_index} • START ${restSeconds}s REST`}
       </button>
     </div>
   ))}
@@ -4277,55 +4578,56 @@ const unlock = async () => {
             </div>
           )}
 
-          <div className={`tr-finalActionModule ${sessionComplete ? "is-sessionComplete" : ""}`}>
-            <div className="tr-finalActionTop">
-              {sessionComplete ? (
-                <div className="tr-finalActionDoneText tr-finalActionDoneText--complete">
-                  Mission complete — reward ready.
+          <div className={`tr-finalActionModule tr-finalActionModule--pro ${sessionComplete ? "is-sessionComplete" : ""} ${isDone ? "is-exerciseComplete" : ""}`}>
+            {isDone ? (
+              <div className="tr-completedExerciseState">
+                <span className="tr-completedExerciseCheck">✓</span>
+                <div>
+                  <div className="tr-kicker">EXERCISE COMPLETED</div>
+                  <strong>{item?.name ?? `Exercise ${exerciseIndex}`}</strong>
                 </div>
-              ) : isDone ? (
-                <div className="tr-finalActionDoneText">Exercise locked as complete.</div>
-              ) : (
-                <div className="tr-sub">Complete sets or time, log pain, then move through the session below.</div>
-              )}
-            </div>
-
-            <div className="tr-finalActionBottom tr-finalActionBottom--triple">
+                <button type="button" className="tr-btn tr-btn--quiet" onClick={unlock}>
+                  UNLOCK FOR EDITING
+                </button>
+              </div>
+            ) : (
               <button
-                className={`tr-btn ${atLast ? "tr-btn--prevOrange" : ""}`}
-                style={{ height: 46 }}
+                className="tr-btn tr-completeExerciseButton"
+                type="button"
+                onClick={markDone}
+                disabled={!readyToLock}
+              >
+                <span aria-hidden>✓</span>
+                <span>
+                  <strong>COMPLETE EXERCISE</strong>
+                  <small>
+                    {readyToLock
+                      ? `${exerciseIndex} of ${totalExercises} • Save and continue`
+                      : "Complete all sets and log pain first"}
+                  </small>
+                </span>
+              </button>
+            )}
+
+            <div className="tr-exerciseNavigation">
+              <button
+                className="tr-btn tr-exerciseNavigationButton tr-exerciseNavigationButton--prev"
                 disabled={atFirst}
                 onClick={onPrev}
               >
-                Prev
+                ← PREVIOUS
               </button>
 
-              {isDone ? (
-                <button
-                  className={`tr-btn tr-btn--primary tr-doneBtn ${sessionComplete ? "tr-doneBtn--celebrate" : ""}`}
-                  style={{ height: 46 }}
-                  onClick={unlock}
-                >
-                  {sessionComplete ? "UNLOCK / REVIEW" : "UNLOCK"}
-                </button>
-              ) : (
-                <button
-                  className="tr-btn tr-btn--primary tr-doneBtn"
-                  type="button"
-                  onClick={markDone}
-                  disabled={!readyToLock}
-                >
-                  DONE (LOCK)
-                </button>
-              )}
+              <div className="tr-exerciseNavigationStatus">
+                {isDone ? "COMPLETED" : `EXERCISE ${exerciseIndex} OF ${totalExercises}`}
+              </div>
 
               <button
-                className={`tr-btn ${!atLast ? "tr-btn--nextOrange" : ""}`}
-                style={{ height: 46 }}
+                className="tr-btn tr-exerciseNavigationButton tr-exerciseNavigationButton--next"
                 disabled={atLast}
                 onClick={onNext}
               >
-                Next
+                NEXT →
               </button>
             </div>
           </div>
