@@ -7242,168 +7242,1948 @@ body{
   }
 }
 
-
 /* ========================================================================== */
-/* IN-SESSION EXERCISE PICKER V6: RELIABLE RESULTS + FULL-SIZE PICKER          */
+/* MVP TRAINER PRO FINAL UI SYNC                                               */
+/* Synchronizes the current AppShell, MusicMiniPlayer and WorkoutPlayer markup */
 /* ========================================================================== */
 
-.tr-pickerStatus,
-.tr-pickerError{
-  width:100%;
+.tr-sessionOverviewBody,
+.tr-sessionChronograph,
+.tr-sessionCurrentHero,
+.tr-sessionMetricRail,
+.tr-proSessionConsole,
+.tr-currentExerciseHero,
+.tr-performanceMetricRail,
+.tr-sessionRoadmap,
+.tr-audioDeckHeader,
+.tr-audioDeckTop,
+.tr-audioTrackRail,
+.tr-fullSessionSheet{
   min-width:0;
-  border:1px solid rgba(0,170,255,.22);
-  border-radius:14px;
-  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.14));
-  padding:16px;
-  color:rgba(226,238,248,.82);
-  font-size:13px;
-  line-height:1.45;
 }
 
-.tr-pickerError{
+.tr-shellInner{
+  padding-bottom:calc(118px + env(safe-area-inset-bottom)) !important;
+  scroll-padding-bottom:calc(118px + env(safe-area-inset-bottom));
+}
+
+/* -------------------------------------------------------------------------- */
+/* AUDIO DECK HEADER AND HARD SIZE GUARDS                                     */
+/* -------------------------------------------------------------------------- */
+
+.tr-audioDeck{
+  width:100% !important;
+  max-width:100% !important;
+  min-width:0 !important;
+}
+
+.tr-audioDeckHeader{
+  position:relative;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  min-width:0;
+  padding:0 1px 10px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+
+.tr-audioSystemIdentity{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.tr-audioSystemIdentity > div{
+  min-width:0;
+  display:flex;
+  align-items:baseline;
+  gap:5px;
+  flex-wrap:wrap;
+}
+
+.tr-audioSystemIdentity > div > span{
+  color:rgba(194,215,229,.72);
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+}
+
+.tr-audioSystemIdentity > div > strong{
+  color:#f8fbfd;
+  font-size:12px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.04em;
+}
+
+.tr-audioSystemMark{
+  flex:0 0 30px;
+  width:30px !important;
+  height:30px !important;
+  display:grid !important;
+  place-items:center !important;
+  overflow:hidden !important;
+  border:1px solid rgba(0,180,255,.32);
+  border-radius:9px;
+  color:#7ed9ff;
+  background:linear-gradient(180deg,rgba(0,169,245,.14),rgba(0,0,0,.24));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 18px rgba(0,165,255,.08);
+}
+
+.tr-audioSystemMark svg{
+  display:block !important;
+  width:16px !important;
+  height:16px !important;
+  max-width:16px !important;
+  max-height:16px !important;
+  min-width:0 !important;
+  min-height:0 !important;
+  fill:currentColor;
+}
+
+.tr-audioSystemReadouts{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:7px;
+}
+
+.tr-audioStatusLamp,
+.tr-audioQualityBadge{
+  min-height:24px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:0 9px;
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:999px;
+  background:rgba(0,0,0,.24);
+  color:rgba(218,232,240,.76);
+  font-size:8px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.tr-audioStatusLamp i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#6d7780;
+  box-shadow:0 0 0 3px rgba(255,255,255,.025);
+}
+
+.tr-audioStatusLamp.is-live{
+  border-color:rgba(41,220,112,.30);
+  color:#8ff0b2;
+}
+
+.tr-audioStatusLamp.is-live i{
+  background:#42df7b;
+  box-shadow:0 0 12px rgba(63,225,124,.54);
+}
+
+.tr-audioStatusLamp.is-loading i{
+  background:#ffae43;
+  box-shadow:0 0 12px rgba(255,163,47,.42);
+  animation:trAudioStatusPulse 1s ease-in-out infinite;
+}
+
+.tr-audioQualityBadge{
+  border-color:rgba(0,174,255,.26);
+  color:#84d9ff;
+}
+
+@keyframes trAudioStatusPulse{
+  0%,100%{opacity:.45;transform:scale(.78);}
+  50%{opacity:1;transform:scale(1);}
+}
+
+.tr-audioDeckTop{
+  position:relative !important;
+  z-index:2 !important;
+  display:grid !important;
+  grid-template-columns:64px minmax(0,1fr) minmax(190px,250px) 50px !important;
+  align-items:center !important;
+  gap:12px !important;
+  width:100% !important;
+  min-width:0 !important;
+}
+
+.tr-audioArtwork{
+  position:relative !important;
+  width:64px !important;
+  height:64px !important;
+  min-width:64px !important;
+  min-height:64px !important;
+  max-width:64px !important;
+  max-height:64px !important;
+  padding:0 !important;
+  display:grid !important;
+  place-items:center !important;
+  overflow:hidden !important;
+  border-radius:16px !important;
+}
+
+.tr-audioArtwork > svg{
+  position:relative !important;
+  z-index:2 !important;
+  display:block !important;
+  width:30px !important;
+  height:30px !important;
+  min-width:0 !important;
+  min-height:0 !important;
+  max-width:30px !important;
+  max-height:30px !important;
+  fill:currentColor !important;
+}
+
+.tr-audioArtworkGlow{
+  position:absolute;
+  inset:8px;
+  z-index:1;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(255,164,44,.34),transparent 68%);
+  pointer-events:none;
+}
+
+.tr-audioIdentity{
+  min-width:0 !important;
+  width:100% !important;
+  padding:0 !important;
+  display:grid !important;
+  gap:3px !important;
+  color:inherit !important;
+  background:transparent !important;
+  border:0 !important;
+  text-align:left !important;
+  overflow:hidden !important;
+}
+
+.tr-audioIdentity > span,
+.tr-audioIdentity > strong,
+.tr-audioIdentity > small{
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.tr-audioIdentity > strong{
+  color:#fff;
+  font-size:clamp(15px,2vw,20px);
+  line-height:1.08;
+  font-weight:1000;
+}
+
+.tr-audioIdentity > small{
+  color:rgba(198,216,228,.62);
+  font-size:10px;
+  font-weight:800;
+}
+
+.tr-audioQueueSelector{
+  min-width:0 !important;
+  width:100% !important;
+}
+
+.tr-audioEqToggle{
+  width:50px !important;
+  height:50px !important;
+  min-width:50px !important;
+  max-width:50px !important;
+}
+
+.tr-audioEqToggle svg,
+.tr-audioModeButton svg,
+.tr-audioTransportButton svg{
+  display:block;
+  width:18px !important;
+  height:18px !important;
+  max-width:18px !important;
+  max-height:18px !important;
+  fill:currentColor;
+}
+
+.tr-audioTrackRail{
+  position:relative;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-height:26px;
+  overflow:hidden;
+  color:rgba(190,210,223,.58);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.tr-audioTrackRail strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:rgba(244,249,252,.92);
+  font-size:10px;
+}
+
+.tr-audioTrackRail small{
+  color:rgba(198,216,228,.52);
+  font-size:8px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* LARGE SESSION CHRONOGRAPH                                                  */
+/* -------------------------------------------------------------------------- */
+
+.tr-sessionOverviewBody{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) !important;
+  gap:14px !important;
+  padding:16px !important;
+}
+
+.tr-sessionChronograph{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
   display:grid;
   gap:10px;
-  border-color:rgba(255,92,92,.34);
+  padding:clamp(18px,3vw,30px);
+  border:1px solid rgba(0,178,255,.38);
+  border-radius:22px;
+  background:
+    radial-gradient(760px 270px at 50% -30%,rgba(0,176,255,.16),transparent 64%),
+    linear-gradient(180deg,rgba(14,23,33,.98),rgba(4,8,13,.99));
+  box-shadow:
+    0 26px 70px rgba(0,0,0,.46),
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 -1px 0 rgba(0,135,210,.12);
 }
 
-.tr-pickerError strong{
-  color:rgba(255,255,255,.96);
+.tr-sessionChronograph::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg,transparent,rgba(255,255,255,.025),transparent),
+    repeating-linear-gradient(90deg,transparent 0 70px,rgba(255,255,255,.011) 71px,transparent 72px);
+}
+
+.tr-sessionChronograph.is-paused{
+  border-color:rgba(255,92,92,.42);
+  box-shadow:
+    0 26px 70px rgba(0,0,0,.46),
+    0 0 34px rgba(239,68,68,.07),
+    inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.tr-sessionChronographHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.tr-sessionChronographKicker{
+  color:#81d9ff;
+  font-size:10px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+}
+
+.tr-sessionChronographState{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  min-height:29px;
+  padding:0 11px;
+  border:1px solid rgba(34,197,94,.30);
+  border-radius:999px;
+  color:#83efaa;
+  background:rgba(34,197,94,.07);
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.tr-sessionChronographState > span{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#3ddd75;
+  box-shadow:0 0 14px rgba(61,221,117,.66);
+}
+
+.tr-sessionChronographState.is-paused{
+  border-color:rgba(239,68,68,.36);
+  color:#ff9898;
+  background:rgba(239,68,68,.08);
+}
+
+.tr-sessionChronographState.is-paused > span{
+  background:#ff5a5a;
+  box-shadow:0 0 14px rgba(255,82,82,.62);
+}
+
+.tr-sessionChronographTime{
+  width:100%;
+  overflow:hidden;
+  color:#ffe680;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+  font-size:clamp(54px,9vw,112px);
+  line-height:.92;
+  font-weight:1000;
+  letter-spacing:.015em;
+  text-align:center;
+  font-variant-numeric:tabular-nums lining-nums;
+  text-shadow:
+    0 2px 0 rgba(0,0,0,.72),
+    0 0 22px rgba(255,210,67,.24),
+    0 0 54px rgba(255,181,35,.10);
+}
+
+.tr-sessionChronograph.is-paused .tr-sessionChronographTime{
+  color:#ff7373;
+  text-shadow:
+    0 2px 0 rgba(0,0,0,.72),
+    0 0 22px rgba(239,68,68,.26),
+    0 0 54px rgba(239,68,68,.12);
+}
+
+.tr-sessionChronographUnits{
+  width:min(100%,780px);
+  margin:-1px auto 2px;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:clamp(34px,9vw,110px);
+  padding:0 clamp(18px,7vw,92px);
+  color:rgba(179,204,220,.50);
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.22em;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+.tr-sessionChronographActions{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(150px,.34fr);
+  gap:10px;
+  margin-top:5px;
+}
+
+.tr-sessionChronographPrimary,
+.tr-sessionChronographEnd{
+  min-height:54px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:0 18px;
+  border-radius:15px;
+  color:#fff;
+  font-size:11px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  cursor:pointer;
+  transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease,filter .14s ease,opacity .14s ease;
+}
+
+.tr-sessionChronographPrimary{
+  border:1px solid rgba(0,177,255,.64);
+  background:linear-gradient(180deg,rgba(0,174,255,.30),rgba(0,91,151,.20));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 14px 36px rgba(0,130,210,.14);
+}
+
+.tr-sessionChronographPrimary.is-resume{
+  border-color:rgba(48,224,111,.60);
+  background:linear-gradient(180deg,rgba(43,211,103,.28),rgba(16,108,54,.22));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 14px 36px rgba(29,185,86,.13);
+}
+
+.tr-sessionChronographEnd{
+  border:1px solid rgba(255,92,92,.42);
+  background:linear-gradient(180deg,rgba(239,68,68,.18),rgba(92,17,17,.20));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.tr-sessionChronographPrimary:hover,
+.tr-sessionChronographEnd:hover:not(:disabled){
+  transform:translateY(-1px);
+  filter:saturate(1.08) brightness(1.04);
+}
+
+.tr-sessionChronographEnd:disabled{
+  opacity:.42;
+  cursor:not-allowed;
+}
+
+.tr-sessionCurrentHero{
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  gap:8px;
+  padding:17px 18px;
+  border:1px solid rgba(0,170,255,.25);
+  border-radius:18px;
+  background:
+    radial-gradient(520px 150px at 0 0,rgba(0,170,255,.11),transparent 67%),
+    linear-gradient(180deg,rgba(15,23,32,.96),rgba(5,9,14,.98));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 18px 48px rgba(0,0,0,.28);
+}
+
+.tr-sessionCurrentHeroHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.tr-sessionCurrentHeroHead > span{
+  color:#7ed9ff;
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+
+.tr-sessionCurrentHeroHead > strong{
+  padding:5px 9px;
+  border:1px solid rgba(255,174,56,.28);
+  border-radius:999px;
+  color:#ffd08a;
+  background:rgba(255,149,23,.07);
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.10em;
+  white-space:nowrap;
+}
+
+.tr-sessionCurrentHeroName{
+  min-width:0;
+  overflow-wrap:anywhere;
+  color:#fff;
+  font-size:clamp(22px,3.7vw,38px);
+  line-height:1.04;
+  font-weight:1000;
+  letter-spacing:-.025em;
+}
+
+.tr-sessionCurrentHeroMode{
+  color:rgba(203,219,229,.66);
+  font-size:12px;
+  line-height:1.35;
+  font-weight:800;
+}
+
+.tr-sessionMetricRail{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+
+.tr-sessionMetric{
+  min-width:0;
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr);
+  align-items:center;
+  gap:10px;
+  padding:13px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:15px;
+  background:linear-gradient(180deg,rgba(255,255,255,.038),rgba(0,0,0,.14));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.tr-sessionMetricIcon{
+  width:40px;
+  height:40px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(0,170,255,.23);
+  border-radius:12px;
+  color:#80d9ff;
+  background:rgba(0,159,235,.07);
+  font-size:18px;
+}
+
+.tr-sessionMetric > div:last-child{
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+
+.tr-sessionMetric span,
+.tr-sessionMetric small{
+  color:rgba(190,211,224,.56);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+}
+
+.tr-sessionMetric strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:rgba(247,250,252,.96);
+  font-size:15px;
+  line-height:1.15;
+  font-weight:1000;
+}
+
+.tr-sessionMetric--protein .tr-sessionMetricIcon{
+  border-color:rgba(255,163,43,.26);
+  color:#ffc36c;
+  background:rgba(255,148,23,.07);
+}
+
+.tr-sessionMetric--state.is-running .tr-sessionMetricIcon{
+  border-color:rgba(52,221,112,.26);
+  color:#66e995;
+  background:rgba(35,194,91,.07);
+}
+
+.tr-sessionMetric--state.is-paused .tr-sessionMetricIcon{
+  border-color:rgba(239,68,68,.30);
+  color:#ff8585;
+  background:rgba(239,68,68,.07);
+}
+
+/* -------------------------------------------------------------------------- */
+/* WORKOUT SESSION COMMAND CONSOLE                                            */
+/* -------------------------------------------------------------------------- */
+
+.tr-proSessionConsole{
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  gap:13px;
+  padding:15px;
+  border:1px solid rgba(0,171,255,.30);
+  border-radius:21px;
+  background:
+    radial-gradient(820px 250px at 12% -18%,rgba(0,167,255,.11),transparent 60%),
+    linear-gradient(180deg,rgba(12,20,29,.98),rgba(4,8,13,.99));
+  box-shadow:0 24px 66px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.07);
+}
+
+.tr-proUtilityToolbar{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.tr-proUtilityButton{
+  min-height:38px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  padding:0 12px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;
+  color:rgba(231,240,246,.86);
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.16));
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.tr-proUtilityButton:hover{
+  border-color:rgba(0,180,255,.44);
+  color:#fff;
+}
+
+.tr-proUtilityButton--music{
+  border-color:rgba(255,164,42,.27);
+  color:#ffd087;
+}
+
+.tr-proUtilityButton--alerts{
+  border-color:rgba(0,178,255,.27);
+  color:#83dafe;
+}
+
+.tr-proUtilityIcon{
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  font-size:14px;
+  line-height:1;
+}
+
+.tr-currentExerciseHero{
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  gap:13px;
+  padding:clamp(17px,2.5vw,24px);
+  border:1px solid rgba(0,181,255,.34);
+  border-radius:19px;
+  background:
+    radial-gradient(700px 210px at 0 0,rgba(0,171,255,.14),transparent 66%),
+    linear-gradient(180deg,rgba(15,24,34,.98),rgba(5,10,16,.99));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 18px 50px rgba(0,0,0,.30);
+}
+
+.tr-currentExerciseHero.is-reviewing{
+  border-color:rgba(48,218,111,.36);
+  background:
+    radial-gradient(700px 210px at 0 0,rgba(42,204,96,.11),transparent 66%),
+    linear-gradient(180deg,rgba(14,25,30,.98),rgba(5,10,14,.99));
+}
+
+.tr-currentExerciseHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.tr-currentExerciseHeader > div:first-child{
+  min-width:0;
+  display:grid;
+  gap:5px;
+}
+
+.tr-currentExerciseCount{
+  color:#fff;
+  font-size:14px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.08em;
+}
+
+.tr-sessionState{
+  flex:0 0 auto;
+  min-height:30px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  padding:0 11px;
+  border:1px solid rgba(0,181,255,.31);
+  border-radius:999px;
+  color:#86dcff;
+  background:rgba(0,166,240,.07);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+
+.tr-sessionState > span{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#25bdf5;
+  box-shadow:0 0 12px rgba(35,188,246,.58);
+}
+
+.tr-sessionState.is-complete{
+  border-color:rgba(47,220,109,.31);
+  color:#8ceeb0;
+  background:rgba(40,199,94,.07);
+}
+
+.tr-sessionState.is-complete > span{
+  background:#3bd873;
+  box-shadow:0 0 12px rgba(59,216,115,.56);
+}
+
+.tr-currentExerciseName{
+  min-width:0;
+  overflow-wrap:anywhere;
+  color:#fff;
+  font-size:clamp(27px,5vw,52px);
+  line-height:.98;
+  font-weight:1000;
+  letter-spacing:-.035em;
+  text-shadow:0 2px 0 rgba(0,0,0,.55),0 0 24px rgba(0,170,255,.09);
+}
+
+.tr-currentExercisePrescription{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+}
+
+.tr-currentExercisePrescription > div{
+  min-width:0;
+  display:grid;
+  gap:4px;
+  padding:11px 12px;
+  border:1px solid rgba(255,255,255,.075);
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.14));
+}
+
+.tr-currentExercisePrescription span,
+.tr-currentExerciseNext span{
+  color:rgba(187,208,222,.56);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+}
+
+.tr-currentExercisePrescription strong{
+  color:#f7fafc;
+  font-size:15px;
+  line-height:1.1;
+  font-weight:1000;
+}
+
+.tr-currentExerciseNext{
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  gap:11px;
+  padding:11px 13px;
+  border:1px solid rgba(255,161,37,.22);
+  border-radius:13px;
+  background:rgba(255,145,17,.055);
+}
+
+.tr-currentExerciseNext strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#ffc166;
+  font-size:13px;
+  font-weight:1000;
+}
+
+.tr-performanceMetricRail{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+}
+
+.tr-performanceMetric{
+  min-width:0;
+  display:grid;
+  grid-template-columns:43px minmax(0,1fr);
+  align-items:center;
+  gap:10px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.075);
+  border-radius:14px;
+  background:linear-gradient(180deg,rgba(255,255,255,.034),rgba(0,0,0,.13));
+}
+
+.tr-performanceMetricIcon{
+  width:41px;
+  height:41px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(0,174,255,.24);
+  border-radius:12px;
+  color:#7ed9ff;
+  background:rgba(0,161,235,.065);
+  font-size:18px;
+}
+
+.tr-performanceMetric > div{
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+
+.tr-performanceMetric > div > span,
+.tr-performanceMetric > div > small{
+  color:rgba(189,210,223,.55);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+
+.tr-performanceMetric > div > strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#f7fafc;
+  font-size:14px;
+  font-weight:1000;
+}
+
+.tr-performanceMetric--protein .tr-performanceMetricIcon{
+  border-color:rgba(255,164,44,.26);
+  color:#ffc36c;
+  background:rgba(255,145,18,.065);
+}
+
+.tr-performanceMetric--status .tr-performanceMetricIcon{
+  border-color:rgba(48,221,110,.25);
+  color:#6ee79a;
+  background:rgba(35,195,91,.065);
+}
+
+.tr-sessionRoadmap{
+  display:grid;
+  gap:12px;
+  padding:14px;
+  border:1px solid rgba(255,255,255,.075);
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,.13));
+}
+
+.tr-sessionRoadmapHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.tr-sessionRoadmapHeader > div{
+  display:flex;
+  align-items:baseline;
+  gap:9px;
+}
+
+.tr-sessionRoadmapHeader strong{
+  color:#ffd17d;
+  font-size:19px;
+  font-weight:1000;
+  font-variant-numeric:tabular-nums;
+}
+
+.tr-sessionRoadmapHeader button,
+.tr-fullSessionHeader button{
+  min-height:34px;
+  padding:0 11px;
+  border:1px solid rgba(0,175,255,.30);
+  border-radius:10px;
+  color:#84dafe;
+  background:rgba(0,151,223,.07);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.tr-sessionRoadmapRail{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:5px 1px;
+}
+
+.tr-sessionRoadmapRail::before{
+  content:"";
+  position:absolute;
+  left:15px;
+  right:15px;
+  top:50%;
+  height:2px;
+  transform:translateY(-50%);
+  background:linear-gradient(90deg,rgba(0,170,255,.22),rgba(255,255,255,.07),rgba(0,170,255,.16));
+}
+
+.tr-sessionRoadmapNode{
+  position:relative;
+  z-index:1;
+  flex:0 0 32px;
+  width:32px;
+  height:32px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:50%;
+  color:rgba(213,226,234,.70);
+  background:#091019;
+  box-shadow:0 0 0 5px rgba(7,12,18,.94),inset 0 1px 0 rgba(255,255,255,.06);
+  font-size:10px;
+  font-weight:1000;
+  cursor:pointer;
+}
+
+.tr-sessionRoadmapNode.is-complete{
+  border-color:rgba(55,223,115,.54);
+  color:#eafff0;
+  background:linear-gradient(180deg,#2fc76a,#14723b);
+  box-shadow:0 0 0 5px rgba(7,12,18,.94),0 0 14px rgba(48,215,108,.17);
+}
+
+.tr-sessionRoadmapNode.is-current{
+  border-color:rgba(0,190,255,.78);
+  color:#fff;
+  background:linear-gradient(180deg,#22bdf5,#086da3);
+  box-shadow:0 0 0 5px rgba(7,12,18,.94),0 0 19px rgba(0,183,255,.34);
+  transform:scale(1.08);
+}
+
+.tr-sessionRoadmapNode.is-next:not(.is-current){
+  border-color:rgba(255,169,49,.46);
+  color:#ffd18a;
+}
+
+.tr-sessionRoadmapNames{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:9px;
+}
+
+.tr-sessionRoadmapNames > div{
+  min-width:0;
+  display:grid;
+  gap:3px;
+  padding:9px 10px;
+  border:1px solid rgba(255,255,255,.065);
+  border-radius:11px;
+  background:rgba(0,0,0,.15);
+}
+
+.tr-sessionRoadmapNames span{
+  color:rgba(188,208,221,.50);
+  font-size:7px;
+  font-weight:1000;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+
+.tr-sessionRoadmapNames strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:rgba(244,249,252,.92);
+  font-size:11px;
+  font-weight:900;
+}
+
+/* -------------------------------------------------------------------------- */
+/* FULL SESSION SHEET                                                         */
+/* -------------------------------------------------------------------------- */
+
+.tr-fullSessionOverlay{
+  position:fixed;
+  inset:0;
+  z-index:10040;
+  display:grid;
+  place-items:center;
+  padding:16px;
+  background:rgba(0,4,8,.78);
+  backdrop-filter:blur(15px);
+  -webkit-backdrop-filter:blur(15px);
+}
+
+.tr-fullSessionSheet{
+  width:min(720px,100%);
+  max-height:min(82dvh,820px);
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr);
+  overflow:hidden;
+  border:1px solid rgba(0,179,255,.39);
+  border-radius:22px;
+  background:linear-gradient(180deg,rgba(15,24,34,.99),rgba(4,8,13,.995));
+  box-shadow:0 34px 110px rgba(0,0,0,.72),inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.tr-fullSessionHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:16px;
+  border-bottom:1px solid rgba(255,255,255,.075);
+}
+
+.tr-fullSessionHeader h2{
+  margin:4px 0 0;
+  color:#fff;
+  font-size:clamp(18px,3vw,28px);
+  line-height:1.05;
+}
+
+.tr-fullSessionList{
+  min-height:0;
+  overflow-y:auto;
+  padding:12px;
+  display:grid;
+  gap:8px;
+}
+
+.tr-fullSessionExercise{
+  width:100%;
+  min-width:0;
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr) 24px;
+  align-items:center;
+  gap:11px;
+  padding:11px;
+  border:1px solid rgba(255,255,255,.075);
+  border-radius:14px;
+  color:#fff;
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.13));
+  text-align:left;
+  cursor:pointer;
+}
+
+.tr-fullSessionExercise.is-current{
+  border-color:rgba(0,186,255,.48);
+  background:linear-gradient(180deg,rgba(0,170,255,.10),rgba(0,72,115,.08));
+}
+
+.tr-fullSessionExercise.is-complete{
+  border-color:rgba(52,220,111,.30);
+}
+
+.tr-fullSessionNumber{
+  width:40px;
+  height:40px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(0,176,255,.27);
+  border-radius:12px;
+  color:#80dbff;
+  background:rgba(0,153,226,.065);
+  font-weight:1000;
+}
+
+.tr-fullSessionExercise.is-complete .tr-fullSessionNumber{
+  border-color:rgba(52,220,111,.34);
+  color:#78eca2;
+  background:rgba(41,195,92,.07);
+}
+
+.tr-fullSessionCopy{
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+
+.tr-fullSessionCopy strong,
+.tr-fullSessionCopy small{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.tr-fullSessionCopy strong{
+  color:#f7fafc;
+  font-size:14px;
+  font-weight:1000;
+}
+
+.tr-fullSessionCopy small{
+  color:rgba(192,211,223,.56);
+  font-size:9px;
+  font-weight:800;
+}
+
+.tr-fullSessionArrow{
+  color:rgba(122,213,255,.72);
+  font-size:25px;
+  text-align:center;
+}
+
+/* -------------------------------------------------------------------------- */
+/* REST TIMER DOCK                                                            */
+/* -------------------------------------------------------------------------- */
+
+.tr-restTimerDock.tr-restTimerDock--pro,
+.tr-restTimerDock{
+  position:fixed;
+  left:50%;
+  bottom:calc(78px + env(safe-area-inset-bottom));
+  z-index:10020;
+  width:min(920px,calc(100vw - 24px));
+  min-width:0;
+  transform:translateX(-50%);
+  overflow:hidden;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(270px,auto);
+  align-items:center;
+  gap:14px;
+  padding:15px 16px 14px;
+  border:1px solid rgba(255,166,43,.53);
+  border-radius:19px;
+  background:
+    radial-gradient(500px 120px at 0 0,rgba(255,148,22,.13),transparent 70%),
+    linear-gradient(180deg,rgba(18,22,27,.99),rgba(5,8,12,.995));
+  box-shadow:0 28px 90px rgba(0,0,0,.72),0 0 34px rgba(255,139,20,.08),inset 0 1px 0 rgba(255,255,255,.09);
+}
+
+.tr-restTimerProgress{
+  position:absolute;
+  left:0;
+  top:0;
+  height:3px;
+  max-width:100%;
+  background:linear-gradient(90deg,#ff972b,#ffd36d);
+  box-shadow:0 0 14px rgba(255,158,45,.48);
+  transition:width .25s linear;
+}
+
+.tr-restTimerIdentity{
+  min-width:0;
+  display:grid;
+  gap:4px;
+}
+
+.tr-restTimerKicker{
+  color:#ffc36d;
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+
+.tr-restTimerExercise{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:rgba(240,246,249,.90);
+  font-size:12px;
+  font-weight:900;
+}
+
+.tr-restTimerClock{
+  min-width:116px;
+  color:#ffd578;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+  font-size:clamp(37px,5vw,54px);
+  line-height:.9;
+  font-weight:1000;
+  letter-spacing:.02em;
+  text-align:center;
+  font-variant-numeric:tabular-nums;
+  text-shadow:0 0 20px rgba(255,180,49,.24);
+}
+
+.tr-restTimerActions,
+.tr-restTimerActions--simple{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(76px,1fr));
+  gap:7px;
+}
+
+.tr-restTimerActions button{
+  min-height:41px;
+  padding:0 10px;
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:11px;
+  color:rgba(239,246,249,.90);
+  background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.18));
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.tr-restTimerActions button:disabled{
+  opacity:.34;
+  cursor:not-allowed;
+}
+
+.tr-restTimerActions .tr-restTimerSkip{
+  border-color:rgba(0,180,255,.38);
+  color:#8edfff;
+  background:rgba(0,161,235,.08);
+}
+
+.tr-restTimerDock.is-finished{
+  grid-template-columns:minmax(0,1fr) auto;
+  border-color:rgba(56,224,117,.55);
+  background:
+    radial-gradient(500px 120px at 0 0,rgba(48,214,107,.13),transparent 70%),
+    linear-gradient(180deg,rgba(13,24,21,.99),rgba(5,10,9,.995));
+  animation:trRestCompletePop .34s ease both;
+}
+
+.tr-restTimerDock.is-finished .tr-restTimerProgress{
+  width:100% !important;
+  background:linear-gradient(90deg,#20b75b,#6aee98);
+  box-shadow:0 0 16px rgba(61,223,119,.42);
+}
+
+.tr-restTimerDock.is-finished .tr-restTimerKicker,
+.tr-restTimerDock.is-finished .tr-restTimerClock{
+  color:#7defa7;
+}
+
+@keyframes trRestCompletePop{
+  0%{transform:translateX(-50%) scale(.96);opacity:.60;}
+  100%{transform:translateX(-50%) scale(1);opacity:1;}
+}
+
+/* -------------------------------------------------------------------------- */
+/* SET SAVE AND FINAL EXERCISE ACTIONS                                        */
+/* -------------------------------------------------------------------------- */
+
+.tr-setCompleteBtn{
+  min-height:52px;
+  width:100%;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0 14px;
+  border:1px solid rgba(255,165,42,.46);
+  border-radius:14px;
+  color:#ffe0aa;
+  background:linear-gradient(180deg,rgba(255,155,31,.18),rgba(88,43,0,.16));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 30px rgba(0,0,0,.22);
+  font-size:10px;
+  line-height:1.2;
+  font-weight:1000;
+  letter-spacing:.08em;
+  text-align:center;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+
+.tr-setCompleteBtn.is-complete{
+  border-color:rgba(51,219,110,.46);
+  color:#a7f4c0;
+  background:linear-gradient(180deg,rgba(44,203,96,.16),rgba(15,88,44,.15));
+}
+
+.tr-setCompleteBtn:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.tr-finalActionModule--pro{
+  position:relative !important;
+  bottom:auto !important;
+  z-index:2;
+  display:grid;
+  gap:10px;
+  padding:13px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(0,0,0,.15));
+}
+
+.tr-completedExerciseState{
+  display:grid;
+  grid-template-columns:44px minmax(0,1fr) auto;
+  align-items:center;
+  gap:11px;
+  padding:11px;
+  border:1px solid rgba(48,220,109,.28);
+  border-radius:14px;
+  background:rgba(40,190,91,.055);
+}
+
+.tr-completedExerciseCheck{
+  width:42px;
+  height:42px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  color:#06100a;
+  background:linear-gradient(180deg,#77f2a1,#2ec768);
+  box-shadow:0 0 18px rgba(55,219,111,.20);
+  font-size:21px;
+  font-weight:1000;
+}
+
+.tr-completedExerciseState > div{
+  min-width:0;
+  display:grid;
+  gap:4px;
+}
+
+.tr-completedExerciseState strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#f4fbf6;
   font-size:14px;
 }
 
-.tr-pickerError .tr-btn{
-  justify-self:start;
-  min-width:130px;
+.tr-btn--quiet{
+  border-color:rgba(255,255,255,.10) !important;
+  color:rgba(211,225,233,.72) !important;
+  background:rgba(255,255,255,.025) !important;
+  box-shadow:none !important;
 }
 
-.tr-editModal--sessionPicker{
-  width:min(1180px,calc(100vw - 24px));
-  height:min(920px,calc(100dvh - 24px));
-  max-height:calc(100dvh - 24px);
-}
-
-.tr-editModal--sessionPicker .tr-editModalBody{
-  grid-template-rows:auto minmax(0,1fr) !important;
-  gap:10px;
-}
-
-.tr-editModal--sessionPicker .tr-editMobileTabs{
-  display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:8px;
-  min-width:0;
-}
-
-.tr-editModal--sessionPicker .tr-editMobileTabs .tr-seg{
+.tr-completeExerciseButton{
   width:100%;
-  min-width:0;
-  min-height:42px;
-}
-
-.tr-editModal--sessionPicker .tr-editCurrentPanel,
-.tr-editModal--sessionPicker .tr-editAddPanel{
-  display:none;
-  width:100%;
-  height:100%;
-  min-height:0;
-  overflow:hidden;
-}
-
-.tr-editModal--sessionPicker.tr-editModal--mobile-current .tr-editCurrentPanel,
-.tr-editModal--sessionPicker.tr-editModal--mobile-add .tr-editAddPanel{
-  display:block;
-}
-
-.tr-editModal--sessionPicker .tr-editCurrentPanel > .tr-card,
-.tr-editModal--sessionPicker .tr-editAddPanel > .tr-card{
-  height:100%;
-  min-height:0;
-}
-
-.tr-editModal--sessionPicker .tr-editCurrentPanel > .tr-card > .tr-card-head,
-.tr-editModal--sessionPicker .tr-editAddPanel > .tr-card > .tr-card-head{
-  display:none;
-}
-
-.tr-editModal--sessionPicker .tr-editCurrentPanel > .tr-card > .tr-card-body,
-.tr-editModal--sessionPicker .tr-editAddPanel > .tr-card > .tr-card-body{
-  height:100%;
-  min-height:0;
-  padding:10px 12px 12px;
-}
-
-.tr-editModal--sessionPicker .tr-editAddLayout{
-  display:flex !important;
-  flex-direction:column;
-  height:100%;
-  min-height:0;
-  overflow:hidden;
-  gap:9px !important;
-}
-
-.tr-editModal--sessionPicker .tr-editResultsViewport{
-  flex:1 1 auto;
-  height:auto;
-  min-height:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-  padding:2px 4px 10px 0;
-  scroll-padding-bottom:12px;
-}
-
-.tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowBtn{
-  width:100%;
-  min-width:0;
-}
-
-.tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox{
-  width:100%;
-  min-width:0;
   min-height:62px;
+  display:grid !important;
+  grid-template-columns:36px minmax(0,1fr);
+  align-items:center;
+  gap:11px;
+  padding:10px 14px !important;
+  border-color:rgba(46,222,111,.58) !important;
+  color:#f5fff8 !important;
+  background:linear-gradient(180deg,rgba(45,208,100,.23),rgba(15,96,48,.18)) !important;
+  text-align:left;
+}
+
+.tr-completeExerciseButton > span:first-child{
+  width:34px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  color:#06210f;
+  background:#64e991;
+  font-size:17px;
+  font-weight:1000;
+}
+
+.tr-completeExerciseButton > span:last-child{
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+
+.tr-completeExerciseButton strong{
+  font-size:12px;
+  line-height:1;
+}
+
+.tr-completeExerciseButton small{
+  color:rgba(217,238,224,.68);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:0;
+  text-transform:none;
+}
+
+.tr-completeExerciseButton:disabled{
+  border-color:rgba(255,255,255,.09) !important;
+  color:rgba(222,232,238,.50) !important;
+  background:rgba(255,255,255,.025) !important;
+}
+
+.tr-completeExerciseButton:disabled > span:first-child{
+  color:rgba(224,233,238,.50);
+  background:rgba(255,255,255,.07);
+}
+
+.tr-exerciseNavigation{
+  display:grid;
+  grid-template-columns:minmax(110px,1fr) minmax(150px,auto) minmax(110px,1fr);
+  align-items:center;
+  gap:9px;
+}
+
+.tr-exerciseNavigationButton{
+  min-width:0;
+  width:100%;
+}
+
+.tr-exerciseNavigationStatus{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:rgba(196,215,226,.62);
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.12em;
+  text-align:center;
+  text-transform:uppercase;
+}
+
+/* -------------------------------------------------------------------------- */
+/* SESSION START AND EXERCISE COMPLETE OVERLAYS                               */
+/* -------------------------------------------------------------------------- */
+
+.tr-sessionStartOverlay{
+  position:fixed;
+  inset:0;
+  z-index:10060;
+  display:grid;
+  place-content:center;
+  justify-items:center;
+  gap:9px;
+  padding:20px;
+  color:#fff;
+  text-align:center;
+  background:radial-gradient(circle at 50% 45%,rgba(0,173,255,.22),rgba(0,5,9,.94) 46%,rgba(0,3,6,.99) 78%);
+  animation:trSessionStartFade 1.65s ease both;
+}
+
+.tr-sessionStartPulse{
+  position:absolute;
+  width:min(65vw,520px);
+  aspect-ratio:1;
+  border:1px solid rgba(0,187,255,.25);
+  border-radius:50%;
+  box-shadow:0 0 0 35px rgba(0,176,255,.025),0 0 100px rgba(0,174,255,.11);
+  animation:trSessionPulse 1.2s ease-out both;
+}
+
+.tr-sessionStartMark{
+  position:relative;
+  width:76px;
+  height:76px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,174,54,.55);
+  border-radius:24px;
+  color:#1a0e00;
+  background:linear-gradient(180deg,#ffd27c,#ff9e2e);
+  box-shadow:0 0 38px rgba(255,157,40,.22);
+  font-size:29px;
+}
+
+.tr-sessionStartKicker,
+.tr-exerciseCompleteKicker{
+  position:relative;
+  color:#80dafe;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+}
+
+.tr-sessionStartTitle{
+  position:relative;
+  max-width:min(760px,92vw);
+  color:#fff;
+  font-size:clamp(30px,7vw,66px);
+  line-height:.98;
+  font-weight:1000;
+  letter-spacing:-.035em;
+}
+
+.tr-sessionStartSub{
+  position:relative;
+  color:#ffd184;
+  font-size:13px;
+  font-weight:1000;
+  letter-spacing:.20em;
+}
+
+@keyframes trSessionPulse{
+  0%{transform:scale(.55);opacity:0;}
+  45%{opacity:1;}
+  100%{transform:scale(1.25);opacity:0;}
+}
+
+@keyframes trSessionStartFade{
+  0%{opacity:0;}
+  12%,78%{opacity:1;}
+  100%{opacity:0;visibility:hidden;}
+}
+
+.tr-exerciseCompleteOverlay{
+  position:fixed;
+  inset:0;
+  z-index:10055;
+  display:grid;
+  place-items:center;
+  padding:16px;
+  background:rgba(0,5,8,.80);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+}
+
+.tr-exerciseCompleteCard{
+  width:min(570px,100%);
+  display:grid;
+  justify-items:center;
+  gap:10px;
+  padding:clamp(22px,5vw,38px);
+  border:1px solid rgba(48,222,110,.44);
+  border-radius:24px;
+  background:
+    radial-gradient(500px 180px at 50% 0,rgba(48,216,107,.14),transparent 70%),
+    linear-gradient(180deg,rgba(14,25,22,.99),rgba(5,10,9,.995));
+  box-shadow:0 34px 100px rgba(0,0,0,.68),0 0 44px rgba(43,207,99,.08),inset 0 1px 0 rgba(255,255,255,.08);
+  text-align:center;
+}
+
+.tr-exerciseCompleteCheck{
+  width:74px;
+  height:74px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  color:#05150a;
+  background:linear-gradient(180deg,#7cf2a5,#31c86a);
+  box-shadow:0 0 34px rgba(58,218,113,.23);
+  font-size:35px;
+  font-weight:1000;
+}
+
+.tr-exerciseCompleteName{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  color:#fff;
+  font-size:clamp(24px,5vw,43px);
+  line-height:1;
+  font-weight:1000;
+}
+
+.tr-exerciseCompleteProgress{
+  color:#8ceeb0;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+}
+
+/* -------------------------------------------------------------------------- */
+/* RESPONSIVE                                                                  */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width:900px){
+  .tr-sessionMetricRail,
+  .tr-performanceMetricRail{
+    grid-template-columns:1fr;
+  }
+
+  .tr-sessionMetric,
+  .tr-performanceMetric{
+    grid-template-columns:44px minmax(0,1fr);
+  }
+
+  .tr-audioDeckTop{
+    grid-template-columns:60px minmax(0,1fr) 48px !important;
+    grid-template-areas:
+      "art identity eq"
+      "queue queue queue";
+  }
+
+  .tr-audioArtwork{grid-area:art;}
+  .tr-audioIdentity{grid-area:identity;}
+  .tr-audioQueueSelector{grid-area:queue;}
+  .tr-audioEqToggle{grid-area:eq;}
 }
 
 @media (max-width:760px){
-  .tr-editModal--sessionPicker{
-    width:100%;
-    height:100%;
-    max-height:100%;
+  .tr-shellInner{
+    padding-bottom:calc(190px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-bottom:calc(190px + env(safe-area-inset-bottom));
   }
 
-  .tr-editModal--sessionPicker .tr-editFilterScroll.is-open{
-    display:grid !important;
-    max-height:min(290px,38dvh);
-    overflow-y:auto !important;
-    overflow-x:hidden !important;
-    padding:10px;
+  .tr-audioDeckHeader{
+    align-items:flex-start;
   }
 
-  .tr-editModal--sessionPicker .tr-editFilterScroll .tr-chipRow,
-  .tr-editModal--sessionPicker .tr-editAddPanel .tr-chipRow{
-    display:flex !important;
-    flex-wrap:wrap !important;
-    width:100%;
-    max-width:100%;
-    overflow:visible !important;
-    gap:7px;
-    padding:0;
+  .tr-audioSystemIdentity > div{
+    display:grid;
+    gap:3px;
   }
 
-  .tr-editModal--sessionPicker .tr-editFilterScroll .tr-chipRow .tr-seg,
-  .tr-editModal--sessionPicker .tr-editAddPanel .tr-chipRow .tr-seg{
-    flex:0 1 auto;
-    max-width:100%;
+  .tr-audioSystemReadouts{
+    gap:5px;
+  }
+
+  .tr-audioQualityBadge{
+    display:none;
+  }
+
+  .tr-audioDeckTop{
+    grid-template-columns:54px minmax(0,1fr) 46px !important;
+    gap:9px !important;
+  }
+
+  .tr-audioArtwork{
+    width:54px !important;
+    height:54px !important;
+    min-width:54px !important;
+    min-height:54px !important;
+    max-width:54px !important;
+    max-height:54px !important;
+    border-radius:14px !important;
+  }
+
+  .tr-audioArtwork > svg{
+    width:25px !important;
+    height:25px !important;
+    max-width:25px !important;
+    max-height:25px !important;
+  }
+
+  .tr-audioEqToggle{
+    width:46px !important;
+    height:46px !important;
+    min-width:46px !important;
+    max-width:46px !important;
+  }
+
+  .tr-sessionOverviewBody{
+    padding:11px !important;
+    gap:11px !important;
+  }
+
+  .tr-sessionChronograph{
+    padding:17px 13px;
+    border-radius:18px;
+  }
+
+  .tr-sessionChronographTime{
+    font-size:clamp(46px,14.2vw,76px);
+    letter-spacing:-.02em;
+  }
+
+  .tr-sessionChronographUnits{
+    gap:18px;
+    padding:0 24px;
+    font-size:8px;
+  }
+
+  .tr-sessionChronographActions{
+    grid-template-columns:1fr;
+  }
+
+  .tr-sessionChronographPrimary,
+  .tr-sessionChronographEnd{
+    min-height:50px;
+  }
+
+  .tr-sessionCurrentHero{
+    padding:15px;
+  }
+
+  .tr-sessionCurrentHeroName{
+    font-size:clamp(23px,7.5vw,36px);
+  }
+
+  .tr-proSessionConsole{
+    padding:11px;
+    gap:10px;
+    border-radius:17px;
+  }
+
+  .tr-proUtilityToolbar{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:6px;
+  }
+
+  .tr-proUtilityButton{
     min-width:0;
-    white-space:normal;
-    line-height:1.15;
-    padding:0 10px;
+    padding:0 7px;
+    font-size:8px;
   }
 
-  .tr-editModal--sessionPicker .tr-editMobileTabs .tr-seg{
-    min-height:40px;
+  .tr-currentExerciseHero{
+    padding:15px;
+    border-radius:16px;
+  }
+
+  .tr-currentExerciseHeader{
+    align-items:center;
+  }
+
+  .tr-currentExerciseName{
+    font-size:clamp(27px,9vw,42px);
+  }
+
+  .tr-currentExercisePrescription{
+    gap:6px;
+  }
+
+  .tr-currentExercisePrescription > div{
+    padding:9px 8px;
+  }
+
+  .tr-currentExercisePrescription strong{
+    font-size:13px;
+  }
+
+  .tr-sessionRoadmapRail{
+    overflow-x:auto;
+    justify-content:flex-start;
+    padding:7px 6px 9px;
+    scroll-snap-type:x proximity;
+  }
+
+  .tr-sessionRoadmapRail::before{
+    left:20px;
+    right:20px;
+  }
+
+  .tr-sessionRoadmapNode{
+    flex-basis:34px;
+    width:34px;
+    height:34px;
+    scroll-snap-align:center;
+  }
+
+  .tr-fullSessionOverlay{
+    padding:9px;
+  }
+
+  .tr-fullSessionSheet{
+    width:100%;
+    height:calc(100dvh - 18px);
+    max-height:none;
+    border-radius:19px;
+  }
+
+  .tr-restTimerDock.tr-restTimerDock--pro,
+  .tr-restTimerDock{
+    bottom:calc(76px + env(safe-area-inset-bottom));
+    width:calc(100vw - 16px);
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:
+      "identity clock"
+      "actions actions";
+    gap:10px;
+    padding:13px;
+    border-radius:16px;
+  }
+
+  .tr-restTimerIdentity{grid-area:identity;}
+  .tr-restTimerClock{grid-area:clock;min-width:92px;font-size:38px;}
+  .tr-restTimerActions{grid-area:actions;}
+
+  .tr-restTimerDock.is-finished{
+    grid-template-areas:"identity clock";
+  }
+
+  .tr-completedExerciseState{
+    grid-template-columns:42px minmax(0,1fr);
+  }
+
+  .tr-completedExerciseState .tr-btn{
+    grid-column:1 / -1;
+    width:100%;
+  }
+
+  .tr-exerciseNavigation{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .tr-exerciseNavigationStatus{
+    grid-column:1 / -1;
+    grid-row:1;
+  }
+}
+
+@media (max-width:520px){
+  .tr-audioDeckHeader{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:8px;
+  }
+
+  .tr-audioStatusLamp{
+    padding:0 7px;
+  }
+
+  .tr-audioTrackRail small{
+    display:none;
+  }
+
+  .tr-sessionChronographHead{
+    align-items:flex-start;
+  }
+
+  .tr-sessionChronographKicker{
     font-size:9px;
+    letter-spacing:.17em;
   }
 
-  .tr-editModal--sessionPicker .tr-editResultsViewport .tr-rowbox{
-    min-height:66px;
+  .tr-sessionChronographTime{
+    font-size:clamp(42px,13.9vw,64px);
+  }
+
+  .tr-sessionChronographUnits{
+    padding:0 15px;
+    gap:10px;
+  }
+
+  .tr-sessionCurrentHeroHead{
+    align-items:flex-start;
+  }
+
+  .tr-sessionMetricRail,
+  .tr-performanceMetricRail{
+    gap:7px;
+  }
+
+  .tr-proUtilityButton{
+    min-height:42px;
+    display:grid;
+    grid-template-columns:1fr;
+    gap:2px;
+  }
+
+  .tr-proUtilityIcon{
+    margin:auto;
+  }
+
+  .tr-currentExerciseHeader{
+    align-items:flex-start;
+  }
+
+  .tr-sessionState{
+    min-height:26px;
+    padding:0 8px;
+    font-size:7px;
+  }
+
+  .tr-currentExercisePrescription{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+
+  .tr-sessionRoadmapNames{
+    grid-template-columns:1fr;
+  }
+
+  .tr-restTimerActions,
+  .tr-restTimerActions--simple{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+
+  .tr-restTimerActions button{
+    min-width:0;
+    padding:0 5px;
+    font-size:8px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .tr-audioStatusLamp.is-loading i,
+  .tr-restTimerDock.is-finished,
+  .tr-sessionStartOverlay,
+  .tr-sessionStartPulse{
+    animation:none !important;
   }
 }
