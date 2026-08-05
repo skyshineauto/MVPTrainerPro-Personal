@@ -1855,19 +1855,7 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
 
-  const navigatorItems = useMemo(
-    () =>
-      items.map((row, index) => ({
-        id: row.id,
-        name:
-          row.exercise?.name ??
-          row.exercise?.title ??
-          `Exercise ${index + 1}`,
-        completed: Boolean(row.completed_at),
-        pain: Math.max(0, Number(row.pain ?? 0)),
-      })),
-    [items]
-  );
+ 
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen && !roadmapOpen) return;
