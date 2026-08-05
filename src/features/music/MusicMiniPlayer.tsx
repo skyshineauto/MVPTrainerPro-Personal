@@ -246,6 +246,28 @@ export function MusicMiniPlayer({
       className={`tr-audioDeck ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
       aria-label="MVP Trainer music console"
     >
+      <div className="tr-audioDeckHeader">
+        <div className="tr-audioSystemIdentity">
+          <span className="tr-audioSystemMark" aria-hidden>
+            <PlayerIcon name="music" />
+          </span>
+          <div>
+            <span>PERFORMANCE AUDIO</span>
+            <strong>MVP PRO DECK</strong>
+          </div>
+        </div>
+
+        <div className="tr-audioSystemReadouts" aria-label="Music system status">
+          <span
+            className={`tr-audioStatusLamp ${player.playing ? "is-live" : ""} ${player.loading || queueBusy ? "is-loading" : ""}`}
+          >
+            <i aria-hidden />
+            {player.loading || queueBusy ? "LOADING" : player.playing ? "LIVE" : "READY"}
+          </span>
+          <span className="tr-audioQualityBadge">10-BAND DSP</span>
+        </div>
+      </div>
+
       <div className="tr-audioDeckTop">
         <button
           type="button"
@@ -263,7 +285,7 @@ export function MusicMiniPlayer({
           onClick={() => navigate("/music")}
         >
           <span className="tr-audioEyebrow">
-            {player.playing ? "NOW PLAYING" : "MVP AUDIO SYSTEM"}
+            {player.playing ? "NOW PLAYING" : track ? "READY TO PLAY" : "MUSIC LIBRARY"}
           </span>
           <strong>
             {track?.title || (player.loading ? "Loading music…" : "Your workout soundtrack")}
@@ -302,6 +324,12 @@ export function MusicMiniPlayer({
           <PlayerIcon name="equalizer" />
           <span>EQ</span>
         </button>
+      </div>
+
+      <div className="tr-audioTrackRail" aria-label="Current audio source">
+        <span>PLAYING FROM</span>
+        <strong>{queueLabel}</strong>
+        <small>SMART QUEUE · PRIVATE LIBRARY</small>
       </div>
 
       <Spectrum playing={player.playing} />
