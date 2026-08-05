@@ -802,17 +802,11 @@ export function AppShell({
 
   const endEnabled = useMemo(() => {
     if (hud.mode !== "active") return false;
-    if (lsGet(LS.isPaused) === "true") return false;
     return !!(hud.bodyweightLb && hud.bodyweightLb > 0);
   }, [hud]);
 
   const onEndWorkout = async () => {
     if (hud.mode !== "active") return;
-
-    if (lsGet(LS.isPaused) === "true") {
-      setMsg("Workout is paused. Resume before ending.");
-      return;
-    }
 
     if (!hud.bodyweightLb || hud.bodyweightLb <= 0) {
       setMsg("Enter your weight to start.");
@@ -1071,141 +1065,164 @@ export function AppShell({
         ) : null}
 
         <section className={`tr-card ${hudClass}`}>
-          <div className="tr-card-body" style={{ gap: 12 }}>
-            <div className="tr-hudStrip">
-              <div className="tr-hudLeft">
-                <div className="tr-hudKicker">
-                  {hud.mode === "active" ? "ACTIVE WORKOUT" : hud.mode === "inactive" ? "NEXT WORKOUT" : "STATUS"}
-                </div>
-
-                <div className="tr-hudStripSub">
-                  {hud.mode === "active"
-                    ? activeLabel
-                    : hud.mode === "inactive"
-                    ? inactiveLabel
-                    : hud.mode === "no_program"
-                    ? "No active program"
-                    : "Sign in"}
-                </div>
-              </div>
-
-              <div
-                className={[
-                  "tr-hudTimeBig",
-                  hud.mode === "active" ? "tr-hudTimeBig--active" : "tr-hudTimeBig--clock",
-                  hud.mode === "active" && hud.isPaused ? "tr-hudTimeBig--paused" : "",
-                ].join(" ")}
-              >
-                {hud.mode === "active" ? (
-                  toHHMMSS(timerSeconds)
-                ) : (
-                  <div className="tr-hudClockWrap">
-                    <div className="tr-hudClockDate">{clockParts?.date}</div>
-                    <div className="tr-hudClockTime">{clockParts?.time}</div>
+          <div className="tr-card-body tr-sessionOverviewBody">
+            {hud.mode === "active" ? (
+              <>
+                <div className={`tr-sessionChronograph ${hud.isPaused ? "is-paused" : "is-running"}`}>
+                  <div className="tr-sessionChronographHead">
+                    <div className="tr-sessionChronographKicker">SESSION ELAPSED</div>
+                    <div className={`tr-sessionChronographState ${hud.isPaused ? "is-paused" : "is-running"}`}>
+                      <span aria-hidden />
+                      {hud.isPaused ? "PAUSED" : "TRAINING"}
+                    </div>
                   </div>
-                )}
-              </div>
 
-              <div className="tr-hudActionsRow">
-                {hud.mode === "active" ? (
-                  <>
+                  <div className="tr-sessionChronographTime" aria-label={`${toHHMMSS(timerSeconds)} elapsed`}>
+                    {toHHMMSS(timerSeconds)}
+                  </div>
+                  <div className="tr-sessionChronographUnits" aria-hidden>
+                    <span>HR</span>
+                    <span>MIN</span>
+                    <span>SEC</span>
+                  </div>
+
+                  <div className="tr-sessionChronographActions">
                     <button
-                      className={`tr-seg tr-hudActionBtn ${hud.isPaused ? "tr-seg--resumeGreen" : "tr-seg--pauseBlue"}`}
+                      type="button"
+                      className={`tr-sessionChronographPrimary ${hud.isPaused ? "is-resume" : "is-pause"}`}
                       onClick={onTogglePause}
                     >
                       {hud.isPaused ? "RESUME WORKOUT" : "PAUSE WORKOUT"}
                     </button>
-
                     <button
-                      className={`tr-seg tr-hudActionBtn tr-seg--endRed ${endEnabled ? "is-enabled" : ""}`}
+                      type="button"
+                      className="tr-sessionChronographEnd"
                       onClick={onEndWorkout}
                       disabled={!endEnabled}
-                      title={!endEnabled ? "Enter weight and make sure it’s not paused" : "End workout"}
+                      title={!endEnabled ? "Confirm today's body weight before ending" : "End workout"}
                     >
                       END WORKOUT
                     </button>
-                  </>
-                ) : hud.mode === "inactive" ? (
-                  <button
-                    className={`tr-seg tr-hudActionBtn tr-seg--startBlue ${hud.nextSessionId ? "is-enabled tr-pulse" : ""}`}
-                    disabled={!hud.nextSessionId}
-                    onClick={() => hud.nextSessionId && startSession(hud.nextSessionId)}
-                  >
-                    START WORKOUT
-                  </button>
-                ) : hud.mode === "no_program" ? (
-                  <button
-                    className="tr-seg tr-hudActionBtn tr-seg--startBlue is-enabled"
-                    onClick={() => navigate("/coach")}
-                  >
-                    GO TO COACH
-                  </button>
-                ) : null}
-              </div>
-            </div>
+                  </div>
+                </div>
 
-            <div className="tr-hudTiles">
-              <div className="tr-rowbox">
-                <div className="tr-hudKicker">{hud.mode === "active" ? "CURRENT EXERCISE" : "NEXT EXERCISE"}</div>
-                <div style={{ fontWeight: 950, fontSize: 16 }}>
-                  {hud.mode === "active"
-                    ? displayOrNotSet(
-                        `${lsGet(LS.activeExerciseName) ?? ""}${lsGet(LS.activeExercisePos) ? ` • ${lsGet(LS.activeExercisePos)}` : ""}`.trim(),
-                        "Not set"
-                      )
-                    : hud.mode === "inactive"
-                    ? displayOrNotSet(hud.nextFirstExercise, "Not set")
-                    : "Not set"}
+                <div className="tr-sessionCurrentHero">
+                  <div className="tr-sessionCurrentHeroHead">
+                    <span>CURRENT EXERCISE</span>
+                    <strong>{lsGet(LS.activeExercisePos) || "IN SESSION"}</strong>
+                  </div>
+                  <div className="tr-sessionCurrentHeroName">
+                    {displayOrNotSet(lsGet(LS.activeExerciseName), "Exercise not selected")}
+                  </div>
+                  <div className="tr-sessionCurrentHeroMode">{activeLabel || "Workout in progress"}</div>
                 </div>
-              </div>
 
-              <div className="tr-rowbox">
-                <div className="tr-hudKicker">WEIGHT</div>
-                <div style={{ fontWeight: 950, fontSize: 16 }}>
-                  {hud.mode === "active"
-                    ? hud.bodyweightLb != null
-                      ? `${hud.bodyweightLb} lb`
-                      : "Not set"
-                    : hud.mode === "inactive"
-                    ? hud.displayWeightLb != null
-                      ? `${hud.displayWeightLb} lb`
-                      : "Not set"
-                    : "Not set"}
-                </div>
-                <div className="tr-hudStripSub" style={{ marginTop: 6 }}>
-                  {hud.mode === "active" ? "Today" : hud.mode === "inactive" ? "Last completed" : ""}
-                </div>
-              </div>
+                <div className="tr-sessionMetricRail">
+                  <div className="tr-sessionMetric tr-sessionMetric--weight">
+                    <div className="tr-sessionMetricIcon" aria-hidden>⚖</div>
+                    <div>
+                      <span>BODY WEIGHT</span>
+                      <strong>{hud.bodyweightLb != null ? `${hud.bodyweightLb} lb` : "Not set"}</strong>
+                      <small>Today</small>
+                    </div>
+                  </div>
 
-              <div className="tr-rowbox">
-                <div className="tr-hudKicker">PROTEIN</div>
-                <div style={{ fontWeight: 950, fontSize: 16 }}>
-                  {hud.mode === "active" || hud.mode === "inactive"
-                    ? hud.proteinTargetG != null
-                      ? `${hud.proteinTargetG}g`
-                      : "Not set"
-                    : "Not set"}
-                </div>
-                <div className="tr-hudStripSub" style={{ marginTop: 6 }}>
-                  {hud.mode === "inactive" ? (isSymptomMode(hud.goalMode) ? "Symptom program" : "Goal program") : ""}
-                </div>
-              </div>
+                  <div className="tr-sessionMetric tr-sessionMetric--protein">
+                    <div className="tr-sessionMetricIcon" aria-hidden>◆</div>
+                    <div>
+                      <span>DAILY PROTEIN</span>
+                      <strong>{hud.proteinTargetG != null ? `${hud.proteinTargetG} g` : "Not set"}</strong>
+                      <small>Target</small>
+                    </div>
+                  </div>
 
-              <div className="tr-rowbox">
-                <div className="tr-hudKicker">STATUS</div>
-                <div style={{ fontWeight: 950, fontSize: 16 }}>
-                  {hud.mode === "active"
-                    ? hud.isPaused
-                      ? "PAUSED"
-                      : "RUNNING"
-                    : hud.mode === "inactive"
-                    ? "IDLE"
-                    : hud.mode === "no_program"
-                    ? "NO PROGRAM"
-                    : "SIGN IN"}
+                  <div className={`tr-sessionMetric tr-sessionMetric--state ${hud.isPaused ? "is-paused" : "is-running"}`}>
+                    <div className="tr-sessionMetricIcon" aria-hidden>●</div>
+                    <div>
+                      <span>SESSION</span>
+                      <strong>{hud.isPaused ? "PAUSED" : "IN PROGRESS"}</strong>
+                      <small>{toHHMMSS(timerSeconds)} elapsed</small>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="tr-hudStrip">
+                  <div className="tr-hudLeft">
+                    <div className="tr-hudKicker">
+                      {hud.mode === "inactive" ? "NEXT WORKOUT" : "STATUS"}
+                    </div>
+                    <div className="tr-hudStripSub">
+                      {hud.mode === "inactive"
+                        ? inactiveLabel
+                        : hud.mode === "no_program"
+                        ? "No active program"
+                        : "Sign in"}
+                    </div>
+                  </div>
+
+                  <div className="tr-hudTimeBig tr-hudTimeBig--clock">
+                    <div className="tr-hudClockWrap">
+                      <div className="tr-hudClockDate">{clockParts?.date}</div>
+                      <div className="tr-hudClockTime">{clockParts?.time}</div>
+                    </div>
+                  </div>
+
+                  <div className="tr-hudActionsRow">
+                    {hud.mode === "inactive" ? (
+                      <button
+                        className={`tr-seg tr-hudActionBtn tr-seg--startBlue ${hud.nextSessionId ? "is-enabled tr-pulse" : ""}`}
+                        disabled={!hud.nextSessionId}
+                        onClick={() => hud.nextSessionId && startSession(hud.nextSessionId)}
+                      >
+                        START WORKOUT
+                      </button>
+                    ) : hud.mode === "no_program" ? (
+                      <button
+                        className="tr-seg tr-hudActionBtn tr-seg--startBlue is-enabled"
+                        onClick={() => navigate("/coach")}
+                      >
+                        GO TO COACH
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="tr-hudTiles">
+                  <div className="tr-rowbox">
+                    <div className="tr-hudKicker">NEXT EXERCISE</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>
+                      {hud.mode === "inactive" ? displayOrNotSet(hud.nextFirstExercise, "Not set") : "Not set"}
+                    </div>
+                  </div>
+
+                  <div className="tr-rowbox">
+                    <div className="tr-hudKicker">BODY WEIGHT</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>
+                      {hud.mode === "inactive" && hud.displayWeightLb != null ? `${hud.displayWeightLb} lb` : "Not set"}
+                    </div>
+                    <div className="tr-hudStripSub" style={{ marginTop: 6 }}>
+                      {hud.mode === "inactive" ? "Last completed" : ""}
+                    </div>
+                  </div>
+
+                  <div className="tr-rowbox">
+                    <div className="tr-hudKicker">PROTEIN TARGET</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>
+                      {hud.mode === "inactive" && hud.proteinTargetG != null ? `${hud.proteinTargetG}g` : "Not set"}
+                    </div>
+                  </div>
+
+                  <div className="tr-rowbox">
+                    <div className="tr-hudKicker">STATUS</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>
+                      {hud.mode === "inactive" ? "READY" : hud.mode === "no_program" ? "NO PROGRAM" : "SIGN IN"}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
