@@ -14,6 +14,11 @@ const ALERT_LABELS: Record<
   AlertSoundType,
   { title: string; description: string }
 > = {
+  workout_start: {
+    title: "Workout Start",
+    description:
+      "Plays once when a new workout session begins. It does not replay when a paused workout is resumed.",
+  },
   rest_complete: {
     title: "Rest Complete",
     description: "Plays when the rest countdown reaches zero.",
