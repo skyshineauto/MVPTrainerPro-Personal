@@ -5,6 +5,7 @@ export const ALERT_SOUND_TABLE = "trainer_alert_sounds";
 export const MAX_ALERT_SOUND_BYTES = 5 * 1024 * 1024;
 
 export const ALERT_SOUND_TYPES = [
+  "workout_start",
   "rest_complete",
   "exercise_complete",
   "workout_complete",
