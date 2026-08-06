@@ -538,7 +538,10 @@ export function MusicMiniPlayer({
   );
   const queueLabel =
     player.activePlaylistName || "All Uploaded Songs";
-  const nextPreview = getNextMusicTrackPreview();
+  const nextPreviewResult = getNextMusicTrackPreview();
+  const nextTrack = nextPreviewResult?.track ?? null;
+  const nextTrackLabel =
+    nextPreviewResult?.label ?? "End of queue";
   const currentIndex = track
     ? player.tracks.findIndex((item) => item.id === track.id)
     : -1;
@@ -784,14 +787,12 @@ export function MusicMiniPlayer({
           </span>
 
           <strong>
-            {nextPreview.track?.title ||
-              nextPreview.label ||
-              "End of queue"}
+            {nextTrack?.title || nextTrackLabel}
           </strong>
 
           <small>
-            {nextPreview.track
-              ? nextPreview.track.artist ||
+            {nextTrack
+              ? nextTrack.artist ||
                 "MVP Trainer library"
               : player.shuffle
                 ? "Selected automatically from the active queue"
