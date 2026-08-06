@@ -496,11 +496,15 @@ const HUD_FORCE_CSS = `
   text-align: center;
 }
 .tr-inactiveCommandDate{
+  width: 100%;
   color: rgba(250,253,250,.96);
-  font-size: clamp(24px,3.2vw,40px);
+  font-size: clamp(20px,2.1vw,30px);
   line-height: 1.08;
   font-weight: 1000;
-  letter-spacing: .025em;
+  letter-spacing: .018em;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  text-align: center;
   text-shadow: 0 2px 0 rgba(0,0,0,.72), 0 0 20px rgba(0,170,255,.08);
 }
 .tr-inactiveCommandTime{
@@ -588,7 +592,10 @@ const HUD_FORCE_CSS = `
     border-radius: 18px;
   }
   .tr-inactiveCommandDate{
-    font-size: clamp(22px,7.2vw,31px);
+    font-size: clamp(16px,4.9vw,21px);
+    letter-spacing: .01em;
+    white-space: nowrap;
+    text-wrap: nowrap;
   }
   .tr-inactiveCommandTime{
     font-size: clamp(23px,7vw,31px);
