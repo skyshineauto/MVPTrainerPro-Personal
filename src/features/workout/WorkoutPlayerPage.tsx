@@ -2622,7 +2622,7 @@ export function WorkoutPlayerPage({ params }: any) {
   }
 
   return (
-    <div style={{ display: "grid", gap: 12, paddingBottom: 156 }}>
+    <div className="tr-workoutPlayerPage" style={{ display: "grid", gap: 12, paddingBottom: "calc(190px + env(safe-area-inset-bottom))" }}>
       <Toast toast={toast} onClose={() => setToast((t) => ({ ...t, open: false }))} />
       <RestTimerDock timer={restTimer} />
 
@@ -2634,9 +2634,10 @@ export function WorkoutPlayerPage({ params }: any) {
         totalExercises={items.length}
       />
 
-      <Card title="Session Check-in" tone="blue">
-        <div className="tr-rowbox">
-          <div className="tr-checkinGrid tr-checkinGrid--tight">
+      <div className="tr-workoutCheckinCard">
+        <Card title="Session Check-in" tone="blue">
+          <div className="tr-rowbox">
+            <div className="tr-checkinGrid tr-checkinGrid--tight">
             <div className="tr-checkinTile tr-checkinTile--tight">
               <div className="tr-kicker">WEIGHT (LB)</div>
               <div className="tr-checkinValue tr-checkinValue--tight">
@@ -2650,9 +2651,10 @@ export function WorkoutPlayerPage({ params }: any) {
                 {proteinTarget != null ? `${proteinTarget}g` : "Not set"}
               </div>
             </div>
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       <div className="tr-workoutSessionCard">
         <Card
@@ -2722,7 +2724,6 @@ export function WorkoutPlayerPage({ params }: any) {
             <div className="tr-exerciseProgressHeader">
               <div>
                 <div className="tr-kicker">EXERCISE PROGRESS</div>
-                <strong>Exercise {items.length ? activeIdx + 1 : 0} of {items.length}</strong>
               </div>
 
               <div className="tr-exerciseProgressCount">
@@ -3339,6 +3340,249 @@ export function WorkoutPlayerPage({ params }: any) {
           }
           .tr-exerciseProgressCount{ align-self:flex-end; }
           .tr-sessionNextLine{ align-items:flex-start; }
+        }
+
+
+        /* Step 1 cumulative mobile refinement */
+        @media (max-width:720px){
+          .tr-workoutPlayerPage{
+            gap:10px !important;
+          }
+
+          .tr-workoutCheckinCard .tr-card-head{
+            padding:10px 12px 8px;
+          }
+
+          .tr-workoutCheckinCard .tr-card-title{
+            font-size:11px;
+            letter-spacing:.17em;
+          }
+
+          .tr-workoutCheckinCard .tr-card-body{
+            padding:9px 10px 10px;
+          }
+
+          .tr-workoutCheckinCard .tr-rowbox{
+            padding:8px !important;
+          }
+
+          .tr-workoutCheckinCard .tr-checkinGrid--tight{
+            grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            gap:8px;
+          }
+
+          .tr-workoutCheckinCard .tr-checkinTile--tight{
+            min-width:0;
+            padding:10px 5px;
+            gap:5px;
+            border-radius:13px;
+          }
+
+          .tr-workoutCheckinCard .tr-checkinTile--tight .tr-kicker{
+            font-size:7.5px;
+            letter-spacing:.14em;
+            white-space:nowrap;
+          }
+
+          .tr-workoutCheckinCard .tr-checkinValue--tight{
+            font-size:19px;
+            letter-spacing:.015em;
+          }
+
+          .tr-workoutSessionCard .tr-card-head{
+            display:grid !important;
+            grid-template-columns:minmax(0,1fr) auto !important;
+            align-items:center !important;
+            gap:10px !important;
+            padding:11px 12px 10px !important;
+          }
+
+          .tr-workoutSessionCard .tr-card-title{
+            min-width:0;
+            font-size:10.5px;
+            line-height:1.35;
+            letter-spacing:.15em;
+            overflow-wrap:anywhere;
+          }
+
+          .tr-workoutSessionCard .tr-card-right{
+            width:auto !important;
+            min-width:0;
+            justify-self:end;
+          }
+
+          .tr-sessionEditButton{
+            min-width:68px;
+            width:auto;
+            height:39px;
+            padding:0 12px;
+            font-size:9px;
+            letter-spacing:.11em;
+          }
+
+          .tr-workoutSessionCard .tr-card-body{
+            gap:12px;
+            padding:12px !important;
+          }
+
+          .tr-sessionNavConsole{
+            gap:9px;
+          }
+
+          .tr-sessionCurrentPanel{
+            padding:14px 11px 13px;
+            gap:8px;
+            border-radius:17px;
+          }
+
+          .tr-sessionCurrentTopline{
+            gap:7px;
+            font-size:7.5px;
+            letter-spacing:.13em;
+          }
+
+          .tr-sessionCurrentState{
+            padding:4px 7px;
+            font-size:7.5px;
+          }
+
+          .tr-sessionCurrentName{
+            font-size:clamp(22px,6.8vw,29px);
+            line-height:1.04;
+          }
+
+          .tr-sessionCurrentMeta{
+            gap:6px;
+          }
+
+          .tr-sessionCurrentMeta span{
+            padding:5px 8px;
+            font-size:8px;
+          }
+
+          .tr-sessionNextLine{
+            gap:7px;
+            font-size:9px;
+            text-align:center;
+          }
+
+          .tr-sessionNavButton{
+            min-height:46px;
+            border-radius:14px;
+            font-size:10px;
+            letter-spacing:.12em;
+          }
+
+          .tr-sessionNavButton span{
+            font-size:18px;
+          }
+
+          .tr-exerciseProgressPanel{
+            gap:10px;
+            padding:12px;
+            border-radius:17px;
+          }
+
+          .tr-exerciseProgressHeader{
+            display:flex;
+            flex-direction:row !important;
+            align-items:baseline !important;
+            justify-content:space-between;
+            gap:10px;
+          }
+
+          .tr-exerciseProgressHeader > div:first-child{
+            gap:0;
+          }
+
+          .tr-exerciseProgressCount{
+            align-self:auto !important;
+            gap:4px;
+          }
+
+          .tr-exerciseProgressCount strong{
+            font-size:21px;
+          }
+
+          .tr-exerciseProgressCount span{
+            font-size:8px;
+            letter-spacing:.06em;
+          }
+
+          .tr-exerciseProgressTrack{
+            height:7px;
+          }
+
+          .tr-exerciseProgressGrid{
+            gap:7px;
+          }
+
+          .tr-exerciseProgressCard{
+            min-height:58px;
+            grid-template-columns:36px minmax(0,1fr);
+            gap:10px;
+            padding:8px 10px;
+            border-radius:14px;
+          }
+
+          .tr-exerciseProgressNumber{
+            width:34px;
+            height:34px;
+            border-radius:11px;
+            font-size:11px;
+          }
+
+          .tr-exerciseProgressCard.is-complete .tr-exerciseProgressNumber{
+            font-size:15px;
+          }
+
+          .tr-exerciseProgressText{
+            grid-template-columns:minmax(0,1fr) auto;
+            align-items:center;
+            gap:8px;
+          }
+
+          .tr-exerciseProgressText strong{
+            font-size:11.5px;
+            line-height:1.18;
+            -webkit-line-clamp:2;
+          }
+
+          .tr-exerciseProgressText small{
+            justify-self:end;
+            font-size:6.8px;
+            letter-spacing:.10em;
+            white-space:nowrap;
+          }
+
+          .tr-exerciseCompletionPanel{
+            margin-top:12px;
+          }
+        }
+
+        @media (max-width:390px){
+          .tr-workoutCheckinCard .tr-checkinTile--tight .tr-kicker{
+            font-size:6.8px;
+            letter-spacing:.10em;
+          }
+
+          .tr-workoutCheckinCard .tr-checkinValue--tight{
+            font-size:18px;
+          }
+
+          .tr-workoutSessionCard .tr-card-title{
+            font-size:9.5px;
+            letter-spacing:.12em;
+          }
+
+          .tr-sessionEditButton{
+            min-width:62px;
+            padding:0 10px;
+          }
+
+          .tr-exerciseProgressText small{
+            font-size:6.2px;
+          }
         }
 
         .tr-btn--nextOrange{
