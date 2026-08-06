@@ -27,7 +27,10 @@ export type MusicTrack = {
 };
 
 type MusicTrackUpdate = Partial<
-  Pick<MusicTrack, "title" | "artist" | "sort_order" | "favorite" | "energy_level">
+  Pick<
+    MusicTrack,
+    "title" | "artist" | "sort_order" | "favorite" | "energy_level"
+  >
 >;
 
 type SignedUrlCacheEntry = {
@@ -51,7 +54,9 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 function extensionFromName(name: string) {
-  const extension = name.split(".").pop()?.trim().toLowerCase() ?? "";
+  const extension =
+    name.split(".").pop()?.trim().toLowerCase() ?? "";
+
   return ALLOWED_EXTENSIONS.has(extension) ? extension : "";
 }
 
@@ -75,70 +80,110 @@ function titleFromFileName(name: string) {
   );
 }
 
-function contentTypeFor(extension: string, providedType: string) {
+function contentTypeFor(
+  extension: string,
+  providedType: string
+) {
   if (providedType) return providedType;
   if (extension === "mp3") return "audio/mpeg";
   if (extension === "m4a") return "audio/mp4";
+
   return "audio/wav";
 }
 
 async function requireUserId() {
   const { data, error } = await supabase.auth.getUser();
+
   if (error) throw error;
-  if (!data.user) throw new Error("Sign in before managing music.");
+
+  if (!data.user) {
+    throw new Error(
+      "Sign in before managing music."
+    );
+  }
+
   return data.user.id;
 }
 
-function normalizeTrack(row: MusicTrack): MusicTrack {
+function normalizeTrack(
+  row: MusicTrack
+): MusicTrack {
   return {
     ...row,
     favorite: Boolean(row.favorite),
     energy_level:
-      row.energy_level === "low" || row.energy_level === "high"
+      row.energy_level === "low" ||
+      row.energy_level === "high"
         ? row.energy_level
         : "medium",
-    play_count: Math.max(0, Number(row.play_count || 0)),
-    skip_count: Math.max(0, Number(row.skip_count || 0)),
+    play_count: Math.max(
+      0,
+      Number(row.play_count || 0)
+    ),
+    skip_count: Math.max(
+      0,
+      Number(row.skip_count || 0)
+    ),
   };
 }
 
-export function clearMusicUrlCache(trackId?: string) {
+export function clearMusicUrlCache(
+  trackId?: string
+) {
   if (trackId) {
     signedUrlCache.delete(trackId);
     return;
   }
+
   signedUrlCache.clear();
 }
 
 export function validateMusicFile(file: File) {
   if (file.size <= 0) {
-    throw new Error(`${file.name} is empty.`);
+    throw new Error(
+      `${file.name} is empty.`
+    );
   }
 
   if (file.size > MAX_MUSIC_FILE_BYTES) {
-    throw new Error(`${file.name} is larger than 50 MB.`);
+    throw new Error(
+      `${file.name} is larger than 50 MB.`
+    );
   }
 
-  const extension = extensionFromName(file.name);
-  const mime = file.type.trim().toLowerCase();
+  const extension =
+    extensionFromName(file.name);
+  const mime =
+    file.type.trim().toLowerCase();
   const mimeAllowed =
-    !mime || ALLOWED_MIME_TYPES.has(mime) || mime.startsWith("audio/");
+    !mime ||
+    ALLOWED_MIME_TYPES.has(mime) ||
+    mime.startsWith("audio/");
 
   if (!extension || !mimeAllowed) {
-    throw new Error(`${file.name}: use an MP3, M4A, or WAV file.`);
+    throw new Error(
+      `${file.name}: use an MP3, M4A, or WAV file.`
+    );
   }
 
   return extension;
 }
 
-export async function readMusicDuration(file: File): Promise<number | null> {
+export async function readMusicDuration(
+  file: File
+): Promise<number | null> {
   return new Promise((resolve) => {
-    const objectUrl = URL.createObjectURL(file);
-    const audio = document.createElement("audio");
+    const objectUrl =
+      URL.createObjectURL(file);
+    const audio =
+      document.createElement("audio");
     let finished = false;
 
-    const finish = (value: number | null) => {
+    const finish = (
+      value: number | null
+    ) => {
       if (finished) return;
+
       finished = true;
       URL.revokeObjectURL(objectUrl);
       audio.removeAttribute("src");
@@ -146,22 +191,31 @@ export async function readMusicDuration(file: File): Promise<number | null> {
       resolve(value);
     };
 
-    const timeout = window.setTimeout(() => finish(null), 6000);
+    const timeout = window.setTimeout(
+      () => finish(null),
+      6000
+    );
 
     audio.preload = "metadata";
+
     audio.addEventListener(
       "loadedmetadata",
       () => {
         window.clearTimeout(timeout);
-        const duration = Number(audio.duration);
+
+        const duration =
+          Number(audio.duration);
+
         finish(
-          Number.isFinite(duration) && duration > 0
+          Number.isFinite(duration) &&
+            duration > 0
             ? Math.round(duration)
             : null
         );
       },
       { once: true }
     );
+
     audio.addEventListener(
       "error",
       () => {
@@ -170,41 +224,63 @@ export async function readMusicDuration(file: File): Promise<number | null> {
       },
       { once: true }
     );
+
     audio.src = objectUrl;
   });
 }
 
-export async function listMusicTracks(): Promise<MusicTrack[]> {
+export async function listMusicTracks(): Promise<
+  MusicTrack[]
+> {
   const userId = await requireUserId();
+
   const { data, error } = await supabase
     .from(MUSIC_TABLE)
     .select(TRACK_SELECT)
     .eq("user_id", userId)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true });
+    .order("sort_order", {
+      ascending: true,
+    })
+    .order("created_at", {
+      ascending: true,
+    });
 
   if (error) throw error;
-  return ((data ?? []) as MusicTrack[]).map(normalizeTrack);
+
+  return (
+    (data ?? []) as MusicTrack[]
+  ).map(normalizeTrack);
 }
 
 export async function uploadMusicTrack(
   file: File,
   sortOrder: number
 ): Promise<MusicTrack> {
-  const extension = validateMusicFile(file);
+  const extension =
+    validateMusicFile(file);
   const userId = await requireUserId();
-  const durationSeconds = await readMusicDuration(file);
-  const fileStem = safeFileName(file.name.replace(/\.[^.]+$/, ""));
-  const storagePath = `${userId}/${Date.now()}-${crypto.randomUUID()}-${fileStem}.${extension}`;
-  const mimeType = contentTypeFor(extension, file.type);
+  const durationSeconds =
+    await readMusicDuration(file);
+  const fileStem = safeFileName(
+    file.name.replace(/\.[^.]+$/, "")
+  );
+  const storagePath =
+    `${userId}/${Date.now()}-` +
+    `${crypto.randomUUID()}-` +
+    `${fileStem}.${extension}`;
+  const mimeType = contentTypeFor(
+    extension,
+    file.type
+  );
 
-  const { error: uploadError } = await supabase.storage
-    .from(MUSIC_BUCKET)
-    .upload(storagePath, file, {
-      upsert: false,
-      contentType: mimeType,
-      cacheControl: "86400",
-    });
+  const { error: uploadError } =
+    await supabase.storage
+      .from(MUSIC_BUCKET)
+      .upload(storagePath, file, {
+        upsert: false,
+        contentType: mimeType,
+        cacheControl: "86400",
+      });
 
   if (uploadError) throw uploadError;
 
@@ -217,9 +293,13 @@ export async function uploadMusicTrack(
     mime_type: mimeType,
     file_size_bytes: file.size,
     duration_seconds: durationSeconds,
-    sort_order: Math.max(0, Math.floor(sortOrder)),
+    sort_order: Math.max(
+      0,
+      Math.floor(sortOrder)
+    ),
     favorite: false,
-    energy_level: "medium" as MusicEnergyLevel,
+    energy_level:
+      "medium" as MusicEnergyLevel,
     play_count: 0,
     skip_count: 0,
     updated_at: new Date().toISOString(),
@@ -232,11 +312,16 @@ export async function uploadMusicTrack(
     .single();
 
   if (error) {
-    await supabase.storage.from(MUSIC_BUCKET).remove([storagePath]);
+    await supabase.storage
+      .from(MUSIC_BUCKET)
+      .remove([storagePath]);
+
     throw error;
   }
 
-  return normalizeTrack(data as MusicTrack);
+  return normalizeTrack(
+    data as MusicTrack
+  );
 }
 
 export async function updateMusicTrack(
@@ -247,21 +332,42 @@ export async function updateMusicTrack(
   const title = patch.title?.trim();
   const artist = patch.artist?.trim();
 
-  const update: Record<string, string | number | boolean | null> = {
+  const update: Record<
+    string,
+    string | number | boolean | null
+  > = {
     updated_at: new Date().toISOString(),
   };
 
   if (patch.title !== undefined) {
-    if (!title) throw new Error("Song title cannot be empty.");
+    if (!title) {
+      throw new Error(
+        "Song title cannot be empty."
+      );
+    }
+
     update.title = title;
   }
-  if (patch.artist !== undefined) update.artist = artist || null;
-  if (patch.sort_order !== undefined) {
-    update.sort_order = Math.max(0, Math.floor(patch.sort_order));
+
+  if (patch.artist !== undefined) {
+    update.artist = artist || null;
   }
-  if (patch.favorite !== undefined) update.favorite = Boolean(patch.favorite);
+
+  if (patch.sort_order !== undefined) {
+    update.sort_order = Math.max(
+      0,
+      Math.floor(patch.sort_order)
+    );
+  }
+
+  if (patch.favorite !== undefined) {
+    update.favorite =
+      Boolean(patch.favorite);
+  }
+
   if (patch.energy_level !== undefined) {
-    update.energy_level = patch.energy_level;
+    update.energy_level =
+      patch.energy_level;
   }
 
   const { data, error } = await supabase
@@ -273,63 +379,109 @@ export async function updateMusicTrack(
     .single();
 
   if (error) throw error;
-  return normalizeTrack(data as MusicTrack);
+
+  return normalizeTrack(
+    data as MusicTrack
+  );
 }
 
-export async function saveMusicTrackOrder(tracks: MusicTrack[]) {
+export async function saveMusicTrackOrder(
+  tracks: MusicTrack[]
+) {
   await Promise.all(
     tracks.map((track, index) =>
-      updateMusicTrack(track.id, { sort_order: index })
+      updateMusicTrack(track.id, {
+        sort_order: index,
+      })
     )
   );
 }
 
 async function incrementTrackCounter(
   trackId: string,
-  field: "play_count" | "skip_count",
+  field:
+    | "play_count"
+    | "skip_count",
   alsoMarkPlayed: boolean
 ) {
   const userId = await requireUserId();
-  const { data, error: readError } = await supabase
-    .from(MUSIC_TABLE)
-    .select(`${field}`)
-    .eq("id", trackId)
-    .eq("user_id", userId)
-    .maybeSingle();
+
+  const { data, error: readError } =
+    await supabase
+      .from(MUSIC_TABLE)
+      .select(`${field}`)
+      .eq("id", trackId)
+      .eq("user_id", userId)
+      .maybeSingle();
 
   if (readError) throw readError;
   if (!data) return;
 
   const counterRow = data as Partial<
-    Record<"play_count" | "skip_count", number | null>
+    Record<
+      "play_count" | "skip_count",
+      number | null
+    >
   >;
-  const nextValue = Math.max(0, Number(counterRow[field] ?? 0)) + 1;
-  const patch: Record<string, string | number> = {
+
+  const nextValue =
+    Math.max(
+      0,
+      Number(counterRow[field] ?? 0)
+    ) + 1;
+
+  const patch: Record<
+    string,
+    string | number
+  > = {
     [field]: nextValue,
     updated_at: new Date().toISOString(),
   };
-  if (alsoMarkPlayed) patch.last_played_at = new Date().toISOString();
 
-  const { error: updateError } = await supabase
-    .from(MUSIC_TABLE)
-    .update(patch)
-    .eq("id", trackId)
-    .eq("user_id", userId);
+  if (alsoMarkPlayed) {
+    patch.last_played_at =
+      new Date().toISOString();
+  }
+
+  const { error: updateError } =
+    await supabase
+      .from(MUSIC_TABLE)
+      .update(patch)
+      .eq("id", trackId)
+      .eq("user_id", userId);
 
   if (updateError) throw updateError;
 }
 
-export async function recordMusicTrackPlayed(trackId: string) {
-  await incrementTrackCounter(trackId, "play_count", true);
+export async function recordMusicTrackPlayed(
+  trackId: string
+) {
+  await incrementTrackCounter(
+    trackId,
+    "play_count",
+    true
+  );
 }
 
-export async function recordMusicTrackSkipped(trackId: string) {
-  await incrementTrackCounter(trackId, "skip_count", false);
+export async function recordMusicTrackSkipped(
+  trackId: string
+) {
+  await incrementTrackCounter(
+    trackId,
+    "skip_count",
+    false
+  );
 }
 
-export async function removeMusicTrack(trackId: string) {
+export async function removeMusicTrack(
+  trackId: string
+) {
   const userId = await requireUserId();
-  const { data: track, error: readError } = await supabase
+
+  const {
+    data: track,
+    error: readError,
+  } = await supabase
     .from(MUSIC_TABLE)
     .select("storage_path")
     .eq("id", trackId)
@@ -338,22 +490,31 @@ export async function removeMusicTrack(trackId: string) {
 
   if (readError) throw readError;
 
-  const { error: deleteError } = await supabase
-    .from(MUSIC_TABLE)
-    .delete()
-    .eq("id", trackId)
-    .eq("user_id", userId);
+  const { error: deleteError } =
+    await supabase
+      .from(MUSIC_TABLE)
+      .delete()
+      .eq("id", trackId)
+      .eq("user_id", userId);
 
   if (deleteError) throw deleteError;
 
-  const storagePath = track?.storage_path as string | undefined;
+  const storagePath =
+    track?.storage_path as
+      | string
+      | undefined;
+
   if (storagePath) {
-    const { error: storageError } = await supabase.storage
-      .from(MUSIC_BUCKET)
-      .remove([storagePath]);
+    const { error: storageError } =
+      await supabase.storage
+        .from(MUSIC_BUCKET)
+        .remove([storagePath]);
 
     if (storageError) {
-      console.warn("Music file cleanup failed:", storageError.message);
+      console.warn(
+        "Music file cleanup failed:",
+        storageError.message
+      );
     }
   }
 
@@ -363,19 +524,34 @@ export async function removeMusicTrack(trackId: string) {
 export async function getMusicTrackSignedUrl(
   track: MusicTrack
 ): Promise<string> {
-  const cached = signedUrlCache.get(track.id);
-  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const cached =
+    signedUrlCache.get(track.id);
 
-  const expiresInSeconds = 24 * 60 * 60;
-  const { data, error } = await supabase.storage
-    .from(MUSIC_BUCKET)
-    .createSignedUrl(track.storage_path, expiresInSeconds);
+  if (
+    cached &&
+    cached.expiresAt > Date.now()
+  ) {
+    return cached.url;
+  }
+
+  const expiresInSeconds =
+    24 * 60 * 60;
+
+  const { data, error } =
+    await supabase.storage
+      .from(MUSIC_BUCKET)
+      .createSignedUrl(
+        track.storage_path,
+        expiresInSeconds
+      );
 
   if (error) throw error;
 
   signedUrlCache.set(track.id, {
     url: data.signedUrl,
-    expiresAt: Date.now() + 20 * 60 * 60 * 1000,
+    expiresAt:
+      Date.now() +
+      20 * 60 * 60 * 1000,
   });
 
   return data.signedUrl;
