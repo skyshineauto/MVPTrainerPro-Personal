@@ -417,7 +417,7 @@ const HUD_FORCE_CSS = `
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(170px,.72fr) minmax(340px,1.55fr) minmax(190px,.72fr);
+  grid-template-columns: minmax(132px,.60fr) minmax(390px,1.80fr) minmax(170px,.70fr);
   align-items: center;
   gap: 20px;
   min-height: 168px;
@@ -496,14 +496,18 @@ const HUD_FORCE_CSS = `
   text-align: center;
 }
 .tr-inactiveCommandDate{
+  display: block;
   width: 100%;
+  max-width: 100%;
   color: rgba(250,253,250,.96);
-  font-size: clamp(20px,2.1vw,30px);
+  font-size: clamp(17px,2vw,24px);
   line-height: 1.08;
   font-weight: 1000;
-  letter-spacing: .018em;
-  white-space: nowrap;
-  text-wrap: nowrap;
+  letter-spacing: 0;
+  white-space: nowrap !important;
+  text-wrap: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
   text-align: center;
   text-shadow: 0 2px 0 rgba(0,0,0,.72), 0 0 20px rgba(0,170,255,.08);
 }
@@ -592,10 +596,12 @@ const HUD_FORCE_CSS = `
     border-radius: 18px;
   }
   .tr-inactiveCommandDate{
-    font-size: clamp(16px,4.9vw,21px);
-    letter-spacing: .01em;
-    white-space: nowrap;
-    text-wrap: nowrap;
+    font-size: clamp(15px,4.55vw,19px);
+    letter-spacing: 0;
+    white-space: nowrap !important;
+    text-wrap: nowrap !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
   }
   .tr-inactiveCommandTime{
     font-size: clamp(23px,7vw,31px);
@@ -1329,7 +1335,16 @@ export function AppShell({
                   </div>
 
                   <div className="tr-inactiveCommandClock">
-                    <div className="tr-inactiveCommandDate">{clockParts?.date}</div>
+                    <div
+                      className="tr-inactiveCommandDate"
+                      style={{
+                        whiteSpace: "nowrap",
+                        wordBreak: "normal",
+                        overflowWrap: "normal",
+                      }}
+                    >
+                      {clockParts?.date}
+                    </div>
                     <div className="tr-inactiveCommandTime">{clockParts?.time}</div>
                   </div>
 
