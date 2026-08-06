@@ -1,5 +1,3 @@
-import BottomHudAdvanced from "./BottomHudAdvanced";
-import { ExerciseNavigator } from "./ExerciseNavigator";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
@@ -1704,7 +1702,7 @@ function SessionCompleteOverlay({
   );
 }
 
-export function WorkoutPlayerPage({ params, navigate }: any) {
+export function WorkoutPlayerPage({ params }: any) {
   const sessionId = params?.sessionId as string;
 
   const [payload, setPayload] = useState<any>(null);
@@ -1758,25 +1756,10 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
 
   const doneCount = useMemo(() => items.filter((x) => !!x.completed_at).length, [items]);
   const current = items[activeIdx];
-  const nextUp = items[activeIdx + 1];
 
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
-
-  const navigatorItems = useMemo(
-    () =>
-      items.map((row, index) => ({
-        id: row.id,
-        name:
-          row.exercise?.name ??
-          row.exercise?.title ??
-          `Exercise ${index + 1}`,
-        completed: Boolean(row.completed_at),
-        pain: Math.max(0, Number(row.pain ?? 0)),
-      })),
-    [items]
-  );
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen) return;
@@ -2538,6 +2521,28 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
     };
   }, [current, rpcMediaMap, userUploadMap]);
 
+  const currentPrescription = current?.prescription_snapshot ?? {};
+  const currentTimed = isTimed(currentPrescription);
+  const currentExerciseName =
+    current?.exercise?.name ?? current?.exercise?.title ?? "Not set";
+  const currentTarget = targetLabelFromPrescription(currentPrescription, currentTimed);
+  const currentFocus = currentRunnerItem
+    ? resolveFocusLabel(currentRunnerItem, currentTimed)
+    : "Full Body";
+  const currentRest = restOrDurationLabel(currentPrescription, currentTimed);
+  const nextIncompleteIndex = items.findIndex(
+    (row, index) => index > activeIdx && !row.completed_at
+  );
+  const nextIncomplete =
+    nextIncompleteIndex >= 0 ? items[nextIncompleteIndex] : null;
+  const nextIncompleteName =
+    nextIncomplete?.exercise?.name ??
+    nextIncomplete?.exercise?.title ??
+    (sessionComplete ? "Workout complete" : "End of workout");
+  const progressPercent = items.length
+    ? Math.round((doneCount / items.length) * 100)
+    : 0;
+
   const prev = () => setActiveIdx((i) => Math.max(i - 1, 0));
   const next = () => setActiveIdx((i) => Math.min(i + 1, Math.max(0, items.length - 1)));
 
@@ -2650,109 +2655,150 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
       </Card>
 
       <div className="tr-workoutSessionCard">
-      <Card
-        title={sessionLabel}
-        tone="blue"
-        right={
-          <div className="tr-sessionActionBar">
+        <Card
+          title={sessionLabel}
+          tone="blue"
+          right={
             <button
               type="button"
-              className="tr-seg tr-seg--musicOrange"
-              onClick={() => {
-                if (navigate) navigate("/music");
-                else window.location.pathname = "/music";
-              }}
-              style={{ height: 44 }}
+              className="tr-seg is-active tr-sessionEditButton"
+              onClick={() => setEditing(true)}
             >
-              Music
-            </button>
-            <button
-              type="button"
-              className="tr-seg"
-              onClick={() => {
-                if (navigate) navigate("/sound-alerts");
-                else window.location.pathname = "/sound-alerts";
-              }}
-              style={{ height: 44 }}
-            >
-              Alert Sounds
-            </button>
-            <button className="tr-seg is-active" onClick={() => setEditing(true)} style={{ height: 44 }}>
               Edit
             </button>
-          </div>
-        }
-      >
-        <div className="tr-sessionStepRow">
-          <div />
-          <div className="tr-sessionStepControls">
+          }
+        >
+          <div className="tr-sessionNavConsole">
             <button
+              type="button"
+              className="tr-sessionNavButton is-prev"
               onClick={prev}
-              className={`tr-seg ${atLast ? "tr-btn--prevOrange" : ""}`}
               disabled={atFirst}
-              style={{ height: 40 }}
+              aria-label="Previous exercise"
             >
-              Prev
+              <span aria-hidden="true">←</span>
+              <strong>Prev</strong>
             </button>
 
-            <div className="tr-doneCountPill" style={{ height: 40 }}>
-              DONE {doneCount}/{items.length}
+            <div className="tr-sessionCurrentPanel">
+              <div className="tr-sessionCurrentTopline">
+                <span>EXERCISE {items.length ? activeIdx + 1 : 0} OF {items.length}</span>
+                <span
+                  className={`tr-sessionCurrentState ${
+                    current?.completed_at ? "is-complete" : "is-current"
+                  }`}
+                >
+                  {current?.completed_at ? "COMPLETED" : "CURRENT"}
+                </span>
+              </div>
+
+              <strong className="tr-sessionCurrentName">{currentExerciseName}</strong>
+
+              <div className="tr-sessionCurrentMeta" aria-label="Exercise prescription">
+                <span>{currentTarget}</span>
+                <span>{currentFocus}</span>
+                <span>{currentRest}</span>
+              </div>
+
+              <div className="tr-sessionNextLine">
+                <span>NEXT</span>
+                <strong>{nextIncompleteName}</strong>
+              </div>
             </div>
 
             <button
+              type="button"
+              className="tr-sessionNavButton is-next"
               onClick={next}
-              className={`tr-seg ${!atLast ? "tr-btn--nextOrange" : ""}`}
               disabled={atLast}
-              style={{ height: 40 }}
+              aria-label="Next exercise"
             >
-              Next
+              <strong>Next</strong>
+              <span aria-hidden="true">→</span>
             </button>
           </div>
-          <div />
-        </div>
 
-        <div className="tr-sessionOverviewGrid">
-          <div className="tr-sessionOverviewCell">
-            <div className="tr-kicker">WORKOUT</div>
-            <strong>Exercise {items.length ? activeIdx + 1 : 0}/{items.length}</strong>
-          </div>
+          <section className="tr-exerciseProgressPanel" aria-label="Exercise progress">
+            <div className="tr-exerciseProgressHeader">
+              <div>
+                <div className="tr-kicker">EXERCISE PROGRESS</div>
+                <strong>Exercise {items.length ? activeIdx + 1 : 0} of {items.length}</strong>
+              </div>
 
-          <div className="tr-sessionOverviewCell is-current">
-            <div className="tr-kicker">{current?.completed_at ? "REVIEWING" : "CURRENT"}</div>
-            <strong>{current?.exercise?.name ?? "Not set"}</strong>
-          </div>
+              <div className="tr-exerciseProgressCount">
+                <strong>{doneCount}</strong>
+                <span>/ {items.length} COMPLETE</span>
+              </div>
+            </div>
 
-          <div className="tr-sessionOverviewCell is-next">
-            <div className="tr-kicker">NEXT UP</div>
-            <strong>{nextUp?.exercise?.name ?? (items.length ? "End" : "Not set")}</strong>
-          </div>
-        </div>
+            <div
+              className="tr-exerciseProgressTrack"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={items.length || 1}
+              aria-valuenow={doneCount}
+              aria-label={`${doneCount} of ${items.length} exercises complete`}
+            >
+              <span style={{ width: `${progressPercent}%` }} />
+            </div>
 
-        <ExerciseNavigator
-          items={navigatorItems}
-          activeIndex={activeIdx}
-          onSelect={setActiveIdx}
-        />
-      </Card>
+            <div className="tr-exerciseProgressGrid">
+              {items.map((row, index) => {
+                const isSelected = index === activeIdx;
+                const status = row.completed_at
+                  ? "complete"
+                  : isSelected
+                    ? "current"
+                    : index === nextIncompleteIndex
+                      ? "next"
+                      : "remaining";
+                const statusLabel =
+                  status === "complete"
+                    ? "COMPLETED"
+                    : status === "current"
+                      ? "CURRENT"
+                      : status === "next"
+                        ? "UP NEXT"
+                        : "REMAINING";
+                const exerciseName =
+                  row.exercise?.name ??
+                  row.exercise?.title ??
+                  `Exercise ${index + 1}`;
+
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className={`tr-exerciseProgressCard is-${status} ${
+                      isSelected ? "is-selected" : ""
+                    }`}
+                    onClick={() => setActiveIdx(index)}
+                    aria-current={isSelected ? "step" : undefined}
+                  >
+                    <span className="tr-exerciseProgressNumber">
+                      {row.completed_at ? "✓" : String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="tr-exerciseProgressText">
+                      <strong>{exerciseName}</strong>
+                      <small>{statusLabel}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </Card>
       </div>
 
       {current && currentRunnerItem ? (
         <ExerciseRunner
           workoutExercise={current}
           item={currentRunnerItem}
-          items={items}
-          activeIdx={activeIdx}
           onChanged={reloadWorkoutExercisesKeepIndex}
           onExerciseCompleted={handleExerciseCompleted}
           showToast={showToast}
           exerciseIndex={activeIdx + 1}
           totalExercises={items.length}
-          doneCount={doneCount}
-          nextExerciseName={nextUp?.exercise?.name ?? "End"}
-          onPrev={prev}
-          onNext={next}
-          atFirst={atFirst}
-          atLast={atLast}
           sessionComplete={sessionComplete}
           onStartRest={restTimer.start}
         />
@@ -2808,6 +2854,493 @@ export function WorkoutPlayerPage({ params, navigate }: any) {
       />
 
       <style>{`
+        .tr-workoutSessionCard .tr-card-body{
+          display:grid;
+          gap:18px;
+        }
+
+        .tr-sessionEditButton{
+          min-width:92px;
+          height:44px;
+          padding:0 20px;
+        }
+
+        .tr-sessionNavConsole{
+          display:grid;
+          grid-template-columns:124px minmax(0,1fr) 124px;
+          align-items:stretch;
+          gap:14px;
+        }
+
+        .tr-sessionNavButton{
+          min-width:0;
+          min-height:148px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:10px;
+          border:1px solid rgba(255,255,255,.12);
+          border-radius:18px;
+          color:rgba(245,249,252,.94);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,.055), rgba(0,0,0,.18)),
+            rgba(8,13,19,.98);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.055),
+            0 18px 42px rgba(0,0,0,.28);
+          font-size:13px;
+          letter-spacing:.14em;
+          text-transform:uppercase;
+          cursor:pointer;
+          transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+        }
+
+        .tr-sessionNavButton span{
+          color:#8bdfff;
+          font-size:22px;
+          line-height:1;
+        }
+
+        .tr-sessionNavButton.is-next{
+          border-color:rgba(255,154,31,.34);
+        }
+
+        .tr-sessionNavButton.is-next span{
+          color:#ffc164;
+        }
+
+        .tr-sessionNavButton:hover:not(:disabled),
+        .tr-sessionNavButton:focus-visible:not(:disabled){
+          transform:translateY(-1px);
+          border-color:rgba(58,203,255,.54);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            0 22px 50px rgba(0,0,0,.34),
+            0 0 24px rgba(0,174,255,.09);
+        }
+
+        .tr-sessionNavButton:disabled{
+          opacity:.32;
+          cursor:not-allowed;
+          transform:none;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.035);
+        }
+
+        .tr-sessionCurrentPanel{
+          min-width:0;
+          display:grid;
+          align-content:center;
+          justify-items:center;
+          gap:11px;
+          padding:20px 24px;
+          border:1px solid rgba(24,190,255,.38);
+          border-radius:20px;
+          background:
+            radial-gradient(560px 170px at 50% -24%, rgba(0,178,255,.18), transparent 66%),
+            linear-gradient(180deg, rgba(14,24,34,.99), rgba(4,9,14,.995));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            0 24px 58px rgba(0,0,0,.34),
+            0 0 28px rgba(0,174,255,.075);
+          text-align:center;
+        }
+
+        .tr-sessionCurrentTopline{
+          width:100%;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:10px;
+          color:rgba(154,210,235,.76);
+          font-size:9px;
+          font-weight:1000;
+          letter-spacing:.18em;
+          text-transform:uppercase;
+        }
+
+        .tr-sessionCurrentState{
+          padding:5px 8px;
+          border:1px solid rgba(34,196,255,.34);
+          border-radius:999px;
+          color:#83ddff;
+          background:rgba(0,174,255,.09);
+          letter-spacing:.12em;
+        }
+
+        .tr-sessionCurrentState.is-complete{
+          border-color:rgba(61,218,116,.38);
+          color:#7bea9c;
+          background:rgba(40,202,99,.09);
+        }
+
+        .tr-sessionCurrentName{
+          min-width:0;
+          max-width:100%;
+          color:#fff;
+          font-size:clamp(24px,3.2vw,39px);
+          line-height:1.03;
+          font-weight:1000;
+          letter-spacing:-.025em;
+          overflow-wrap:anywhere;
+          text-shadow:0 2px 0 rgba(0,0,0,.7), 0 0 24px rgba(0,174,255,.08);
+        }
+
+        .tr-sessionCurrentMeta{
+          display:flex;
+          justify-content:center;
+          gap:8px;
+          flex-wrap:wrap;
+        }
+
+        .tr-sessionCurrentMeta span{
+          padding:6px 10px;
+          border:1px solid rgba(255,255,255,.105);
+          border-radius:999px;
+          color:rgba(225,236,244,.82);
+          background:rgba(255,255,255,.035);
+          font-size:10px;
+          font-weight:900;
+          letter-spacing:.04em;
+        }
+
+        .tr-sessionNextLine{
+          max-width:100%;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:9px;
+          color:rgba(255,193,100,.94);
+          font-size:11px;
+        }
+
+        .tr-sessionNextLine span{
+          color:rgba(255,184,71,.66);
+          font-size:8px;
+          font-weight:1000;
+          letter-spacing:.16em;
+        }
+
+        .tr-sessionNextLine strong{
+          min-width:0;
+          overflow-wrap:anywhere;
+        }
+
+        .tr-exerciseProgressPanel{
+          display:grid;
+          gap:14px;
+          padding:17px;
+          border:1px solid rgba(255,255,255,.085);
+          border-radius:19px;
+          background:
+            radial-gradient(620px 190px at 5% -20%, rgba(0,174,255,.09), transparent 63%),
+            linear-gradient(180deg, rgba(255,255,255,.028), rgba(0,0,0,.16));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
+        }
+
+        .tr-exerciseProgressHeader{
+          display:flex;
+          align-items:end;
+          justify-content:space-between;
+          gap:18px;
+        }
+
+        .tr-exerciseProgressHeader > div:first-child{
+          display:grid;
+          gap:6px;
+        }
+
+        .tr-exerciseProgressHeader > div:first-child strong{
+          color:rgba(246,250,253,.96);
+          font-size:15px;
+          font-weight:950;
+        }
+
+        .tr-exerciseProgressCount{
+          display:flex;
+          align-items:baseline;
+          gap:5px;
+          font-variant-numeric:tabular-nums;
+          white-space:nowrap;
+        }
+
+        .tr-exerciseProgressCount strong{
+          color:#ffd078;
+          font-size:25px;
+          line-height:1;
+          font-weight:1000;
+        }
+
+        .tr-exerciseProgressCount span{
+          color:rgba(203,220,231,.58);
+          font-size:10px;
+          font-weight:900;
+          letter-spacing:.08em;
+        }
+
+        .tr-exerciseProgressTrack{
+          height:9px;
+          overflow:hidden;
+          border:1px solid rgba(255,255,255,.085);
+          border-radius:999px;
+          background:rgba(255,255,255,.05);
+          box-shadow:inset 0 2px 4px rgba(0,0,0,.72);
+        }
+
+        .tr-exerciseProgressTrack span{
+          display:block;
+          height:100%;
+          border-radius:inherit;
+          background:linear-gradient(90deg, #13a64d, #6bf094);
+          box-shadow:0 0 16px rgba(54,221,111,.23);
+          transition:width .25s ease;
+        }
+
+        .tr-exerciseProgressGrid{
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          gap:11px;
+        }
+
+        .tr-exerciseProgressCard{
+          min-width:0;
+          min-height:82px;
+          display:grid;
+          grid-template-columns:43px minmax(0,1fr);
+          align-items:center;
+          gap:11px;
+          padding:12px;
+          border:1px solid rgba(255,255,255,.09);
+          border-radius:16px;
+          color:#fff;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,.045), rgba(0,0,0,.18)),
+            rgba(7,11,16,.98);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+          text-align:left;
+          cursor:pointer;
+          transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+        }
+
+        .tr-exerciseProgressCard:hover,
+        .tr-exerciseProgressCard:focus-visible{
+          transform:translateY(-1px);
+          border-color:rgba(54,194,255,.38);
+        }
+
+        .tr-exerciseProgressCard.is-current,
+        .tr-exerciseProgressCard.is-selected.is-current{
+          border-color:rgba(29,198,255,.76);
+          background:
+            radial-gradient(300px 100px at 0 0, rgba(0,174,255,.16), transparent 68%),
+            linear-gradient(180deg, rgba(8,31,45,.98), rgba(3,12,18,.995));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            0 0 22px rgba(0,180,255,.12);
+        }
+
+        .tr-exerciseProgressCard.is-next{
+          border-color:rgba(255,165,35,.42);
+          background:
+            radial-gradient(280px 100px at 0 0, rgba(255,145,0,.11), transparent 68%),
+            linear-gradient(180deg, rgba(30,22,10,.96), rgba(10,8,5,.995));
+        }
+
+        .tr-exerciseProgressCard.is-complete{
+          border-color:rgba(58,218,112,.42);
+          background:
+            radial-gradient(280px 100px at 0 0, rgba(43,207,102,.105), transparent 68%),
+            linear-gradient(180deg, rgba(10,28,17,.94), rgba(4,10,7,.995));
+        }
+
+        .tr-exerciseProgressCard.is-selected:not(.is-current){
+          box-shadow:0 0 0 2px rgba(116,218,255,.22), inset 0 1px 0 rgba(255,255,255,.06);
+        }
+
+        .tr-exerciseProgressNumber{
+          width:41px;
+          height:41px;
+          display:grid;
+          place-items:center;
+          border:1px solid rgba(255,255,255,.12);
+          border-radius:13px;
+          color:rgba(222,234,242,.8);
+          background:rgba(0,0,0,.24);
+          font-size:13px;
+          font-weight:1000;
+          font-variant-numeric:tabular-nums;
+        }
+
+        .tr-exerciseProgressCard.is-current .tr-exerciseProgressNumber{
+          border-color:rgba(38,199,255,.62);
+          color:#bdeeff;
+          background:rgba(0,174,255,.12);
+        }
+
+        .tr-exerciseProgressCard.is-next .tr-exerciseProgressNumber{
+          border-color:rgba(255,165,35,.48);
+          color:#ffd08a;
+          background:rgba(255,145,0,.085);
+        }
+
+        .tr-exerciseProgressCard.is-complete .tr-exerciseProgressNumber{
+          border-color:rgba(58,218,112,.5);
+          color:#82efa3;
+          background:rgba(39,202,96,.09);
+          font-size:18px;
+        }
+
+        .tr-exerciseProgressText{
+          min-width:0;
+          display:grid;
+          gap:7px;
+        }
+
+        .tr-exerciseProgressText strong{
+          min-width:0;
+          color:rgba(248,251,253,.96);
+          font-size:13px;
+          line-height:1.22;
+          font-weight:950;
+          overflow-wrap:anywhere;
+          display:-webkit-box;
+          -webkit-box-orient:vertical;
+          -webkit-line-clamp:2;
+          overflow:hidden;
+        }
+
+        .tr-exerciseProgressText small{
+          width:max-content;
+          max-width:100%;
+          color:rgba(179,200,214,.52);
+          font-size:8px;
+          font-weight:1000;
+          letter-spacing:.14em;
+        }
+
+        .tr-exerciseProgressCard.is-current small{ color:#76d9ff; }
+        .tr-exerciseProgressCard.is-next small{ color:#ffc66e; }
+        .tr-exerciseProgressCard.is-complete small{ color:#71e493; }
+
+        .tr-exerciseCompletionPanel{
+          position:static !important;
+          inset:auto !important;
+          z-index:auto !important;
+          width:100%;
+          margin-top:18px;
+          display:grid;
+          grid-template-columns:minmax(0,1fr) minmax(260px,360px);
+          align-items:center;
+          gap:18px;
+          padding:17px;
+          border:1px solid rgba(255,255,255,.105);
+          border-radius:19px;
+          background:
+            radial-gradient(520px 170px at 0 -30%, rgba(0,174,255,.10), transparent 66%),
+            linear-gradient(180deg, rgb(17,24,31), rgb(6,10,14));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.055),
+            0 22px 52px rgba(0,0,0,.34);
+          backdrop-filter:none !important;
+          -webkit-backdrop-filter:none !important;
+          opacity:1 !important;
+        }
+
+        .tr-exerciseCompletionPanel.is-ready{
+          border-color:rgba(36,194,255,.4);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.065),
+            0 24px 58px rgba(0,0,0,.36),
+            0 0 26px rgba(0,174,255,.08);
+        }
+
+        .tr-exerciseCompletionPanel.is-complete,
+        .tr-exerciseCompletionPanel.is-sessionComplete{
+          border-color:rgba(64,220,120,.39);
+          background:
+            radial-gradient(520px 170px at 0 -30%, rgba(44,208,103,.105), transparent 66%),
+            linear-gradient(180deg, rgb(14,27,20), rgb(5,11,8));
+        }
+
+        .tr-exerciseCompletionState{
+          min-width:0;
+          display:grid;
+          gap:7px;
+        }
+
+        .tr-exerciseCompletionState strong{
+          color:rgba(248,251,253,.96);
+          font-size:clamp(17px,2vw,23px);
+          line-height:1.14;
+          font-weight:1000;
+        }
+
+        .tr-exerciseCompletionButton{
+          width:100%;
+          min-height:52px;
+        }
+
+        .tr-exerciseCompletionButton.is-unlock{
+          border-color:rgba(255,255,255,.18);
+          background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.14));
+        }
+
+        @media (max-width:980px){
+          .tr-sessionNavConsole{
+            grid-template-columns:104px minmax(0,1fr) 104px;
+            gap:10px;
+          }
+          .tr-sessionNavButton{ min-height:138px; }
+          .tr-exerciseProgressGrid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .tr-exerciseCompletionPanel{ grid-template-columns:1fr minmax(230px,310px); }
+        }
+
+        @media (max-width:720px){
+          .tr-sessionEditButton{
+            min-width:78px;
+            height:42px;
+            padding:0 15px;
+          }
+          .tr-sessionNavConsole{
+            grid-template-columns:1fr 1fr;
+            grid-template-areas:
+              "current current"
+              "prev next";
+          }
+          .tr-sessionCurrentPanel{
+            grid-area:current;
+            padding:18px 14px;
+          }
+          .tr-sessionNavButton{
+            min-height:50px;
+            border-radius:15px;
+          }
+          .tr-sessionNavButton.is-prev{ grid-area:prev; }
+          .tr-sessionNavButton.is-next{ grid-area:next; }
+          .tr-sessionCurrentName{ font-size:clamp(22px,7vw,31px); }
+          .tr-sessionCurrentTopline{ flex-wrap:wrap; }
+          .tr-sessionCurrentMeta span{ font-size:9px; }
+          .tr-exerciseProgressPanel{ padding:13px; }
+          .tr-exerciseProgressHeader{ align-items:center; }
+          .tr-exerciseProgressCount strong{ font-size:22px; }
+          .tr-exerciseProgressGrid{ grid-template-columns:1fr; }
+          .tr-exerciseProgressCard{ min-height:76px; }
+          .tr-exerciseCompletionPanel{
+            grid-template-columns:1fr;
+            gap:13px;
+            padding:14px;
+          }
+        }
+
+        @media (max-width:430px){
+          .tr-exerciseProgressHeader{
+            align-items:flex-start;
+            flex-direction:column;
+            gap:9px;
+          }
+          .tr-exerciseProgressCount{ align-self:flex-end; }
+          .tr-sessionNextLine{ align-items:flex-start; }
+        }
+
         .tr-btn--nextOrange{
           border-color: rgba(255,140,0,.70) !important;
           background: linear-gradient(180deg, rgba(255,140,0,.30), rgba(255,80,80,.16)) !important;
@@ -3366,37 +3899,21 @@ function EditSessionPanel(props: {
 function ExerciseRunner({
   workoutExercise,
   item,
-  items,
-  activeIdx,
   onChanged,
   onExerciseCompleted,
   showToast,
   exerciseIndex,
   totalExercises,
-  doneCount,
-  nextExerciseName,
-  onPrev,
-  onNext,
-  atFirst,
-  atLast,
   sessionComplete,
   onStartRest,
 }: {
   workoutExercise: WorkoutExerciseRow;
   item: any;
-  items: WorkoutExerciseRow[];
-  activeIdx: number;
   onChanged: () => Promise<WorkoutExerciseRow[]>;
   onExerciseCompleted: (workoutExerciseId: string) => Promise<void>;
   showToast: (msg: string, tone?: ToastTone) => void;
   exerciseIndex: number;
   totalExercises: number;
-  doneCount: number;
-  nextExerciseName: string;
-  onPrev: () => void;
-  onNext: () => void;
-  atFirst: boolean;
-  atLast: boolean;
   sessionComplete: boolean;
   onStartRest: (seconds: number, exerciseName: string, setIndex: number) => void;
 }) {
@@ -3618,19 +4135,7 @@ function ExerciseRunner({
   }, [sets, historyStats]);
 
   const readyToLock = painTouched && (timed || allSetsLogged);
-
-  const focusLabel = resolveFocusLabel(item, timed);
-  const targetLabel = targetLabelFromPrescription(pres, timed);
-  const restDurationLabel = restOrDurationLabel(pres, timed);
-
-  const progressCellCount = Math.max(1, items.length || totalExercises || 1);
-  const progressCells = Array.from({ length: progressCellCount }, (_, idx) => {
-    const row = items[idx];
-    if (!row) return "upcoming";
-    if (row.completed_at) return "complete";
-    if (!sessionComplete && idx === activeIdx) return "current";
-    return "upcoming";
-  });
+  const finalExercise = exerciseIndex >= totalExercises;
 
   const upsertSet = async (idx: number, patch: any) => {
     if (isDone || timed) return;
@@ -3852,17 +4357,9 @@ const unlock = async () => {
   const warmupPlan = buildWarmupPlan(calculatorWeight);
   const plateLoad = calculatePlateLoad(calculatorWeight, barWeight);
 
-  const detailRows = [
-    { key: "sets", label: "Sets", value: timed ? "—" : String(setsTarget) },
-    { key: "reps", label: "Reps", value: timed ? `${durationMinutes(pres)} min` : `${repMin}-${repMax}` },
-    { key: "focus", label: "Focus", value: focusLabel },
-    { key: "next", label: "Next", value: nextExerciseName },
-    { key: "rest", label: "Rest", value: timed ? restDurationLabel : `${restSeconds} Sec` },
-  ];
-
   return (
     <Card
-      title={item.name}
+      title="Exercise Console"
       tone="base"
       clip="no-clip"
       right={
@@ -4277,74 +4774,59 @@ const unlock = async () => {
             </div>
           )}
 
-          <div className={`tr-finalActionModule ${sessionComplete ? "is-sessionComplete" : ""}`}>
-            <div className="tr-finalActionTop">
-              {sessionComplete ? (
-                <div className="tr-finalActionDoneText tr-finalActionDoneText--complete">
-                  Mission complete — reward ready.
-                </div>
-              ) : isDone ? (
-                <div className="tr-finalActionDoneText">Exercise locked as complete.</div>
-              ) : (
-                <div className="tr-sub">Complete sets or time, log pain, then move through the session below.</div>
-              )}
-            </div>
-
-            <div className="tr-finalActionBottom tr-finalActionBottom--triple">
-              <button
-                className={`tr-btn ${atLast ? "tr-btn--prevOrange" : ""}`}
-                style={{ height: 46 }}
-                disabled={atFirst}
-                onClick={onPrev}
-              >
-                Prev
-              </button>
-
-              {isDone ? (
-                <button
-                  className={`tr-btn tr-btn--primary tr-doneBtn ${sessionComplete ? "tr-doneBtn--celebrate" : ""}`}
-                  style={{ height: 46 }}
-                  onClick={unlock}
-                >
-                  {sessionComplete ? "UNLOCK / REVIEW" : "UNLOCK"}
-                </button>
-              ) : (
-                <button
-                  className="tr-btn tr-btn--primary tr-doneBtn"
-                  type="button"
-                  onClick={markDone}
-                  disabled={!readyToLock}
-                >
-                  DONE (LOCK)
-                </button>
-              )}
-
-              <button
-                className={`tr-btn ${!atLast ? "tr-btn--nextOrange" : ""}`}
-                style={{ height: 46 }}
-                disabled={atLast}
-                onClick={onNext}
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 28 }}>
-        <BottomHudAdvanced
-          sessionComplete={sessionComplete}
-          reviewingComplete={isDone}
-          doneCount={doneCount}
-          totalExercises={totalExercises}
-          progressCells={progressCells}
-          exerciseName={item?.name ?? `Exercise ${exerciseIndex}`}
-          targetLabel={targetLabel}
-          detailRows={detailRows}
-          iconSrc="/dumbbell.png"
-        />
-      </div>
+      <section
+        className={`tr-exerciseCompletionPanel ${
+          isDone ? "is-complete" : readyToLock ? "is-ready" : "is-locked"
+        } ${sessionComplete ? "is-sessionComplete" : ""}`}
+        aria-label="Exercise completion action"
+      >
+        <div className="tr-exerciseCompletionState">
+          <span className="tr-kicker">
+            {sessionComplete
+              ? "WORKOUT COMPLETE"
+              : isDone
+                ? "EXERCISE COMPLETE"
+                : readyToLock
+                  ? "READY TO ADVANCE"
+                  : "ACTION LOCKED"}
+          </span>
+          <strong>
+            {sessionComplete
+              ? "All exercises are complete"
+              : isDone
+                ? "Exercise saved and locked"
+                : readyToLock
+                  ? finalExercise
+                    ? "Ready to finish the final exercise"
+                    : "Ready to continue to the next exercise"
+                  : "Complete the required training logs"}
+          </strong>
+        </div>
+
+        {isDone ? (
+          <button
+            type="button"
+            className="tr-btn tr-exerciseCompletionButton is-unlock"
+            onClick={unlock}
+          >
+            Unlock to Edit
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="tr-btn tr-btn--primary tr-exerciseCompletionButton"
+            onClick={markDone}
+            disabled={!readyToLock}
+          >
+            {finalExercise
+              ? "Complete Final Exercise"
+              : "Complete Exercise & Continue"}
+          </button>
+        )}
+      </section>
 
       <style>{`
         .tr-exerciseTopMeta{
