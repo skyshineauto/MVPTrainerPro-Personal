@@ -1,12 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
-import {
-  formatSessionLabel,
-  inferSymptomKey,
-  isSymptomMode,
-  type SymptomKey,
-} from "../../lib/sessionLabel";
+import { inferSymptomKey, isSymptomMode, type SymptomKey } from "../../lib/sessionLabel";
 import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
 
 const LS = {
@@ -245,10 +240,6 @@ function difficultyToRating(d: "too_easy" | "just_right" | "too_hard") {
   return 3;
 }
 
-function displayOrNotSet(v: any, notSet = "Not set") {
-  const s = String(v ?? "").trim();
-  return s ? s : notSet;
-}
 
 type Hud =
   | { mode: "signed_out" }
@@ -1114,15 +1105,6 @@ export function AppShell({
     return <div style={{ minHeight: "100vh", background: "#0b0d10", color: "rgba(255,255,255,.92)" }}>{children}</div>;
   }
 
-  const activeLabel =
-    hud.mode === "active"
-      ? formatSessionLabel({
-          sessionType: hud.sessionType ?? hud.templateName,
-          goal: hud.goal,
-          goalMode: hud.goalMode,
-          symptomKey: hud.symptomKey,
-        })
-      : "";
 
   const clockParts = hud.mode !== "active" ? fmtClockParts(nowTick) : null;
 
@@ -1301,17 +1283,6 @@ export function AppShell({
                       END WORKOUT
                     </button>
                   </div>
-                </div>
-
-                <div className="tr-sessionCurrentHero">
-                  <div className="tr-sessionCurrentHeroHead">
-                    <span>CURRENT EXERCISE</span>
-                    <strong>{lsGet(LS.activeExercisePos) || "IN SESSION"}</strong>
-                  </div>
-                  <div className="tr-sessionCurrentHeroName">
-                    {displayOrNotSet(lsGet(LS.activeExerciseName), "Exercise not selected")}
-                  </div>
-                  <div className="tr-sessionCurrentHeroMode">{activeLabel || "Workout in progress"}</div>
                 </div>
 
               </>
