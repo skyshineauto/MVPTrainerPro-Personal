@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import {
   listMusicTracks,
   removeMusicTrack,
@@ -9,12 +17,10 @@ import {
   type MusicTrack,
 } from "../../lib/musicStorage";
 import {
-  addMusicPlaylistTracks,
   createMusicPlaylist,
   deleteMusicPlaylist,
   listMusicPlaylists,
   listMusicPlaylistTrackLinks,
-  removeMusicPlaylistTrack,
   renameMusicPlaylist,
   replaceMusicPlaylistTracks,
   type MusicPlaylist,
@@ -27,10 +33,25 @@ import {
   playMusicPlaylist,
   playMusicTrack,
   replaceMusicLibrary,
-  stopMusic,
   toggleMusicShuffle,
   useMusicPlayer,
 } from "../../lib/musicPlayer";
+
+type DraftMap = Record<string, { title: string; artist: string }>;
+type PlaylistTrackMap = Record<string, string[]>;
+type MusicTab = "songs" | "playlists" | "smart";
+type SmartIntensity = "high" | "balanced" | "recovery";
+type SongSort =
+  | "library"
+  | "title"
+  | "artist"
+  | "most_played"
+  | "recently_played"
+  | "recently_added";
+type EnergyFilter = "all" | MusicEnergyLevel;
+type PageSize = 12 | 24 | 48;
+
+const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 
 function formatFileSize(bytes: number | null) {
   if (!bytes) return "";
@@ -53,11 +74,16 @@ function formatLongDuration(seconds: number) {
   return `${hours} hr${minutes ? ` ${minutes} min` : ""}`;
 }
 
-type DraftMap = Record<string, { title: string; artist: string }>;
-type PlaylistTrackMap = Record<string, string[]>;
-type MusicTab = "songs" | "playlists" | "smart";
-type SmartIntensity = "high" | "balanced" | "recovery";
-const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
+function formatDate(value: string | null) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
 
 function trackDuration(track: MusicTrack) {
   return Math.max(120, Number(track.duration_seconds || 210));
@@ -125,11 +151,16 @@ function buildSmartMix(
   return selected;
 }
 
-export function MusicPage({
-  navigate,
-}: {
-  navigate?: (to: string) => void;
-}) {
+function songSortLabel(sort: SongSort) {
+  if (sort === "title") return "Title";
+  if (sort === "artist") return "Artist";
+  if (sort === "most_played") return "Most played";
+  if (sort === "recently_played") return "Recently played";
+  if (sort === "recently_added") return "Recently added";
+  return "Library order";
+}
+
+export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const orderSaveTimerRef = useRef<number | null>(null);
   const latestOrderRef = useRef<MusicTrack[]>([]);
@@ -153,6 +184,20 @@ export function MusicPage({
   const [buildingSmart, setBuildingSmart] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [songSort, setSongSort] = useState<SongSort>("library");
+  const [pageSize, setPageSize] = useState<PageSize>(12);
+  const [page, setPage] = useState(1);
+  const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
+  const [detailTrackId, setDetailTrackId] = useState<string | null>(null);
+  const [playlistModalTrackIds, setPlaylistModalTrackIds] = useState<string[]>([]);
+  const [playlistModalSelections, setPlaylistModalSelections] = useState<Set<string>>(
+    new Set()
+  );
+  const [playlistModalName, setPlaylistModalName] = useState("");
+  const [playlistModalBusy, setPlaylistModalBusy] = useState(false);
 
   const totalSize = useMemo(
     () => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0),
@@ -192,13 +237,42 @@ export function MusicPage({
 
   const filteredTracks = useMemo(() => {
     const query = songSearch.trim().toLowerCase();
-    if (!query) return tracks;
-    return tracks.filter((track) =>
-      `${track.title} ${track.artist || ""} ${track.original_name}`
-        .toLowerCase()
-        .includes(query)
-    );
-  }, [songSearch, tracks]);
+    const next = tracks.filter((track) => {
+      const matchesSearch =
+        !query ||
+        `${track.title} ${track.artist || ""} ${track.original_name}`
+          .toLowerCase()
+          .includes(query);
+      const matchesEnergy =
+        energyFilter === "all" || track.energy_level === energyFilter;
+      const matchesFavorite = !favoritesOnly || track.favorite;
+      return matchesSearch && matchesEnergy && matchesFavorite;
+    });
+
+    return [...next].sort((left, right) => {
+      if (songSort === "title") return left.title.localeCompare(right.title);
+      if (songSort === "artist") {
+        return (left.artist || "").localeCompare(right.artist || "");
+      }
+      if (songSort === "most_played") return right.play_count - left.play_count;
+      if (songSort === "recently_played") {
+        return (
+          new Date(right.last_played_at || 0).getTime() -
+          new Date(left.last_played_at || 0).getTime()
+        );
+      }
+      if (songSort === "recently_added") {
+        return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      }
+      return left.sort_order - right.sort_order;
+    });
+  }, [energyFilter, favoritesOnly, songSearch, songSort, tracks]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTracks.length / pageSize));
+  const pagedTracks = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredTracks.slice(start, start + pageSize);
+  }, [filteredTracks, page, pageSize]);
 
   const availableTracks = useMemo(() => {
     const selected = new Set(selectedTrackIds);
@@ -210,13 +284,19 @@ export function MusicPage({
     });
   }, [selectedTrackIds, playlistSearch, tracks]);
 
+  const detailTrack = useMemo(
+    () => tracks.find((track) => track.id === detailTrackId) ?? null,
+    [detailTrackId, tracks]
+  );
+
+  const selectedCount = selectedSongIds.size;
+  const allVisibleSelected =
+    pagedTracks.length > 0 && pagedTracks.every((track) => selectedSongIds.has(track.id));
+
   function buildDrafts(rows: MusicTrack[]) {
     const next: DraftMap = {};
     for (const track of rows) {
-      next[track.id] = {
-        title: track.title,
-        artist: track.artist || "",
-      };
+      next[track.id] = { title: track.title, artist: track.artist || "" };
     }
     setDrafts(next);
   }
@@ -285,6 +365,14 @@ export function MusicPage({
     setPlaylistNameDraft(selectedPlaylist?.name ?? "");
   }, [selectedPlaylist?.id, selectedPlaylist?.name]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [songSearch, energyFilter, favoritesOnly, songSort, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   async function uploadFiles(files: FileList | null) {
     if (!files?.length) return;
     setUploading(true);
@@ -301,7 +389,9 @@ export function MusicPage({
       setMessage(`${files.length} song${files.length === 1 ? "" : "s"} uploaded.`);
       await refreshTracks();
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : "Could not upload the selected songs.");
+      setError(
+        caught instanceof Error ? caught.message : "Could not upload the selected songs."
+      );
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -317,10 +407,7 @@ export function MusicPage({
     });
     setDrafts((current) => ({
       ...current,
-      [updated.id]: {
-        title: updated.title,
-        artist: updated.artist || "",
-      },
+      [updated.id]: { title: updated.title, artist: updated.artist || "" },
     }));
   }
 
@@ -338,6 +425,7 @@ export function MusicPage({
       });
       replaceTrackLocally(updated);
       setMessage("Song details saved.");
+      setDetailTrackId(null);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "Could not save the song.");
     } finally {
@@ -363,6 +451,24 @@ export function MusicPage({
     }
   }
 
+  async function applyBulkEnergy(energy: MusicEnergyLevel) {
+    const ids = Array.from(selectedSongIds);
+    if (!ids.length) return;
+    setBusyId("bulk-energy");
+    setError("");
+    try {
+      const updates = await Promise.all(
+        ids.map((id) => updateMusicTrack(id, { energy_level: energy }))
+      );
+      for (const updated of updates) replaceTrackLocally(updated);
+      setMessage(`${updates.length} songs marked ${energy}.`);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not update song energy.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function deleteTrack(track: MusicTrack) {
     if (!window.confirm(`Delete “${track.title}” from MVP Trainer?`)) return;
 
@@ -371,10 +477,30 @@ export function MusicPage({
     setMessage("");
     try {
       await removeMusicTrack(track.id);
+      setDetailTrackId(null);
       setMessage("Song removed.");
       await Promise.all([refreshTracks(), refreshPlaylists()]);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "Could not remove the song.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteSelectedTracks() {
+    const ids = Array.from(selectedSongIds);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} selected songs from MVP Trainer?`)) return;
+
+    setBusyId("bulk-delete");
+    setError("");
+    try {
+      for (const id of ids) await removeMusicTrack(id);
+      setSelectedSongIds(new Set());
+      setMessage(`${ids.length} songs removed.`);
+      await Promise.all([refreshTracks(), refreshPlaylists()]);
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not remove the songs.");
     } finally {
       setBusyId(null);
     }
@@ -426,10 +552,6 @@ export function MusicPage({
     }
   }
 
-  function stopTrackPreview(track: MusicTrack) {
-    if (player.currentTrack?.id === track.id) stopMusic();
-  }
-
   async function createPlaylist() {
     setError("");
     setMessage("");
@@ -461,7 +583,12 @@ export function MusicPage({
 
   async function removePlaylist() {
     if (!selectedPlaylist) return;
-    if (!window.confirm(`Delete playlist “${selectedPlaylist.name}”? Your songs will remain in My Music.`)) return;
+    if (
+      !window.confirm(
+        `Delete playlist “${selectedPlaylist.name}”? Your songs will remain in My Music.`
+      )
+    )
+      return;
 
     setBusyId(selectedPlaylist.id);
     setError("");
@@ -480,7 +607,8 @@ export function MusicPage({
     if (!selectedPlaylist) return;
     setBusyId(trackId);
     try {
-      await addMusicPlaylistTracks(selectedPlaylist.id, [trackId]);
+      const next = [...selectedTrackIds, trackId];
+      await replaceMusicPlaylistTracks(selectedPlaylist.id, next);
       await refreshPlaylists(selectedPlaylist.id);
       setMessage("Song added to playlist.");
     } catch (caught: unknown) {
@@ -494,7 +622,10 @@ export function MusicPage({
     if (!selectedPlaylist) return;
     setBusyId(trackId);
     try {
-      await removeMusicPlaylistTrack(selectedPlaylist.id, trackId);
+      await replaceMusicPlaylistTracks(
+        selectedPlaylist.id,
+        selectedTrackIds.filter((id) => id !== trackId)
+      );
       await refreshPlaylists(selectedPlaylist.id);
       setMessage("Song removed from playlist.");
     } catch (caught: unknown) {
@@ -552,14 +683,23 @@ export function MusicPage({
       let playlist = playlists.find((item) => item.name.startsWith("Smart Mix"));
 
       if (!playlist) playlist = await createMusicPlaylist(smartName);
-      else if (playlist.name !== smartName) playlist = await renameMusicPlaylist(playlist.id, smartName);
+      else if (playlist.name !== smartName) {
+        playlist = await renameMusicPlaylist(playlist.id, smartName);
+      }
 
-      await replaceMusicPlaylistTracks(playlist.id, mixTracks.map((track) => track.id));
+      await replaceMusicPlaylistTracks(
+        playlist.id,
+        mixTracks.map((track) => track.id)
+      );
       await refreshPlaylists(playlist.id);
       setSelectedPlaylistId(playlist.id);
       setTab("playlists");
       await playMusicPlaylist(playlist, mixTracks);
-      setMessage(`Smart Mix ready: ${mixTracks.length} songs, about ${formatLongDuration(mixTracks.reduce((sum, track) => sum + trackDuration(track), 0))}.`);
+      setMessage(
+        `Smart Mix ready: ${mixTracks.length} songs, about ${formatLongDuration(
+          mixTracks.reduce((sum, track) => sum + trackDuration(track), 0)
+        )}.`
+      );
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "Could not build the Smart Mix.");
     } finally {
@@ -567,133 +707,478 @@ export function MusicPage({
     }
   }
 
+  function toggleSongSelection(trackId: string) {
+    setSelectedSongIds((current) => {
+      const next = new Set(current);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  }
+
+  function toggleSelectVisible() {
+    setSelectedSongIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        for (const track of pagedTracks) next.delete(track.id);
+      } else {
+        for (const track of pagedTracks) next.add(track.id);
+      }
+      return next;
+    });
+  }
+
+  function openPlaylistModal(trackIds: string[]) {
+    const uniqueIds = Array.from(new Set(trackIds.filter(Boolean)));
+    if (!uniqueIds.length) return;
+    setDetailTrackId(null);
+    const selectedPlaylists = new Set<string>();
+    for (const playlist of playlists) {
+      const ids = new Set(playlistTrackIds[playlist.id] ?? []);
+      if (uniqueIds.every((id) => ids.has(id))) selectedPlaylists.add(playlist.id);
+    }
+    setPlaylistModalTrackIds(uniqueIds);
+    setPlaylistModalSelections(selectedPlaylists);
+    setPlaylistModalName("");
+  }
+
+  function closePlaylistModal() {
+    if (playlistModalBusy) return;
+    setPlaylistModalTrackIds([]);
+    setPlaylistModalSelections(new Set());
+    setPlaylistModalName("");
+  }
+
+  async function savePlaylistMemberships() {
+    if (!playlistModalTrackIds.length) return;
+    setPlaylistModalBusy(true);
+    setError("");
+    try {
+      let createdPlaylistId: string | null = null;
+      const cleanName = playlistModalName.trim();
+      if (cleanName) {
+        const created = await createMusicPlaylist(cleanName);
+        createdPlaylistId = created.id;
+        await replaceMusicPlaylistTracks(created.id, playlistModalTrackIds);
+      }
+
+      for (const playlist of playlists) {
+        const currentIds = playlistTrackIds[playlist.id] ?? [];
+        const targetSet = new Set(playlistModalTrackIds);
+        const shouldContain = playlistModalSelections.has(playlist.id);
+        const nextIds = shouldContain
+          ? Array.from(new Set([...currentIds, ...playlistModalTrackIds]))
+          : currentIds.filter((id) => !targetSet.has(id));
+        if (nextIds.join("|") !== currentIds.join("|")) {
+          await replaceMusicPlaylistTracks(playlist.id, nextIds);
+        }
+      }
+
+      await refreshPlaylists(createdPlaylistId ?? selectedPlaylistId);
+      setMessage(
+        `${playlistModalTrackIds.length} song${
+          playlistModalTrackIds.length === 1 ? "" : "s"
+        } playlist memberships updated.`
+      );
+      setSelectedSongIds(new Set());
+      setPlaylistModalTrackIds([]);
+      setPlaylistModalSelections(new Set());
+      setPlaylistModalName("");
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not update playlists.");
+    } finally {
+      setPlaylistModalBusy(false);
+    }
+  }
+
+  const modalTrackNames = playlistModalTrackIds
+    .map((id) => tracks.find((track) => track.id === id)?.title)
+    .filter(Boolean);
+
   return (
-    <div className="tr-musicHubPage">
+    <div className="tr-musicHubPage tr-musicHubPage--v4">
       <section className="tr-musicHubHero">
         <div>
           <span className="tr-musicHubEyebrow">PRIVATE WORKOUT AUDIO</span>
           <h1>Your music. Engineered for training.</h1>
-          <p>Upload your own songs, build playlists, and let Smart Mix assemble a fresh queue from your favorites, energy tags, skips, and recent plays.</p>
+          <p>
+            Upload your own songs, build playlists, and let Smart Mix assemble a fresh
+            queue from your favorites, energy tags, skips, and recent plays.
+          </p>
         </div>
-        <button type="button" className="tr-musicHubBack" onClick={() => (navigate ? navigate("/") : window.history.back())}>BACK</button>
+        <button
+          type="button"
+          className="tr-musicHubBack"
+          onClick={() => (navigate ? navigate("/") : window.history.back())}
+        >
+          BACK
+        </button>
       </section>
 
       <section className="tr-musicHubStats" aria-label="Music library summary">
-        <div><strong>{tracks.length}</strong><span>SONGS</span></div>
-        <div><strong>{playlists.length}</strong><span>PLAYLISTS</span></div>
-        <div><strong>{favoriteCount}</strong><span>FAVORITES</span></div>
-        <div><strong>{formatFileSize(totalSize) || "0 MB"}</strong><span>STORED</span></div>
-        <div><strong>{formatLongDuration(totalDuration)}</strong><span>PLAY TIME</span></div>
+        <div>
+          <strong>{tracks.length}</strong>
+          <span>SONGS</span>
+        </div>
+        <div>
+          <strong>{playlists.length}</strong>
+          <span>PLAYLISTS</span>
+        </div>
+        <div>
+          <strong>{favoriteCount}</strong>
+          <span>FAVORITES</span>
+        </div>
+        <div>
+          <strong>{formatFileSize(totalSize) || "0 MB"}</strong>
+          <span>STORED</span>
+        </div>
+        <div>
+          <strong>{formatLongDuration(totalDuration)}</strong>
+          <span>PLAY TIME</span>
+        </div>
       </section>
 
       <nav className="tr-musicHubTabs" aria-label="Music sections">
-        <button type="button" className={tab === "songs" ? "is-active" : ""} onClick={() => setTab("songs")}><span>01</span> SONG LIBRARY</button>
-        <button type="button" className={tab === "playlists" ? "is-active" : ""} onClick={() => setTab("playlists")}><span>02</span> PLAYLISTS</button>
-        <button type="button" className={tab === "smart" ? "is-active" : ""} onClick={() => setTab("smart")}><span>03</span> SMART MIX</button>
+        <button
+          type="button"
+          className={tab === "songs" ? "is-active" : ""}
+          onClick={() => setTab("songs")}
+        >
+          <span>01</span> SONG LIBRARY
+        </button>
+        <button
+          type="button"
+          className={tab === "playlists" ? "is-active" : ""}
+          onClick={() => setTab("playlists")}
+        >
+          <span>02</span> PLAYLISTS
+        </button>
+        <button
+          type="button"
+          className={tab === "smart" ? "is-active" : ""}
+          onClick={() => setTab("smart")}
+        >
+          <span>03</span> SMART MIX
+        </button>
       </nav>
 
       {message ? <div className="tr-musicHubNotice tr-musicHubNotice--ok">{message}</div> : null}
       {error ? <div className="tr-musicHubNotice tr-musicHubNotice--err">{error}</div> : null}
 
       {tab === "songs" ? (
-        <section className="tr-musicLibraryPanel">
-          <div className="tr-musicCommandBar">
+        <section className="tr-libraryConsole">
+          <header className="tr-libraryHeader">
             <div>
               <span className="tr-musicHubEyebrow">SONG LIBRARY</span>
-              <h2>Manage your private catalog</h2>
+              <h2>Performance-ready catalog</h2>
+              <p>{filteredTracks.length} matching songs across your private library.</p>
             </div>
-            <label className="tr-musicUploadButton">
+            <div className="tr-libraryUploadBlock">
               <input
                 ref={inputRef}
                 type="file"
-                accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav"
+                accept=".mp3,.m4a,.wav,audio/*"
                 multiple
-                onChange={(event: ChangeEvent<HTMLInputElement>) => void uploadFiles(event.target.files)}
+                hidden
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  void uploadFiles(event.target.files)
+                }
               />
-              {uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}
-            </label>
-            <label className="tr-musicSearch">
+              <button
+                type="button"
+                className="tr-libraryUpload"
+                disabled={uploading}
+                onClick={() => inputRef.current?.click()}
+              >
+                {uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}
+              </button>
+            </div>
+          </header>
+
+          <div className="tr-libraryToolbar">
+            <label className="tr-librarySearch">
               <span>SEARCH</span>
-              <input value={songSearch} onChange={(event: ChangeEvent<HTMLInputElement>) => setSongSearch(event.target.value)} placeholder="Song, artist, or file…" />
+              <input
+                value={songSearch}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setSongSearch(event.target.value)
+                }
+                placeholder="Song, artist, or file…"
+              />
             </label>
+
+            <label className="tr-libraryFilter">
+              <span>ENERGY</span>
+              <select
+                value={energyFilter}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  setEnergyFilter(event.target.value as EnergyFilter)
+                }
+              >
+                <option value="all">All energy</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+
+            <label className="tr-libraryFilter">
+              <span>SORT</span>
+              <select
+                value={songSort}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  setSongSort(event.target.value as SongSort)
+                }
+              >
+                {(
+                  [
+                    "library",
+                    "recently_added",
+                    "title",
+                    "artist",
+                    "most_played",
+                    "recently_played",
+                  ] as SongSort[]
+                ).map((sort) => (
+                  <option key={sort} value={sort}>
+                    {songSortLabel(sort)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              className={`tr-libraryFavorites ${favoritesOnly ? "is-active" : ""}`}
+              onClick={() => setFavoritesOnly((current) => !current)}
+            >
+              ★ FAVORITES
+            </button>
           </div>
 
-          {loading ? (
-            <div className="tr-musicHubEmpty">Loading your music…</div>
-          ) : !filteredTracks.length ? (
-            <div className="tr-musicHubEmpty">{tracks.length ? "No songs match your search." : "Upload your first MP3, M4A, or WAV file."}</div>
-          ) : (
-            <div className="tr-songCardGrid">
-              {filteredTracks.map((track) => {
-                const index = tracks.findIndex((item) => item.id === track.id);
-                const isCurrent = player.currentTrack?.id === track.id;
-                const isPlaying = isCurrent && player.playing;
-                const draft = drafts[track.id] ?? { title: track.title, artist: track.artist || "" };
-
-                return (
-                  <article key={track.id} className={`tr-songCard ${isCurrent ? "is-current" : ""}`}>
-                    <div className="tr-songCardTop">
-                      <span className="tr-songIndex">{String(index + 1).padStart(2, "0")}</span>
-                      <button type="button" className={`tr-songFavorite ${track.favorite ? "is-active" : ""}`} onClick={() => void toggleFavorite(track)} aria-label={track.favorite ? "Remove favorite" : "Add favorite"}>★</button>
-                    </div>
-
-                    <div className="tr-songPreview">
-                      <button type="button" className="tr-songPlayButton" onClick={() => void toggleTrackPlayback(track)}>{isPlaying ? "Ⅱ" : "▶"}</button>
-                      <button type="button" className="tr-songStopButton" disabled={!isCurrent} onClick={() => stopTrackPreview(track)}>■</button>
-                      <span>{isPlaying ? "PLAYING" : isCurrent ? "PAUSED" : "PREVIEW"}</span>
-                    </div>
-
-                    <label className="tr-songField"><span>SONG TITLE</span><input value={draft.title} onChange={(event: ChangeEvent<HTMLInputElement>) => setDrafts((current) => ({ ...current, [track.id]: { ...draft, title: event.target.value } }))} /></label>
-                    <label className="tr-songField"><span>ARTIST</span><input value={draft.artist} placeholder="Optional" onChange={(event: ChangeEvent<HTMLInputElement>) => setDrafts((current) => ({ ...current, [track.id]: { ...draft, artist: event.target.value } }))} /></label>
-
-                    <div className="tr-songEnergy">
-                      <span>ENERGY</span>
-                      {(["low", "medium", "high"] as MusicEnergyLevel[]).map((energy) => (
-                        <button key={energy} type="button" className={track.energy_level === energy ? "is-active" : ""} onClick={() => void setEnergy(track, energy)}>{energy.toUpperCase()}</button>
-                      ))}
-                    </div>
-
-                    <div className="tr-songMeta">
-                      <span>{formatDuration(track.duration_seconds) || "--:--"}</span>
-                      <span>{formatFileSize(track.file_size_bytes) || "--"}</span>
-                      <span>{track.play_count} plays</span>
-                      <span>{track.skip_count} skips</span>
-                    </div>
-
-                    <div className="tr-songCardActions">
-                      <button type="button" disabled={index === 0} onClick={() => moveTrack(track.id, -1)}>↑ MOVE</button>
-                      <button type="button" disabled={index === tracks.length - 1} onClick={() => moveTrack(track.id, 1)}>↓ MOVE</button>
-                      <button type="button" className="is-save" disabled={busyId === track.id} onClick={() => void saveTrack(track)}>SAVE</button>
-                      <button type="button" className="is-delete" disabled={busyId === track.id} onClick={() => void deleteTrack(track)}>DELETE</button>
-                    </div>
-                  </article>
-                );
-              })}
+          {selectedCount ? (
+            <div className="tr-libraryBulkBar">
+              <strong>{selectedCount} SONG{selectedCount === 1 ? "" : "S"} SELECTED</strong>
+              <div>
+                <button type="button" onClick={() => openPlaylistModal(Array.from(selectedSongIds))}>
+                  + ADD TO PLAYLIST
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === "bulk-energy"}
+                  onClick={() => void applyBulkEnergy("high")}
+                >
+                  ⚡ HIGH ENERGY
+                </button>
+                <button
+                  type="button"
+                  className="is-danger"
+                  disabled={busyId === "bulk-delete"}
+                  onClick={() => void deleteSelectedTracks()}
+                >
+                  DELETE
+                </button>
+                <button type="button" onClick={() => setSelectedSongIds(new Set())}>
+                  CLEAR
+                </button>
+              </div>
             </div>
-          )}
+          ) : null}
+
+          <div className="tr-libraryTable" role="table" aria-label="Music library">
+            <div className="tr-libraryTableHead" role="row">
+              <label className="tr-libraryCheck">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectVisible}
+                  aria-label="Select all visible songs"
+                />
+              </label>
+              <span>TRACK</span>
+              <span>TIME</span>
+              <span>ENERGY</span>
+              <span>ACTIONS</span>
+            </div>
+
+            {loading ? <div className="tr-musicHubEmpty">Loading your music…</div> : null}
+            {!loading && !pagedTracks.length ? (
+              <div className="tr-musicHubEmpty">No songs match these filters.</div>
+            ) : null}
+
+            {!loading
+              ? pagedTracks.map((track) => {
+                  const isCurrent = player.currentTrack?.id === track.id;
+                  const isPlaying = isCurrent && player.playing;
+                  return (
+                    <article
+                      key={track.id}
+                      className={`tr-libraryRow ${isCurrent ? "is-current" : ""}`}
+                      role="row"
+                    >
+                      <label className="tr-libraryCheck">
+                        <input
+                          type="checkbox"
+                          checked={selectedSongIds.has(track.id)}
+                          onChange={() => toggleSongSelection(track.id)}
+                          aria-label={`Select ${track.title}`}
+                        />
+                      </label>
+
+                      <div className="tr-libraryTrackCell">
+                        <button
+                          type="button"
+                          className={`tr-libraryPlay ${isPlaying ? "is-playing" : ""}`}
+                          onClick={() => void toggleTrackPlayback(track)}
+                          aria-label={isPlaying ? `Pause ${track.title}` : `Play ${track.title}`}
+                        >
+                          {isPlaying ? "Ⅱ" : "▶"}
+                        </button>
+                        <div>
+                          <strong>{track.title}</strong>
+                          <span>{track.artist || "Unknown artist"}</span>
+                        </div>
+                        {isCurrent ? <em>{isPlaying ? "PLAYING" : "READY"}</em> : null}
+                      </div>
+
+                      <span className="tr-libraryDuration">
+                        {formatDuration(track.duration_seconds) || "--:--"}
+                      </span>
+
+                      <button
+                        type="button"
+                        className={`tr-libraryEnergy tr-libraryEnergy--${track.energy_level}`}
+                        onClick={() =>
+                          void setEnergy(
+                            track,
+                            track.energy_level === "low"
+                              ? "medium"
+                              : track.energy_level === "medium"
+                                ? "high"
+                                : "low"
+                          )
+                        }
+                        aria-label={`Change energy for ${track.title}`}
+                      >
+                        {track.energy_level.toUpperCase()}
+                      </button>
+
+                      <div className="tr-libraryActions">
+                        <button
+                          type="button"
+                          className={`tr-libraryFavorite ${track.favorite ? "is-active" : ""}`}
+                          onClick={() => void toggleFavorite(track)}
+                          aria-label={track.favorite ? "Remove favorite" : "Add favorite"}
+                        >
+                          ★
+                        </button>
+                        <button
+                          type="button"
+                          className="tr-libraryPlaylistButton"
+                          onClick={() => openPlaylistModal([track.id])}
+                        >
+                          + PLAYLIST
+                        </button>
+                        <button
+                          type="button"
+                          className="tr-libraryMore"
+                          onClick={() => setDetailTrackId(track.id)}
+                          aria-label={`More options for ${track.title}`}
+                        >
+                          •••
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              : null}
+          </div>
+
+          <footer className="tr-libraryPagination">
+            <label>
+              <span>SHOW</span>
+              <select
+                value={pageSize}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  setPageSize(Number(event.target.value) as PageSize)
+                }
+              >
+                <option value="12">12 songs</option>
+                <option value="24">24 songs</option>
+                <option value="48">48 songs</option>
+              </select>
+            </label>
+            <div>
+              <button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                ← PREVIOUS
+              </button>
+              <strong>
+                PAGE {page} OF {totalPages}
+              </strong>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                NEXT →
+              </button>
+            </div>
+            <span>
+              {filteredTracks.length ? (page - 1) * pageSize + 1 : 0}–
+              {Math.min(page * pageSize, filteredTracks.length)} OF {filteredTracks.length}
+            </span>
+          </footer>
         </section>
       ) : null}
 
       {tab === "playlists" ? (
         <section className="tr-playlistStudio">
           <aside className="tr-playlistRail">
-            <div className="tr-playlistRailHead"><span className="tr-musicHubEyebrow">YOUR PLAYLISTS</span><strong>Choose a queue</strong></div>
+            <div className="tr-playlistRailHead">
+              <span className="tr-musicHubEyebrow">YOUR PLAYLISTS</span>
+              <strong>Choose a queue</strong>
+            </div>
             <div className="tr-playlistCreatePremium">
-              <input value={newPlaylistName} placeholder="New playlist name" onChange={(event: ChangeEvent<HTMLInputElement>) => setNewPlaylistName(event.target.value)} onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") void createPlaylist(); }} />
-              <button type="button" onClick={() => void createPlaylist()}>+ CREATE</button>
+              <input
+                value={newPlaylistName}
+                placeholder="New playlist name"
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setNewPlaylistName(event.target.value)
+                }
+                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === "Enter") void createPlaylist();
+                }}
+              />
+              <button type="button" onClick={() => void createPlaylist()}>
+                + CREATE
+              </button>
             </div>
             <div className="tr-playlistTileList">
               {playlists.map((playlist) => {
                 const count = playlistTrackIds[playlist.id]?.length ?? 0;
                 return (
-                  <button key={playlist.id} type="button" className={`tr-playlistTile ${selectedPlaylistId === playlist.id ? "is-active" : ""}`} onClick={() => setSelectedPlaylistId(playlist.id)}>
+                  <button
+                    key={playlist.id}
+                    type="button"
+                    className={`tr-playlistTile ${
+                      selectedPlaylistId === playlist.id ? "is-active" : ""
+                    }`}
+                    onClick={() => setSelectedPlaylistId(playlist.id)}
+                  >
                     <span className="tr-playlistTileIcon">♫</span>
-                    <span><strong>{playlist.name}</strong><small>{count} song{count === 1 ? "" : "s"}</small></span>
+                    <span>
+                      <strong>{playlist.name}</strong>
+                      <small>
+                        {count} song{count === 1 ? "" : "s"}
+                      </small>
+                    </span>
                     {player.activePlaylistId === playlist.id ? <em>LIVE</em> : null}
                   </button>
                 );
               })}
-              {!playlists.length ? <div className="tr-musicHubEmpty">Create your first playlist.</div> : null}
+              {!playlists.length ? (
+                <div className="tr-musicHubEmpty">Create your first playlist.</div>
+              ) : null}
             </div>
           </aside>
 
@@ -703,40 +1188,133 @@ export function MusicPage({
                 <header className="tr-playlistConsoleHead">
                   <div>
                     <span className="tr-musicHubEyebrow">SELECTED PLAYLIST</span>
-                    <input value={playlistNameDraft} onChange={(event: ChangeEvent<HTMLInputElement>) => setPlaylistNameDraft(event.target.value)} />
-                    <small>{selectedTracks.length} songs • {formatLongDuration(selectedPlaylistSeconds)}</small>
+                    <input
+                      value={playlistNameDraft}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        setPlaylistNameDraft(event.target.value)
+                      }
+                    />
+                    <small>
+                      {selectedTracks.length} songs • {formatLongDuration(selectedPlaylistSeconds)}
+                    </small>
                   </div>
                   <div className="tr-playlistConsoleActions">
-                    <button type="button" onClick={() => void savePlaylistName()}>SAVE NAME</button>
-                    <button type="button" className="is-primary" disabled={!selectedTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button>
-                    <button type="button" disabled={!selectedTracks.length} onClick={() => { if (!player.shuffle) toggleMusicShuffle(); void playSelectedPlaylist(); }}>⇄ SHUFFLE</button>
-                    <button type="button" className="is-danger" onClick={() => void removePlaylist()}>DELETE</button>
+                    <button type="button" onClick={() => void savePlaylistName()}>
+                      SAVE NAME
+                    </button>
+                    <button
+                      type="button"
+                      className="is-primary"
+                      disabled={!selectedTracks.length}
+                      onClick={() => void playSelectedPlaylist()}
+                    >
+                      ▶ PLAY
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedTracks.length}
+                      onClick={() => {
+                        if (!player.shuffle) toggleMusicShuffle();
+                        void playSelectedPlaylist();
+                      }}
+                    >
+                      ⇄ SHUFFLE
+                    </button>
+                    <button type="button" className="is-danger" onClick={() => void removePlaylist()}>
+                      DELETE
+                    </button>
                   </div>
                 </header>
 
                 <div className="tr-playlistTrackStack">
                   {selectedTracks.map((track, index) => (
-                    <article key={track.id} className={`tr-playlistTrackRow ${player.currentTrack?.id === track.id ? "is-current" : ""}`}>
-                      <span className="tr-playlistTrackIndex">{String(index + 1).padStart(2, "0")}</span>
-                      <button type="button" className="tr-playlistTrackPlay" onClick={() => void playSelectedPlaylist(track.id)}>▶</button>
-                      <span className="tr-playlistTrackText"><strong>{track.title}</strong><small>{track.artist || "Unknown artist"} • {formatDuration(track.duration_seconds) || "--:--"}</small></span>
+                    <article
+                      key={track.id}
+                      className={`tr-playlistTrackRow ${
+                        player.currentTrack?.id === track.id ? "is-current" : ""
+                      }`}
+                    >
+                      <span className="tr-playlistTrackIndex">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <button
+                        type="button"
+                        className="tr-playlistTrackPlay"
+                        onClick={() => void playSelectedPlaylist(track.id)}
+                      >
+                        ▶
+                      </button>
+                      <span className="tr-playlistTrackText">
+                        <strong>{track.title}</strong>
+                        <small>
+                          {track.artist || "Unknown artist"} • {formatDuration(track.duration_seconds) || "--:--"}
+                        </small>
+                      </span>
                       <span className="tr-playlistTrackTools">
-                        <button type="button" disabled={index === 0} onClick={() => void movePlaylistTrack(index, -1)}>↑</button>
-                        <button type="button" disabled={index === selectedTracks.length - 1} onClick={() => void movePlaylistTrack(index, 1)}>↓</button>
-                        <button type="button" className="is-remove" onClick={() => void removeTrackFromSelected(track.id)}>REMOVE</button>
+                        <button type="button" disabled={index === 0} onClick={() => void movePlaylistTrack(index, -1)}>
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === selectedTracks.length - 1}
+                          onClick={() => void movePlaylistTrack(index, 1)}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="is-remove"
+                          onClick={() => void removeTrackFromSelected(track.id)}
+                        >
+                          REMOVE
+                        </button>
                       </span>
                     </article>
                   ))}
-                  {!selectedTracks.length ? <div className="tr-musicHubEmpty">No songs yet. Add tracks from your library below.</div> : null}
+                  {!selectedTracks.length ? (
+                    <div className="tr-musicHubEmpty">
+                      No songs yet. Add tracks from your library below.
+                    </div>
+                  ) : null}
                 </div>
 
                 <section className="tr-playlistAddPanel">
-                  <div className="tr-playlistAddHead"><div><span className="tr-musicHubEyebrow">ADD FROM LIBRARY</span><strong>Expand this playlist</strong></div><input value={playlistSearch} onChange={(event: ChangeEvent<HTMLInputElement>) => setPlaylistSearch(event.target.value)} placeholder="Search available songs…" /></div>
+                  <div className="tr-playlistAddHead">
+                    <div>
+                      <span className="tr-musicHubEyebrow">ADD FROM LIBRARY</span>
+                      <strong>Expand this playlist</strong>
+                    </div>
+                    <input
+                      value={playlistSearch}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        setPlaylistSearch(event.target.value)
+                      }
+                      placeholder="Search available songs…"
+                    />
+                  </div>
                   <div className="tr-playlistAvailableGrid">
                     {availableTracks.map((track) => (
-                      <article key={track.id} className="tr-playlistAvailableCard"><span><strong>{track.title}</strong><small>{track.artist || "Unknown artist"} • {formatDuration(track.duration_seconds) || "--:--"}</small></span><button type="button" disabled={busyId === track.id} onClick={() => void addTrackToSelected(track.id)}>+ ADD</button></article>
+                      <article key={track.id} className="tr-playlistAvailableCard">
+                        <span>
+                          <strong>{track.title}</strong>
+                          <small>
+                            {track.artist || "Unknown artist"} • {formatDuration(track.duration_seconds) || "--:--"}
+                          </small>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busyId === track.id}
+                          onClick={() => void addTrackToSelected(track.id)}
+                        >
+                          + ADD
+                        </button>
+                      </article>
                     ))}
-                    {!availableTracks.length ? <div className="tr-musicHubEmpty">Every matching song is already in this playlist.</div> : null}
+                    {!availableTracks.length ? (
+                      <div className="tr-musicHubEmpty">
+                        Every matching song is already in this playlist.
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               </>
@@ -752,17 +1330,289 @@ export function MusicPage({
           <div className="tr-smartMixCopy">
             <span className="tr-musicHubEyebrow">SMART MIX ENGINE</span>
             <h2>A fresh workout playlist in one press.</h2>
-            <p>Smart Mix scores your uploaded songs using favorites, energy, play history, skips, recency, and artist variety. It updates one reusable Smart Mix playlist and starts it immediately.</p>
-            <div className="tr-smartSignals"><span>★ FAVORITES</span><span>⚡ ENERGY</span><span>↺ RECENCY</span><span>⊘ SKIPS</span><span>◎ VARIETY</span></div>
+            <p>
+              Smart Mix scores your uploaded songs using favorites, energy, play history,
+              skips, recency, and artist variety. It updates one reusable Smart Mix playlist
+              and starts it immediately.
+            </p>
+            <div className="tr-smartSignals">
+              <span>★ FAVORITES</span>
+              <span>⚡ ENERGY</span>
+              <span>↺ RECENCY</span>
+              <span>⊘ SKIPS</span>
+              <span>◎ VARIETY</span>
+            </div>
           </div>
 
           <div className="tr-smartMixControls">
-            <label><span>MIX LENGTH</span><select value={smartMinutes} onChange={(event: ChangeEvent<HTMLSelectElement>) => setSmartMinutes(Number(event.target.value))}><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option><option value="120">2 hours</option></select></label>
-            <div className="tr-smartIntensity"><span>INTENSITY</span>{(["recovery", "balanced", "high"] as SmartIntensity[]).map((intensity) => <button key={intensity} type="button" className={smartIntensity === intensity ? "is-active" : ""} onClick={() => setSmartIntensity(intensity)}>{intensity === "high" ? "HIGH ENERGY" : intensity.toUpperCase()}</button>)}</div>
-            <button type="button" className="tr-smartBuildButton" disabled={buildingSmart || !tracks.length} onClick={() => void buildAndPlaySmartMix()}>{buildingSmart ? "BUILDING MIX…" : "✦ BUILD, SAVE & PLAY SMART MIX"}</button>
-            <small>{tracks.length} uploaded songs available • {favoriteCount} favorites tagged</small>
+            <label>
+              <span>MIX LENGTH</span>
+              <select
+                value={smartMinutes}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  setSmartMinutes(Number(event.target.value))
+                }
+              >
+                <option value="30">30 minutes</option>
+                <option value="45">45 minutes</option>
+                <option value="60">60 minutes</option>
+                <option value="90">90 minutes</option>
+                <option value="120">2 hours</option>
+              </select>
+            </label>
+            <div className="tr-smartIntensity">
+              <span>INTENSITY</span>
+              {(["recovery", "balanced", "high"] as SmartIntensity[]).map((intensity) => (
+                <button
+                  key={intensity}
+                  type="button"
+                  className={smartIntensity === intensity ? "is-active" : ""}
+                  onClick={() => setSmartIntensity(intensity)}
+                >
+                  {intensity === "high" ? "HIGH ENERGY" : intensity.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="tr-smartBuildButton"
+              disabled={buildingSmart || !tracks.length}
+              onClick={() => void buildAndPlaySmartMix()}
+            >
+              {buildingSmart ? "BUILDING MIX…" : "✦ BUILD, SAVE & PLAY SMART MIX"}
+            </button>
+            <small>
+              {tracks.length} uploaded songs available • {favoriteCount} favorites tagged
+            </small>
           </div>
         </section>
+      ) : null}
+
+      {detailTrack ? (
+        <div className="tr-musicModalBackdrop" role="presentation" onMouseDown={() => setDetailTrackId(null)}>
+          <section
+            className="tr-trackInspector"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Edit ${detailTrack.title}`}
+            onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span className="tr-musicHubEyebrow">TRACK DETAILS</span>
+                <h2>{detailTrack.title}</h2>
+              </div>
+              <button type="button" onClick={() => setDetailTrackId(null)} aria-label="Close track details">
+                ×
+              </button>
+            </header>
+
+            <div className="tr-trackInspectorBody">
+              <label>
+                <span>SONG TITLE</span>
+                <input
+                  value={drafts[detailTrack.id]?.title ?? detailTrack.title}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [detailTrack.id]: {
+                        title: event.target.value,
+                        artist: current[detailTrack.id]?.artist ?? detailTrack.artist ?? "",
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>ARTIST</span>
+                <input
+                  value={drafts[detailTrack.id]?.artist ?? detailTrack.artist ?? ""}
+                  placeholder="Unknown artist"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [detailTrack.id]: {
+                        title: current[detailTrack.id]?.title ?? detailTrack.title,
+                        artist: event.target.value,
+                      },
+                    }))
+                  }
+                />
+              </label>
+
+              <div className="tr-trackInspectorEnergy">
+                <span>ENERGY LEVEL</span>
+                <div>
+                  {(["low", "medium", "high"] as MusicEnergyLevel[]).map((energy) => (
+                    <button
+                      key={energy}
+                      type="button"
+                      className={detailTrack.energy_level === energy ? "is-active" : ""}
+                      onClick={() => void setEnergy(detailTrack, energy)}
+                    >
+                      {energy.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <dl className="tr-trackInspectorMeta">
+                <div>
+                  <dt>DURATION</dt>
+                  <dd>{formatDuration(detailTrack.duration_seconds) || "--:--"}</dd>
+                </div>
+                <div>
+                  <dt>FILE SIZE</dt>
+                  <dd>{formatFileSize(detailTrack.file_size_bytes) || "--"}</dd>
+                </div>
+                <div>
+                  <dt>PLAYS</dt>
+                  <dd>{detailTrack.play_count}</dd>
+                </div>
+                <div>
+                  <dt>SKIPS</dt>
+                  <dd>{detailTrack.skip_count}</dd>
+                </div>
+                <div>
+                  <dt>LAST PLAYED</dt>
+                  <dd>{formatDate(detailTrack.last_played_at)}</dd>
+                </div>
+                <div>
+                  <dt>ADDED</dt>
+                  <dd>{formatDate(detailTrack.created_at)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <footer>
+              <div>
+                <button
+                  type="button"
+                  disabled={tracks.findIndex((track) => track.id === detailTrack.id) === 0}
+                  onClick={() => moveTrack(detailTrack.id, -1)}
+                >
+                  ↑ MOVE UP
+                </button>
+                <button
+                  type="button"
+                  disabled={tracks.findIndex((track) => track.id === detailTrack.id) === tracks.length - 1}
+                  onClick={() => moveTrack(detailTrack.id, 1)}
+                >
+                  ↓ MOVE DOWN
+                </button>
+              </div>
+              <div>
+                <button type="button" onClick={() => openPlaylistModal([detailTrack.id])}>
+                  + PLAYLIST
+                </button>
+                <button
+                  type="button"
+                  className="is-danger"
+                  disabled={busyId === detailTrack.id}
+                  onClick={() => void deleteTrack(detailTrack)}
+                >
+                  DELETE
+                </button>
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={busyId === detailTrack.id}
+                  onClick={() => void saveTrack(detailTrack)}
+                >
+                  SAVE CHANGES
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+
+      {playlistModalTrackIds.length ? (
+        <div className="tr-musicModalBackdrop" role="presentation" onMouseDown={closePlaylistModal}>
+          <section
+            className="tr-playlistPicker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add songs to playlists"
+            onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span className="tr-musicHubEyebrow">PLAYLIST ROUTING</span>
+                <h2>
+                  {playlistModalTrackIds.length === 1
+                    ? `Add “${modalTrackNames[0] || "song"}”`
+                    : `Route ${playlistModalTrackIds.length} selected songs`}
+                </h2>
+              </div>
+              <button type="button" onClick={closePlaylistModal} aria-label="Close playlist picker">
+                ×
+              </button>
+            </header>
+
+            <div className="tr-playlistPickerList">
+              {playlists.map((playlist) => {
+                const currentIds = new Set(playlistTrackIds[playlist.id] ?? []);
+                const matchingCount = playlistModalTrackIds.filter((id) => currentIds.has(id)).length;
+                const checked = playlistModalSelections.has(playlist.id);
+                return (
+                  <label key={playlist.id} className={checked ? "is-checked" : ""}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setPlaylistModalSelections((current) => {
+                          const next = new Set(current);
+                          if (next.has(playlist.id)) next.delete(playlist.id);
+                          else next.add(playlist.id);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="tr-playlistPickerIcon">♫</span>
+                    <span>
+                      <strong>{playlist.name}</strong>
+                      <small>
+                        {playlistTrackIds[playlist.id]?.length ?? 0} songs
+                        {matchingCount
+                          ? ` • ${matchingCount}/${playlistModalTrackIds.length} selected already included`
+                          : ""}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })}
+              {!playlists.length ? (
+                <div className="tr-musicHubEmpty">Create a playlist below.</div>
+              ) : null}
+            </div>
+
+            <label className="tr-playlistPickerCreate">
+              <span>CREATE A NEW PLAYLIST AND ADD THESE SONGS</span>
+              <input
+                value={playlistModalName}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setPlaylistModalName(event.target.value)
+                }
+                placeholder="New playlist name"
+              />
+            </label>
+
+            <footer>
+              <button type="button" onClick={closePlaylistModal} disabled={playlistModalBusy}>
+                CANCEL
+              </button>
+              <button
+                type="button"
+                className="is-primary"
+                onClick={() => void savePlaylistMemberships()}
+                disabled={playlistModalBusy}
+              >
+                {playlistModalBusy ? "SAVING…" : "SAVE PLAYLISTS"}
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
     </div>
   );
