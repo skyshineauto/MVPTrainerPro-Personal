@@ -1,0 +1,694 @@
+/* ==========================================================================
+   MVP TRAINER PRO — ADAPTIVE PROGRESSION COACH
+   Complete file for src/features/workout/ProgressionCoach.css
+   ========================================================================== */
+
+.pc-coach,
+.pc-coach * {
+  box-sizing: border-box;
+}
+
+.pc-coach {
+  --pc-cyan: #48d0ff;
+  --pc-blue: #168cff;
+  --pc-gold: #f4bd67;
+  --pc-green: #66e297;
+  --pc-amber: #ffb84f;
+  --pc-red: #ff747c;
+  --pc-violet: #9d8cff;
+  --pc-surface: #0a1118;
+  --pc-surface-2: #0e1720;
+  --pc-line: rgba(184, 214, 232, 0.13);
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(72, 208, 255, 0.24);
+  border-radius: 24px;
+  background:
+    radial-gradient(780px 280px at 0% -20%, rgba(28, 153, 255, 0.17), transparent 64%),
+    radial-gradient(600px 260px at 100% 0%, rgba(244, 189, 103, 0.08), transparent 72%),
+    linear-gradient(180deg, rgba(13, 21, 29, 0.995), rgba(4, 8, 12, 0.998));
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.065),
+    inset 0 -1px 0 rgba(72, 208, 255, 0.08);
+}
+
+.pc-coach.is-increase {
+  border-color: rgba(102, 226, 151, 0.35);
+}
+
+.pc-coach.is-hold {
+  border-color: rgba(72, 208, 255, 0.28);
+}
+
+.pc-coach.is-reduce,
+.pc-coach.is-modify {
+  border-color: rgba(255, 184, 79, 0.35);
+}
+
+.pc-coach.is-stop {
+  border-color: rgba(255, 116, 124, 0.42);
+}
+
+.pc-coachHeader {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 17px 18px;
+  border: 0;
+  color: #fff;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pc-coachHeader:hover .pc-coachToggle,
+.pc-coachHeader:focus-visible .pc-coachToggle {
+  border-color: rgba(72, 208, 255, 0.7);
+  color: #f2fcff;
+  background: rgba(72, 208, 255, 0.12);
+}
+
+.pc-coachHeader:focus-visible {
+  outline: 2px solid rgba(72, 208, 255, 0.65);
+  outline-offset: -3px;
+  border-radius: 20px;
+}
+
+.pc-coachIdentity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.pc-coachIcon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(72, 208, 255, 0.28);
+  border-radius: 15px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(0, 0, 0, 0.15)),
+    rgba(7, 18, 27, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 22px rgba(0, 0, 0, 0.2);
+}
+
+.pc-coachIcon span {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(72, 208, 255, 0.3), #61d9ff);
+  box-shadow: 0 0 10px rgba(72, 208, 255, 0.28);
+}
+
+.pc-coachIcon span:nth-child(1) {
+  width: 54%;
+}
+
+.pc-coachIcon span:nth-child(2) {
+  width: 100%;
+}
+
+.pc-coachIcon span:nth-child(3) {
+  width: 72%;
+}
+
+.pc-coachTitleGroup {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pc-coachKicker {
+  color: #84ddff;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 1000;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+
+.pc-coachTitleGroup strong {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(248, 252, 255, 0.98);
+  font-size: clamp(15px, 1.55vw, 19px);
+  line-height: 1.12;
+  font-weight: 1000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-coachHeaderMeta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pc-coachDecision,
+.pc-coachConfidence {
+  width: max-content;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid rgba(183, 211, 228, 0.13);
+  border-radius: 999px;
+  color: rgba(210, 225, 235, 0.7);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 7px;
+  line-height: 1;
+  font-weight: 1000;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pc-coachDecision.is-baseline {
+  border-color: rgba(157, 140, 255, 0.32);
+  color: #c8bdff;
+  background: rgba(157, 140, 255, 0.08);
+}
+
+.pc-coachDecision.is-increase {
+  border-color: rgba(102, 226, 151, 0.34);
+  color: #9cf1b9;
+  background: rgba(102, 226, 151, 0.08);
+}
+
+.pc-coachDecision.is-hold {
+  border-color: rgba(72, 208, 255, 0.34);
+  color: #9ae7ff;
+  background: rgba(72, 208, 255, 0.08);
+}
+
+.pc-coachDecision.is-reduce,
+.pc-coachDecision.is-modify {
+  border-color: rgba(255, 184, 79, 0.34);
+  color: #ffd391;
+  background: rgba(255, 184, 79, 0.08);
+}
+
+.pc-coachDecision.is-stop {
+  border-color: rgba(255, 116, 124, 0.38);
+  color: #ffb4b8;
+  background: rgba(255, 116, 124, 0.09);
+}
+
+.pc-coachConfidence {
+  color: rgba(210, 225, 235, 0.58);
+}
+
+.pc-coachToggle {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(72, 208, 255, 0.26);
+  border-radius: 12px;
+  color: #a9ebff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(0, 0, 0, 0.15)),
+    rgba(7, 16, 23, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 18px rgba(0, 0, 0, 0.17);
+  font-size: 22px;
+  font-weight: 500;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.pc-coachHeader:active .pc-coachToggle {
+  transform: scale(0.96);
+}
+
+/* Collapsed state
+   -------------------------------------------------------------------------- */
+
+.pc-coachCollapsedLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.85fr);
+  gap: 14px;
+  padding: 0 18px 17px;
+}
+
+.pc-coachCollapsedLine strong,
+.pc-coachCollapsedLine span {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(179, 209, 226, 0.1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pc-coachCollapsedLine strong {
+  color: rgba(248, 252, 255, 0.95);
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 900;
+}
+
+.pc-coachCollapsedLine span {
+  color: rgba(200, 218, 229, 0.66);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 750;
+}
+
+/* Expanded body
+   -------------------------------------------------------------------------- */
+
+.pc-coachBody {
+  display: grid;
+  gap: 13px;
+  padding: 0 16px 16px;
+}
+
+.pc-coachLoading {
+  min-height: 94px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(72, 208, 255, 0.15);
+  border-radius: 16px;
+  color: rgba(211, 229, 239, 0.72);
+  background: rgba(255, 255, 255, 0.018);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pc-coachLoadingPulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #56d6ff;
+  box-shadow: 0 0 14px rgba(72, 208, 255, 0.62);
+  animation: pcCoachPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pcCoachPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.78);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pc-coachRecommendation {
+  min-width: 0;
+  display: grid;
+  gap: 13px;
+  padding: 17px;
+  border: 1px solid rgba(72, 208, 255, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(520px 180px at 0 0, rgba(30, 155, 255, 0.12), transparent 70%),
+    linear-gradient(180deg, rgba(13, 24, 34, 0.96), rgba(6, 11, 16, 0.985));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+.pc-coach.is-increase .pc-coachRecommendation {
+  border-color: rgba(102, 226, 151, 0.28);
+  background:
+    radial-gradient(520px 180px at 0 0, rgba(67, 202, 116, 0.12), transparent 70%),
+    linear-gradient(180deg, rgba(11, 25, 20, 0.97), rgba(5, 12, 9, 0.99));
+}
+
+.pc-coach.is-reduce .pc-coachRecommendation,
+.pc-coach.is-modify .pc-coachRecommendation {
+  border-color: rgba(255, 184, 79, 0.28);
+  background:
+    radial-gradient(520px 180px at 0 0, rgba(255, 156, 45, 0.12), transparent 70%),
+    linear-gradient(180deg, rgba(27, 20, 10, 0.97), rgba(13, 9, 4, 0.99));
+}
+
+.pc-coach.is-stop .pc-coachRecommendation {
+  border-color: rgba(255, 116, 124, 0.34);
+  background:
+    radial-gradient(520px 180px at 0 0, rgba(255, 75, 87, 0.13), transparent 70%),
+    linear-gradient(180deg, rgba(29, 14, 16, 0.97), rgba(13, 6, 8, 0.99));
+}
+
+.pc-coachRecommendationTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pc-coachSetStamp {
+  width: max-content;
+  max-width: 100%;
+  padding: 6px 9px;
+  overflow: hidden;
+  border: 1px solid rgba(244, 189, 103, 0.26);
+  border-radius: 999px;
+  color: #ffd99f;
+  background: rgba(244, 189, 103, 0.07);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-coachInstruction {
+  color: #fff;
+  font-size: clamp(22px, 3vw, 36px);
+  line-height: 1.02;
+  font-weight: 1000;
+  letter-spacing: -0.025em;
+}
+
+.pc-coachReason {
+  color: rgba(202, 221, 232, 0.72);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.pc-coachTarget {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+  border: 1px solid rgba(244, 189, 103, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(244, 189, 103, 0.07), rgba(255, 255, 255, 0.015));
+}
+
+.pc-coachTarget span {
+  color: #f6c579;
+  font-size: 8px;
+  font-weight: 1000;
+  letter-spacing: 0.14em;
+}
+
+.pc-coachTarget strong {
+  min-width: 0;
+  color: rgba(248, 252, 255, 0.95);
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 850;
+}
+
+.pc-coachApply {
+  min-height: 44px;
+  justify-self: start;
+  padding: 0 16px;
+  border: 1px solid rgba(102, 226, 151, 0.42);
+  border-radius: 13px;
+  color: #07130c;
+  background: linear-gradient(180deg, #82efa8, #55d98a);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 10px 24px rgba(49, 185, 104, 0.17);
+  font-size: 11px;
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    filter 150ms ease;
+}
+
+.pc-coachApply:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.pc-coachApply:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.pc-coachEvidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pc-coachEvidenceCard {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  min-height: 108px;
+  padding: 13px;
+  border: 1px solid rgba(178, 208, 226, 0.1);
+  border-radius: 15px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.13));
+}
+
+.pc-coachEvidenceCard > span {
+  color: rgba(188, 210, 224, 0.56);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 1000;
+  letter-spacing: 0.14em;
+}
+
+.pc-coachEvidenceCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(247, 251, 254, 0.95);
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-coachEvidenceCard small {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(188, 207, 219, 0.53);
+  font-size: 10px;
+  line-height: 1.25;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-coachDecisionRail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pc-coachDecisionRail span {
+  min-width: 0;
+  padding: 9px 10px;
+  overflow: hidden;
+  border: 1px solid rgba(177, 206, 224, 0.09);
+  border-radius: 12px;
+  color: rgba(203, 220, 231, 0.62);
+  background: rgba(255, 255, 255, 0.018);
+  font-size: 8px;
+  line-height: 1.2;
+  font-weight: 850;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-coachDecisionRail .is-increase {
+  border-color: rgba(102, 226, 151, 0.2);
+  color: #94eeb4;
+}
+
+.pc-coachDecisionRail .is-hold {
+  border-color: rgba(72, 208, 255, 0.2);
+  color: #92e2fb;
+}
+
+.pc-coachDecisionRail .is-reduce {
+  border-color: rgba(255, 184, 79, 0.2);
+  color: #f8c77d;
+}
+
+.pc-coachDecisionRail .is-stop {
+  border-color: rgba(255, 116, 124, 0.22);
+  color: #f7a4aa;
+}
+
+/* Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .pc-coachEvidence {
+    grid-template-columns: 1fr;
+  }
+
+  .pc-coachEvidenceCard {
+    min-height: 0;
+  }
+
+  .pc-coachDecisionRail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .pc-coach {
+    border-radius: 19px;
+  }
+
+  .pc-coachHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px 13px;
+  }
+
+  .pc-coachIdentity {
+    gap: 10px;
+  }
+
+  .pc-coachIcon {
+    width: 42px;
+    height: 42px;
+    padding: 10px;
+    border-radius: 13px;
+  }
+
+  .pc-coachTitleGroup strong {
+    font-size: 14px;
+  }
+
+  .pc-coachHeaderMeta {
+    gap: 6px;
+  }
+
+  .pc-coachConfidence {
+    display: none;
+  }
+
+  .pc-coachToggle {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    font-size: 20px;
+  }
+
+  .pc-coachCollapsedLine {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 0 13px 13px;
+  }
+
+  .pc-coachBody {
+    gap: 10px;
+    padding: 0 12px 12px;
+  }
+
+  .pc-coachRecommendation {
+    gap: 11px;
+    padding: 14px;
+    border-radius: 15px;
+  }
+
+  .pc-coachRecommendationTop {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .pc-coachInstruction {
+    font-size: clamp(20px, 7vw, 29px);
+  }
+
+  .pc-coachReason {
+    font-size: 12px;
+  }
+
+  .pc-coachTarget {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .pc-coachApply {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .pc-coachDecisionRail {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 440px) {
+  .pc-coachHeader {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
+
+  .pc-coachDecision {
+    display: none;
+  }
+
+  .pc-coachIdentity {
+    min-width: 0;
+  }
+
+  .pc-coachIcon {
+    width: 38px;
+    height: 38px;
+    padding: 9px;
+  }
+
+  .pc-coachTitleGroup {
+    gap: 5px;
+  }
+
+  .pc-coachTitleGroup strong {
+    font-size: 13px;
+  }
+
+  .pc-coachKicker {
+    font-size: 7px;
+  }
+
+  .pc-coachEvidenceCard strong {
+    font-size: 12px;
+  }
+
+  .pc-coachDecisionRail {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-coachToggle,
+  .pc-coachApply {
+    transition: none !important;
+  }
+
+  .pc-coachLoadingPulse {
+    animation: none !important;
+  }
+}
