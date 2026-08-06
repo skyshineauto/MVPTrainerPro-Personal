@@ -4573,14 +4573,15 @@ const unlock = async () => {
         }
 
         .tr-finalActionModule{
-          position: sticky;
-          bottom: 14px;
-          z-index: 20;
+          position: static;
+          bottom: auto;
+          z-index: 1;
+          margin-top: 12px;
           border-radius: 18px;
           border: 1px solid rgba(0,170,255,.22);
           background:
-            linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.18)),
-            radial-gradient(520px 180px at 50% 0%, rgba(0,170,255,.08), rgba(0,0,0,0) 70%);
+            radial-gradient(520px 180px at 50% 0%, rgba(0,170,255,.08), transparent 70%),
+            linear-gradient(180deg, rgb(21,28,35), rgb(8,12,17));
           box-shadow:
             inset 0 1px 0 rgba(255,255,255,.05),
             0 18px 50px rgba(0,0,0,.38),
@@ -4588,7 +4589,8 @@ const unlock = async () => {
           padding: 14px;
           display:grid;
           gap: 12px;
-          backdrop-filter: blur(10px);
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
         }
 
         .tr-finalActionModule.is-sessionComplete{
