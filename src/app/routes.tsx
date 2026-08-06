@@ -9,10 +9,13 @@ import { LibraryPage } from "../features/library/LibraryPage";
 import { ExerciseDetailPage } from "../features/library/ExerciseDetailPage";
 import { ProgressPage } from "../features/progress/ProgressPage";
 import { CoachPage } from "../features/coach/CoachPage";
-import { SoundAlertsPage } from "../features/settings/SoundAlertsPage";
 import { MusicPage } from "../features/music/MusicPage";
+import { SoundAlertsPage } from "../features/settings/SoundAlertsPage";
 
-export type Route = { path: string; el: ReactElement };
+export type Route = {
+  path: string;
+  el: ReactElement;
+};
 
 const goTo = (to: string) => {
   window.location.pathname = to;
@@ -30,17 +33,52 @@ function CoachPageRoute() {
   return <CoachPage navigate={goTo} />;
 }
 
+function MusicPageRoute() {
+  return <MusicPage navigate={goTo} />;
+}
+
+function SoundAlertsPageRoute() {
+  return <SoundAlertsPage navigate={goTo} />;
+}
+
 export const routes: Route[] = [
   { path: "/login", el: <LoginPageRoute /> },
-  { path: "/forgot-password", el: <ForgotPasswordPage /> },
-  { path: "/reset-password", el: <ResetPasswordPage /> },
+  {
+    path: "/forgot-password",
+    el: <ForgotPasswordPage />,
+  },
+  {
+    path: "/reset-password",
+    el: <ResetPasswordPage />,
+  },
 
   { path: "/", el: <TodayPage /> },
-  { path: "/workout/:sessionId", el: <WorkoutPlayerPage /> },
-  { path: "/library", el: <LibraryPageRoute /> },
-  { path: "/library/:exerciseId", el: <ExerciseDetailPage /> },
-  { path: "/progress", el: <ProgressPage /> },
-  { path: "/sound-alerts", el: <SoundAlertsPage /> },
-  { path: "/music", el: <MusicPage /> },
-  { path: "/coach", el: <CoachPageRoute /> },
+  {
+    path: "/workout/:sessionId",
+    el: <WorkoutPlayerPage />,
+  },
+  {
+    path: "/library",
+    el: <LibraryPageRoute />,
+  },
+  {
+    path: "/library/:exerciseId",
+    el: <ExerciseDetailPage />,
+  },
+  {
+    path: "/progress",
+    el: <ProgressPage />,
+  },
+  {
+    path: "/music",
+    el: <MusicPageRoute />,
+  },
+  {
+    path: "/sound-alerts",
+    el: <SoundAlertsPageRoute />,
+  },
+  {
+    path: "/coach",
+    el: <CoachPageRoute />,
+  },
 ];
