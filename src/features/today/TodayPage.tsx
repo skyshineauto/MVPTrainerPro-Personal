@@ -133,13 +133,18 @@ function muscleKey(raw: unknown): string | null {
 }
 
 function splitLabel(label: string) {
-  const parts = label
+  const normalized = String(label ?? "")
+    .replace(/\s+[—–-]\s+/g, " • ")
+    .replace(/\s*•\s*/g, " • ")
+    .trim();
+
+  const parts = normalized
     .split("•")
     .map((part) => part.trim())
     .filter(Boolean);
 
   return {
-    title: parts[0] || label || "Workout",
+    title: parts[0] || normalized || "Workout",
     subtitle: parts.slice(1).join(" • "),
   };
 }
@@ -152,18 +157,31 @@ function parseDateOnly(raw: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatScheduleDate(raw: unknown, long = false) {
-  const date = parseDateOnly(raw);
-  if (!date) return "Date not set";
-  return date.toLocaleDateString(undefined, {
-    weekday: long ? "long" : "short",
-    month: "short",
-    day: "numeric",
-  });
+function sameDay(a: Date, b: Date) {
+  return startOfDay(a).getTime() === startOfDay(b).getTime();
+}
+
+function formatTimelineDate(date: Date | null) {
+  if (!date) return "DATE NOT SET";
+  const today = startOfDay(new Date());
+  if (sameDay(date, today)) return "TODAY";
+  if (sameDay(date, addDays(today, 1))) return "TOMORROW";
+
+  return date
+    .toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    })
+    .toUpperCase();
 }
 
 function formatRecommendedDate(date: Date | null) {
   if (!date) return "As scheduled";
+  const today = startOfDay(new Date());
+  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, addDays(today, 1))) return "Tomorrow";
+
   return date.toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
@@ -266,11 +284,11 @@ function readinessForSession(
   session: any,
   meta: SessionMeta,
   history: HistorySignal[],
-  metaByTemplate: Map<string, SessionMeta>
+  metaByTemplate: Map<string, SessionMeta>,
+  plannedDateOverride?: Date | null
 ): Readiness {
   const today = startOfDay(new Date());
-  const planned = normalizeSessionDate(session) ?? today;
-  const plannedStart = startOfDay(planned);
+  const plannedStart = startOfDay(plannedDateOverride ?? normalizeSessionDate(session) ?? today);
   const targetMuscles = new Set(meta.allMuscleKeys);
 
   let latestConflict: {
@@ -298,9 +316,9 @@ function readinessForSession(
   }
 
   let recoveryDays = 0;
-  let detail = "Logged recovery window is clear.";
   let tone: Readiness["tone"] = plannedStart.getTime() > today.getTime() ? "soon" : "ready";
   let label = plannedStart.getTime() > today.getTime() ? "ON SCHEDULE" : "READY TO TRAIN";
+  let detail = "";
 
   if (latestConflict) {
     const hard = latestConflict.history.postDifficulty === "too_hard";
@@ -312,26 +330,24 @@ function readinessForSession(
       recoveryDays = Math.max(1, 3 - Math.floor(days));
       tone = "recovering";
       label = "RECOVERY CHECK";
-      detail = "Recent overlapping work logged a high pain rating.";
     } else if ((pain >= 3 || hard) && overlap >= 2 && days < 2) {
       recoveryDays = Math.max(1, 2 - Math.floor(days));
       tone = "recovering";
       label = "RECOVERING";
-      detail = "Recent overlapping muscles logged higher stress.";
     } else if (overlap >= 2 && days < 1) {
       recoveryDays = 1;
       tone = "monitor";
       label = "RECOVERY WINDOW";
-      detail = "This session heavily overlaps today’s trained muscles.";
     } else if (overlap === 1 && days < 1) {
+      recoveryDays = 1;
       tone = "monitor";
       label = "MONITOR RECOVERY";
-      detail = "Some muscle overlap exists with your latest session.";
     }
   }
 
-  const recoveryDate = recoveryDays > 0 ? addDays(today, recoveryDays) : plannedStart;
-  const recommendedDate = recoveryDate.getTime() > plannedStart.getTime() ? recoveryDate : plannedStart;
+  const recoveryDate = recoveryDays > 0 ? addDays(today, recoveryDays) : today;
+  const recommendedDate =
+    recoveryDate.getTime() > plannedStart.getTime() ? recoveryDate : plannedStart;
 
   if (recoveryDays === 0 && plannedStart.getTime() <= today.getTime()) {
     label = "READY TO TRAIN";
@@ -362,11 +378,20 @@ function MuscleStrip({ muscles, compact = false }: { muscles: MuscleFocus[]; com
 
 function ReadinessBadge({ readiness, compact = false }: { readiness: Readiness; compact?: boolean }) {
   return (
-    <div className={`tr-readiness tr-readiness--${readiness.tone} ${compact ? "is-compact" : ""}`}>
-      <span className="tr-readinessDot" aria-hidden />
-      <div>
+    <div
+      className={`tr-readinessStatus tr-readinessStatus--${readiness.tone} ${
+        compact ? "is-compact" : ""
+      }`}
+    >
+      <span className="tr-readinessAccent" aria-hidden />
+      <div className="tr-readinessCopy">
+        {!compact ? <span className="tr-readinessLabel">READINESS</span> : null}
         <strong>{readiness.label}</strong>
-        {!compact ? <span>{readiness.detail}</span> : null}
+        {!compact && readiness.recommendedDate ? (
+          <span className="tr-readinessDate">
+            Recommended {formatRecommendedDate(readiness.recommendedDate)}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -644,9 +669,6 @@ export function TodayPage() {
   const nextSessionId = (qd?.nextSession?.id as string | undefined) ?? null;
   const nextMeta = nextSessionId ? metaBySession.get(nextSessionId) ?? null : null;
   const nextLabelParts = splitLabel(nextLabel);
-  const nextReadiness = qd?.nextSession
-    ? readinessForSession(qd.nextSession, nextMeta ?? summarizeTemplate(null, new Map(), new Map(), new Map()), historySignals, metaByTemplate)
-    : null;
 
   const upcomingSessions = useMemo(() => {
     const nextId = qd?.nextSession?.id;
@@ -659,6 +681,63 @@ export function TodayPage() {
       })
       .slice(0, 7);
   }, [qd]);
+
+  const scheduleDateBySession = useMemo(() => {
+    const result = new Map<string, Date>();
+    const sessions = [qd?.nextSession, ...upcomingSessions].filter(Boolean) as any[];
+    if (!sessions.length) return result;
+
+    const today = startOfDay(new Date());
+    const firstStoredRaw = normalizeSessionDate(sessions[0]);
+    const firstStored = firstStoredRaw ? startOfDay(firstStoredRaw) : null;
+    const staleSchedule = !firstStored || firstStored.getTime() < today.getTime();
+
+    let previousEffective = staleSchedule ? today : firstStored ?? today;
+    let previousStored = firstStored;
+
+    if (sessions[0]?.id) result.set(sessions[0].id, previousEffective);
+
+    for (let index = 1; index < sessions.length; index += 1) {
+      const session = sessions[index];
+      const storedRaw = normalizeSessionDate(session);
+      const stored = storedRaw ? startOfDay(storedRaw) : null;
+      let effective: Date;
+
+      if (staleSchedule) {
+        let gap = 1;
+        if (stored && previousStored) {
+          gap = Math.max(1, Math.round(daysBetween(stored, previousStored)));
+        }
+        effective = addDays(previousEffective, gap);
+      } else {
+        effective = stored ?? addDays(previousEffective, 1);
+        if (effective.getTime() <= previousEffective.getTime()) {
+          effective = addDays(previousEffective, 1);
+        }
+      }
+
+      if (session?.id) result.set(session.id, effective);
+      previousEffective = effective;
+      previousStored = stored ?? previousStored;
+    }
+
+    return result;
+  }, [qd, upcomingSessions]);
+
+  const nextPlannedDate =
+    nextSessionId && scheduleDateBySession.has(nextSessionId)
+      ? scheduleDateBySession.get(nextSessionId) ?? null
+      : null;
+
+  const nextReadiness = qd?.nextSession
+    ? readinessForSession(
+        qd.nextSession,
+        nextMeta ?? summarizeTemplate(null, new Map(), new Map(), new Map()),
+        historySignals,
+        metaByTemplate,
+        nextPlannedDate
+      )
+    : null;
 
   const rotationLabels = useMemo(() => {
     const sessions = [qd?.nextSession, ...upcomingSessions].filter(Boolean).slice(0, 5);
@@ -685,7 +764,6 @@ export function TodayPage() {
     <div className="tr-trainingBoard">
       <div className="tr-trainingPageHead">
         <div className="tr-trainingSectionEyebrow">WORKOUTS</div>
-        <div className="tr-trainingPageHeadCopy">Training schedule • readiness • program rotation</div>
       </div>
 
       {err ? <div className="tr-trainingError">{err}</div> : null}
@@ -702,55 +780,63 @@ export function TodayPage() {
         <>
           <section className={`tr-nextHero ${activeSessionId ? "is-active" : ""}`}>
             <div className="tr-nextHeroTopline">
-              <div>
-                <div className="tr-trainingSectionEyebrow">
-                  {activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}
-                </div>
-                <div className="tr-nextHeroSequence">01</div>
+              <div className="tr-trainingSectionEyebrow">
+                {activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}
               </div>
 
               {!activeSessionId && nextReadiness ? (
                 <ReadinessBadge readiness={nextReadiness} />
               ) : (
-                <div className="tr-readiness tr-readiness--ready">
-                  <span className="tr-readinessDot" />
-                  <div>
-                    <strong>IN PROGRESS</strong>
-                    <span>Your active workout is ready to resume.</span>
-                  </div>
-                </div>
+                <ReadinessBadge
+                  readiness={{
+                    tone: "ready",
+                    label: "IN PROGRESS",
+                    detail: "",
+                    recommendedDate: null,
+                  }}
+                />
               )}
             </div>
 
             <div className="tr-nextHeroBody">
               <div className="tr-nextHeroCopy">
-                <h1>{activeSessionId ? splitLabel(activeLabel ?? "Session").title : nextLabelParts.title}</h1>
-                <div className="tr-nextHeroProgram">
+                <h1>
                   {activeSessionId
-                    ? splitLabel(activeLabel ?? "Session").subtitle || "Current training session"
-                    : nextLabelParts.subtitle || nextMeta?.templateName || "Scheduled training session"}
-                </div>
+                    ? splitLabel(activeLabel ?? "Session").title
+                    : nextLabelParts.title}
+                </h1>
+
+                {(activeSessionId
+                  ? splitLabel(activeLabel ?? "Session").subtitle
+                  : nextLabelParts.subtitle || nextMeta?.templateName) ? (
+                  <div className="tr-nextHeroProgram">
+                    {activeSessionId
+                      ? splitLabel(activeLabel ?? "Session").subtitle
+                      : nextLabelParts.subtitle || nextMeta?.templateName}
+                  </div>
+                ) : null}
 
                 {!activeSessionId ? <MuscleStrip muscles={nextMeta?.muscles ?? []} /> : null}
               </div>
 
               {!activeSessionId ? (
-                <div className="tr-nextHeroMetrics">
+                <div className="tr-nextHeroMetrics" aria-label="Next workout details">
                   <div className="tr-nextMetric">
-                    <span>PLANNED</span>
-                    <strong>{formatScheduleDate(qd?.nextSession?.date, true)}</strong>
+                    <strong>{formatTimelineDate(nextPlannedDate)}</strong>
                   </div>
                   <div className="tr-nextMetric">
-                    <span>EXERCISES</span>
-                    <strong>{nextMeta?.exerciseCount || "—"}</strong>
+                    <strong>
+                      {nextMeta?.exerciseCount
+                        ? `${nextMeta.exerciseCount} EXERCISES`
+                        : "EXERCISES —"}
+                    </strong>
                   </div>
                   <div className="tr-nextMetric">
-                    <span>EST. TIME</span>
-                    <strong>{nextMeta?.estimatedMinutes ? `~${nextMeta.estimatedMinutes} min` : "—"}</strong>
-                  </div>
-                  <div className="tr-nextMetric">
-                    <span>RECOMMENDED</span>
-                    <strong>{formatRecommendedDate(nextReadiness?.recommendedDate ?? null)}</strong>
+                    <strong>
+                      {nextMeta?.estimatedMinutes
+                        ? `~${nextMeta.estimatedMinutes} MIN`
+                        : "TIME —"}
+                    </strong>
                   </div>
                 </div>
               ) : null}
@@ -778,15 +864,10 @@ export function TodayPage() {
 
           <section className="tr-upcomingBoard">
             <div className="tr-upcomingHeader">
-              <div>
-                <div className="tr-trainingSectionEyebrow">UPCOMING TRAINING</div>
-                <h2>Your next 7 sessions</h2>
-                <p>Seven sessions ahead in your current program rotation.</p>
-              </div>
+              <div className="tr-trainingSectionEyebrow">UPCOMING TRAINING</div>
 
               {rotationLabels.length ? (
                 <div className="tr-rotationStrip" aria-label="Program rotation">
-                  <span>PROGRAM ROTATION</span>
                   <div>
                     {rotationLabels.map((label, index) => (
                       <span key={`${label}-${index}`}>
@@ -812,17 +893,19 @@ export function TodayPage() {
                   });
                   const parts = splitLabel(label);
                   const meta = metaBySession.get(session.id) ?? null;
+                  const plannedDate =
+                    scheduleDateBySession.get(session.id) ?? normalizeSessionDate(session);
                   const readiness = readinessForSession(
                     session,
                     meta ?? summarizeTemplate(null, new Map(), new Map(), new Map()),
                     historySignals,
-                    metaByTemplate
+                    metaByTemplate,
+                    plannedDate
                   );
 
                   return (
                     <article key={session.id} className={`tr-trainingTimelineRow is-${readiness.tone}`}>
                       <div className="tr-timelineRail" aria-hidden>
-                        <span className="tr-timelineNumber">{String(index + 2).padStart(2, "0")}</span>
                         <span className="tr-timelineNode" />
                         {index < upcomingSessions.length - 1 ? <span className="tr-timelineLine" /> : null}
                       </div>
@@ -830,26 +913,36 @@ export function TodayPage() {
                       <div className="tr-sessionCard">
                         <div className="tr-sessionPrimary">
                           <div className="tr-sessionTitleRow">
-                            <div>
+                            <div className="tr-sessionTitleCopy">
                               <h3>{parts.title}</h3>
-                              <p>{parts.subtitle || meta?.templateName || "Training session"}</p>
+                              {(parts.subtitle || meta?.templateName) ? (
+                                <p>{parts.subtitle || meta?.templateName}</p>
+                              ) : null}
                             </div>
-                            <div className="tr-sessionDate">{formatScheduleDate(session.date)}</div>
+                            <div className="tr-sessionDate">{formatTimelineDate(plannedDate)}</div>
                           </div>
 
                           <MuscleStrip muscles={meta?.muscles ?? []} compact />
 
                           <div className="tr-sessionMeta">
-                            <span>{meta?.exerciseCount || "—"} exercises</span>
+                            <span>
+                              {meta?.exerciseCount ? `${meta.exerciseCount} exercises` : "Exercises —"}
+                            </span>
                             <i aria-hidden>•</i>
-                            <span>{meta?.estimatedMinutes ? `~${meta.estimatedMinutes} min` : "Duration not set"}</span>
-                            <i aria-hidden>•</i>
-                            <span>Recommended {formatRecommendedDate(readiness.recommendedDate)}</span>
+                            <span>
+                              {meta?.estimatedMinutes ? `~${meta.estimatedMinutes} min` : "Time —"}
+                            </span>
                           </div>
                         </div>
 
                         <div className="tr-sessionRight">
-                          <ReadinessBadge readiness={readiness} compact />
+                          <div className="tr-sessionReadiness">
+                            <ReadinessBadge readiness={readiness} compact />
+                            <span>
+                              Recommended {formatRecommendedDate(readiness.recommendedDate)}
+                            </span>
+                          </div>
+
                           <div className="tr-sessionActions">
                             <button
                               className="tr-scheduleBtn tr-scheduleBtn--rowStart"
@@ -871,12 +964,8 @@ export function TodayPage() {
                 })}
               </div>
             ) : (
-              <div className="tr-upcomingLoading">No queued sessions returned for the active program.</div>
+              <div className="tr-upcomingLoading">No upcoming sessions.</div>
             )}
-
-            <div className="tr-readinessFootnote">
-              Readiness uses your logged muscle overlap, recent session difficulty, pain ratings, and time between completed workouts. Planned dates remain your schedule.
-            </div>
           </section>
         </>
       ) : null}
@@ -893,56 +982,18 @@ export function TodayPage() {
         .tr-trainingBoard{
           display:grid;
           gap:16px;
-          padding-bottom:18px;
+          min-width:0;
+          padding-bottom:28px;
         }
+
         .tr-trainingPageHead{
           display:flex;
-          align-items:end;
-          justify-content:space-between;
-          gap:12px;
+          align-items:center;
+          justify-content:flex-start;
+          min-width:0;
           padding:0 2px 2px;
         }
-        .tr-trainingPageHeadCopy{
-          color:rgba(206,220,232,.43);
-          font-size:10px;
-          font-weight:850;
-          letter-spacing:.06em;
-          text-transform:uppercase;
-        }
-        .tr-trainingError,
-        .tr-trainingEmpty,
-        .tr-nextHero,
-        .tr-upcomingBoard{
-          border:1px solid rgba(255,255,255,.095);
-          background:
-            radial-gradient(circle at 88% 0%, rgba(0,170,255,.08), transparent 34%),
-            linear-gradient(145deg, rgba(18,24,34,.98), rgba(8,12,19,.995));
-          border-radius:20px;
-          box-shadow:
-            0 24px 70px rgba(0,0,0,.34),
-            inset 0 1px 0 rgba(255,255,255,.035);
-        }
-        .tr-trainingError{
-          padding:14px 16px;
-          border-color:rgba(255,80,80,.3);
-          background:rgba(255,80,80,.08);
-          font-weight:850;
-        }
-        .tr-trainingEmpty{
-          padding:24px;
-        }
-        .tr-trainingEmpty h2,
-        .tr-upcomingHeader h2{
-          margin:5px 0 0;
-          font-size:clamp(22px,2vw,30px);
-          letter-spacing:-.03em;
-        }
-        .tr-trainingEmpty p,
-        .tr-upcomingHeader p{
-          margin:6px 0 0;
-          color:rgba(224,234,244,.64);
-          line-height:1.45;
-        }
+
         .tr-trainingSectionEyebrow{
           color:#67d4ff;
           font-size:12px;
@@ -951,425 +1002,518 @@ export function TodayPage() {
           letter-spacing:.16em;
         }
 
+        .tr-trainingError,
+        .tr-trainingEmpty,
+        .tr-nextHero,
+        .tr-upcomingBoard{
+          min-width:0;
+          border:1px solid rgba(255,255,255,.09);
+          background:
+            radial-gradient(circle at 88% -8%, rgba(0,170,255,.08), transparent 32%),
+            linear-gradient(145deg, rgba(17,23,33,.99), rgba(7,11,17,.995));
+          border-radius:20px;
+          box-shadow:
+            0 24px 70px rgba(0,0,0,.34),
+            inset 0 1px 0 rgba(255,255,255,.035);
+        }
+
+        .tr-trainingError{
+          padding:14px 16px;
+          border-color:rgba(255,80,80,.3);
+          background:rgba(255,80,80,.08);
+          font-weight:850;
+        }
+
+        .tr-trainingEmpty{
+          padding:24px;
+        }
+
+        .tr-trainingEmpty h2{
+          margin:6px 0 0;
+          color:#f5f9fc;
+          font-size:clamp(22px,2vw,30px);
+          letter-spacing:-.03em;
+        }
+
+        .tr-trainingEmpty p{
+          margin:7px 0 0;
+          color:rgba(224,234,244,.64);
+          line-height:1.45;
+        }
+
+        /* NEXT WORKOUT HERO */
         .tr-nextHero{
           position:relative;
           overflow:hidden;
-          padding:22px;
-          border-color:rgba(0,170,255,.27);
+          padding:24px;
+          border-color:rgba(49,190,246,.27);
+          background:
+            radial-gradient(circle at 84% 8%, rgba(50,193,247,.09), transparent 30%),
+            linear-gradient(135deg, rgba(20,29,41,.995), rgba(8,12,19,.995) 60%, rgba(6,10,16,.995));
           box-shadow:
-            0 30px 85px rgba(0,0,0,.42),
-            0 0 0 1px rgba(0,170,255,.055) inset,
-            inset 0 1px 0 rgba(255,255,255,.05);
+            0 30px 90px rgba(0,0,0,.42),
+            inset 0 1px 0 rgba(255,255,255,.05),
+            inset 0 0 0 1px rgba(70,199,248,.025);
         }
+
         .tr-nextHero::before{
           content:"";
           position:absolute;
           inset:0 auto 0 0;
           width:3px;
-          background:linear-gradient(180deg,#63d9ff,#138fd8 56%,rgba(19,143,216,.08));
-          box-shadow:0 0 24px rgba(0,170,255,.28);
+          background:linear-gradient(180deg,#78e3ff 0%,#1aa9ef 58%,rgba(26,169,239,.05) 100%);
+          box-shadow:0 0 20px rgba(47,188,245,.2);
         }
+
         .tr-nextHero::after{
           content:"";
           position:absolute;
-          width:300px;
-          height:300px;
-          right:-130px;
-          top:-170px;
-          border-radius:50%;
-          background:rgba(0,170,255,.07);
-          filter:blur(20px);
+          left:24px;
+          right:24px;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,rgba(112,223,255,.42),rgba(112,223,255,.08),transparent 72%);
           pointer-events:none;
         }
+
         .tr-nextHero.is-active::before{
-          background:linear-gradient(180deg,#48e18d,#17a85f 60%,rgba(23,168,95,.08));
+          background:linear-gradient(180deg,#63e6a0,#1db66c 60%,rgba(29,182,108,.05));
         }
+
         .tr-nextHeroTopline,
         .tr-nextHeroBody,
         .tr-nextHeroActions{
           position:relative;
           z-index:1;
+          min-width:0;
         }
+
         .tr-nextHeroTopline{
           display:flex;
           align-items:flex-start;
           justify-content:space-between;
-          gap:16px;
+          gap:20px;
         }
-        .tr-nextHeroSequence{
-          margin-top:9px;
-          color:rgba(255,255,255,.22);
-          font-size:12px;
-          font-weight:1000;
-          letter-spacing:.2em;
-        }
+
         .tr-nextHeroBody{
           display:grid;
-          grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);
-          gap:26px;
-          align-items:end;
+          gap:22px;
           margin-top:24px;
         }
+
+        .tr-nextHeroCopy{
+          min-width:0;
+        }
+
         .tr-nextHeroCopy h1{
           margin:0;
-          font-size:clamp(32px,4.5vw,58px);
+          color:#f7fbff;
+          font-size:clamp(34px,4.4vw,58px);
           line-height:.98;
           letter-spacing:-.045em;
           font-weight:1000;
-          color:#f6fbff;
-          text-shadow:0 8px 30px rgba(0,0,0,.42);
+          overflow-wrap:anywhere;
+          text-shadow:0 8px 26px rgba(0,0,0,.34);
         }
+
         .tr-nextHeroProgram{
           margin-top:9px;
-          color:rgba(228,238,248,.72);
+          color:rgba(226,237,247,.72);
           font-size:15px;
           font-weight:850;
           letter-spacing:.02em;
-        }
-        .tr-nextHeroMetrics{
-          display:grid;
-          grid-template-columns:repeat(2,minmax(0,1fr));
-          gap:9px;
-        }
-        .tr-nextMetric{
-          min-height:74px;
-          padding:13px 14px;
-          border:1px solid rgba(255,255,255,.075);
-          border-radius:14px;
-          background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
-        }
-        .tr-nextMetric span{
-          display:block;
-          color:rgba(188,204,218,.56);
-          font-size:10px;
-          font-weight:1000;
-          letter-spacing:.13em;
-        }
-        .tr-nextMetric strong{
-          display:block;
-          margin-top:7px;
-          color:#f4f9fd;
-          font-size:15px;
-          line-height:1.2;
-          font-weight:950;
-        }
-        .tr-nextHeroActions{
-          display:grid;
-          grid-template-columns:minmax(0,1fr) 148px;
-          gap:10px;
-          margin-top:20px;
         }
 
         .tr-scheduleMuscles{
           display:flex;
           flex-wrap:wrap;
-          gap:9px;
-          margin-top:18px;
+          gap:10px 18px;
+          min-width:0;
+          margin-top:20px;
         }
+
         .tr-scheduleMuscle{
           display:flex;
           align-items:center;
-          gap:8px;
-          min-height:38px;
-          padding:6px 11px 6px 7px;
-          border:1px solid rgba(0,170,255,.16);
-          border-radius:12px;
-          background:rgba(0,170,255,.055);
-          color:rgba(240,248,255,.88);
+          gap:9px;
+          min-width:0;
+          color:rgba(244,250,255,.9);
           font-size:11px;
           font-weight:950;
-          letter-spacing:.045em;
+          letter-spacing:.06em;
           text-transform:uppercase;
         }
+
         .tr-scheduleMuscleIcon{
-          width:26px;
-          height:26px;
+          width:34px;
+          height:34px;
+          flex:0 0 34px;
           display:grid;
           place-items:center;
-          border-radius:8px;
-          background:rgba(0,170,255,.09);
-          box-shadow:inset 0 0 0 1px rgba(0,170,255,.09);
+          border:1px solid rgba(71,200,247,.16);
+          border-radius:10px;
+          background:
+            linear-gradient(180deg,rgba(60,193,244,.09),rgba(255,255,255,.015));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.035),
+            0 8px 18px rgba(0,0,0,.18);
         }
+
         .tr-scheduleMuscleIcon img{
-          width:21px;
-          height:21px;
+          width:25px;
+          height:25px;
           object-fit:contain;
-          filter:drop-shadow(0 3px 8px rgba(0,170,255,.16));
+          filter:drop-shadow(0 4px 8px rgba(0,170,255,.14));
         }
+
         .tr-scheduleMuscles.is-compact{
+          gap:7px 13px;
           margin-top:11px;
-          gap:7px;
         }
+
         .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
-          min-height:32px;
-          padding:4px 9px 4px 5px;
-          font-size:10px;
-          border-color:rgba(255,255,255,.075);
-          background:rgba(255,255,255,.025);
+          font-size:9.5px;
+          letter-spacing:.045em;
+          color:rgba(227,237,245,.72);
         }
+
         .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon{
-          width:22px;
-          height:22px;
-          background:rgba(0,170,255,.055);
+          width:24px;
+          height:24px;
+          flex-basis:24px;
+          border:0;
+          border-radius:7px;
+          background:rgba(42,180,235,.055);
+          box-shadow:none;
         }
+
         .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon img{
-          width:18px;
-          height:18px;
+          width:19px;
+          height:19px;
         }
+
         .tr-scheduleNoMuscles{
           margin-top:14px;
           color:rgba(207,220,233,.48);
-          font-size:12px;
+          font-size:11px;
           font-weight:750;
         }
 
-        .tr-readiness{
+        .tr-readinessStatus{
+          position:relative;
           display:flex;
-          align-items:flex-start;
-          gap:9px;
-          min-width:220px;
-          max-width:330px;
-          padding:10px 12px;
-          border-radius:13px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.025);
+          align-items:stretch;
+          gap:10px;
+          min-width:190px;
+          max-width:320px;
+          padding:2px 0 2px 11px;
         }
-        .tr-readinessDot{
-          width:8px;
-          height:8px;
-          flex:0 0 8px;
-          margin-top:4px;
-          border-radius:50%;
-          background:#69d6ff;
-          box-shadow:0 0 14px rgba(105,214,255,.48);
+
+        .tr-readinessAccent{
+          position:absolute;
+          inset:1px auto 1px 0;
+          width:2px;
+          border-radius:2px;
+          background:#5ed3ff;
+          box-shadow:0 0 12px rgba(94,211,255,.28);
         }
-        .tr-readiness strong{
+
+        .tr-readinessCopy{
+          min-width:0;
+        }
+
+        .tr-readinessLabel{
           display:block;
-          color:#dff6ff;
-          font-size:10px;
-          letter-spacing:.11em;
+          color:rgba(194,209,222,.42);
+          font-size:9px;
           font-weight:1000;
+          letter-spacing:.15em;
         }
-        .tr-readiness span:not(.tr-readinessDot){
+
+        .tr-readinessStatus strong{
           display:block;
           margin-top:4px;
-          color:rgba(220,232,242,.58);
+          color:#a9e8ff;
           font-size:11px;
-          line-height:1.35;
-          font-weight:750;
+          line-height:1.1;
+          font-weight:1000;
+          letter-spacing:.08em;
         }
-        .tr-readiness--ready{
-          border-color:rgba(58,220,131,.19);
-          background:rgba(58,220,131,.055);
+
+        .tr-readinessDate{
+          display:block;
+          margin-top:5px;
+          color:rgba(217,229,239,.55);
+          font-size:10px;
+          line-height:1.25;
+          font-weight:800;
         }
-        .tr-readiness--ready .tr-readinessDot{
-          background:#44dd88;
-          box-shadow:0 0 15px rgba(68,221,136,.44);
+
+        .tr-readinessStatus--ready .tr-readinessAccent{
+          background:#50df91;
+          box-shadow:0 0 12px rgba(80,223,145,.28);
         }
-        .tr-readiness--ready strong{ color:#8df2bb; }
-        .tr-readiness--soon,
-        .tr-readiness--monitor{
-          border-color:rgba(224,181,92,.2);
-          background:rgba(224,181,92,.045);
+        .tr-readinessStatus--ready strong{ color:#8ef0b8; }
+
+        .tr-readinessStatus--soon .tr-readinessAccent,
+        .tr-readinessStatus--monitor .tr-readinessAccent{
+          background:#dcb86e;
+          box-shadow:0 0 12px rgba(220,184,110,.22);
         }
-        .tr-readiness--soon .tr-readinessDot,
-        .tr-readiness--monitor .tr-readinessDot{
-          background:#e1bc72;
-          box-shadow:0 0 14px rgba(225,188,114,.35);
+        .tr-readinessStatus--soon strong,
+        .tr-readinessStatus--monitor strong{ color:#efd09a; }
+
+        .tr-readinessStatus--recovering .tr-readinessAccent{
+          background:#efa54a;
+          box-shadow:0 0 12px rgba(239,165,74,.24);
         }
-        .tr-readiness--soon strong,
-        .tr-readiness--monitor strong{ color:#f1d39a; }
-        .tr-readiness--recovering{
-          border-color:rgba(240,166,64,.23);
-          background:rgba(240,166,64,.055);
-        }
-        .tr-readiness--recovering .tr-readinessDot{
-          background:#f0a640;
-          box-shadow:0 0 14px rgba(240,166,64,.35);
-        }
-        .tr-readiness--recovering strong{ color:#ffc46f; }
-        .tr-readiness.is-compact{
+        .tr-readinessStatus--recovering strong{ color:#ffc476; }
+
+        .tr-readinessStatus.is-compact{
           min-width:0;
           max-width:none;
-          padding:7px 9px;
-          border-radius:10px;
-          white-space:nowrap;
+          padding-left:9px;
         }
-        .tr-readiness.is-compact .tr-readinessDot{ margin-top:2px; }
+
+        .tr-readinessStatus.is-compact strong{
+          margin-top:0;
+          font-size:9px;
+          white-space:normal;
+        }
+
+        .tr-nextHeroMetrics{
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          min-width:0;
+          border-top:1px solid rgba(255,255,255,.07);
+          border-bottom:1px solid rgba(255,255,255,.055);
+        }
+
+        .tr-nextMetric{
+          position:relative;
+          min-width:0;
+          padding:15px 16px;
+          text-align:center;
+        }
+
+        .tr-nextMetric + .tr-nextMetric::before{
+          content:"";
+          position:absolute;
+          left:0;
+          top:12px;
+          bottom:12px;
+          width:1px;
+          background:rgba(255,255,255,.065);
+        }
+
+        .tr-nextMetric strong{
+          display:block;
+          color:#f4f9fd;
+          font-size:13px;
+          line-height:1.18;
+          font-weight:1000;
+          letter-spacing:.035em;
+          white-space:normal;
+        }
+
+        .tr-nextHeroActions{
+          display:grid;
+          grid-template-columns:minmax(0,1fr) 138px;
+          gap:10px;
+          margin-top:18px;
+        }
 
         .tr-scheduleBtn{
           appearance:none;
-          border:0;
-          border-radius:13px;
+          min-width:0;
           min-height:48px;
           padding:0 18px;
+          border:1px solid transparent;
+          border-radius:12px;
           cursor:pointer;
           font:inherit;
-          font-size:12px;
+          font-size:11px;
           font-weight:1000;
           letter-spacing:.055em;
-          transition:transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
-        }
-        .tr-scheduleBtn:hover{ transform:translateY(-1px); }
-        .tr-scheduleBtn:active{ transform:translateY(0) scale(.99); }
-        .tr-scheduleBtn:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
-        .tr-scheduleBtn--primary{
-          color:#061019;
-          background:linear-gradient(180deg,#67ddff,#29a9ef);
-          box-shadow:
-            0 14px 32px rgba(0,170,255,.18),
-            inset 0 1px 0 rgba(255,255,255,.42);
-        }
-        .tr-scheduleBtn--edit,
-        .tr-scheduleBtn--rowEdit{
-          color:#c9eefe;
-          border:1px solid rgba(0,170,255,.24);
-          background:rgba(0,170,255,.055);
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
-        }
-        .tr-scheduleBtn--rowStart{
-          min-height:40px;
-          color:#dff7ff;
-          border:1px solid rgba(0,170,255,.23);
-          background:linear-gradient(180deg,rgba(0,170,255,.14),rgba(0,170,255,.065));
-          box-shadow:0 10px 25px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.03);
-        }
-        .tr-scheduleBtn--rowEdit{
-          min-height:40px;
-          color:rgba(211,225,236,.72);
-          border-color:rgba(255,255,255,.08);
-          background:rgba(255,255,255,.025);
+          transition:
+            transform .16s ease,
+            border-color .16s ease,
+            box-shadow .16s ease,
+            background .16s ease;
         }
 
-        .tr-upcomingBoard{
-          padding:20px;
+        .tr-scheduleBtn:hover{ transform:translateY(-1px); }
+        .tr-scheduleBtn:active{ transform:translateY(0) scale(.99); }
+        .tr-scheduleBtn:disabled{
+          opacity:.45;
+          cursor:not-allowed;
+          transform:none;
         }
+
+        .tr-scheduleBtn--primary{
+          color:#061019;
+          background:linear-gradient(180deg,#6be0ff,#28a9ef);
+          box-shadow:
+            0 15px 34px rgba(0,170,255,.18),
+            inset 0 1px 0 rgba(255,255,255,.42);
+        }
+
+        .tr-scheduleBtn--edit,
+        .tr-scheduleBtn--rowEdit{
+          color:rgba(237,246,253,.82);
+          border-color:rgba(119,195,230,.16);
+          background:linear-gradient(180deg,rgba(255,255,255,.042),rgba(255,255,255,.018));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+        }
+
+        .tr-scheduleBtn--rowStart{
+          color:#061019;
+          background:linear-gradient(180deg,#5bd7ff,#239fe3);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.36);
+        }
+
+        /* UPCOMING TRAINING */
+        .tr-upcomingBoard{
+          padding:20px 20px 18px;
+        }
+
         .tr-upcomingHeader{
           display:flex;
-          align-items:flex-end;
+          align-items:center;
           justify-content:space-between;
-          gap:20px;
-          padding-bottom:16px;
+          gap:18px;
+          min-width:0;
+          padding-bottom:13px;
           border-bottom:1px solid rgba(255,255,255,.06);
         }
+
         .tr-rotationStrip{
-          max-width:520px;
-          text-align:right;
+          min-width:0;
+          max-width:620px;
         }
-        .tr-rotationStrip > span{
-          display:block;
-          color:rgba(187,204,219,.42);
-          font-size:9px;
-          font-weight:1000;
-          letter-spacing:.14em;
-        }
+
         .tr-rotationStrip > div{
           display:flex;
           align-items:center;
           justify-content:flex-end;
           flex-wrap:wrap;
           gap:6px;
-          margin-top:6px;
+          min-width:0;
         }
+
         .tr-rotationStrip > div > span{
           display:flex;
           align-items:center;
           gap:6px;
-          color:rgba(231,240,247,.69);
-          font-size:10px;
+          min-width:0;
+          color:rgba(213,226,237,.55);
+          font-size:9px;
           font-weight:900;
+          letter-spacing:.035em;
           text-transform:uppercase;
         }
+
         .tr-rotationStrip b{
-          color:#4cc8fb;
-          font-size:15px;
+          color:#49c9fb;
+          font-size:14px;
           line-height:1;
+          font-weight:900;
         }
+
         .tr-upcomingLoading{
-          padding:22px 2px 4px;
-          color:rgba(214,227,238,.58);
+          padding:20px 2px 4px;
+          color:rgba(214,227,238,.56);
           font-weight:800;
         }
+
         .tr-trainingTimeline{
           display:grid;
-          margin-top:12px;
+          margin-top:10px;
         }
+
         .tr-trainingTimelineRow{
           display:grid;
-          grid-template-columns:62px minmax(0,1fr);
-          min-height:124px;
+          grid-template-columns:28px minmax(0,1fr);
+          min-width:0;
+          min-height:116px;
         }
+
         .tr-timelineRail{
           position:relative;
           display:flex;
           justify-content:center;
         }
-        .tr-timelineNumber{
-          position:absolute;
-          top:23px;
-          left:0;
-          width:29px;
-          color:rgba(220,234,245,.38);
-          font-size:11px;
-          font-weight:1000;
-          letter-spacing:.12em;
-        }
+
         .tr-timelineNode{
           position:absolute;
-          top:27px;
-          left:39px;
+          top:28px;
+          left:8px;
           width:9px;
           height:9px;
           border-radius:50%;
           border:2px solid #48c9ff;
           background:#0d141d;
-          box-shadow:0 0 14px rgba(72,201,255,.25);
+          box-shadow:0 0 12px rgba(72,201,255,.22);
           z-index:2;
         }
+
         .tr-trainingTimelineRow.is-soon .tr-timelineNode,
         .tr-trainingTimelineRow.is-monitor .tr-timelineNode{
-          border-color:#e1bc72;
-          box-shadow:0 0 14px rgba(225,188,114,.2);
+          border-color:#dbb86f;
+          box-shadow:0 0 12px rgba(219,184,111,.18);
         }
+
         .tr-trainingTimelineRow.is-recovering .tr-timelineNode{
-          border-color:#f0a640;
-          box-shadow:0 0 14px rgba(240,166,64,.22);
+          border-color:#efa54a;
+          box-shadow:0 0 12px rgba(239,165,74,.2);
         }
+
         .tr-timelineLine{
           position:absolute;
-          top:36px;
-          bottom:-25px;
-          left:43px;
+          top:37px;
+          bottom:-23px;
+          left:12px;
           width:1px;
-          background:linear-gradient(180deg,rgba(72,201,255,.22),rgba(255,255,255,.055));
+          background:linear-gradient(180deg,rgba(72,201,255,.2),rgba(255,255,255,.045));
         }
+
         .tr-sessionCard{
           display:grid;
-          grid-template-columns:minmax(0,1fr) auto;
+          grid-template-columns:minmax(0,1fr) minmax(220px,auto);
           gap:18px;
           align-items:center;
+          min-width:0;
           margin:5px 0 10px;
           padding:16px 17px;
-          border:1px solid rgba(255,255,255,.065);
+          border:1px solid rgba(255,255,255,.06);
           border-radius:15px;
           background:
-            linear-gradient(105deg,rgba(255,255,255,.032),rgba(255,255,255,.012));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+            linear-gradient(105deg,rgba(255,255,255,.028),rgba(255,255,255,.01));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.022),
+            0 12px 30px rgba(0,0,0,.12);
           transition:border-color .16s ease, transform .16s ease, background .16s ease;
         }
+
         .tr-sessionCard:hover{
           transform:translateY(-1px);
-          border-color:rgba(0,170,255,.17);
-          background:linear-gradient(105deg,rgba(0,170,255,.04),rgba(255,255,255,.012));
+          border-color:rgba(0,170,255,.16);
+          background:linear-gradient(105deg,rgba(0,170,255,.035),rgba(255,255,255,.012));
         }
-        .tr-sessionPrimary{ min-width:0; }
+
+        .tr-sessionPrimary,
+        .tr-sessionTitleCopy{
+          min-width:0;
+        }
+
         .tr-sessionTitleRow{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:16px;
+          display:grid;
+          grid-template-columns:minmax(0,1fr) auto;
+          align-items:start;
+          gap:14px;
+          min-width:0;
         }
+
         .tr-sessionTitleRow h3{
           margin:0;
           color:#f5f9fc;
@@ -1377,21 +1521,26 @@ export function TodayPage() {
           line-height:1.08;
           letter-spacing:-.015em;
           font-weight:1000;
+          overflow-wrap:anywhere;
         }
+
         .tr-sessionTitleRow p{
           margin:4px 0 0;
           color:rgba(208,222,233,.55);
-          font-size:11px;
+          font-size:10.5px;
           font-weight:800;
         }
+
         .tr-sessionDate{
-          flex:0 0 auto;
           color:#cceeff;
-          font-size:11px;
+          font-size:10px;
+          line-height:1.2;
           font-weight:1000;
           letter-spacing:.06em;
           text-transform:uppercase;
+          white-space:nowrap;
         }
+
         .tr-sessionMeta{
           display:flex;
           align-items:center;
@@ -1402,221 +1551,316 @@ export function TodayPage() {
           font-size:10px;
           font-weight:850;
         }
+
         .tr-sessionMeta i{
-          color:rgba(93,204,247,.45);
+          color:rgba(93,204,247,.42);
           font-style:normal;
         }
+
         .tr-sessionRight{
           display:grid;
-          gap:9px;
-          min-width:238px;
+          gap:10px;
+          min-width:0;
         }
+
+        .tr-sessionReadiness{
+          display:grid;
+          gap:4px;
+          justify-items:start;
+        }
+
+        .tr-sessionReadiness > span{
+          color:rgba(208,221,232,.48);
+          font-size:9px;
+          line-height:1.25;
+          font-weight:800;
+        }
+
         .tr-sessionActions{
           display:grid;
-          grid-template-columns:minmax(0,1fr) 82px;
+          grid-template-columns:minmax(0,1fr) 78px;
           gap:8px;
+          min-width:0;
         }
-        .tr-readinessFootnote{
-          margin:11px 0 0 62px;
-          padding-top:12px;
-          border-top:1px solid rgba(255,255,255,.05);
-          color:rgba(188,205,220,.4);
-          font-size:9px;
-          line-height:1.45;
-          font-weight:700;
+
+        .tr-sessionActions .tr-scheduleBtn{
+          min-height:40px;
+          padding:0 12px;
+          font-size:9.5px;
         }
 
         @media (max-width:900px){
-          .tr-nextHeroBody{
-            grid-template-columns:1fr;
-            gap:18px;
+          .tr-nextHeroTopline{
+            gap:14px;
           }
+
           .tr-upcomingHeader{
             align-items:flex-start;
             flex-direction:column;
+            gap:9px;
           }
+
           .tr-rotationStrip{
+            width:100%;
             max-width:none;
-            text-align:left;
           }
-          .tr-rotationStrip > div{ justify-content:flex-start; }
+
+          .tr-rotationStrip > div{
+            justify-content:flex-start;
+          }
+
+          .tr-sessionCard{
+            grid-template-columns:minmax(0,1fr) 200px;
+          }
         }
 
         @media (max-width:680px){
-          .tr-trainingBoard{ gap:12px; }
-          .tr-trainingPageHead{
-            align-items:flex-start;
-            flex-direction:column;
-            gap:5px;
-            padding-left:2px;
+          .tr-trainingBoard{
+            gap:12px;
+            padding-bottom:110px;
           }
-          .tr-trainingPageHeadCopy{ font-size:8.5px; }
+
           .tr-nextHero,
           .tr-upcomingBoard{
+            width:100%;
+            max-width:100%;
+            box-sizing:border-box;
             border-radius:16px;
           }
+
           .tr-nextHero{
             padding:17px 14px 15px;
           }
+
+          .tr-nextHero::after{
+            left:14px;
+            right:14px;
+          }
+
           .tr-nextHeroTopline{
-            align-items:flex-start;
+            display:grid;
+            grid-template-columns:1fr;
+            gap:12px;
           }
-          .tr-nextHeroTopline .tr-readiness{
+
+          .tr-readinessStatus{
+            width:100%;
+            max-width:none;
             min-width:0;
-            width:auto;
-            max-width:55%;
-            padding:8px 9px;
           }
-          .tr-nextHeroTopline .tr-readiness span:not(.tr-readinessDot){
-            display:none;
+
+          .tr-nextHeroBody{
+            gap:16px;
+            margin-top:17px;
           }
-          .tr-nextHeroBody{ margin-top:17px; }
+
           .tr-nextHeroCopy h1{
-            font-size:clamp(31px,10.5vw,44px);
+            font-size:clamp(31px,10vw,42px);
+            line-height:1;
           }
+
           .tr-nextHeroProgram{
             margin-top:7px;
             font-size:12px;
           }
+
           .tr-scheduleMuscles{
             display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
-            gap:6px;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:7px;
             margin-top:14px;
           }
+
           .tr-scheduleMuscle{
-            justify-content:flex-start;
-            min-width:0;
-            min-height:36px;
-            padding:5px 6px;
+            width:100%;
+            gap:7px;
+            min-height:38px;
+            padding:5px 7px;
+            border:1px solid rgba(65,194,244,.11);
+            border-radius:10px;
+            background:rgba(45,184,239,.035);
             font-size:9px;
             overflow:hidden;
           }
+
           .tr-scheduleMuscleIcon{
-            width:24px;
-            height:24px;
-            flex:0 0 24px;
+            width:26px;
+            height:26px;
+            flex-basis:26px;
+            border-radius:8px;
           }
+
           .tr-scheduleMuscleIcon img{
-            width:19px;
-            height:19px;
+            width:20px;
+            height:20px;
           }
+
           .tr-nextHeroMetrics{
-            grid-template-columns:repeat(2,minmax(0,1fr));
-            gap:7px;
+            grid-template-columns:repeat(3,minmax(0,1fr));
           }
+
           .tr-nextMetric{
-            min-height:67px;
-            padding:11px;
-            border-radius:12px;
+            min-height:54px;
+            padding:13px 6px;
+            display:grid;
+            place-items:center;
           }
-          .tr-nextMetric strong{ font-size:13px; }
+
+          .tr-nextMetric + .tr-nextMetric::before{
+            top:10px;
+            bottom:10px;
+          }
+
+          .tr-nextMetric strong{
+            font-size:10px;
+            line-height:1.25;
+            letter-spacing:.025em;
+            overflow-wrap:anywhere;
+          }
+
           .tr-nextHeroActions{
-            grid-template-columns:minmax(0,1fr) 88px;
-            gap:8px;
+            grid-template-columns:1fr;
+            gap:7px;
             margin-top:14px;
           }
-          .tr-scheduleBtn{
+
+          .tr-nextHeroActions .tr-scheduleBtn{
+            width:100%;
             min-height:45px;
-            border-radius:11px;
-            padding:0 12px;
-            font-size:11px;
           }
 
           .tr-upcomingBoard{
             padding:16px 12px 15px;
           }
-          .tr-upcomingHeader h2{
-            font-size:23px;
+
+          .tr-upcomingHeader{
+            gap:8px;
           }
-          .tr-upcomingHeader p{
-            font-size:11px;
-          }
+
           .tr-rotationStrip{
-            width:100%;
-            overflow:hidden;
+            overflow:visible;
           }
+
           .tr-rotationStrip > div{
-            flex-wrap:nowrap;
-            overflow-x:auto;
-            scrollbar-width:none;
-            padding-bottom:2px;
+            flex-wrap:wrap;
+            overflow:visible;
+            gap:4px 6px;
           }
-          .tr-rotationStrip > div::-webkit-scrollbar{ display:none; }
-          .tr-rotationStrip > div > span{ flex:0 0 auto; }
+
+          .tr-rotationStrip > div > span{
+            flex:0 1 auto;
+            font-size:8px;
+            white-space:normal;
+          }
 
           .tr-trainingTimeline{
             gap:8px;
-            margin-top:12px;
+            margin-top:10px;
           }
+
           .tr-trainingTimelineRow{
             display:block;
             min-height:0;
           }
+
           .tr-timelineRail{
             display:none;
           }
+
           .tr-sessionCard{
             display:block;
+            width:100%;
+            max-width:100%;
+            min-width:0;
+            box-sizing:border-box;
             margin:0;
             padding:13px;
             border-radius:13px;
+            overflow:hidden;
           }
+
           .tr-sessionTitleRow{
-            gap:10px;
+            grid-template-columns:minmax(0,1fr) auto;
+            gap:8px;
           }
+
           .tr-sessionTitleRow h3{
             font-size:17px;
           }
+
           .tr-sessionTitleRow p{
-            font-size:10px;
+            font-size:9.5px;
           }
+
           .tr-sessionDate{
-            font-size:9px;
-            padding-top:2px;
+            max-width:92px;
+            font-size:8.5px;
+            text-align:right;
+            white-space:normal;
           }
+
           .tr-scheduleMuscles.is-compact{
             display:flex;
             flex-wrap:wrap;
+            gap:6px 10px;
             margin-top:9px;
           }
+
           .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
-            flex:0 0 auto;
             width:auto;
-            min-height:28px;
-            font-size:9px;
+            min-height:25px;
+            padding:0;
+            border:0;
+            background:transparent;
+            overflow:visible;
           }
+
+          .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon{
+            width:20px;
+            height:20px;
+            flex-basis:20px;
+            background:rgba(0,170,255,.05);
+          }
+
+          .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon img{
+            width:16px;
+            height:16px;
+          }
+
           .tr-sessionMeta{
             margin-top:8px;
             gap:5px;
             font-size:9px;
           }
+
           .tr-sessionRight{
-            display:grid;
-            grid-template-columns:minmax(0,1fr) auto;
-            align-items:center;
-            gap:8px;
+            display:block;
             min-width:0;
             margin-top:10px;
             padding-top:10px;
             border-top:1px solid rgba(255,255,255,.05);
           }
-          .tr-sessionRight .tr-readiness.is-compact{
-            justify-self:start;
+
+          .tr-sessionReadiness{
             min-width:0;
           }
-          .tr-sessionActions{
-            grid-template-columns:74px 60px;
-            gap:6px;
+
+          .tr-sessionReadiness > span{
+            margin-top:3px;
+            font-size:8.5px;
           }
+
+          .tr-sessionActions{
+            grid-template-columns:minmax(0,1fr) 72px;
+            gap:7px;
+            margin-top:9px;
+          }
+
           .tr-sessionActions .tr-scheduleBtn{
-            min-height:36px;
+            min-width:0;
+            min-height:38px;
             padding:0 8px;
             font-size:9px;
-          }
-          .tr-readinessFootnote{
-            margin:11px 0 0;
-            font-size:8.5px;
           }
         }
       `}</style>
