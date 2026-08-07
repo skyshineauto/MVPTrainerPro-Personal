@@ -360,6 +360,795 @@ const SHELL_GUARD_CSS = `
     line-height:12px!important;
   }
 }
+
+/* ============================================================
+   STEP 8B UI RESTORE
+   Restores the production command center/header styling while
+   keeping the Step 8 stability, polling and restart diagnostics.
+   ============================================================ */
+
+.tr-appHeader{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  margin:0 0 12px;
+  min-width:0;
+}
+
+.tr-topTitle{
+  position:relative;
+  display:inline-block;
+  min-width:0;
+  margin:0;
+  color:#ffe268;
+  font-size:24px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.02em;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,.88),
+    0 3px 8px rgba(0,0,0,.42),
+    0 0 18px rgba(255,200,52,.12);
+}
+
+.tr-appHeaderActions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.tr-appHeaderButton{
+  appearance:none;
+  min-height:38px;
+  padding:0 13px;
+  border-radius:11px;
+  border:1px solid rgba(255,255,255,.10);
+  color:rgba(241,247,250,.88);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.16)),
+    #0d141a;
+  box-shadow:
+    0 1px 1px rgba(0,0,0,.45),
+    0 4px 10px rgba(0,0,0,.18),
+    inset 0 1px 0 rgba(255,255,255,.045),
+    inset 0 -1px 0 rgba(0,0,0,.52);
+  font:inherit;
+  font-size:10px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.075em;
+  cursor:pointer;
+  transition:
+    transform .14s ease,
+    border-color .14s ease,
+    background .14s ease,
+    color .14s ease;
+}
+
+.tr-appHeaderButton:hover{
+  transform:translateY(-1px);
+  color:#fff;
+}
+
+.tr-appHeaderButton:active{
+  transform:translateY(1px);
+}
+
+.tr-appHeaderButton.is-music{
+  border-color:rgba(245,167,40,.30);
+  color:#ffe3b5;
+  background:
+    linear-gradient(180deg,rgba(255,186,72,.10),rgba(58,31,3,.18)),
+    #11120f;
+}
+
+.tr-appHeaderButton.is-alerts{
+  border-color:rgba(59,189,237,.28);
+  color:#bfeeff;
+  background:
+    linear-gradient(180deg,rgba(37,174,225,.10),rgba(2,42,58,.18)),
+    #0b1217;
+}
+
+.tr-appHeaderButton.is-signout{
+  color:rgba(231,237,240,.72);
+}
+
+.tr-appHeaderButton:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none;
+}
+
+.tr-commandMessage{
+  margin:10px 0 12px;
+  padding:10px 12px;
+  border:1px solid rgba(255,115,115,.22);
+  border-radius:11px;
+  color:#ffd8d8;
+  background:rgba(95,24,24,.20);
+  font-size:11px;
+  font-weight:850;
+}
+
+/* Command center shell */
+.tr-commandCenter{
+  position:relative;
+  isolation:isolate;
+  width:100%;
+  min-width:0;
+  overflow:hidden;
+  margin:12px 0 14px;
+  border:1px solid rgba(42,162,205,.28);
+  border-top-color:rgba(104,208,244,.34);
+  border-bottom-color:rgba(22,83,105,.28);
+  border-radius:18px;
+  background:
+    linear-gradient(180deg,rgba(17,34,45,.97),rgba(7,15,21,.99));
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.035),
+    0 4px 10px rgba(0,0,0,.30),
+    0 18px 42px rgba(0,0,0,.22),
+    inset 0 1px 0 rgba(255,255,255,.045),
+    inset 0 -1px 0 rgba(0,0,0,.65);
+}
+
+.tr-commandCenter::before{
+  content:"";
+  position:absolute;
+  z-index:0;
+  inset:0;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg,rgba(17,150,203,.08),transparent 20%),
+    linear-gradient(180deg,rgba(255,255,255,.018),transparent 16%);
+}
+
+.tr-commandCenter::after{
+  content:"";
+  position:absolute;
+  z-index:1;
+  left:22px;
+  right:22px;
+  top:0;
+  height:1px;
+  pointer-events:none;
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(175,230,250,.26) 18%,
+    rgba(96,192,227,.12) 68%,
+    transparent
+  );
+}
+
+.tr-commandCenter > *{
+  position:relative;
+  z-index:2;
+}
+
+.tr-commandCenter--large{
+  border-radius:19px;
+}
+
+.tr-commandCenter--compact{
+  margin-top:10px;
+}
+
+.tr-commandSectionLabel{
+  color:#6bd5f6;
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.17em;
+  text-transform:uppercase;
+}
+
+/* Inactive command center */
+.tr-commandInactive{
+  display:grid;
+  grid-template-columns:minmax(190px,.88fr) minmax(300px,1.34fr) minmax(190px,.88fr);
+  grid-template-areas:
+    "status clock action"
+    "metrics metrics metrics";
+  align-items:center;
+  gap:13px 15px;
+  padding:18px;
+}
+
+.tr-commandDateTime{
+  grid-area:clock;
+  min-width:0;
+  display:grid;
+  justify-items:center;
+  align-content:center;
+  gap:3px;
+  text-align:center;
+  padding:8px 12px;
+}
+
+.tr-commandDateTime > span{
+  max-width:100%;
+  color:#f2f6f8;
+  font-size:18px;
+  line-height:1.1;
+  font-weight:950;
+  letter-spacing:-.025em;
+  white-space:nowrap;
+}
+
+.tr-commandDateTime > strong{
+  color:#ffe16b;
+  font-size:34px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.045em;
+  font-variant-numeric:tabular-nums;
+  text-shadow:
+    0 2px 4px rgba(0,0,0,.38),
+    0 0 16px rgba(255,209,67,.09);
+}
+
+.tr-commandDateTime > small{
+  color:rgba(151,184,200,.45);
+  font-size:7px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.15em;
+}
+
+.tr-commandNextWorkout{
+  grid-area:status;
+  min-width:0;
+  display:grid;
+  align-content:center;
+  gap:5px;
+  padding:7px 8px 7px 2px;
+}
+
+.tr-commandNextWorkout > strong{
+  color:#72e7a5;
+  font-size:22px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.025em;
+}
+
+.tr-commandNextWorkout > span{
+  color:rgba(203,222,232,.58);
+  font-size:10px;
+  line-height:1.35;
+  font-weight:800;
+}
+
+.tr-commandMetricRail{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+  min-width:0;
+}
+
+.tr-commandMetricRail--inactive{
+  grid-area:metrics;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+
+.tr-commandMetricRail--inactive .tr-commandMetric.is-status{
+  display:none;
+}
+
+.tr-commandMetric{
+  position:relative;
+  min-width:0;
+  min-height:76px;
+  display:grid;
+  justify-items:center;
+  align-content:center;
+  gap:4px;
+  padding:10px 12px;
+  overflow:hidden;
+  border:1px solid rgba(120,188,212,.10);
+  border-top-color:rgba(168,219,237,.15);
+  border-bottom-color:rgba(24,52,64,.34);
+  border-radius:12px;
+  background:
+    linear-gradient(180deg,rgba(18,28,35,.92),rgba(8,14,19,.96));
+  box-shadow:
+    0 1px 1px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.028),
+    inset 0 -1px 0 rgba(0,0,0,.58);
+  text-align:center;
+}
+
+.tr-commandMetric > span{
+  color:rgba(139,173,189,.47);
+  font-size:7px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+
+.tr-commandMetric > strong{
+  color:#f2f6f8;
+  font-size:24px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.025em;
+  font-variant-numeric:tabular-nums;
+}
+
+.tr-commandMetric > small{
+  color:rgba(169,194,206,.44);
+  font-size:8px;
+  line-height:1.2;
+  font-weight:750;
+}
+
+.tr-commandActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.tr-commandActions--inactive{
+  grid-area:action;
+  justify-content:flex-end;
+}
+
+.tr-commandButton{
+  appearance:none;
+  min-height:45px;
+  min-width:0;
+  padding:0 18px;
+  border:1px solid rgba(100,196,229,.38);
+  border-top-color:rgba(151,222,247,.48);
+  border-bottom-color:rgba(13,68,89,.62);
+  border-radius:11px;
+  color:#f3fbff;
+  background:
+    linear-gradient(180deg,#17799f 0%,#0d607f 100%);
+  box-shadow:
+    0 1px 1px rgba(0,0,0,.40),
+    0 4px 9px rgba(0,0,0,.23),
+    inset 0 1px 0 rgba(255,255,255,.12),
+    inset 0 -2px 4px rgba(0,0,0,.18);
+  font:inherit;
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.08em;
+  cursor:pointer;
+  transition:
+    transform .14s ease,
+    border-color .14s ease,
+    background .14s ease;
+}
+
+.tr-commandButton:hover:not(:disabled){
+  transform:translateY(-1px);
+  background:linear-gradient(180deg,#1b84aa 0%,#126b8b 100%);
+}
+
+.tr-commandButton:active:not(:disabled){
+  transform:translateY(1px);
+}
+
+.tr-commandButton:disabled{
+  opacity:.42;
+  cursor:not-allowed;
+}
+
+.tr-commandButton.is-start{
+  width:100%;
+  max-width:185px;
+  min-height:48px;
+}
+
+.tr-commandButton.is-end{
+  border-color:rgba(220,88,88,.28);
+  color:#ffd2d2;
+  background:linear-gradient(180deg,rgba(113,36,36,.82),rgba(65,21,21,.84));
+}
+
+.tr-commandButton.is-pause,
+.tr-commandButton.is-return{
+  background:linear-gradient(180deg,#176b89,#0e5069);
+}
+
+.tr-commandButton.is-resume{
+  border-color:rgba(92,212,148,.33);
+  background:linear-gradient(180deg,#19724e,#10523a);
+}
+
+/* Active command center */
+.tr-commandActive{
+  display:grid;
+  gap:12px;
+  padding:16px 18px 17px;
+}
+
+.tr-commandActiveTopline{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding-bottom:10px;
+  border-bottom:1px solid rgba(124,191,216,.08);
+}
+
+.tr-commandLiveIdentity{
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+
+.tr-commandLiveDot{
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  flex:0 0 9px;
+}
+
+.tr-commandLiveDot.is-running{
+  background:#61e29d;
+  box-shadow:0 0 0 3px rgba(97,226,157,.07),0 0 11px rgba(97,226,157,.24);
+}
+
+.tr-commandLiveDot.is-paused{
+  background:#e8bd69;
+  box-shadow:0 0 0 3px rgba(232,189,105,.07),0 0 11px rgba(232,189,105,.20);
+}
+
+.tr-commandLiveIdentity > div{
+  display:grid;
+  gap:2px;
+}
+
+.tr-commandLiveIdentity span{
+  color:rgba(132,178,198,.52);
+  font-size:7px;
+  font-weight:1000;
+  letter-spacing:.15em;
+}
+
+.tr-commandLiveIdentity strong{
+  color:#eaf5f9;
+  font-size:13px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.08em;
+}
+
+.tr-commandRealClock{
+  display:flex;
+  align-items:baseline;
+  justify-content:flex-end;
+  gap:9px;
+  min-width:0;
+}
+
+.tr-commandRealClock span{
+  color:rgba(198,217,226,.62);
+  font-size:10px;
+  font-weight:850;
+  white-space:nowrap;
+}
+
+.tr-commandRealClock strong{
+  color:#f0d46b;
+  font-size:19px;
+  line-height:1;
+  font-weight:1000;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+
+.tr-commandActiveGrid{
+  display:grid;
+  grid-template-columns:minmax(235px,.74fr) minmax(0,1.26fr);
+  gap:11px;
+}
+
+.tr-commandChronograph,
+.tr-commandExercisePanel{
+  min-width:0;
+  border:1px solid rgba(116,189,215,.10);
+  border-top-color:rgba(168,220,239,.14);
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(16,27,35,.93),rgba(7,13,18,.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.025),
+    inset 0 -1px 0 rgba(0,0,0,.55);
+}
+
+.tr-commandChronograph{
+  display:grid;
+  align-content:center;
+  justify-items:center;
+  padding:13px;
+}
+
+.tr-commandChronographTime{
+  margin-top:5px;
+  color:#f7fbfd;
+  font-size:40px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.055em;
+  font-variant-numeric:tabular-nums;
+}
+
+.tr-commandChronographUnits{
+  width:min(190px,80%);
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  margin-top:4px;
+  color:rgba(129,168,185,.42);
+  font-size:6px;
+  font-weight:1000;
+  letter-spacing:.13em;
+  text-align:center;
+}
+
+.tr-commandExercisePanel{
+  padding:13px 14px;
+}
+
+.tr-commandExerciseHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  color:rgba(126,174,194,.49);
+  font-size:7px;
+  font-weight:1000;
+  letter-spacing:.13em;
+}
+
+.tr-commandExerciseHead strong{
+  color:#5fcdf2;
+}
+
+.tr-commandExerciseName{
+  margin-top:6px;
+  color:#f4f9fb;
+  font-size:23px;
+  line-height:1.05;
+  font-weight:1000;
+  letter-spacing:-.03em;
+}
+
+.tr-commandExerciseProgram{
+  margin-top:4px;
+  color:rgba(181,204,215,.49);
+  font-size:9px;
+  font-weight:800;
+}
+
+.tr-commandNextExercise{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px solid rgba(122,187,211,.08);
+}
+
+.tr-commandNextExercise span{
+  color:rgba(126,171,190,.46);
+  font-size:7px;
+  font-weight:1000;
+  letter-spacing:.13em;
+}
+
+.tr-commandNextExercise strong{
+  min-width:0;
+  color:rgba(225,237,243,.76);
+  font-size:11px;
+  font-weight:900;
+  text-align:right;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.tr-commandActions--active{
+  justify-content:flex-end;
+  flex-wrap:wrap;
+}
+
+/* Compact shell mode used away from main Workouts */
+.tr-commandCenter--compact .tr-commandInactive{
+  grid-template-columns:minmax(170px,.8fr) minmax(260px,1.2fr) minmax(150px,.7fr);
+  padding:13px 15px;
+  gap:10px 12px;
+}
+
+.tr-commandCenter--compact .tr-commandDateTime > span{
+  font-size:14px;
+}
+
+.tr-commandCenter--compact .tr-commandDateTime > strong{
+  font-size:27px;
+}
+
+.tr-commandCenter--compact .tr-commandMetric{
+  min-height:64px;
+}
+
+.tr-commandCenter--compact .tr-commandMetric > strong{
+  font-size:20px;
+}
+
+/* Mobile */
+@media(max-width:820px){
+  .tr-appHeader{
+    align-items:flex-start;
+  }
+
+  .tr-appHeaderActions{
+    gap:6px;
+  }
+
+  .tr-appHeaderButton{
+    min-height:34px;
+    padding:0 9px;
+    font-size:8px;
+  }
+
+  .tr-commandInactive{
+    grid-template-columns:1fr 1fr;
+    grid-template-areas:
+      "status clock"
+      "metrics metrics"
+      "action action";
+    padding:14px;
+  }
+
+  .tr-commandActions--inactive{
+    justify-content:stretch;
+  }
+
+  .tr-commandButton.is-start{
+    max-width:none;
+  }
+
+  .tr-commandActiveGrid{
+    grid-template-columns:1fr;
+  }
+}
+
+@media(max-width:560px){
+  .tr-appHeader{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:9px;
+  }
+
+  .tr-topTitle{
+    font-size:21px;
+  }
+
+  .tr-appHeaderActions{
+    justify-content:flex-start;
+    width:100%;
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    scrollbar-width:none;
+  }
+
+  .tr-appHeaderActions::-webkit-scrollbar{
+    display:none;
+  }
+
+  .tr-commandCenter{
+    margin:9px 0 12px;
+    border-radius:15px;
+  }
+
+  .tr-commandInactive,
+  .tr-commandCenter--compact .tr-commandInactive{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "clock"
+      "status"
+      "metrics"
+      "action";
+    gap:10px;
+    padding:12px;
+  }
+
+  .tr-commandDateTime{
+    padding:3px 4px 9px;
+    border-bottom:1px solid rgba(119,188,214,.08);
+  }
+
+  .tr-commandDateTime > span,
+  .tr-commandCenter--compact .tr-commandDateTime > span{
+    font-size:13px;
+  }
+
+  .tr-commandDateTime > strong,
+  .tr-commandCenter--compact .tr-commandDateTime > strong{
+    font-size:30px;
+  }
+
+  .tr-commandNextWorkout{
+    padding:3px 2px;
+  }
+
+  .tr-commandNextWorkout > strong{
+    font-size:19px;
+  }
+
+  .tr-commandMetricRail,
+  .tr-commandMetricRail--inactive{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+
+  .tr-commandMetric{
+    min-height:66px;
+    padding:8px;
+    border-radius:10px;
+  }
+
+  .tr-commandMetric > strong{
+    font-size:20px;
+  }
+
+  .tr-commandActive{
+    padding:12px;
+  }
+
+  .tr-commandActiveTopline{
+    align-items:flex-start;
+  }
+
+  .tr-commandRealClock{
+    display:grid;
+    justify-items:end;
+    gap:2px;
+  }
+
+  .tr-commandRealClock span{
+    font-size:8px;
+  }
+
+  .tr-commandRealClock strong{
+    font-size:16px;
+  }
+
+  .tr-commandChronographTime{
+    font-size:clamp(35px,11vw,46px);
+  }
+
+  .tr-commandExerciseName{
+    font-size:20px;
+  }
+
+  .tr-commandActions--active{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+
+  .tr-commandActions--active .tr-commandButton{
+    width:100%;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .tr-appHeaderButton,
+  .tr-commandButton{
+    transition:none!important;
+  }
+}
 `;
 
 
