@@ -410,7 +410,7 @@ type DecoratedSearchRow = SearchExerciseRow & {
 };
 
 function defaultPrescription() {
-  return { sets: 3, rep_min: 8, rep_max: 12, rest_seconds: 90, rir_min: 2, rir_max: 3 };
+  return { sets: 3, rep_min: 8, rep_max: 12, rest_seconds: 60, rir_min: 2, rir_max: 3 };
 }
 
 function proteinMultiplier(goal: string | null | undefined) {
@@ -558,19 +558,87 @@ type ExerciseHistoryStats = {
   bestSetVolume: number;
   bestEstimated1RM: number;
   bestSessionVolume: number;
+  bestSetWeight: number;
+  bestSetReps: number;
   maxRepsByWeight: Record<string, number>;
 };
 
+type CoachDecision = "BASELINE" | "HOLD" | "PROGRESS" | "MONITOR" | "DELOAD";
+
 type ProgressionGuidance = {
   tone: "first" | "repeat" | "increase" | "review";
+  decision: CoachDecision;
   title: string;
   action: string;
   why: string;
   target: string;
   lastSummary: string;
+  bestSetSummary: string;
+  trend: string;
   suggestedWeight: number | null;
-  confidence: "BASELINE" | "MODERATE" | "HIGH";
+  exactChange: string;
+  confidence: "LOW" | "MODERATE" | "HIGH";
+  confidenceDetail: string;
+  confidenceScore: number;
 };
+
+type EffortOption = {
+  key: string;
+  rir: number | null;
+  label: string;
+  shortLabel: string;
+  detail: string;
+};
+
+const EFFORT_OPTIONS: EffortOption[] = [
+  { key: "easy", rir: 4, label: "Easy", shortLabel: "Plenty left", detail: "I could have done several more clean reps." },
+  { key: "moderate", rir: 3, label: "Moderate", shortLabel: "A few more", detail: "I could have done about three more clean reps." },
+  { key: "challenging", rir: 2, label: "Challenging", shortLabel: "Target effort", detail: "I probably had about two clean reps left." },
+  { key: "very_hard", rir: 1, label: "Very hard", shortLabel: "Maybe one more", detail: "I might have managed one more clean rep." },
+  { key: "maximum", rir: 0, label: "Maximum", shortLabel: "Nothing left", detail: "I could not complete another clean rep." },
+  { key: "not_sure", rir: null, label: "Not sure", shortLabel: "Skip estimate", detail: "I cannot judge the effort yet." },
+];
+
+function effortOption(rir: number | null | undefined, effortKey?: string | null) {
+  if (effortKey) {
+    const byKey = EFFORT_OPTIONS.find((option) => option.key === effortKey);
+    if (byKey) return byKey;
+  }
+  if (rir == null) return null;
+  return EFFORT_OPTIONS.find((option) => option.rir != null && option.rir === Number(rir)) ?? null;
+}
+
+function effortLabel(rir: number | null | undefined, effortKey?: string | null) {
+  return effortOption(rir, effortKey)?.label ?? "Not rated";
+}
+
+function usableRir(rir: number | null | undefined) {
+  if (rir == null) return null;
+  const value = Number(rir);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function loadIncrementForExercise(exercise: any, currentWeight: number) {
+  const text = [
+    exercise?.name,
+    ...(Array.isArray(exercise?.equipment) ? exercise.equipment : []),
+    ...(Array.isArray(exercise?.primary_muscles) ? exercise.primary_muscles : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/leg press|hack squat|squat|deadlift|hip thrust|calf press/.test(text)) return 10;
+  if (/barbell/.test(text) && currentWeight >= 95) return 10;
+  return 5;
+}
+
+function confidenceForSessions(sessions: number) {
+  if (sessions >= 5) return { level: "HIGH" as const, detail: `${sessions} sessions analyzed`, score: 5 };
+  if (sessions >= 2) return { level: "MODERATE" as const, detail: `${sessions} sessions analyzed`, score: 3 };
+  if (sessions === 1) return { level: "LOW" as const, detail: "1 session analyzed", score: 1 };
+  return { level: "LOW" as const, detail: "1 completed session needed", score: 0 };
+}
 
 function chunkValues<T>(values: T[], size = 75): T[][] {
   const chunks: T[][] = [];
@@ -587,6 +655,8 @@ function emptyHistoryStats(): ExerciseHistoryStats {
     bestSetVolume: 0,
     bestEstimated1RM: 0,
     bestSessionVolume: 0,
+    bestSetWeight: 0,
+    bestSetReps: 0,
     maxRepsByWeight: {},
   };
 }
@@ -600,6 +670,11 @@ function estimatedOneRepMax(weight: number, reps: number) {
 function roundToIncrement(value: number, increment = 5) {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.max(increment, Math.round(value / increment) * increment);
+}
+
+function roundDownToIncrement(value: number, increment = 5) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.max(increment, Math.floor(value / increment) * increment);
 }
 
 function primaryWorkingWeight(sets: PreviousSetRow[]) {
@@ -681,6 +756,10 @@ async function loadExerciseHistoryStats(params: {
     const workoutId = workoutByExercise.get((row as any).workout_exercise_id);
 
     stats.bestWeight = Math.max(stats.bestWeight, weight);
+    if (e1rm >= stats.bestEstimated1RM) {
+      stats.bestSetWeight = weight;
+      stats.bestSetReps = reps;
+    }
     stats.bestSetVolume = Math.max(stats.bestSetVolume, volume);
     stats.bestEstimated1RM = Math.max(stats.bestEstimated1RM, e1rm);
     stats.maxRepsByWeight[weightKey] = Math.max(stats.maxRepsByWeight[weightKey] ?? 0, reps);
@@ -720,18 +799,31 @@ function progressionGuidance(
   history: ExerciseHistoryStats,
   repMin: number,
   repMax: number,
-  setsTarget: number
+  setsTarget: number,
+  exercise: any
 ): ProgressionGuidance {
+  const confidence = confidenceForSessions(history.sessions);
+  const bestSetSummary =
+    history.bestSetWeight > 0 && history.bestSetReps > 0
+      ? `${formatLoggedWeight(history.bestSetWeight)} lb × ${history.bestSetReps}`
+      : "No data yet";
+
   if (!previous?.sets.length) {
     return {
       tone: "first",
-      title: "Establish a clean baseline",
+      decision: "BASELINE",
+      title: "Establish your baseline",
       action: "CHOOSE A CONTROLLED STARTING WEIGHT",
-      why: "There is no completed performance for this exact exercise yet.",
-      target: `${setsTarget} sets of ${repMin}-${repMax} clean reps with 2-3 reps left in reserve.`,
-      lastSummary: "No previous performance",
+      why: "No completed performance exists for this exact exercise. Log clean working sets so the coach can calculate a precise load change next time.",
+      target: `${setsTarget} sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
+      lastSummary: "No data yet",
+      bestSetSummary,
+      trend: "Baseline",
       suggestedWeight: null,
-      confidence: "BASELINE",
+      exactChange: "FIRST SESSION",
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
     };
   }
 
@@ -739,89 +831,233 @@ function progressionGuidance(
   if (!validSets.length) {
     return {
       tone: "first",
+      decision: "BASELINE",
       title: "Build the first usable performance",
       action: "LOG EVERY WORKING SET",
       why: "The previous session did not contain complete weight-and-rep data.",
-      target: `${setsTarget} complete sets inside the ${repMin}-${repMax} rep range.`,
-      lastSummary: "Previous set data incomplete",
+      target: `${setsTarget} sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
+      lastSummary: "Previous data incomplete",
+      bestSetSummary,
+      trend: "Baseline",
       suggestedWeight: null,
-      confidence: "BASELINE",
+      exactChange: "NO LOAD DECISION",
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
     };
   }
 
   const workingWeight = primaryWorkingWeight(validSets);
+  const increment = loadIncrementForExercise(exercise, workingWeight);
   const totalReps = validSets.reduce((sum, set) => sum + set.reps, 0);
-  const topSets = validSets.filter((set) => set.reps >= repMax).length;
-  const allReachedTop = validSets.length >= setsTarget && topSets === validSets.length;
-  const loggedRir = validSets
-    .map((set) => set.rir)
-    .filter((value): value is number => value != null && Number.isFinite(value));
-  const averageRir = loggedRir.length
-    ? loggedRir.reduce((sum, value) => sum + value, 0) / loggedRir.length
+  const allAtLeastMinimum = validSets.length >= setsTarget && validSets.every((set) => set.reps >= repMin);
+  const allReachedTop = validSets.length >= setsTarget && validSets.every((set) => set.reps >= repMax);
+  const belowMinimum = validSets.filter((set) => set.reps < repMin).length;
+  const usableEfforts = validSets
+    .map((set) => usableRir(set.rir))
+    .filter((value): value is number => value != null);
+  const averageRir = usableEfforts.length
+    ? usableEfforts.reduce((sum, value) => sum + value, 0) / usableEfforts.length
     : null;
+  const firstRir = usableRir(validSets[0]?.rir);
+  const finalRir = usableRir(validSets[validSets.length - 1]?.rir);
   const pain = Number(previous.pain ?? 0);
   const tooHard = previous.difficulty === "too_hard";
   const lastSummary = `${formatLoggedWeight(workingWeight)} lb • ${validSets
     .map((set) => set.reps)
-    .join(", ")} reps • ${totalReps} total reps`;
+    .join(" / ")} reps`;
+  const previousBestE1rm = Math.max(
+    0,
+    ...validSets.map((set) => estimatedOneRepMax(set.weight, set.reps))
+  );
+  const trend =
+    history.sessions <= 1
+      ? "Building"
+      : previousBestE1rm >= history.bestEstimated1RM * 0.985
+      ? "Improving"
+      : "Steady";
 
   if (pain >= 7) {
+    const reduced = roundDownToIncrement(workingWeight * 0.9, increment);
+    const change = Math.max(0, workingWeight - reduced);
     return {
       tone: "review",
+      decision: "DELOAD",
       title: "Pain overrides progression",
-      action: "STOP, REDUCE, OR SWAP",
-      why: `The last performance recorded pain ${pain}/10. Strength progression is not the priority until the movement is comfortable.`,
-      target: "Use a pain-free variation and keep symptoms at 0-2/10.",
+      action: reduced > 0 ? `REDUCE TO ${formatLoggedWeight(reduced)} LB` : "STOP OR SWAP THE EXERCISE",
+      why: `The last performance recorded pain ${pain}/10. Reduce the load or use a pain-free variation before progressing.`,
+      target: `${setsTarget} controlled sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
       lastSummary,
-      suggestedWeight: null,
-      confidence: "HIGH",
+      bestSetSummary,
+      trend: "Needs review",
+      suggestedWeight: reduced || null,
+      exactChange: change > 0 ? `−${formatLoggedWeight(change)} LB` : "PAIN-FIRST ADJUSTMENT",
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
     };
   }
 
-  if (pain >= 3 || tooHard || (averageRir != null && averageRir <= 0.5)) {
-    const reduced = roundToIncrement(workingWeight * 0.95, 5);
+  const majorFailure =
+    belowMinimum >= Math.max(1, Math.ceil(validSets.length / 2)) ||
+    (firstRir != null && firstRir <= 1 && belowMinimum > 0);
+
+  if (majorFailure || tooHard || pain >= 3) {
+    const reductionRate = majorFailure || pain >= 5 ? 0.9 : 0.95;
+    const reduced = roundDownToIncrement(workingWeight * reductionRate, increment);
+    const change = Math.max(increment, workingWeight - reduced);
     return {
       tone: "review",
-      title: "Hold or reduce before progressing",
-      action: reduced > 0 ? `USE ABOUT ${formatLoggedWeight(reduced)} LB` : "HOLD THE CURRENT LOAD",
-      why: pain >= 3
-        ? `The last performance recorded pain ${pain}/10.`
-        : tooHard
-        ? "The last performance was marked Too Hard."
-        : "The recorded RIR was at or near failure.",
-      target: `Complete ${setsTarget} controlled sets inside ${repMin}-${repMax} reps without increasing pain.`,
+      decision: "DELOAD",
+      title: "Reduce the load and restore clean reps",
+      action: `REDUCE TO ${formatLoggedWeight(reduced)} LB`,
+      why:
+        pain >= 3
+          ? `The last performance recorded pain ${pain}/10.`
+          : tooHard
+          ? "The last performance was marked too hard."
+          : `${belowMinimum} working set${belowMinimum === 1 ? "" : "s"} fell below the programmed rep range.`,
+      target: `${setsTarget} sets × ${repMin}-${Math.min(repMax, repMin + 2)} reps • Rest 60 seconds`,
       lastSummary,
-      suggestedWeight: reduced || workingWeight || null,
-      confidence: "HIGH",
+      bestSetSummary,
+      trend: "Reduce and rebuild",
+      suggestedWeight: reduced,
+      exactChange: `−${formatLoggedWeight(change)} LB`,
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
     };
   }
 
-  if (allReachedTop && (averageRir == null || averageRir >= 1)) {
-    const suggested = roundToIncrement(workingWeight + 5, 5);
+  if (allReachedTop && (finalRir == null || finalRir >= 2) && (averageRir == null || averageRir >= 2)) {
+    const suggested = roundToIncrement(workingWeight + increment, increment);
     return {
       tone: "increase",
-      title: "The rep range was earned",
-      action: `CONSIDER ${formatLoggedWeight(suggested)} LB`,
-      why: `Every logged working set reached the top of the ${repMin}-${repMax} range${
-        averageRir != null ? ` with ${averageRir.toFixed(1)} average RIR` : ""
-      }.`,
-      target: `${setsTarget} sets of at least ${repMin} clean reps at the new weight.`,
+      decision: "PROGRESS",
+      title: "Ready to progress",
+      action: `INCREASE TO ${formatLoggedWeight(suggested)} LB`,
+      why: `All ${setsTarget} working sets reached the top of the ${repMin}-${repMax} range without finishing near maximum effort.`,
+      target: `${setsTarget} sets × ${repMin}-${Math.min(repMax, repMin + 2)} reps • Rest 60 seconds`,
       lastSummary,
+      bestSetSummary,
+      trend,
       suggestedWeight: suggested,
-      confidence: history.sessions >= 3 ? "HIGH" : "MODERATE",
+      exactChange: `+${formatLoggedWeight(increment)} LB`,
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
     };
   }
 
-  const nextRepGoal = totalReps + Math.max(1, Math.min(3, setsTarget));
+  if (allAtLeastMinimum && finalRir != null && finalRir <= 1) {
+    return {
+      tone: "repeat",
+      decision: "HOLD",
+      title: "Good working weight",
+      action: `HOLD AT ${formatLoggedWeight(workingWeight)} LB`,
+      why: "You completed the programmed work, but the final set was very hard. Keep the load and improve total reps or control before increasing.",
+      target: `Add 1-2 total clean reps across ${setsTarget} sets • Rest 60 seconds`,
+      lastSummary,
+      bestSetSummary,
+      trend: "Building capacity",
+      suggestedWeight: workingWeight,
+      exactChange: "NO LOAD CHANGE",
+      confidence: confidence.level,
+      confidenceDetail: confidence.detail,
+      confidenceScore: confidence.score,
+    };
+  }
+
+  const nextRepGoal = totalReps + Math.max(1, Math.min(2, setsTarget));
   return {
     tone: "repeat",
-    title: "Own the current weight before adding load",
-    action: workingWeight > 0 ? `REPEAT ${formatLoggedWeight(workingWeight)} LB` : "REPEAT THE LAST LOAD",
-    why: `${topSets}/${validSets.length} sets reached the top of the programmed rep range.`,
-    target: `Beat ${totalReps} total reps. Aim for ${nextRepGoal} while keeping every set inside ${repMin}-${repMax}.`,
+    decision: averageRir != null && averageRir <= 1 ? "MONITOR" : "HOLD",
+    title: "Own the current weight",
+    action: `HOLD AT ${formatLoggedWeight(workingWeight)} LB`,
+    why: "The current load still has productive reps available before a weight increase is justified.",
+    target: `Aim for ${nextRepGoal} total reps across ${setsTarget} sets • Rest 60 seconds`,
     lastSummary,
-    suggestedWeight: workingWeight || null,
-    confidence: history.sessions >= 2 ? "HIGH" : "MODERATE",
+    bestSetSummary,
+    trend,
+    suggestedWeight: workingWeight,
+    exactChange: "NO LOAD CHANGE",
+    confidence: confidence.level,
+    confidenceDetail: confidence.detail,
+    confidenceScore: confidence.score,
+  };
+}
+
+type LiveSetAdvice = {
+  status: string;
+  tone: "good" | "hold" | "monitor" | "reduce";
+  summary: string;
+  nextInstruction: string;
+  nextWeight: number;
+};
+
+function buildLiveSetAdvice(params: {
+  set: any | null;
+  exercise: any;
+  repMin: number;
+  repMax: number;
+}) : LiveSetAdvice | null {
+  const { set, exercise, repMin, repMax } = params;
+  if (!set) return null;
+
+  const weight = Number(set.weight ?? 0);
+  const reps = Number(set.reps ?? 0);
+  const selectedEffort = effortOption(set.rir, set.effort_key);
+  const rir = selectedEffort?.rir;
+  const increment = loadIncrementForExercise(exercise, weight);
+  const summary = `${formatLoggedWeight(weight)} lb × ${reps} reps • ${effortLabel(set.rir, set.effort_key)}`;
+
+  if (rir === 0) {
+    const reduced = roundDownToIncrement(weight * 0.95, increment);
+    return {
+      status: "MAXIMUM EFFORT",
+      tone: "reduce",
+      summary,
+      nextInstruction: `Reduce to ${formatLoggedWeight(reduced)} lb and target ${repMin}-${Math.min(repMax, repMin + 1)} clean reps. Rest 60 seconds.`,
+      nextWeight: reduced,
+    };
+  }
+
+  if (rir === 1) {
+    return {
+      status: "VERY HARD",
+      tone: "monitor",
+      summary,
+      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and target ${repMin}-${Math.min(repMax, reps)} clean reps. Rest 60 seconds.`,
+      nextWeight: weight,
+    };
+  }
+
+  if (rir === 2) {
+    return {
+      status: "TARGET REACHED",
+      tone: "good",
+      summary,
+      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and target ${Math.max(repMin, reps - 1)}-${Math.min(repMax, reps)} clean reps. Rest 60 seconds.`,
+      nextWeight: weight,
+    };
+  }
+
+  if (rir != null && rir >= 3) {
+    return {
+      status: "CONTROLLED SET",
+      tone: "good",
+      summary,
+      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and aim for ${Math.min(repMax, reps + 1)} clean reps. Rest 60 seconds.`,
+      nextWeight: weight,
+    };
+  }
+
+  return {
+    status: "EFFORT NOT RATED",
+    tone: "hold",
+    summary,
+    nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and stay inside ${repMin}-${repMax} clean reps. Rest 60 seconds.`,
+    nextWeight: weight,
   };
 }
 
@@ -4171,7 +4407,7 @@ function ExerciseRunner({
   const setsTarget = Number(pres.sets ?? 3);
   const repMin = Number(pres.rep_min ?? 8);
   const repMax = Number(pres.rep_max ?? 12);
-  const restSeconds = Number(pres.rest_seconds ?? 90);
+  const restSeconds = 60;
 
   const [sets, setSets] = useState<any[]>([]);
   const [loadingSets, setLoadingSets] = useState(true);
@@ -4264,7 +4500,7 @@ function ExerciseRunner({
         const [existingResult, previous, history] = await Promise.all([
           supabase
             .from("workout_sets")
-            .select("set_index,reps,weight")
+            .select("set_index,reps,weight,rir")
             .eq("workout_exercise_id", weId)
             .order("set_index", { ascending: true }),
           loadPreviousPerformance({
@@ -4283,6 +4519,15 @@ function ExerciseRunner({
         const rows = (existingResult.data ?? []) as any[];
         const maxExisting = rows.reduce((m, r) => Math.max(m, Number(r.set_index) || 0), 0);
         const total = Math.max(setsTarget, maxExisting);
+        const storedEffortKeys = (() => {
+          try {
+            const saved = sessionStorage.getItem(`mvp_set_efforts:${weId}`);
+            const parsed = saved ? JSON.parse(saved) : {};
+            return parsed && typeof parsed === "object" ? parsed as Record<string, string> : {};
+          } catch {
+            return {} as Record<string, string>;
+          }
+        })();
 
         const filled = Array.from({ length: total }, (_, i) => {
           const idx = i + 1;
@@ -4293,6 +4538,12 @@ function ExerciseRunner({
             set_index: idx,
             reps: Number(found?.reps ?? 0),
             weight: savedWeight > 0 ? savedWeight : previousWeightForIndex(previous, idx),
+            rir: found?.rir != null ? Number(found.rir) : null,
+            effort_key:
+              storedEffortKeys[String(idx)] ??
+              (found?.rir != null
+                ? EFFORT_OPTIONS.find((option) => option.rir === Number(found.rir))?.key ?? null
+                : null),
           };
         });
 
@@ -4300,7 +4551,21 @@ function ExerciseRunner({
         setHistoryStats(history);
         setSets(filled);
 
-        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget).suggestedWeight;
+        const storedCompleted = (() => {
+          try {
+            const saved = sessionStorage.getItem(`mvp_completed_sets:${weId}`);
+            const parsed = saved ? JSON.parse(saved) : [];
+            return Array.isArray(parsed) ? parsed.map(Number).filter((value) => value > 0) : [];
+          } catch {
+            return [] as number[];
+          }
+        })();
+        const databaseCompleted = filled
+          .filter((row) => Number(row.reps) > 0 && Number(row.weight) > 0 && row.rir != null)
+          .map((row) => Number(row.set_index));
+        setCompletedSetIndexes(Array.from(new Set([...storedCompleted, ...databaseCompleted])).sort((a, b) => a - b));
+
+        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget, item).suggestedWeight;
         const firstWeight = filled.find((row) => Number(row.weight) > 0)?.weight ?? 0;
         setCalculatorWeight(Number(firstWeight || suggestedStart || history.bestWeight || 0));
       } catch (error: any) {
@@ -4311,7 +4576,7 @@ function ExerciseRunner({
 
           const { data: fallbackRows } = await supabase
             .from("workout_sets")
-            .select("set_index,reps,weight")
+            .select("set_index,reps,weight,rir")
             .eq("workout_exercise_id", weId)
             .order("set_index", { ascending: true });
 
@@ -4320,6 +4585,15 @@ function ExerciseRunner({
           const rows = (fallbackRows ?? []) as any[];
           const maxExisting = rows.reduce((m, r) => Math.max(m, Number(r.set_index) || 0), 0);
           const total = Math.max(setsTarget, maxExisting);
+          const storedEffortKeys = (() => {
+            try {
+              const saved = sessionStorage.getItem(`mvp_set_efforts:${weId}`);
+              const parsed = saved ? JSON.parse(saved) : {};
+              return parsed && typeof parsed === "object" ? parsed as Record<string, string> : {};
+            } catch {
+              return {} as Record<string, string>;
+            }
+          })();
           setSets(
             Array.from({ length: total }, (_, i) => {
               const idx = i + 1;
@@ -4328,6 +4602,12 @@ function ExerciseRunner({
                 set_index: idx,
                 reps: Number(found?.reps ?? 0),
                 weight: Number(found?.weight ?? 0),
+                rir: found?.rir != null ? Number(found.rir) : null,
+                effort_key:
+                  storedEffortKeys[String(idx)] ??
+                  (found?.rir != null
+                    ? EFFORT_OPTIONS.find((option) => option.rir === Number(found.rir))?.key ?? null
+                    : null),
               };
             })
           );
@@ -4348,12 +4628,42 @@ function ExerciseRunner({
   const allSetsLogged = useMemo(() => {
     if (timed) return true;
     if (!sets.length) return false;
-    return sets.every((s) => Number(s.reps) > 0 && Number(s.weight) > 0);
-  }, [sets, timed]);
+    return sets.every(
+      (set) =>
+        Number(set.reps) > 0 &&
+        Number(set.weight) > 0 &&
+        completedSetIndexes.includes(Number(set.set_index))
+    );
+  }, [sets, timed, completedSetIndexes]);
 
   const previousGuidance = useMemo(
-    () => progressionGuidance(previousPerformance, historyStats, repMin, repMax, setsTarget),
-    [previousPerformance, historyStats, repMin, repMax, setsTarget]
+    () => progressionGuidance(previousPerformance, historyStats, repMin, repMax, setsTarget, item),
+    [previousPerformance, historyStats, repMin, repMax, setsTarget, item]
+  );
+
+  const completedSets = useMemo(
+    () =>
+      sets.filter((set) => completedSetIndexes.includes(Number(set.set_index))),
+    [sets, completedSetIndexes]
+  );
+  const activeSetIndex = useMemo(() => {
+    const index = sets.findIndex(
+      (set) => !completedSetIndexes.includes(Number(set.set_index))
+    );
+    return index >= 0 ? index : Math.max(0, sets.length - 1);
+  }, [sets, completedSetIndexes]);
+  const lastCompletedSet = completedSets.length
+    ? completedSets[completedSets.length - 1]
+    : null;
+  const liveSetAdvice = useMemo(
+    () =>
+      buildLiveSetAdvice({
+        set: lastCompletedSet,
+        exercise: item,
+        repMin,
+        repMax,
+      }),
+    [lastCompletedSet, item, repMin, repMax]
   );
 
   const currentPrLabels = useMemo(() => {
@@ -4394,6 +4704,7 @@ function ExerciseRunner({
         set_index: row.set_index,
         reps: row.reps,
         weight: row.weight,
+        rir: row.rir,
       },
       { onConflict: "workout_exercise_id,set_index" }
     );
@@ -4407,6 +4718,37 @@ function ExerciseRunner({
     } catch {}
   };
 
+  const setEffortRating = async (idx: number, option: EffortOption) => {
+    if (isDone || timed) return;
+
+    const next = sets.map((set, setIndex) =>
+      setIndex === idx
+        ? { ...set, rir: option.rir, effort_key: option.key }
+        : set
+    );
+    setSets(next);
+
+    try {
+      const saved = sessionStorage.getItem(`mvp_set_efforts:${weId}`);
+      const parsed = saved ? JSON.parse(saved) : {};
+      const map = parsed && typeof parsed === "object" ? parsed : {};
+      map[String(next[idx].set_index)] = option.key;
+      sessionStorage.setItem(`mvp_set_efforts:${weId}`, JSON.stringify(map));
+    } catch {}
+
+    const row = next[idx];
+    await supabase.from("workout_sets").upsert(
+      {
+        workout_exercise_id: weId,
+        set_index: row.set_index,
+        reps: Number(row.reps ?? 0),
+        weight: Number(row.weight ?? 0),
+        rir: option.rir,
+      },
+      { onConflict: "workout_exercise_id,set_index" }
+    );
+  };
+
   const completeSetAndStartRest = async (idx: number) => {
     primeWorkoutAudio();
     void preloadWorkoutAlerts();
@@ -4415,41 +4757,89 @@ function ExerciseRunner({
     const row = sets[idx];
     const reps = Number(row?.reps ?? 0);
     const weight = Number(row?.weight ?? 0);
+    const selectedEffort = effortOption(row?.rir, row?.effort_key);
+    const rir = selectedEffort?.rir ?? null;
 
     if (!(reps > 0) || !(weight > 0)) {
       showToast("ENTER REPS AND WEIGHT BEFORE COMPLETING THE SET.", "err");
       return;
     }
 
-    await supabase.from("workout_sets").upsert(
+    if (!selectedEffort) {
+      showToast("CHOOSE HOW HARD THE SET FELT OR SELECT NOT SURE.", "err");
+      return;
+    }
+
+    const { error } = await supabase.from("workout_sets").upsert(
       {
         workout_exercise_id: weId,
         set_index: row.set_index,
         reps,
         weight,
+        rir,
       },
       { onConflict: "workout_exercise_id,set_index" }
     );
 
+    if (error) {
+      showToast(error.message, "err");
+      return;
+    }
+
     persistCompletedSetIndexes([...completedSetIndexes, Number(row.set_index)]);
+
+    const advice = buildLiveSetAdvice({ set: { ...row, reps, weight, rir }, exercise: item, repMin, repMax });
+    const nextIndex = idx + 1;
+    if (advice && nextIndex < sets.length) {
+      const nextRows = sets.map((set, setIndex) =>
+        setIndex === nextIndex && !completedSetIndexes.includes(Number(set.set_index))
+          ? { ...set, weight: advice.nextWeight > 0 ? advice.nextWeight : set.weight }
+          : set
+      );
+      setSets(nextRows);
+
+      const nextRow = nextRows[nextIndex];
+      if (nextRow && Number(nextRow.weight) > 0) {
+        await supabase.from("workout_sets").upsert(
+          {
+            workout_exercise_id: weId,
+            set_index: nextRow.set_index,
+            reps: Number(nextRow.reps ?? 0),
+            weight: Number(nextRow.weight),
+            rir: nextRow.rir,
+          },
+          { onConflict: "workout_exercise_id,set_index" }
+        );
+      }
+    }
 
     const prs = detectPersonalRecords({ reps, weight }, historyStats);
     if (prs.length) {
       showToast(`NEW PR • ${prs.join(" • ")}`, "ok");
     } else {
-      showToast(`SET ${row.set_index} LOGGED • REST STARTED.`, "ok");
+      showToast(`SET ${row.set_index} LOGGED • REST 60 SECONDS.`, "ok");
     }
 
-    if (restSeconds > 0) {
-      onStartRest(restSeconds, item?.name ?? "Exercise", Number(row.set_index));
-    }
+    onStartRest(60, item?.name ?? "Exercise", Number(row.set_index));
+  };
+
+  const editCompletedSet = (setIndex: number) => {
+    if (isDone || timed) return;
+    persistCompletedSetIndexes(
+      completedSetIndexes.filter((value) => value !== Number(setIndex))
+    );
+    showToast(`SET ${setIndex} UNLOCKED FOR EDITING.`, "ok");
   };
 
   const applySuggestedWeight = async () => {
     const suggested = Number(previousGuidance.suggestedWeight ?? 0);
     if (!(suggested > 0) || isDone || timed) return;
 
-    const next = sets.map((set) => ({ ...set, weight: suggested }));
+    const next = sets.map((set) =>
+      completedSetIndexes.includes(Number(set.set_index))
+        ? set
+        : { ...set, weight: suggested }
+    );
     setSets(next);
     setCalculatorWeight(suggested);
 
@@ -4458,6 +4848,7 @@ function ExerciseRunner({
       set_index: row.set_index,
       reps: Number(row.reps ?? 0),
       weight: suggested,
+      rir: row.rir,
     }));
 
     const { error } = await supabase
@@ -4476,7 +4867,7 @@ function ExerciseRunner({
     if (isDone || timed) return;
 
     const nextIndex = sets.length + 1;
-    const next = [...sets, { set_index: nextIndex, reps: 0, weight: 0 }];
+    const next = [...sets, { set_index: nextIndex, reps: 0, weight: 0, rir: null, effort_key: null }];
     setSets(next);
 
     await supabase.from("workout_sets").upsert(
@@ -4485,6 +4876,7 @@ function ExerciseRunner({
         set_index: nextIndex,
         reps: 0,
         weight: 0,
+        rir: null,
       },
       { onConflict: "workout_exercise_id,set_index" }
     );
@@ -4501,7 +4893,7 @@ function ExerciseRunner({
     }
 
     const last = sets[sets.length - 1];
-    const hasData = Number(last?.reps ?? 0) > 0 || Number(last?.weight ?? 0) > 0;
+    const hasData = Number(last?.reps ?? 0) > 0 || Number(last?.weight ?? 0) > 0 || last?.rir != null || !!last?.effort_key;
     if (hasData) {
       showToast("LAST SET HAS DATA. CLEAR REPS/WEIGHT TO REMOVE.", "err");
       return;
@@ -4558,7 +4950,7 @@ const markDone = async () => {
   }
 
   if (!timed && !allSetsLogged) {
-    showToast("To mark Done: all sets must have reps + weight.", "err");
+    showToast("COMPLETE EVERY SET WITH WEIGHT, REPS, AND AN EFFORT RATING.", "err");
     return;
   }
 
@@ -4749,104 +5141,161 @@ const unlock = async () => {
             </div>
           ) : (
             <div className="tr-rowbox tr-railModule">
-              <div className="tr-sectionHeader tr-sectionHeader--tight">
-                <div className="tr-sectionTitle">SETS</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div className="tr-workingSetsHeader">
+                <div>
+                  <div className="tr-kicker">WORKING SETS</div>
+                  <div className="tr-workingSetsTitle">{setsTarget} × {repMin}-{repMax} REPS • 60 SEC REST</div>
+                </div>
+
+                <div className="tr-workingSetsHeaderActions">
                   <button
-                    className="tr-btn tr-btn--blueOutline"
-                    style={{ height: 40 }}
+                    className="tr-btn tr-workingSetUtility is-add"
                     disabled={isDone}
                     onClick={addSet}
                   >
                     + ADD SET
                   </button>
-
                   <button
-                    className="tr-btn"
-                    style={{ height: 40, borderColor: "rgba(255,255,255,.18)" }}
+                    className="tr-btn tr-workingSetUtility is-remove"
                     disabled={isDone}
                     onClick={removeLastSet}
                   >
-                    − REMOVE LAST
+                    REMOVE LAST
                   </button>
                 </div>
               </div>
 
-              <div
-                className={`tr-previousPerformance tr-previousPerformance--${previousGuidance.tone} ${
+              <section
+                className={`tr-proCoach tr-proCoach--${previousGuidance.decision.toLowerCase()} ${
                   progressionOpen ? "is-open" : "is-collapsed"
                 }`}
+                aria-label="Progression coach"
               >
                 <button
                   type="button"
-                  className="tr-progressionToggle"
+                  className="tr-proCoachHeader"
                   onClick={() => setProgressionOpen((value) => !value)}
                   aria-expanded={progressionOpen}
                 >
-                  <span className="tr-progressionToggleText">
-                    <span className="tr-kicker">TRANSPARENT PROGRESSION ASSISTANT</span>
-                    <span className="tr-previousPerformanceTitle">{previousGuidance.title}</span>
+                  <span className="tr-proCoachIdentity">
+                    <span className="tr-proCoachIcon" aria-hidden>◎</span>
+                    <span>
+                      <span className="tr-proCoachTitle">PROGRESSION COACH</span>
+                      <span className="tr-proCoachSubtitle">Evidence-based load guidance</span>
+                    </span>
                   </span>
 
-                  <span className="tr-progressionToggleRight">
-                    <span className="tr-progressionConfidence">
-                      {previousGuidance.confidence} CONFIDENCE
+                  <span className="tr-proCoachHeaderRight">
+                    <span className={`tr-proCoachDecision is-${previousGuidance.decision.toLowerCase()}`}>
+                      {previousGuidance.decision}
                     </span>
-                    <span className="tr-progressionChevron" aria-hidden>
-                      {progressionOpen ? "▲" : "▼"}
-                    </span>
-                    <span className="tr-progressionToggleLabel">
+                    <span className="tr-proCoachMinimize">
                       {progressionOpen ? "MINIMIZE" : "EXPAND"}
+                    </span>
+                    <span className="tr-proCoachChevron" aria-hidden>
+                      {progressionOpen ? "▲" : "▼"}
                     </span>
                   </span>
                 </button>
 
-                {progressionOpen ? (
-                  <div className="tr-progressionBody">
+                {!progressionOpen ? (
+                  <div className="tr-proCoachCollapsedSummary">
+                    <strong>{liveSetAdvice ? liveSetAdvice.status : previousGuidance.action}</strong>
+                    <span>{liveSetAdvice ? liveSetAdvice.nextInstruction : previousGuidance.target}</span>
+                  </div>
+                ) : (
+                  <div className="tr-proCoachBody">
                     {previousLoading ? (
-                      <div className="tr-sub">Reading your previous performance and records…</div>
+                      <div className="tr-sub">Analyzing your completed exercise history…</div>
                     ) : (
                       <>
+                        <div className="tr-proCoachHero">
+                          <div className="tr-kicker">TODAY'S TRAINING TARGET</div>
+                          <div className="tr-proCoachHeroAction">{previousGuidance.action}</div>
+                          <div className="tr-proCoachHeroTitle">{previousGuidance.title}</div>
+                          <div className="tr-proCoachHeroPrescription">
+                            <div>
+                              <span>LOAD CHANGE</span>
+                              <strong>{previousGuidance.exactChange}</strong>
+                            </div>
+                            <div>
+                              <span>REP TARGET</span>
+                              <strong>{previousGuidance.target}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="tr-proCoachEvidence">
+                          <div>
+                            <span>LAST SESSION</span>
+                            <strong>{previousGuidance.lastSummary}</strong>
+                          </div>
+                          <div>
+                            <span>BEST SET</span>
+                            <strong>{previousGuidance.bestSetSummary}</strong>
+                          </div>
+                          <div>
+                            <span>TREND</span>
+                            <strong>{previousGuidance.trend}</strong>
+                          </div>
+                        </div>
+
+                        <div className="tr-proCoachReason">
+                          <div className="tr-kicker">WHY THIS TARGET</div>
+                          <p>{previousGuidance.why}</p>
+                          {previousPerformance ? (
+                            <small>
+                              {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
+                            </small>
+                          ) : null}
+                        </div>
+
+                        <div className="tr-proCoachConfidencePanel">
+                          <div>
+                            <span>COACH CONFIDENCE</span>
+                            <strong>{previousGuidance.confidence}</strong>
+                            <small>{previousGuidance.confidenceDetail}</small>
+                          </div>
+                          <div className="tr-proCoachConfidenceDots" aria-label={`${previousGuidance.confidence} confidence`}>
+                            {Array.from({ length: 5 }, (_, dotIndex) => (
+                              <span
+                                key={dotIndex}
+                                className={dotIndex < previousGuidance.confidenceScore ? "is-filled" : ""}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        {liveSetAdvice && lastCompletedSet ? (
+                          <div className={`tr-liveSetReview is-${liveSetAdvice.tone}`}>
+                            <div className="tr-liveSetReviewHead">
+                              <span>SET {lastCompletedSet.set_index} REVIEW</span>
+                              <strong>{liveSetAdvice.status}</strong>
+                            </div>
+                            <div className="tr-liveSetReviewResult">{liveSetAdvice.summary}</div>
+                            <div className="tr-liveSetReviewNext">
+                              <span>NEXT SET</span>
+                              <strong>{liveSetAdvice.nextInstruction}</strong>
+                            </div>
+                          </div>
+                        ) : null}
+
                         {previousPerformance?.sets.length ? (
-                          <div className="tr-previousSetSummary">
+                          <div className="tr-proCoachPreviousSets">
                             {previousPerformance.sets.map((set) => (
-                              <span key={set.set_index} className="tr-previousSetChip">
+                              <span key={set.set_index}>
                                 S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
-                                {set.rir != null ? ` • RIR ${set.rir}` : ""}
+                                {set.rir != null ? ` • ${effortLabel(set.rir)}` : ""}
                               </span>
                             ))}
                           </div>
                         ) : null}
 
-                        <div className="tr-progressionGrid">
-                          <div className="tr-progressionCell tr-progressionCell--action">
-                            <div className="tr-kicker">TODAY'S RECOMMENDATION</div>
-                            <div className="tr-progressionAction">{previousGuidance.action}</div>
-                          </div>
-                          <div className="tr-progressionCell">
-                            <div className="tr-kicker">WHY</div>
-                            <div>{previousGuidance.why}</div>
-                          </div>
-                          <div className="tr-progressionCell">
-                            <div className="tr-kicker">TARGET</div>
-                            <div>{previousGuidance.target}</div>
-                          </div>
-                          <div className="tr-progressionCell">
-                            <div className="tr-kicker">LAST TIME</div>
-                            <div>{previousGuidance.lastSummary}</div>
-                            {previousPerformance ? (
-                              <div className="tr-previousPerformanceMeta">
-                                {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="tr-progressionActions">
+                        <div className="tr-proCoachActions">
                           {previousGuidance.suggestedWeight && !isDone ? (
                             <button
                               type="button"
-                              className="tr-btn tr-btn--progressionApply"
+                              className="tr-btn tr-proCoachApply"
                               onClick={applySuggestedWeight}
                             >
                               APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO TODAY'S SETS
@@ -4855,10 +5304,10 @@ const unlock = async () => {
 
                           <button
                             type="button"
-                            className="tr-btn tr-btn--blueOutline"
+                            className="tr-btn tr-proCoachHistory"
                             onClick={() => (window.location.pathname = `/library/${exerciseId}`)}
                           >
-                            OPEN FULL EXERCISE HISTORY
+                            VIEW FULL EXERCISE HISTORY
                           </button>
                         </div>
 
@@ -4875,8 +5324,164 @@ const unlock = async () => {
                       </>
                     )}
                   </div>
-                ) : null}
-              </div>
+                )}
+              </section>
+
+              <section className="tr-workingSetsPanel" aria-label="Working sets">
+                <div className="tr-workingSetsPanelHead">
+                  <div>
+                    <span className="tr-kicker">SET EXECUTION</span>
+                    <strong>{completedSetIndexes.length} OF {sets.length} SETS LOGGED</strong>
+                  </div>
+                  <div className="tr-workingSetsProgress" aria-hidden>
+                    <span style={{ width: `${sets.length ? (completedSetIndexes.length / sets.length) * 100 : 0}%` }} />
+                  </div>
+                </div>
+
+                <div className="tr-workingSetList">
+                  {sets.map((set, index) => {
+                    const setNumber = Number(set.set_index);
+                    const isCompletedSet = completedSetIndexes.includes(setNumber);
+                    const isActiveSet = !isCompletedSet && index === activeSetIndex;
+                    const selectedEffort = effortOption(set.rir, set.effort_key);
+                    const previousSet = previousSetForIndex(previousPerformance, setNumber);
+
+                    if (isCompletedSet) {
+                      return (
+                        <article key={setNumber} className="tr-workingSetRow is-complete">
+                          <div className="tr-workingSetStatusIcon" aria-hidden>✓</div>
+                          <div className="tr-workingSetSummary">
+                            <span>SET {setNumber}</span>
+                            <strong>
+                              {formatLoggedWeight(Number(set.weight ?? 0))} lb × {Number(set.reps ?? 0)} reps
+                            </strong>
+                            <small>{effortLabel(set.rir, set.effort_key)} • Rest 60 seconds</small>
+                          </div>
+                          <span className="tr-workingSetState">COMPLETE</span>
+                          {!isDone ? (
+                            <button
+                              type="button"
+                              className="tr-workingSetEdit"
+                              onClick={() => editCompletedSet(setNumber)}
+                            >
+                              EDIT SET
+                            </button>
+                          ) : null}
+                        </article>
+                      );
+                    }
+
+                    if (!isActiveSet) {
+                      return (
+                        <article key={setNumber} className="tr-workingSetRow is-upcoming">
+                          <div className="tr-workingSetStatusIcon" aria-hidden>{String(setNumber).padStart(2, "0")}</div>
+                          <div className="tr-workingSetSummary">
+                            <span>SET {setNumber}</span>
+                            <strong>Upcoming working set</strong>
+                            <small>
+                              Previous: {previousSet ? `${formatLoggedWeight(previousSet.weight)} lb × ${previousSet.reps}` : "No prior set"}
+                            </small>
+                          </div>
+                          <span className="tr-workingSetState">UPCOMING</span>
+                        </article>
+                      );
+                    }
+
+                    return (
+                      <article key={setNumber} className="tr-workingSetActive">
+                        <div className="tr-workingSetActiveHead">
+                          <div>
+                            <span className="tr-kicker">ACTIVE WORKING SET</span>
+                            <strong>SET {setNumber}</strong>
+                          </div>
+                          <div className="tr-workingSetPrevious">
+                            <span>PREVIOUS</span>
+                            <strong>
+                              {previousSet ? `${formatLoggedWeight(previousSet.weight)} lb × ${previousSet.reps}` : "No data"}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="tr-workingSetControls">
+                          <div className="tr-workingSetField">
+                            <span>WEIGHT (LB)</span>
+                            <Qty
+                              label=""
+                              value={Number(set.weight ?? 0)}
+                              step={5}
+                              disabled={isDone}
+                              onChange={(value) => upsertSet(index, { weight: value })}
+                            />
+                          </div>
+
+                          <div className="tr-workingSetField">
+                            <span>REPS</span>
+                            <Qty
+                              label=""
+                              value={Number(set.reps ?? 0)}
+                              step={1}
+                              disabled={isDone}
+                              onChange={(value) => upsertSet(index, { reps: value })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="tr-effortSelector">
+                          <div className="tr-effortSelectorHead">
+                            <div>
+                              <span>HOW HARD DID THAT SET FEEL?</span>
+                              <small>Choose the answer that best matches your clean reps.</small>
+                            </div>
+                            <em>Also called Reps in Reserve</em>
+                          </div>
+
+                          <div className="tr-effortOptions">
+                            {EFFORT_OPTIONS.map((option) => (
+                              <button
+                                key={option.key}
+                                type="button"
+                                className={`${selectedEffort?.key === option.key ? "is-selected" : ""} ${
+                                  option.rir === 2 ? "is-target" : ""
+                                }`}
+                                disabled={isDone}
+                                onClick={() => setEffortRating(index, option)}
+                                title={option.detail}
+                              >
+                                <strong>{option.label}</strong>
+                                <span>{option.shortLabel}</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="tr-effortExplanation">
+                            {selectedEffort ? (
+                              <>
+                                <strong>{selectedEffort.label}</strong>
+                                <span>{selectedEffort.detail}</span>
+                              </>
+                            ) : (
+                              <>
+                                <strong>Select one answer</strong>
+                                <span>Think only about another rep with the same clean form and full range of motion.</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="tr-workingSetComplete"
+                          disabled={isDone}
+                          onClick={() => completeSetAndStartRest(index)}
+                        >
+                          <span>COMPLETE SET</span>
+                          <small>Log performance • Start 60-second rest</small>
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
 
               <div className={`tr-trainingCalculator ${calculatorOpen ? "is-open" : ""}`}>
                 <button
@@ -4964,57 +5569,6 @@ const unlock = async () => {
                 ) : null}
               </div>
 
-             <div className="tr-setStack">
-  {sets.map((s, i) => (
-    <div key={s.set_index} className="tr-setCardMobile">
-      <div className="tr-setCardHead">
-        <span>SET {s.set_index}</span>
-        <span className="tr-setPreviousValue">
-          PREVIOUS:{" "}
-          {(() => {
-            const previousSet = previousSetForIndex(previousPerformance, Number(s.set_index));
-            return previousSet
-              ? `${formatLoggedWeight(previousSet.weight)} lb × ${previousSet.reps}`
-              : "—";
-          })()}
-        </span>
-      </div>
-
-      <div className="tr-setFieldBlock">
-        <div className="tr-setFieldLabel">REPS</div>
-        <Qty
-          label=""
-          value={Number(s.reps ?? 0)}
-          step={1}
-          disabled={isDone}
-          onChange={(v) => upsertSet(i, { reps: v })}
-        />
-      </div>
-
-      <div className="tr-setFieldBlock">
-        <div className="tr-setFieldLabel">WEIGHT (LB)</div>
-        <Qty
-          label=""
-          value={Number(s.weight ?? 0)}
-          step={5}
-          disabled={isDone}
-          onChange={(v) => upsertSet(i, { weight: v })}
-        />
-      </div>
-
-      <button
-        type="button"
-        className={`tr-setCompleteBtn ${completedSetIndexes.includes(Number(s.set_index)) ? "is-complete" : ""}`}
-        disabled={isDone}
-        onClick={() => completeSetAndStartRest(i)}
-      >
-        {completedSetIndexes.includes(Number(s.set_index))
-          ? `SET ${s.set_index} LOGGED • START REST AGAIN`
-          : `COMPLETE SET ${s.set_index} • START ${restSeconds}s REST`}
-      </button>
-    </div>
-  ))}
-</div>
             </div>
           )}
 
@@ -5674,6 +6228,714 @@ const unlock = async () => {
     border-radius: 16px !important;
     padding: 0 10px !important;
   }
+}
+
+/* STEP 3: PREMIUM PROGRESSION COACH + WORKING SETS */
+.tr-btn--prevOrange,
+.tr-btn--nextOrange{
+  border-color:rgba(0,170,255,.42) !important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.018)),
+    linear-gradient(180deg,rgba(12,23,37,.96),rgba(4,9,16,.98)) !important;
+  color:rgba(244,251,255,.96) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    0 14px 34px rgba(0,0,0,.34),
+    0 0 22px rgba(0,170,255,.10) !important;
+}
+.tr-btn--nextOrange{
+  border-color:rgba(216,185,105,.46) !important;
+  color:rgba(255,247,220,.98) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 0 0 1px rgba(0,0,0,.55),
+    0 14px 34px rgba(0,0,0,.34),
+    0 0 22px rgba(216,185,105,.10) !important;
+}
+.tr-btn--prevOrange:hover:not(:disabled){
+  border-color:rgba(0,196,255,.72) !important;
+  transform:translateY(-1px);
+}
+.tr-btn--nextOrange:hover:not(:disabled){
+  border-color:rgba(232,205,132,.75) !important;
+  transform:translateY(-1px);
+}
+
+.tr-workingSetsHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:2px 0 14px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+.tr-workingSetsTitle{
+  margin-top:5px;
+  color:rgba(246,252,255,.96);
+  font-size:18px;
+  line-height:1.2;
+  font-weight:1050;
+  letter-spacing:.025em;
+}
+.tr-workingSetsHeaderActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.tr-workingSetUtility{
+  min-height:38px !important;
+  height:38px !important;
+  padding:0 14px !important;
+  border-radius:11px !important;
+  font-size:10px !important;
+  letter-spacing:.12em !important;
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.16)) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 10px 24px rgba(0,0,0,.26) !important;
+}
+.tr-workingSetUtility.is-add{
+  border-color:rgba(0,190,255,.48) !important;
+  color:rgba(205,245,255,.98) !important;
+}
+.tr-workingSetUtility.is-remove{
+  border-color:rgba(255,105,120,.30) !important;
+  color:rgba(255,190,198,.88) !important;
+}
+
+.tr-proCoach{
+  position:relative;
+  overflow:hidden;
+  margin-top:16px;
+  border-radius:22px;
+  border:1px solid rgba(0,180,255,.27);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,0) 22%),
+    radial-gradient(760px 280px at 0% 0%,rgba(0,170,255,.105),rgba(0,0,0,0) 66%),
+    linear-gradient(145deg,rgba(11,19,31,.985),rgba(4,8,14,.985));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    inset 0 0 0 1px rgba(0,0,0,.58),
+    0 22px 58px rgba(0,0,0,.42),
+    0 0 38px rgba(0,170,255,.07);
+}
+.tr-proCoach::before{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 0;
+  width:3px;
+  background:linear-gradient(180deg,rgba(0,215,255,.95),rgba(0,120,255,.18));
+  box-shadow:0 0 18px rgba(0,190,255,.35);
+}
+.tr-proCoach--progress::before{background:linear-gradient(180deg,#59f3a8,rgba(22,184,112,.18));}
+.tr-proCoach--monitor::before{background:linear-gradient(180deg,#e4c678,rgba(193,148,44,.18));}
+.tr-proCoach--deload::before{background:linear-gradient(180deg,#ff7584,rgba(207,55,77,.18));}
+.tr-proCoachHeader{
+  width:100%;
+  min-height:72px;
+  padding:15px 17px 15px 20px;
+  border:0;
+  border-bottom:1px solid rgba(255,255,255,.075);
+  background:transparent;
+  color:inherit;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  text-align:left;
+  cursor:pointer;
+}
+.tr-proCoachIdentity{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-width:0;
+}
+.tr-proCoachIcon{
+  width:38px;
+  height:38px;
+  flex:0 0 38px;
+  display:grid;
+  place-items:center;
+  border-radius:13px;
+  border:1px solid rgba(0,190,255,.42);
+  background:linear-gradient(180deg,rgba(0,190,255,.18),rgba(0,100,170,.08));
+  color:rgba(202,245,255,.98);
+  font-size:23px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.11),0 0 22px rgba(0,180,255,.12);
+}
+.tr-proCoachTitle{
+  display:block;
+  color:rgba(250,253,255,.98);
+  font-size:15px;
+  font-weight:1100;
+  letter-spacing:.14em;
+}
+.tr-proCoachSubtitle{
+  display:block;
+  margin-top:4px;
+  color:rgba(181,204,220,.64);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.04em;
+}
+.tr-proCoachHeaderRight{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex:0 0 auto;
+}
+.tr-proCoachDecision{
+  min-height:28px;
+  padding:0 11px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(0,190,255,.40);
+  background:rgba(0,170,255,.10);
+  color:rgba(206,245,255,.98);
+  font-size:9px;
+  font-weight:1100;
+  letter-spacing:.14em;
+}
+.tr-proCoachDecision.is-progress{border-color:rgba(74,235,155,.44);background:rgba(40,205,130,.11);color:#a8ffd0;}
+.tr-proCoachDecision.is-monitor{border-color:rgba(228,198,120,.44);background:rgba(205,165,65,.10);color:#f3dfaa;}
+.tr-proCoachDecision.is-deload{border-color:rgba(255,102,120,.46);background:rgba(230,70,92,.11);color:#ffc1c9;}
+.tr-proCoachMinimize{
+  color:rgba(183,207,220,.62);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.12em;
+}
+.tr-proCoachChevron{
+  width:30px;
+  height:30px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.10);
+  display:grid;
+  place-items:center;
+  color:rgba(214,238,248,.84);
+  background:rgba(255,255,255,.035);
+  font-size:10px;
+}
+.tr-proCoachCollapsedSummary{
+  padding:12px 18px 15px 20px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+}
+.tr-proCoachCollapsedSummary strong{
+  color:rgba(236,250,255,.96);
+  font-size:13px;
+  letter-spacing:.04em;
+}
+.tr-proCoachCollapsedSummary span{
+  color:rgba(174,202,217,.68);
+  font-size:10px;
+  text-align:right;
+}
+.tr-proCoachBody{
+  display:grid;
+  gap:12px;
+  padding:16px 18px 18px 20px;
+}
+.tr-proCoachHero{
+  position:relative;
+  overflow:hidden;
+  padding:18px 18px 16px 20px;
+  border-radius:18px;
+  border:1px solid rgba(0,188,255,.25);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.052),rgba(255,255,255,0) 28%),
+    radial-gradient(640px 230px at 0% 0%,rgba(0,175,255,.13),rgba(0,0,0,0) 70%),
+    rgba(2,8,14,.64);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 16px 34px rgba(0,0,0,.25);
+}
+.tr-proCoachHero::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:14px;
+  bottom:14px;
+  width:3px;
+  border-radius:0 999px 999px 0;
+  background:#25cfff;
+  box-shadow:0 0 18px rgba(37,207,255,.45);
+}
+.tr-proCoachHeroAction{
+  margin-top:8px;
+  color:rgba(246,253,255,.99);
+  font-size:clamp(23px,3vw,36px);
+  line-height:1.04;
+  font-weight:1150;
+  letter-spacing:.018em;
+  text-wrap:balance;
+}
+.tr-proCoachHeroTitle{
+  margin-top:7px;
+  color:rgba(180,211,226,.76);
+  font-size:13px;
+  font-weight:850;
+}
+.tr-proCoachHeroPrescription{
+  margin-top:16px;
+  display:grid;
+  grid-template-columns:minmax(150px,.7fr) minmax(220px,1.3fr);
+  gap:10px;
+}
+.tr-proCoachHeroPrescription > div{
+  min-width:0;
+  padding:11px 12px;
+  border-radius:13px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.028);
+  display:grid;
+  gap:5px;
+}
+.tr-proCoachHeroPrescription span,
+.tr-proCoachEvidence span,
+.tr-proCoachConfidencePanel span,
+.tr-liveSetReviewNext span{
+  color:rgba(161,191,207,.62);
+  font-size:8px;
+  font-weight:1050;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+.tr-proCoachHeroPrescription strong{
+  color:rgba(229,247,255,.96);
+  font-size:12px;
+  line-height:1.35;
+}
+.tr-proCoachEvidence{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.075);
+  background:rgba(0,0,0,.20);
+  overflow:hidden;
+}
+.tr-proCoachEvidence > div{
+  min-width:0;
+  padding:13px 14px;
+  display:grid;
+  gap:6px;
+}
+.tr-proCoachEvidence > div + div{border-left:1px solid rgba(255,255,255,.07);}
+.tr-proCoachEvidence strong{
+  color:rgba(240,249,253,.95);
+  font-size:13px;
+  line-height:1.32;
+  overflow-wrap:anywhere;
+}
+.tr-proCoachReason{
+  padding:14px 15px;
+  border-radius:15px;
+  border:1px solid rgba(255,255,255,.065);
+  background:rgba(0,0,0,.16);
+}
+.tr-proCoachReason p{
+  margin:7px 0 0;
+  color:rgba(205,223,232,.82);
+  font-size:12px;
+  line-height:1.55;
+}
+.tr-proCoachReason small{
+  display:block;
+  margin-top:7px;
+  color:rgba(150,180,195,.54);
+  font-size:9px;
+}
+.tr-proCoachConfidencePanel{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:12px 14px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.022);
+}
+.tr-proCoachConfidencePanel > div:first-child{display:grid;grid-template-columns:auto auto;gap:4px 9px;align-items:center;}
+.tr-proCoachConfidencePanel strong{color:rgba(230,247,255,.96);font-size:12px;letter-spacing:.10em;}
+.tr-proCoachConfidencePanel small{grid-column:1/-1;color:rgba(160,190,205,.62);font-size:9px;}
+.tr-proCoachConfidenceDots{display:flex;align-items:center;gap:5px;}
+.tr-proCoachConfidenceDots span{
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.035);
+}
+.tr-proCoachConfidenceDots span.is-filled{
+  border-color:rgba(0,205,255,.65);
+  background:#24d0ff;
+  box-shadow:0 0 10px rgba(36,208,255,.38);
+}
+.tr-liveSetReview{
+  padding:14px 15px;
+  border-radius:16px;
+  border:1px solid rgba(0,190,255,.20);
+  background:linear-gradient(180deg,rgba(0,180,255,.075),rgba(0,0,0,.15));
+}
+.tr-liveSetReview.is-good{border-color:rgba(68,231,150,.28);background:linear-gradient(180deg,rgba(40,205,130,.085),rgba(0,0,0,.15));}
+.tr-liveSetReview.is-monitor{border-color:rgba(228,198,120,.30);background:linear-gradient(180deg,rgba(205,165,65,.075),rgba(0,0,0,.15));}
+.tr-liveSetReview.is-reduce{border-color:rgba(255,102,120,.32);background:linear-gradient(180deg,rgba(225,64,84,.08),rgba(0,0,0,.15));}
+.tr-liveSetReviewHead{display:flex;align-items:center;justify-content:space-between;gap:12px;color:rgba(173,204,218,.68);font-size:9px;font-weight:1050;letter-spacing:.13em;}
+.tr-liveSetReviewHead strong{color:rgba(235,250,255,.95);font-size:9px;}
+.tr-liveSetReviewResult{margin-top:9px;color:rgba(250,253,255,.98);font-size:17px;font-weight:1100;}
+.tr-liveSetReviewNext{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);display:grid;gap:5px;}
+.tr-liveSetReviewNext strong{color:rgba(207,230,240,.86);font-size:11px;line-height:1.45;}
+.tr-proCoachPreviousSets{display:flex;gap:7px;flex-wrap:wrap;}
+.tr-proCoachPreviousSets span{padding:7px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.025);color:rgba(185,211,223,.72);font-size:8px;font-weight:900;}
+.tr-proCoachActions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.72fr);gap:9px;}
+.tr-proCoachApply,
+.tr-proCoachHistory{
+  min-height:45px !important;
+  border-radius:13px !important;
+  font-size:9px !important;
+  letter-spacing:.11em !important;
+}
+.tr-proCoachApply{
+  border-color:rgba(0,205,255,.52) !important;
+  background:
+    linear-gradient(180deg,rgba(62,220,255,.20),rgba(0,111,185,.15)),
+    linear-gradient(180deg,rgba(11,30,46,.98),rgba(3,12,21,.98)) !important;
+  color:rgba(240,253,255,.98) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 26px rgba(0,190,255,.13) !important;
+}
+.tr-proCoachHistory{
+  border-color:rgba(255,255,255,.12) !important;
+  background:rgba(255,255,255,.025) !important;
+  color:rgba(201,224,235,.82) !important;
+}
+
+.tr-workingSetsPanel{
+  margin-top:14px;
+  padding:15px;
+  border-radius:20px;
+  border:1px solid rgba(255,255,255,.085);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 20%),
+    rgba(2,7,12,.56);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 18px 42px rgba(0,0,0,.28);
+}
+.tr-workingSetsPanelHead{
+  display:grid;
+  grid-template-columns:auto minmax(120px,1fr);
+  align-items:center;
+  gap:18px;
+  padding-bottom:13px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.tr-workingSetsPanelHead > div:first-child{display:grid;gap:5px;}
+.tr-workingSetsPanelHead strong{color:rgba(237,249,254,.92);font-size:11px;letter-spacing:.10em;}
+.tr-workingSetsProgress{
+  height:6px;
+  border-radius:999px;
+  background:rgba(255,255,255,.065);
+  overflow:hidden;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.6);
+}
+.tr-workingSetsProgress span{
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,#1db8ff,#4de4c2);
+  box-shadow:0 0 16px rgba(29,184,255,.34);
+  transition:width .28s ease;
+}
+.tr-workingSetList{display:grid;gap:10px;margin-top:12px;}
+.tr-workingSetRow{
+  min-height:70px;
+  padding:11px 12px;
+  border-radius:15px;
+  border:1px solid rgba(255,255,255,.075);
+  background:rgba(255,255,255,.022);
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr) auto auto;
+  align-items:center;
+  gap:11px;
+}
+.tr-workingSetRow.is-complete{
+  border-color:rgba(62,225,145,.20);
+  background:linear-gradient(90deg,rgba(38,190,119,.07),rgba(255,255,255,.016));
+}
+.tr-workingSetRow.is-upcoming{opacity:.74;}
+.tr-workingSetStatusIcon{
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.035);
+  color:rgba(180,210,223,.72);
+  font-size:11px;
+  font-weight:1100;
+  letter-spacing:.08em;
+}
+.tr-workingSetRow.is-complete .tr-workingSetStatusIcon{
+  border-color:rgba(62,225,145,.34);
+  background:rgba(38,190,119,.11);
+  color:#8cffbf;
+  font-size:18px;
+}
+.tr-workingSetSummary{display:grid;gap:3px;min-width:0;}
+.tr-workingSetSummary > span{color:rgba(149,181,196,.58);font-size:7px;font-weight:1050;letter-spacing:.14em;}
+.tr-workingSetSummary strong{color:rgba(239,249,253,.94);font-size:13px;line-height:1.25;}
+.tr-workingSetSummary small{color:rgba(163,191,204,.60);font-size:9px;line-height:1.3;}
+.tr-workingSetState{
+  padding:6px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.08);
+  color:rgba(166,196,209,.60);
+  font-size:7px;
+  font-weight:1100;
+  letter-spacing:.12em;
+}
+.tr-workingSetRow.is-complete .tr-workingSetState{border-color:rgba(62,225,145,.25);color:#91efb7;background:rgba(38,190,119,.07);}
+.tr-workingSetEdit{
+  min-height:31px;
+  padding:0 10px;
+  border-radius:9px;
+  border:1px solid rgba(0,180,255,.25);
+  background:rgba(0,160,225,.06);
+  color:rgba(190,231,247,.82);
+  font-size:7px;
+  font-weight:1050;
+  letter-spacing:.11em;
+  cursor:pointer;
+}
+.tr-workingSetActive{
+  padding:16px;
+  border-radius:18px;
+  border:1px solid rgba(0,190,255,.31);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,0) 24%),
+    radial-gradient(560px 180px at 0% 0%,rgba(0,175,255,.095),rgba(0,0,0,0) 70%),
+    rgba(3,10,17,.80);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 18px 42px rgba(0,0,0,.32),0 0 28px rgba(0,175,255,.07);
+}
+.tr-workingSetActiveHead{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding-bottom:13px;
+  border-bottom:1px solid rgba(255,255,255,.075);
+}
+.tr-workingSetActiveHead > div:first-child{display:grid;gap:4px;}
+.tr-workingSetActiveHead > div:first-child strong{color:rgba(248,253,255,.98);font-size:22px;letter-spacing:.05em;}
+.tr-workingSetPrevious{text-align:right;display:grid;gap:4px;}
+.tr-workingSetPrevious span{color:rgba(148,180,195,.58);font-size:7px;font-weight:1050;letter-spacing:.14em;}
+.tr-workingSetPrevious strong{color:rgba(207,229,239,.84);font-size:11px;}
+.tr-workingSetControls{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:14px;
+}
+.tr-workingSetField{display:grid;gap:8px;}
+.tr-workingSetField > span{color:rgba(170,199,212,.68);font-size:9px;font-weight:1050;letter-spacing:.13em;}
+.tr-workingSetActive .tr-qtyRow{
+  grid-template-columns:50px minmax(0,1fr) 50px !important;
+  gap:7px !important;
+}
+.tr-workingSetActive .tr-qtyBtn{
+  width:50px !important;
+  min-width:50px !important;
+  height:52px !important;
+  min-height:52px !important;
+  border-radius:14px !important;
+  border-color:rgba(255,255,255,.10) !important;
+  background:linear-gradient(180deg,rgba(255,255,255,.065),rgba(0,0,0,.20)) !important;
+  color:rgba(232,246,252,.95) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 22px rgba(0,0,0,.22) !important;
+}
+.tr-workingSetActive .tr-qtyBtn:hover:not(:disabled){border-color:rgba(0,190,255,.50) !important;color:#d8f8ff !important;}
+.tr-workingSetActive .tr-bigInput{
+  height:52px !important;
+  min-height:52px !important;
+  border-radius:14px !important;
+  border-color:rgba(0,180,255,.19) !important;
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.24)) !important;
+  color:rgba(250,253,255,.99) !important;
+  font-size:22px !important;
+  font-weight:1100 !important;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.55),0 0 18px rgba(0,170,255,.045) !important;
+}
+.tr-effortSelector{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid rgba(255,255,255,.075);
+}
+.tr-effortSelectorHead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;}
+.tr-effortSelectorHead > div{display:grid;gap:4px;}
+.tr-effortSelectorHead span{color:rgba(237,249,254,.92);font-size:10px;font-weight:1100;letter-spacing:.10em;}
+.tr-effortSelectorHead small{color:rgba(159,189,203,.62);font-size:9px;}
+.tr-effortSelectorHead em{color:rgba(147,177,190,.48);font-size:8px;font-style:normal;}
+.tr-effortOptions{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:7px;
+  margin-top:11px;
+}
+.tr-effortOptions button{
+  position:relative;
+  min-height:58px;
+  padding:8px 6px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.085);
+  background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(0,0,0,.15));
+  color:rgba(200,221,231,.78);
+  display:grid;
+  align-content:center;
+  gap:4px;
+  cursor:pointer;
+  transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease;
+}
+.tr-effortOptions button:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(0,190,255,.38);}
+.tr-effortOptions button strong{font-size:9px;line-height:1.15;}
+.tr-effortOptions button span{font-size:7px;color:rgba(155,184,197,.58);line-height:1.15;}
+.tr-effortOptions button.is-target::after{
+  content:"TARGET";
+  position:absolute;
+  top:-7px;
+  left:50%;
+  transform:translateX(-50%);
+  padding:2px 5px;
+  border-radius:999px;
+  border:1px solid rgba(221,194,119,.35);
+  background:#16140d;
+  color:#e8d399;
+  font-size:5px;
+  font-weight:1100;
+  letter-spacing:.09em;
+}
+.tr-effortOptions button.is-selected{
+  border-color:rgba(0,205,255,.68);
+  background:linear-gradient(180deg,rgba(0,200,255,.19),rgba(0,90,155,.10));
+  color:rgba(240,253,255,.99);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 0 20px rgba(0,190,255,.12);
+}
+.tr-effortOptions button.is-selected span{color:rgba(199,235,247,.79);}
+.tr-effortExplanation{
+  margin-top:9px;
+  min-height:38px;
+  padding:9px 11px;
+  border-radius:11px;
+  border:1px solid rgba(255,255,255,.06);
+  background:rgba(0,0,0,.15);
+  display:flex;
+  align-items:center;
+  gap:9px;
+}
+.tr-effortExplanation strong{color:rgba(228,245,252,.92);font-size:9px;white-space:nowrap;}
+.tr-effortExplanation span{color:rgba(164,191,204,.66);font-size:9px;line-height:1.35;}
+.tr-workingSetComplete{
+  width:100%;
+  min-height:58px;
+  margin-top:14px;
+  border-radius:15px;
+  border:1px solid rgba(0,205,255,.58);
+  background:
+    linear-gradient(180deg,rgba(71,224,255,.22),rgba(0,105,175,.14)),
+    linear-gradient(180deg,#0b2638,#06131f);
+  color:rgba(247,254,255,.99);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.15),
+    inset 0 0 0 1px rgba(0,0,0,.48),
+    0 14px 28px rgba(0,0,0,.30),
+    0 0 24px rgba(0,195,255,.13);
+  display:grid;
+  place-content:center;
+  gap:3px;
+  cursor:pointer;
+  transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;
+}
+.tr-workingSetComplete:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(89,229,255,.85);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 17px 32px rgba(0,0,0,.34),0 0 31px rgba(0,195,255,.20);}
+.tr-workingSetComplete:active:not(:disabled){transform:translateY(1px);}
+.tr-workingSetComplete span{font-size:12px;font-weight:1150;letter-spacing:.14em;}
+.tr-workingSetComplete small{font-size:8px;color:rgba(194,230,243,.70);font-weight:850;letter-spacing:.04em;}
+
+@media (max-width:900px){
+  .tr-proCoachHeroPrescription{grid-template-columns:1fr;}
+  .tr-effortOptions{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+
+@media (max-width:720px){
+  .tr-workingSetsHeader{align-items:flex-start;gap:10px;}
+  .tr-workingSetsTitle{font-size:13px;white-space:nowrap;}
+  .tr-workingSetsHeaderActions{gap:5px;}
+  .tr-workingSetUtility{height:33px !important;min-height:33px !important;padding:0 9px !important;font-size:7px !important;}
+  .tr-proCoach{margin-top:12px;border-radius:17px;}
+  .tr-proCoachHeader{min-height:61px;padding:11px 11px 11px 15px;gap:8px;}
+  .tr-proCoachIcon{width:33px;height:33px;flex-basis:33px;border-radius:11px;font-size:19px;}
+  .tr-proCoachTitle{font-size:11px;letter-spacing:.11em;}
+  .tr-proCoachSubtitle{font-size:8px;}
+  .tr-proCoachHeaderRight{gap:5px;}
+  .tr-proCoachDecision{min-height:24px;padding:0 7px;font-size:7px;letter-spacing:.10em;}
+  .tr-proCoachMinimize{display:none;}
+  .tr-proCoachChevron{width:27px;height:27px;border-radius:9px;font-size:8px;}
+  .tr-proCoachCollapsedSummary{padding:9px 12px 12px 15px;display:grid;gap:4px;}
+  .tr-proCoachCollapsedSummary strong{font-size:11px;}
+  .tr-proCoachCollapsedSummary span{text-align:left;font-size:8px;}
+  .tr-proCoachBody{padding:11px 11px 13px 14px;gap:9px;}
+  .tr-proCoachHero{padding:14px 12px 12px 15px;border-radius:14px;}
+  .tr-proCoachHeroAction{font-size:23px;}
+  .tr-proCoachHeroTitle{font-size:10px;}
+  .tr-proCoachHeroPrescription{margin-top:11px;grid-template-columns:1fr 1fr;gap:7px;}
+  .tr-proCoachHeroPrescription > div{padding:8px;border-radius:10px;}
+  .tr-proCoachHeroPrescription strong{font-size:9px;}
+  .tr-proCoachEvidence{grid-template-columns:repeat(3,minmax(0,1fr));border-radius:12px;}
+  .tr-proCoachEvidence > div{padding:9px 7px;}
+  .tr-proCoachEvidence strong{font-size:9px;line-height:1.22;}
+  .tr-proCoachEvidence span{font-size:6px;letter-spacing:.09em;}
+  .tr-proCoachReason{padding:10px 11px;border-radius:12px;}
+  .tr-proCoachReason p{font-size:9px;line-height:1.45;}
+  .tr-proCoachConfidencePanel{padding:9px 10px;border-radius:11px;}
+  .tr-liveSetReview{padding:10px 11px;border-radius:12px;}
+  .tr-liveSetReviewResult{font-size:13px;}
+  .tr-liveSetReviewNext strong{font-size:9px;}
+  .tr-proCoachActions{grid-template-columns:1fr;gap:7px;}
+  .tr-proCoachApply,.tr-proCoachHistory{min-height:40px !important;font-size:7px !important;}
+  .tr-workingSetsPanel{margin-top:11px;padding:10px;border-radius:16px;}
+  .tr-workingSetsPanelHead{grid-template-columns:1fr;gap:8px;padding-bottom:10px;}
+  .tr-workingSetList{gap:7px;margin-top:9px;}
+  .tr-workingSetRow{min-height:60px;padding:8px 9px;border-radius:12px;grid-template-columns:35px minmax(0,1fr) auto;gap:8px;}
+  .tr-workingSetStatusIcon{width:34px;height:34px;border-radius:10px;font-size:9px;}
+  .tr-workingSetSummary strong{font-size:11px;}
+  .tr-workingSetSummary small{font-size:8px;}
+  .tr-workingSetState{font-size:6px;padding:5px 6px;}
+  .tr-workingSetEdit{grid-column:2/-1;justify-self:end;min-height:27px;font-size:6px;}
+  .tr-workingSetActive{padding:11px;border-radius:14px;}
+  .tr-workingSetActiveHead{padding-bottom:9px;}
+  .tr-workingSetActiveHead > div:first-child strong{font-size:18px;}
+  .tr-workingSetPrevious strong{font-size:9px;}
+  .tr-workingSetControls{grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+  .tr-workingSetField > span{font-size:7px;}
+  .tr-workingSetActive .tr-qtyRow{grid-template-columns:41px minmax(0,1fr) 41px !important;gap:5px !important;}
+  .tr-workingSetActive .tr-qtyBtn{width:41px !important;min-width:41px !important;height:46px !important;min-height:46px !important;border-radius:12px !important;font-size:20px !important;}
+  .tr-workingSetActive .tr-bigInput{height:46px !important;min-height:46px !important;border-radius:12px !important;font-size:18px !important;padding:0 5px !important;}
+  .tr-effortSelector{margin-top:11px;padding-top:11px;}
+  .tr-effortSelectorHead{align-items:flex-start;}
+  .tr-effortSelectorHead span{font-size:8px;}
+  .tr-effortSelectorHead small{font-size:7px;}
+  .tr-effortSelectorHead em{display:none;}
+  .tr-effortOptions{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:9px;}
+  .tr-effortOptions button{min-height:49px;padding:7px 4px;border-radius:10px;}
+  .tr-effortOptions button strong{font-size:7.5px;}
+  .tr-effortOptions button span{font-size:6px;}
+  .tr-effortExplanation{min-height:34px;padding:7px 8px;gap:6px;align-items:flex-start;}
+  .tr-effortExplanation strong{font-size:7px;}
+  .tr-effortExplanation span{font-size:7px;}
+  .tr-workingSetComplete{min-height:51px;margin-top:11px;border-radius:13px;}
+  .tr-workingSetComplete span{font-size:10px;}
+  .tr-workingSetComplete small{font-size:7px;}
 }
 `}</style>
     </Card>
