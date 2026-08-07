@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
 } from "react";
+import { getMusicArtworkSignedUrl } from "../../lib/musicStorage";
 import {
   listMusicPlaylists,
   listMusicPlaylistTrackLinks,
@@ -20,19 +21,29 @@ import {
   loadMusicLibrary,
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
+  MUSIC_HEADPHONE_MODES,
   nextMusicTrack,
   pauseMusic,
   playMusic,
   playMusicPlaylist,
   previousMusicTrack,
+  saveMusicEqCustomPreset,
   seekMusic,
   setMusicEqBand,
   setMusicEqEnabled,
+  setMusicHeadphoneBassImpact,
+  setMusicHeadphoneCenter,
+  setMusicHeadphoneCrossfeed,
+  setMusicHeadphoneDepth,
+  setMusicHeadphoneMode,
+  setMusicHeadphoneWidth,
   setMusicPreamp,
   stopMusic,
   toggleMusicShuffle,
   useMusicPlayer,
+  type MusicCustomPresetSlot,
   type MusicEqPreset,
+  type MusicHeadphoneMode,
 } from "../../lib/musicPlayer";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
@@ -295,6 +306,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
   const [eqOpen, setEqOpen] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
+  const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<SpectrumTelemetry>({ bass: 0, peak: 0 });
 
   useEffect(() => {
@@ -309,6 +321,23 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     window.addEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
     return () => window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const current = player.currentTrack;
+    setArtworkUrl(null);
+    if (!current?.artwork_path) return () => { cancelled = true; };
+
+    void getMusicArtworkSignedUrl(current)
+      .then((url) => {
+        if (!cancelled) setArtworkUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setArtworkUrl(null);
+      });
+
+    return () => { cancelled = true; };
+  }, [player.currentTrack?.id, player.currentTrack?.artwork_path]);
 
   const run = (action: () => void | Promise<void>) => {
     try {
@@ -360,7 +389,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   return (
     <section
-      className={`tr-audioDeck tr-audioDeck--v4 ${player.playing ? "is-playing" : ""} ${
+      className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${
         player.loading || queueBusy ? "is-busy" : ""
       }`}
       style={deckStyle}
@@ -373,8 +402,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           onClick={() => navigate("/music")}
           aria-label="Open My Music"
         >
-          <PlayerIcon name="music" />
-          <span className="tr-audioArtworkGlow" />
+          {artworkUrl ? (
+            <img className="tr-audioArtworkImage" src={artworkUrl} alt="" />
+          ) : (
+            <span className="tr-audioArtworkFallback">
+              <PlayerIcon name="music" />
+            </span>
+          )}
         </button>
 
         <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}>
@@ -386,7 +420,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </strong>
           <small>
             {track
-              ? track.artist || "MVP Trainer library"
+              ? [track.artist || "MVP Trainer library", track.album].filter(Boolean).join(" • ")
               : "Choose a playlist or upload your music"}
           </small>
         </button>
@@ -532,16 +566,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           aria-label={`Repeat ${player.repeat}`}
         >
           <PlayerIcon name="repeat" />
-          <span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span>
+          <span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT TRACK"}</span>
         </button>
       </div>
 
       {eqOpen ? (
-        <div className="tr-audioEqPanel tr-audioEqPanel--v4">
+        <div className="tr-audioEqPanel tr-audioEqPanel--v4 tr-audioEqPanel--pro7">
           <div className="tr-audioEqHead">
             <div>
               <span className="tr-audioEyebrow">PERFORMANCE DSP</span>
-              <strong>10-band tone shaping with live RTA response</strong>
+              <strong>31-band 1/3-octave EQ + headphone immersion</strong>
             </div>
             <label className="tr-audioEqSwitch">
               <input
@@ -554,7 +588,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>{player.eqEnabled ? "ACTIVE" : "BYPASS"}</span>
             </label>
             <label className="tr-audioEqPreset">
-              <span>PRESET</span>
+              <span>EQ PRESET</span>
               <select
                 value={player.eqPreset}
                 onChange={(event: ChangeEvent<HTMLSelectElement>) =>
@@ -566,56 +600,62 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                     {preset.label}
                   </option>
                 ))}
-                <option value="custom">Custom</option>
+                <option value="custom_1">Custom 1</option>
+                <option value="custom_2">Custom 2</option>
+                <option value="custom_3">Custom 3</option>
+                <option value="custom">Unsaved Custom</option>
               </select>
             </label>
           </div>
 
           <div className="tr-audioDspSignalPath" aria-label="Audio processing path">
-            <span>INPUT</span>
-            <i />
-            <span>PREAMP</span>
-            <i />
-            <span>10-BAND EQ</span>
-            <i />
-            <span>RTA ANALYSIS</span>
-            <i />
+            <span>INPUT</span><i />
+            <span>PREAMP</span><i />
+            <span>31-BAND EQ</span><i />
+            <span>HEADPHONE</span><i />
+            <span>LIMITER / RTA</span><i />
             <span>OUTPUT</span>
           </div>
 
-          <div className="tr-audioEqBands">
-            {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
-              <label key={frequency} className="tr-audioEqBand">
-                <span className="tr-audioEqGain">
-                  {Number(player.eqGains[index] || 0) > 0 ? "+" : ""}
-                  {Number(player.eqGains[index] || 0).toFixed(0)}
-                </span>
-                <span className="tr-audioEqSliderShell">
-                  <input
-                    type="range"
-                    min="-12"
-                    max="12"
-                    step="1"
-                    value={player.eqGains[index] || 0}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      setMusicEqBand(index, Number(event.target.value))
-                    }
-                    aria-label={`${frequency} hertz equalizer gain`}
-                  />
-                </span>
-                <span>{frequency >= 1000 ? `${frequency / 1000}K` : frequency}</span>
-              </label>
-            ))}
+          <div className="tr-audioEqScroll" aria-label="31 band equalizer">
+            <div className="tr-audioEqBands tr-audioEqBands--31">
+              {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
+                <label key={frequency} className="tr-audioEqBand">
+                  <span className="tr-audioEqGain">
+                    {Number(player.eqGains[index] || 0) > 0 ? "+" : ""}
+                    {Number(player.eqGains[index] || 0).toFixed(0)}
+                  </span>
+                  <span className="tr-audioEqSliderShell">
+                    <input
+                      type="range"
+                      min="-12"
+                      max="12"
+                      step="0.5"
+                      value={player.eqGains[index] || 0}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        setMusicEqBand(index, Number(event.target.value))
+                      }
+                      aria-label={`${frequency} hertz equalizer gain`}
+                    />
+                  </span>
+                  <span>
+                    {frequency >= 1000
+                      ? `${Number((frequency / 1000).toFixed(frequency % 1000 ? 2 : 0))}K`
+                      : frequency}
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
-          <div className="tr-audioEqFooter">
+          <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
             <label className="tr-audioPreamp">
               <span>PREAMP</span>
               <input
                 type="range"
                 min="-12"
                 max="6"
-                step="1"
+                step="0.5"
                 value={player.preampDb}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   setMusicPreamp(Number(event.target.value))
@@ -623,22 +663,137 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               />
               <strong>
                 {player.preampDb > 0 ? "+" : ""}
-                {player.preampDb.toFixed(0)} dB
+                {player.preampDb.toFixed(1)} dB
               </strong>
             </label>
             <div className="tr-audioEqQuickActions">
-              <button type="button" onClick={() => applyMusicEqPreset("flat")}>
-                RESET FLAT
-              </button>
-              <button type="button" onClick={() => applyMusicEqPreset("power")}>
-                POWER TRAINING
-              </button>
+              <button type="button" onClick={() => applyMusicEqPreset("flat")}>FLAT</button>
+              <button type="button" onClick={() => applyMusicEqPreset("power")}>POWER TRAINING</button>
             </div>
           </div>
+
+          <div className="tr-customPresetRail" aria-label="Save custom equalizer presets">
+            <span>SAVE CURRENT EQ</span>
+            {(["custom_1", "custom_2", "custom_3"] as MusicCustomPresetSlot[]).map((slot, index) => (
+              <button key={slot} type="button" onClick={() => saveMusicEqCustomPreset(slot)}>
+                CUSTOM {index + 1}
+              </button>
+            ))}
+          </div>
+
+          <section className="tr-headphoneProcessor">
+            <header>
+              <div>
+                <span className="tr-audioEyebrow">HEADPHONE IMMERSION</span>
+                <strong>Virtual soundstage and natural crossfeed</strong>
+              </div>
+              <label>
+                <span>MODE</span>
+                <select
+                  value={player.headphoneMode}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode)
+                  }
+                >
+                  {Object.entries(MUSIC_HEADPHONE_MODES).map(([value, mode]) => (
+                    <option key={value} value={value}>{mode.label}</option>
+                  ))}
+                </select>
+              </label>
+            </header>
+
+            <div className="tr-headphoneModes">
+              {(Object.entries(MUSIC_HEADPHONE_MODES) as Array<
+                [MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]
+              >).map(([value, mode]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={player.headphoneMode === value ? "is-active" : ""}
+                  onClick={() => setMusicHeadphoneMode(value)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="tr-headphoneControls">
+              <label>
+                <span>WIDTH <b>{player.headphoneWidth}%</b></span>
+                <input type="range" min="0" max="100" value={player.headphoneWidth}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneWidth(Number(event.target.value))} />
+              </label>
+              <label>
+                <span>DEPTH <b>{player.headphoneDepth}%</b></span>
+                <input type="range" min="0" max="100" value={player.headphoneDepth}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneDepth(Number(event.target.value))} />
+              </label>
+              <label>
+                <span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span>
+                <input type="range" min="0" max="100" value={player.headphoneCrossfeed}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCrossfeed(Number(event.target.value))} />
+              </label>
+              <label>
+                <span>CENTER FOCUS <b>{player.headphoneCenter}%</b></span>
+                <input type="range" min="0" max="100" value={player.headphoneCenter}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCenter(Number(event.target.value))} />
+              </label>
+              <label>
+                <span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span>
+                <input type="range" min="0" max="100" value={player.headphoneBassImpact}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneBassImpact(Number(event.target.value))} />
+              </label>
+            </div>
+          </section>
         </div>
       ) : null}
 
       {player.error ? <div className="tr-audioError">{player.error}</div> : null}
+
+      <style>{`
+        .tr-audioDeck--pro7 .tr-audioArtwork{
+          background:linear-gradient(180deg,#111a21,#070b0f)!important;
+          border-color:rgba(132,196,221,.20)!important;
+          box-shadow:0 5px 14px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.055)!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%;height:100%;object-fit:cover;display:block;}
+        .tr-audioDeck--pro7 .tr-audioArtworkFallback{width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(145deg,#132332,#09131c);color:#ffc061;}
+        .tr-audioDeck--pro7 .tr-audioArtworkFallback svg{width:28px;height:28px;fill:currentColor;}
+        .tr-audioDeck--pro7 .tr-audioTransportButton--primary::before{
+          background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(95,30,0,.10))!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioTransportButton--primary::after,
+        .tr-audioDeck--pro7 .tr-audioTransportFace::before,
+        .tr-audioDeck--pro7 .tr-audioTransportFace::after{display:none!important;content:none!important;}
+        .tr-audioDeck--pro7 .tr-audioTransportButton--primary svg{filter:none!important;}
+        .tr-audioEqPanel--pro7{overflow:hidden;}
+        .tr-audioEqScroll{width:100%;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 8px;scrollbar-width:thin;scrollbar-color:rgba(83,199,240,.35) rgba(255,255,255,.04);}
+        .tr-audioEqBands--31{display:grid!important;grid-template-columns:repeat(31,minmax(42px,1fr))!important;gap:6px!important;min-width:1380px!important;}
+        .tr-audioEqBands--31 .tr-audioEqBand{min-width:42px!important;padding:8px 4px!important;}
+        .tr-audioEqBands--31 .tr-audioEqBand>span:last-child{font-size:7px!important;white-space:nowrap;}
+        .tr-audioEqBands--31 .tr-audioEqGain{font-size:8px!important;}
+        .tr-audioEqFooter--pro7{margin-top:5px;}
+        .tr-customPresetRail{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(118,204,236,.09);}
+        .tr-customPresetRail>span{margin-right:auto;color:rgba(183,209,222,.54);font-size:8px;font-weight:1000;letter-spacing:.14em;}
+        .tr-customPresetRail button,.tr-headphoneModes button{min-height:32px;padding:0 11px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer;}
+        .tr-headphoneProcessor{margin-top:12px;padding:13px;border:1px solid rgba(71,186,229,.20);border-radius:14px;background:linear-gradient(180deg,rgba(11,27,38,.88),rgba(5,13,19,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.035);}
+        .tr-headphoneProcessor header{display:grid;grid-template-columns:minmax(0,1fr) 190px;align-items:end;gap:12px;}
+        .tr-headphoneProcessor header>div{display:grid;gap:3px;}.tr-headphoneProcessor header strong{color:#f4f9fc;font-size:12px;}
+        .tr-headphoneProcessor header label{display:grid;gap:4px;}.tr-headphoneProcessor header label>span{color:rgba(180,204,217,.52);font-size:7px;font-weight:1000;letter-spacing:.14em;}
+        .tr-headphoneProcessor select{min-height:35px;border:1px solid rgba(125,198,224,.16);border-radius:9px;color:#f2f8fb;background:#081119;padding:0 10px;font-weight:900;}
+        .tr-headphoneModes{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
+        .tr-headphoneModes button.is-active{border-color:rgba(65,199,248,.52);color:#9de5ff;background:rgba(0,158,223,.11);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);}
+        .tr-headphoneControls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:11px;}
+        .tr-headphoneControls label{display:grid;gap:6px;padding:9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(0,0,0,.15);}
+        .tr-headphoneControls label>span{display:flex;justify-content:space-between;gap:6px;color:rgba(184,208,220,.55);font-size:7px;font-weight:1000;letter-spacing:.08em;}.tr-headphoneControls b{color:#91defb;}
+        .tr-headphoneControls input{width:100%;}
+        @media(max-width:760px){
+          .tr-audioEqBands--31{grid-template-columns:repeat(31,44px)!important;min-width:1530px!important;}
+          .tr-headphoneProcessor header{grid-template-columns:1fr;}
+          .tr-headphoneControls{grid-template-columns:repeat(2,minmax(0,1fr));}
+          .tr-customPresetRail{flex-wrap:wrap;justify-content:flex-start}.tr-customPresetRail>span{width:100%;margin:0;}
+        }
+      `}</style>
     </section>
   );
 }
