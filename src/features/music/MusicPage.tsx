@@ -8,10 +8,13 @@ import {
   type MouseEvent,
 } from "react";
 import {
+  getMusicArtworkSignedUrl,
   listMusicTracks,
+  removeMusicArtwork,
   removeMusicTrack,
   saveMusicTrackOrder,
   updateMusicTrack,
+  uploadMusicArtwork,
   uploadMusicTrack,
   type MusicEnergyLevel,
   type MusicTrack,
@@ -37,7 +40,7 @@ import {
   useMusicPlayer,
 } from "../../lib/musicPlayer";
 
-type DraftMap = Record<string, { title: string; artist: string }>;
+type DraftMap = Record<string, { title: string; artist: string; album: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
 type MusicTab = "songs" | "playlists" | "smart";
 type SmartIntensity = "high" | "balanced" | "recovery";
@@ -160,8 +163,45 @@ function songSortLabel(sort: SongSort) {
   return "Library order";
 }
 
+function TrackArtwork({
+  track,
+  size = "row",
+}: {
+  track: MusicTrack;
+  size?: "row" | "detail";
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUrl(null);
+    if (!track.artwork_path) return () => { cancelled = true; };
+
+    void getMusicArtworkSignedUrl(track)
+      .then((next) => {
+        if (!cancelled) setUrl(next);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+
+    return () => { cancelled = true; };
+  }, [track.id, track.artwork_path]);
+
+  return (
+    <span className={`tr-trackArtwork tr-trackArtwork--${size}`} aria-hidden>
+      {url ? (
+        <img src={url} alt="" />
+      ) : (
+        <span className="tr-trackArtworkFallback">♫</span>
+      )}
+    </span>
+  );
+}
+
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const artworkInputRef = useRef<HTMLInputElement | null>(null);
   const orderSaveTimerRef = useRef<number | null>(null);
   const latestOrderRef = useRef<MusicTrack[]>([]);
   const player = useMusicPlayer();
@@ -296,7 +336,11 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   function buildDrafts(rows: MusicTrack[]) {
     const next: DraftMap = {};
     for (const track of rows) {
-      next[track.id] = { title: track.title, artist: track.artist || "" };
+      next[track.id] = {
+        title: track.title,
+        artist: track.artist || "",
+        album: track.album || "",
+      };
     }
     setDrafts(next);
   }
@@ -407,7 +451,11 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     });
     setDrafts((current) => ({
       ...current,
-      [updated.id]: { title: updated.title, artist: updated.artist || "" },
+      [updated.id]: {
+        title: updated.title,
+        artist: updated.artist || "",
+        album: updated.album || "",
+      },
     }));
   }
 
@@ -422,12 +470,44 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       const updated = await updateMusicTrack(track.id, {
         title: draft.title,
         artist: draft.artist,
+        album: draft.album,
       });
       replaceTrackLocally(updated);
       setMessage("Song details saved.");
       setDetailTrackId(null);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "Could not save the song.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function replaceArtwork(track: MusicTrack, file: File | null) {
+    if (!file) return;
+    setBusyId(`artwork-${track.id}`);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await uploadMusicArtwork(track, file);
+      replaceTrackLocally(updated);
+      setMessage("Album artwork updated.");
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not update album artwork.");
+    } finally {
+      setBusyId(null);
+      if (artworkInputRef.current) artworkInputRef.current.value = "";
+    }
+  }
+
+  async function clearArtwork(track: MusicTrack) {
+    setBusyId(`artwork-${track.id}`);
+    setError("");
+    try {
+      const updated = await removeMusicArtwork(track);
+      replaceTrackLocally(updated);
+      setMessage("Album artwork removed.");
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not remove album artwork.");
     } finally {
       setBusyId(null);
     }
@@ -1026,6 +1106,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                       </label>
 
                       <div className="tr-libraryTrackCell">
+                        <TrackArtwork track={track} />
                         <button
                           type="button"
                           className={`tr-libraryPlay ${isPlaying ? "is-playing" : ""}`}
@@ -1036,7 +1117,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                         </button>
                         <div>
                           <strong>{track.title}</strong>
-                          <span>{track.artist || "Unknown artist"}</span>
+                          <span>
+                            {[track.artist || "Unknown artist", track.album].filter(Boolean).join(" • ")}
+                          </span>
                         </div>
                         {isCurrent ? <em>{isPlaying ? "PLAYING" : "READY"}</em> : null}
                       </div>
@@ -1244,6 +1327,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                       >
                         ▶
                       </button>
+                      <TrackArtwork track={track} />
                       <span className="tr-playlistTrackText">
                         <strong>{track.title}</strong>
                         <small>
@@ -1398,9 +1482,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}
           >
             <header>
-              <div>
-                <span className="tr-musicHubEyebrow">TRACK DETAILS</span>
-                <h2>{detailTrack.title}</h2>
+              <div className="tr-trackInspectorIdentity">
+                <TrackArtwork track={detailTrack} size="detail" />
+                <div>
+                  <span className="tr-musicHubEyebrow">TRACK DETAILS</span>
+                  <h2>{detailTrack.title}</h2>
+                </div>
               </div>
               <button type="button" onClick={() => setDetailTrackId(null)} aria-label="Close track details">
                 ×
@@ -1418,6 +1505,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                       [detailTrack.id]: {
                         title: event.target.value,
                         artist: current[detailTrack.id]?.artist ?? detailTrack.artist ?? "",
+                        album: current[detailTrack.id]?.album ?? detailTrack.album ?? "",
                       },
                     }))
                   }
@@ -1434,11 +1522,65 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                       [detailTrack.id]: {
                         title: current[detailTrack.id]?.title ?? detailTrack.title,
                         artist: event.target.value,
+                        album: current[detailTrack.id]?.album ?? detailTrack.album ?? "",
                       },
                     }))
                   }
                 />
               </label>
+
+              <label>
+                <span>ALBUM</span>
+                <input
+                  value={drafts[detailTrack.id]?.album ?? detailTrack.album ?? ""}
+                  placeholder="Optional album"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [detailTrack.id]: {
+                        title: current[detailTrack.id]?.title ?? detailTrack.title,
+                        artist: current[detailTrack.id]?.artist ?? detailTrack.artist ?? "",
+                        album: event.target.value,
+                      },
+                    }))
+                  }
+                />
+              </label>
+
+              <div className="tr-trackArtworkEditor">
+                <input
+                  ref={artworkInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    void replaceArtwork(detailTrack, event.target.files?.[0] ?? null)
+                  }
+                />
+                <div>
+                  <span>ALBUM ARTWORK</span>
+                  <small>
+                    Embedded MP3/M4A artwork is imported automatically when available.
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  disabled={busyId === `artwork-${detailTrack.id}`}
+                  onClick={() => artworkInputRef.current?.click()}
+                >
+                  {detailTrack.artwork_path ? "REPLACE ARTWORK" : "+ ADD ARTWORK"}
+                </button>
+                {detailTrack.artwork_path ? (
+                  <button
+                    type="button"
+                    className="is-danger"
+                    disabled={busyId === `artwork-${detailTrack.id}`}
+                    onClick={() => void clearArtwork(detailTrack)}
+                  >
+                    REMOVE
+                  </button>
+                ) : null}
+              </div>
 
               <div className="tr-trackInspectorEnergy">
                 <span>ENERGY LEVEL</span>
@@ -1614,6 +1756,27 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </section>
         </div>
       ) : null}
+
+      <style>{`
+        .tr-libraryTrackCell{grid-template-columns:auto auto minmax(0,1fr) auto!important;}
+        .tr-trackArtwork{display:grid;place-items:center;overflow:hidden;flex:0 0 auto;border:1px solid rgba(101,194,229,.15);background:linear-gradient(145deg,#102331,#07131b);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);}
+        .tr-trackArtwork--row{width:34px;height:34px;border-radius:8px;}
+        .tr-trackArtwork--detail{width:68px;height:68px;border-radius:13px;}
+        .tr-trackArtwork img{width:100%;height:100%;object-fit:cover;display:block;}
+        .tr-trackArtworkFallback{color:#ffc164;font-size:16px;font-weight:1000;}
+        .tr-trackArtwork--detail .tr-trackArtworkFallback{font-size:28px;}
+        .tr-trackInspectorIdentity{display:flex!important;align-items:center;gap:12px;min-width:0;}
+        .tr-trackInspectorIdentity>div{min-width:0;}
+        .tr-trackArtworkEditor{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:11px;border:1px solid rgba(91,192,231,.16);border-radius:12px;background:rgba(5,15,22,.45);}
+        .tr-trackArtworkEditor>div{display:grid;gap:3px;}.tr-trackArtworkEditor>div>span{color:#9ddff8;font-size:8px;font-weight:1000;letter-spacing:.13em;}.tr-trackArtworkEditor small{color:rgba(200,217,226,.55);font-size:10px;}
+        .tr-trackArtworkEditor button{min-height:35px;padding:0 11px;border:1px solid rgba(91,194,231,.25);border-radius:9px;color:#dff6ff;background:rgba(15,74,98,.30);font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer;}
+        .tr-trackArtworkEditor button.is-danger{border-color:rgba(227,88,88,.25);color:#ffb3b3;background:rgba(105,22,22,.18);}
+        .tr-playlistTrackRow>.tr-trackArtwork{margin-left:2px;}
+        @media(max-width:700px){
+          .tr-libraryTrackCell{grid-template-columns:auto auto minmax(0,1fr)!important;}.tr-libraryTrackCell>em{grid-column:3;}
+          .tr-trackArtworkEditor{grid-template-columns:1fr 1fr;}.tr-trackArtworkEditor>div{grid-column:1/-1;}.tr-trackInspectorIdentity .tr-trackArtwork--detail{width:54px;height:54px;}
+        }
+      `}</style>
     </div>
   );
 }
