@@ -207,15 +207,37 @@ function normalizeSessionDate(session: any) {
 
 function estimateMinutes(rows: TemplateExerciseRow[]) {
   if (!rows.length) return null;
-  let seconds = 0;
-  for (const row of rows) {
-    const sets = Math.max(1, Number(row.sets ?? 3));
-    const rest = Math.max(0, Number(row.rest_seconds ?? 60));
-    seconds += sets * 42;
+
+  // Real template-driven estimate:
+  // - exercise execution time comes from the programmed rep range
+  // - rest comes directly from each exercise's rest_seconds
+  // - a small per-set allowance covers logging/load adjustment
+  // - transitions account for moving/setup between exercises
+  let seconds = 90; // initial setup / getting into the first movement
+
+  rows.forEach((row, index) => {
+    const sets = Math.min(10, Math.max(1, Number(row.sets ?? 3)));
+    const rest = Math.min(300, Math.max(0, Number(row.rest_seconds ?? 60)));
+
+    const repMin = Math.max(1, Number(row.rep_min ?? 8));
+    const repMax = Math.max(repMin, Number(row.rep_max ?? repMin));
+    const averageReps = (repMin + repMax) / 2;
+
+    // About 4.5 sec/rep gives a controlled lifting tempo and includes
+    // the brief start/finish of the set. Keep unusual rep ranges sane.
+    const executionPerSet = Math.min(90, Math.max(25, averageReps * 4.5));
+    const setHandling = 12; // log set / change pin or load / reset position
+
+    seconds += sets * (executionPerSet + setHandling);
     seconds += Math.max(0, sets - 1) * rest;
-  }
-  seconds += rows.length * 75;
-  return Math.max(15, Math.round(seconds / 300) * 5);
+
+    if (index < rows.length - 1) {
+      seconds += 55; // exercise transition / equipment setup
+    }
+  });
+
+  const rawMinutes = seconds / 60;
+  return Math.max(15, Math.ceil(rawMinutes / 5) * 5);
 }
 
 function summarizeTemplate(
@@ -273,7 +295,15 @@ function summarizeTemplate(
     templateId,
     templateName: template?.name ?? null,
     exerciseCount: rows.length,
-    estimatedMinutes: templateMinutes > 0 ? templateMinutes : estimateMinutes(rows),
+    // If the template has real exercise rows, always calculate from the
+    // current programming so adding/removing exercises or changing sets,
+    // reps or rest immediately changes the dashboard estimate after save.
+    estimatedMinutes:
+      rows.length > 0
+        ? estimateMinutes(rows)
+        : templateMinutes > 0
+          ? templateMinutes
+          : null,
     muscles: display,
     allMuscleKeys: ranked.filter((item) => item.score >= 0.65).map((item) => item.key),
   };
@@ -368,6 +398,47 @@ function overlapCount(a: SessionMeta | null | undefined, b: SessionMeta | null |
 function laterDate(a: Date, b: Date | null | undefined) {
   if (!b) return a;
   return b.getTime() > a.getTime() ? b : a;
+}
+
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path d="M7 3v3M17 3v3M4.5 9h15M6.5 5h11a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+      <path d="M8 13h2M14 13h2M8 17h2M14 17h2" />
+    </svg>
+  );
+}
+
+function ExerciseMetricIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path d="M7 8v8M17 8v8M4.5 10v4M19.5 10v4M7 12h10" />
+      <path d="M3 9.5h1.5v5H3zM19.5 9.5H21v5h-1.5z" />
+    </svg>
+  );
+}
+
+function ClockMetricIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3.2 2" />
+    </svg>
+  );
+}
+
+function ScheduleDateBadge({ date }: { date: Date | null }) {
+  const label = formatTimelineDate(date);
+  const immediate = label === "TODAY" || label === "TOMORROW";
+
+  return (
+    <div className={`tr-sessionDate ${immediate ? "is-immediate" : ""}`}>
+      <span className="tr-sessionDateIcon">
+        <CalendarIcon />
+      </span>
+      <strong>{label}</strong>
+    </div>
+  );
 }
 
 function MuscleStrip({ muscles, compact = false }: { muscles: MuscleFocus[]; compact?: boolean }) {
@@ -858,14 +929,25 @@ export function TodayPage() {
               {!activeSessionId ? (
                 <div className="tr-nextHeroQuickStats" aria-label="Next workout details">
                   <div className="tr-nextHeroQuickStat">
-                    <strong>{nextMeta?.exerciseCount ?? "—"}</strong>
-                    <span>EXERCISES</span>
+                    <span className="tr-heroMetricIcon" aria-hidden>
+                      <ExerciseMetricIcon />
+                    </span>
+                    <div className="tr-heroMetricCopy">
+                      <strong>{nextMeta?.exerciseCount ?? "—"}</strong>
+                      <span>EXERCISES</span>
+                    </div>
                   </div>
-                  <div className="tr-nextHeroQuickStat">
-                    <strong>
-                      {nextMeta?.estimatedMinutes ? `~${nextMeta.estimatedMinutes}` : "—"}
-                    </strong>
-                    <span>MINUTES</span>
+
+                  <div className="tr-nextHeroQuickStat is-time">
+                    <span className="tr-heroMetricIcon" aria-hidden>
+                      <ClockMetricIcon />
+                    </span>
+                    <div className="tr-heroMetricCopy">
+                      <strong>
+                        {nextMeta?.estimatedMinutes ? `~${nextMeta.estimatedMinutes}` : "—"}
+                      </strong>
+                      <span>EST. MINUTES</span>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -937,19 +1019,29 @@ export function TodayPage() {
                                 <p>{parts.subtitle || meta?.templateName}</p>
                               ) : null}
                             </div>
-                            <div className="tr-sessionDate">{formatTimelineDate(plannedDate)}</div>
+                            <ScheduleDateBadge date={plannedDate} />
                           </div>
 
                           <MuscleStrip muscles={meta?.muscles ?? []} compact />
 
-                          <div className="tr-sessionMeta">
-                            <span>
-                              {meta?.exerciseCount ? `${meta.exerciseCount} exercises` : "Exercises —"}
-                            </span>
-                            <i aria-hidden>•</i>
-                            <span>
-                              {meta?.estimatedMinutes ? `~${meta.estimatedMinutes} min` : "Time —"}
-                            </span>
+                          <div className="tr-sessionMeta" aria-label="Workout size and estimated duration">
+                            <div className="tr-sessionMetaItem">
+                              <span className="tr-sessionMetaIcon" aria-hidden>
+                                <ExerciseMetricIcon />
+                              </span>
+                              <strong>{meta?.exerciseCount ?? "—"}</strong>
+                              <span>EXERCISES</span>
+                            </div>
+
+                            <div className="tr-sessionMetaItem">
+                              <span className="tr-sessionMetaIcon" aria-hidden>
+                                <ClockMetricIcon />
+                              </span>
+                              <strong>
+                                {meta?.estimatedMinutes ? `~${meta.estimatedMinutes}` : "—"}
+                              </strong>
+                              <span>MIN</span>
+                            </div>
                           </div>
                         </div>
 
@@ -4985,6 +5077,485 @@ export function TodayPage() {
             transition:none !important;
           }
         }
+
+
+        /* ==========================================================
+           STEP 6H: PERFORMANCE INSTRUMENTS + DEEP UPCOMING CARDS
+           ========================================================== */
+
+        .tr-nextHeroQuickStats{
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:8px;
+          overflow:visible;
+          border:0;
+          background:none;
+          box-shadow:none;
+        }
+
+        .tr-nextHeroQuickStat{
+          position:relative;
+          min-width:0;
+          min-height:78px;
+          display:grid;
+          grid-template-columns:38px minmax(0,1fr);
+          align-items:center;
+          gap:9px;
+          padding:11px 12px;
+          overflow:hidden;
+          border:1px solid rgba(126,199,224,.16);
+          border-top-color:rgba(187,229,244,.25);
+          border-bottom-color:rgba(27,59,72,.44);
+          border-radius:12px;
+          background:
+            linear-gradient(180deg,#101d26 0%,#091218 58%,#060c11 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.028),
+            0 2px 3px rgba(0,0,0,.43),
+            0 8px 18px rgba(0,0,0,.22),
+            inset 0 1px 0 rgba(255,255,255,.045),
+            inset 0 -2px 5px rgba(0,0,0,.30);
+          text-align:left;
+        }
+
+        .tr-nextHeroQuickStat::after{
+          content:"";
+          position:absolute;
+          left:13px;
+          right:13px;
+          top:0;
+          height:1px;
+          background:linear-gradient(
+            90deg,
+            transparent,
+            rgba(209,242,252,.22),
+            transparent
+          );
+        }
+
+        .tr-nextHeroQuickStat + .tr-nextHeroQuickStat{
+          border-left:1px solid rgba(126,199,224,.16);
+        }
+
+        .tr-heroMetricIcon{
+          width:38px;
+          height:38px;
+          display:grid;
+          place-items:center;
+          border:1px solid rgba(84,184,219,.21);
+          border-top-color:rgba(134,215,244,.29);
+          border-radius:10px;
+          color:#71d8f8;
+          background:
+            linear-gradient(180deg,#113448 0%,#09202c 100%);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.42),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 -3px 5px rgba(0,0,0,.26);
+        }
+
+        .tr-nextHeroQuickStat.is-time .tr-heroMetricIcon{
+          color:#efc56f;
+          border-color:rgba(219,170,78,.20);
+          border-top-color:rgba(241,200,117,.30);
+          background:linear-gradient(180deg,#3a2d16 0%,#20180d 100%);
+        }
+
+        .tr-heroMetricIcon svg{
+          width:21px;
+          height:21px;
+          fill:none;
+          stroke:currentColor;
+          stroke-width:1.8;
+          stroke-linecap:round;
+          stroke-linejoin:round;
+        }
+
+        .tr-heroMetricCopy{
+          min-width:0;
+          display:grid;
+          align-content:center;
+          gap:4px;
+        }
+
+        .tr-heroMetricCopy strong,
+        .tr-nextHeroQuickStat strong{
+          color:#f7fbfd;
+          font-size:28px;
+          line-height:.9;
+          font-weight:1000;
+          letter-spacing:-.045em;
+          font-variant-numeric:tabular-nums;
+          text-shadow:0 2px 5px rgba(0,0,0,.34);
+        }
+
+        .tr-heroMetricCopy span,
+        .tr-nextHeroQuickStat span:not(.tr-heroMetricIcon){
+          color:rgba(174,204,217,.58);
+          font-size:7px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.14em;
+          white-space:nowrap;
+        }
+
+        /* The upcoming section is a recessed tray. Individual sessions
+           are clearly brighter/lifted so they do not disappear into it. */
+        .tr-upcomingBoard{
+          border-color:rgba(115,184,209,.15);
+          border-top-color:rgba(179,224,240,.21);
+          background:
+            linear-gradient(180deg,#091016 0%,#050a0e 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.018),
+            0 3px 5px rgba(0,0,0,.40),
+            0 16px 38px rgba(0,0,0,.21),
+            inset 0 2px 6px rgba(0,0,0,.32),
+            inset 0 1px 0 rgba(255,255,255,.021);
+        }
+
+        .tr-upcomingHeader{
+          min-height:49px;
+          padding:0 17px;
+          border-bottom-color:rgba(134,196,218,.10);
+          background:
+            linear-gradient(180deg,rgba(21,37,47,.66),rgba(8,15,20,.42));
+        }
+
+        .tr-upcomingAdvisory{
+          color:rgba(141,189,207,.54);
+          font-size:7px;
+          letter-spacing:.17em;
+        }
+
+        .tr-trainingTimeline{
+          gap:13px;
+          padding:14px 13px 16px;
+        }
+
+        .tr-sessionCard{
+          border:1px solid rgba(123,194,219,.14);
+          border-top-color:rgba(189,229,243,.23);
+          border-bottom-color:rgba(31,64,77,.50);
+          border-radius:14px;
+          background:
+            linear-gradient(180deg,#172630 0%,#101b23 46%,#0b141b 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.040),
+            0 2px 3px rgba(0,0,0,.44),
+            0 8px 15px rgba(0,0,0,.29),
+            0 18px 32px rgba(0,0,0,.12),
+            inset 0 1px 0 rgba(255,255,255,.050),
+            inset 0 -2px 4px rgba(0,0,0,.27);
+        }
+
+        .tr-sessionCard::before{
+          width:3px;
+          background:
+            linear-gradient(
+              180deg,
+              rgba(78,198,238,.76),
+              rgba(31,116,148,.37) 58%,
+              rgba(18,63,82,.18)
+            );
+          box-shadow:1px 0 0 rgba(100,206,242,.05);
+        }
+
+        .tr-sessionCard::after{
+          left:18px;
+          right:24%;
+          background:linear-gradient(
+            90deg,
+            rgba(224,247,255,.20),
+            rgba(118,211,243,.09) 44%,
+            transparent
+          );
+        }
+
+        .tr-trainingTimelineRow.is-ready .tr-sessionCard{
+          border-top-color:rgba(190,232,245,.25);
+        }
+
+        .tr-sessionCard:hover{
+          transform:translateY(-2px);
+          border-color:rgba(110,204,237,.22);
+          border-top-color:rgba(204,238,249,.31);
+          background:
+            linear-gradient(180deg,#1a2c38 0%,#12212a 48%,#0c171f 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.045),
+            0 2px 3px rgba(0,0,0,.42),
+            0 10px 18px rgba(0,0,0,.30),
+            0 22px 38px rgba(0,0,0,.14),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 -2px 4px rgba(0,0,0,.25);
+        }
+
+        .tr-sessionTitleRow{
+          align-items:flex-start;
+        }
+
+        .tr-sessionTitleRow h3{
+          font-size:20px;
+          color:#f8fbfd;
+        }
+
+        .tr-sessionTitleRow p{
+          color:rgba(194,217,228,.57);
+          font-size:10px;
+        }
+
+        /* Schedule/date instrument */
+        .tr-sessionDate{
+          min-height:35px;
+          display:flex;
+          align-items:center;
+          gap:7px;
+          padding:6px 10px 6px 7px;
+          border:1px solid rgba(104,185,216,.17);
+          border-top-color:rgba(167,220,241,.23);
+          border-bottom-color:rgba(28,62,76,.44);
+          border-radius:9px;
+          color:#d8edf6;
+          background:
+            linear-gradient(180deg,#102631 0%,#091820 100%);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.40),
+            inset 0 1px 0 rgba(255,255,255,.040),
+            inset 0 -2px 3px rgba(0,0,0,.25);
+        }
+
+        .tr-sessionDate.is-immediate{
+          border-color:rgba(222,174,82,.28);
+          border-top-color:rgba(244,204,125,.38);
+          color:#f3cf7b;
+          background:
+            linear-gradient(180deg,#392b14 0%,#21180c 100%);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.40),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 -2px 3px rgba(0,0,0,.25);
+        }
+
+        .tr-sessionDateIcon{
+          width:23px;
+          height:23px;
+          display:grid;
+          place-items:center;
+          flex:0 0 23px;
+          border:1px solid rgba(121,202,232,.14);
+          border-radius:6px;
+          color:#67cff3;
+          background:rgba(4,13,18,.42);
+        }
+
+        .tr-sessionDate.is-immediate .tr-sessionDateIcon{
+          color:#f0c467;
+          border-color:rgba(239,194,103,.16);
+          background:rgba(32,22,8,.45);
+        }
+
+        .tr-sessionDateIcon svg{
+          width:14px;
+          height:14px;
+          fill:none;
+          stroke:currentColor;
+          stroke-width:1.8;
+          stroke-linecap:round;
+          stroke-linejoin:round;
+        }
+
+        .tr-sessionDate strong{
+          color:inherit;
+          font-size:8px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.105em;
+          white-space:nowrap;
+        }
+
+        /* High-contrast workout metadata */
+        .tr-sessionMeta{
+          display:flex;
+          align-items:center;
+          gap:7px;
+          margin-top:11px;
+          color:inherit;
+        }
+
+        .tr-sessionMeta i{
+          display:none;
+        }
+
+        .tr-sessionMetaItem{
+          min-height:30px;
+          display:flex;
+          align-items:center;
+          gap:5px;
+          padding:4px 8px 4px 5px;
+          border:1px solid rgba(117,185,210,.11);
+          border-top-color:rgba(162,211,229,.16);
+          border-radius:8px;
+          background:
+            linear-gradient(180deg,rgba(9,23,31,.72),rgba(5,14,19,.68));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.022),
+            inset 0 -1px 0 rgba(0,0,0,.34);
+        }
+
+        .tr-sessionMetaIcon{
+          width:21px;
+          height:21px;
+          display:grid;
+          place-items:center;
+          color:#62c9ed;
+          border:1px solid rgba(88,184,219,.12);
+          border-radius:6px;
+          background:rgba(11,40,53,.68);
+        }
+
+        .tr-sessionMetaItem:nth-child(2) .tr-sessionMetaIcon{
+          color:#e8bf6a;
+          border-color:rgba(216,169,77,.12);
+          background:rgba(53,39,16,.58);
+        }
+
+        .tr-sessionMetaIcon svg{
+          width:13px;
+          height:13px;
+          fill:none;
+          stroke:currentColor;
+          stroke-width:1.9;
+          stroke-linecap:round;
+          stroke-linejoin:round;
+        }
+
+        .tr-sessionMetaItem strong{
+          color:#f3f8fa;
+          font-size:11px;
+          line-height:1;
+          font-weight:1000;
+          font-variant-numeric:tabular-nums;
+        }
+
+        .tr-sessionMetaItem > span:last-child{
+          color:rgba(174,202,214,.64);
+          font-size:7px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.10em;
+        }
+
+        /* Timeline has enough presence to visually link the cards. */
+        .tr-timelineNode{
+          width:9px;
+          height:9px;
+          border-color:rgba(91,197,235,.45);
+          background:linear-gradient(180deg,#183747,#0b1b24);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.42),
+            0 0 0 3px rgba(60,172,214,.035),
+            inset 0 1px 0 rgba(255,255,255,.07);
+        }
+
+        .tr-trainingTimelineRow.is-ready .tr-timelineNode{
+          border-color:rgba(92,214,151,.53);
+          background:linear-gradient(180deg,#1b4132,#0b251b);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.42),
+            0 0 0 3px rgba(92,214,151,.035),
+            inset 0 1px 0 rgba(255,255,255,.065);
+        }
+
+        .tr-timelineLine{
+          background:linear-gradient(
+            180deg,
+            rgba(88,182,217,.25),
+            rgba(88,182,217,.07)
+          );
+        }
+
+        @media(max-width:680px){
+          .tr-nextHeroQuickStats{
+            gap:6px;
+          }
+
+          .tr-nextHeroQuickStat{
+            min-height:60px;
+            grid-template-columns:31px minmax(0,1fr);
+            gap:7px;
+            padding:8px;
+            border-radius:10px;
+          }
+
+          .tr-heroMetricIcon{
+            width:31px;
+            height:31px;
+            border-radius:8px;
+          }
+
+          .tr-heroMetricIcon svg{
+            width:18px;
+            height:18px;
+          }
+
+          .tr-heroMetricCopy strong,
+          .tr-nextHeroQuickStat strong{
+            font-size:22px;
+          }
+
+          .tr-heroMetricCopy span,
+          .tr-nextHeroQuickStat span:not(.tr-heroMetricIcon){
+            font-size:6px;
+            letter-spacing:.105em;
+          }
+
+          .tr-trainingTimeline{
+            gap:10px;
+            padding:11px 8px 13px;
+          }
+
+          .tr-sessionCard{
+            padding:12px 10px;
+          }
+
+          .tr-sessionDate{
+            min-height:31px;
+            gap:5px;
+            padding:4px 7px 4px 5px;
+          }
+
+          .tr-sessionDateIcon{
+            width:21px;
+            height:21px;
+            flex-basis:21px;
+          }
+
+          .tr-sessionDate strong{
+            font-size:7px;
+          }
+
+          .tr-sessionMeta{
+            gap:5px;
+            margin-top:9px;
+            flex-wrap:wrap;
+          }
+
+          .tr-sessionMetaItem{
+            min-height:28px;
+            padding:3px 7px 3px 4px;
+          }
+
+          .tr-sessionMetaIcon{
+            width:20px;
+            height:20px;
+          }
+
+          .tr-sessionMetaItem strong{
+            font-size:10px;
+          }
+        }
+
 
       `}</style>
     </div>
