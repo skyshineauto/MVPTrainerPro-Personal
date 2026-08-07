@@ -2084,6 +2084,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const toastTimer = useRef<any>(null);
   const addedTimer = useRef<any>(null);
   const completedOverlayArmedRef = useRef(false);
+  const workoutStartAlertPlayedRef = useRef(false);
 
   const [toast, setToast] = useState<ToastState>({ open: false, tone: "ok", text: "" });
 
@@ -2301,6 +2302,11 @@ export function WorkoutPlayerPage({ params }: any) {
         .eq("id", workoutId);
 
       if (error) throw error;
+
+      if (!workoutStartAlertPlayedRef.current) {
+        workoutStartAlertPlayedRef.current = true;
+        void playWorkoutAlert("workout_start");
+      }
 
       setGateOpen(false);
       setStartedWeight(w);
