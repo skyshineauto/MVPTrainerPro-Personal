@@ -635,6 +635,74 @@ const HUD_FORCE_CSS = `
 }
 `;
 
+
+const RUNTIME_DIAGNOSTICS_KEY = "mvp_runtime_diagnostics_v1";
+
+type RuntimeDiagnosticsRecord = {
+  bootId: string;
+  startedAt: number;
+  lastHeartbeatAt: number;
+  route: string;
+  cleanExit: boolean;
+  navigationType: string;
+  lastError: string | null;
+  heapUsedMb: number | null;
+  heapLimitMb: number | null;
+};
+
+function readRuntimeDiagnostics(): RuntimeDiagnosticsRecord | null {
+  try {
+    const raw = localStorage.getItem(RUNTIME_DIAGNOSTICS_KEY);
+    return raw ? (JSON.parse(raw) as RuntimeDiagnosticsRecord) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimeDiagnostics(record: RuntimeDiagnosticsRecord) {
+  try {
+    localStorage.setItem(RUNTIME_DIAGNOSTICS_KEY, JSON.stringify(record));
+  } catch {
+    // Diagnostics are intentionally non-blocking.
+  }
+}
+
+function getNavigationType() {
+  try {
+    const entry = performance.getEntriesByType("navigation")[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    return entry?.type ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readHeapSnapshot() {
+  try {
+    const memory = (performance as Performance & {
+      memory?: {
+        usedJSHeapSize?: number;
+        jsHeapSizeLimit?: number;
+      };
+    }).memory;
+
+    const used =
+      typeof memory?.usedJSHeapSize === "number"
+        ? Math.round((memory.usedJSHeapSize / 1024 / 1024) * 10) / 10
+        : null;
+
+    const limit =
+      typeof memory?.jsHeapSizeLimit === "number"
+        ? Math.round((memory.jsHeapSizeLimit / 1024 / 1024) * 10) / 10
+        : null;
+
+    return { used, limit };
+  } catch {
+    return { used: null, limit: null };
+  }
+}
+
 export function AppShell({
   children,
   navigate,
@@ -655,6 +723,7 @@ export function AppShell({
   const [nowTick, setNowTick] = useState(Date.now());
 
   const pollRef = useRef<any>(null);
+  const refreshInFlightRef = useRef(false);
 
   const isWorkoutSession = currentPath.startsWith("/workout/");
   const isWorkoutsTab = currentPath === "/" || currentPath.startsWith("/workout/");
@@ -664,6 +733,131 @@ export function AppShell({
   const [endDifficulty, setEndDifficulty] = useState<"too_easy" | "just_right" | "too_hard" | "">("");
   const [endNotes, setEndNotes] = useState("");
   const [endBusy, setEndBusy] = useState(false);
+
+  useEffect(() => {
+    if (hideChrome) return;
+
+    const previous = readRuntimeDiagnostics();
+    const now = Date.now();
+    const heap = readHeapSnapshot();
+    const bootId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const record: RuntimeDiagnosticsRecord = {
+      bootId,
+      startedAt: now,
+      lastHeartbeatAt: now,
+      route: currentPath,
+      cleanExit: false,
+      navigationType: getNavigationType(),
+      lastError: null,
+      heapUsedMb: heap.used,
+      heapLimitMb: heap.limit,
+    };
+
+    if (
+      previous &&
+      !previous.cleanExit &&
+      now - previous.lastHeartbeatAt < 5 * 60 * 1000
+    ) {
+      console.warn("MVP Trainer detected a previous unexpected restart.", {
+        previousRoute: previous.route,
+        previousSessionSeconds: Math.max(
+          0,
+          Math.round((previous.lastHeartbeatAt - previous.startedAt) / 1000)
+        ),
+        previousNavigationType: previous.navigationType,
+        previousError: previous.lastError,
+        previousHeapUsedMb: previous.heapUsedMb,
+        previousHeapLimitMb: previous.heapLimitMb,
+      });
+    }
+
+    writeRuntimeDiagnostics(record);
+
+    const heartbeat = () => {
+      const current = readRuntimeDiagnostics();
+      if (!current || current.bootId !== bootId) return;
+
+      const memory = readHeapSnapshot();
+      writeRuntimeDiagnostics({
+        ...current,
+        lastHeartbeatAt: Date.now(),
+        route: window.location.pathname,
+        heapUsedMb: memory.used,
+        heapLimitMb: memory.limit,
+      });
+    };
+
+    const heartbeatTimer = window.setInterval(heartbeat, 15000);
+
+    const recordError = (message: string) => {
+      const current = readRuntimeDiagnostics();
+      if (!current || current.bootId !== bootId) return;
+
+      writeRuntimeDiagnostics({
+        ...current,
+        lastHeartbeatAt: Date.now(),
+        lastError: message.slice(0, 1200),
+      });
+    };
+
+    const onError = (event: ErrorEvent) => {
+      recordError(
+        [
+          event.message,
+          event.filename,
+          event.lineno ? `line ${event.lineno}` : "",
+        ]
+          .filter(Boolean)
+          .join(" • ")
+      );
+    };
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason =
+        event.reason instanceof Error
+          ? `${event.reason.name}: ${event.reason.message}`
+          : String(event.reason ?? "Unhandled promise rejection");
+      recordError(reason);
+    };
+
+    const markCleanExit = () => {
+      const current = readRuntimeDiagnostics();
+      if (!current || current.bootId !== bootId) return;
+
+      writeRuntimeDiagnostics({
+        ...current,
+        lastHeartbeatAt: Date.now(),
+        cleanExit: true,
+      });
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    window.addEventListener("pagehide", markCleanExit);
+    window.addEventListener("beforeunload", markCleanExit);
+
+    return () => {
+      window.clearInterval(heartbeatTimer);
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      window.removeEventListener("pagehide", markCleanExit);
+      window.removeEventListener("beforeunload", markCleanExit);
+    };
+  }, [hideChrome]);
+
+  useEffect(() => {
+    if (hideChrome) return;
+
+    const current = readRuntimeDiagnostics();
+    if (!current) return;
+
+    writeRuntimeDiagnostics({
+      ...current,
+      route: currentPath,
+      lastHeartbeatAt: Date.now(),
+    });
+  }, [currentPath, hideChrome]);
 
   useEffect(() => {
     if (!endOpen) return;
@@ -677,9 +871,27 @@ export function AppShell({
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+    setNowTick(Date.now());
+
+    const intervalMs = hud.mode === "active" ? 1000 : 30000;
+    const t = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      setNowTick(Date.now());
+    }, intervalMs);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        setNowTick(Date.now());
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [hud.mode]);
 
   const signOut = async () => {
     setMsg(null);
@@ -929,21 +1141,52 @@ export function AppShell({
     if (hideChrome) return;
 
     const run = async () => {
+      if (
+        cancelled ||
+        refreshInFlightRef.current ||
+        document.visibilityState !== "visible"
+      ) {
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+
       try {
-        if (!cancelled) await fetchHud();
-      } catch {}
+        await fetchHud();
+      } catch (error) {
+        console.warn("Could not refresh MVP Trainer command center.", error);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void run();
+      }
     };
 
     void run();
 
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => void run(), 8000);
+    if (pollRef.current) window.clearInterval(pollRef.current);
+
+    const pollMs = hud.mode === "active" ? 10000 : 45000;
+    pollRef.current = window.setInterval(() => void run(), pollMs);
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
 
     return () => {
       cancelled = true;
-      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-  }, [user?.id, currentPath, hideChrome]);
+  }, [user?.id, currentPath, hideChrome, hud.mode]);
 
   const timerSeconds = useMemo(() => {
     if (hud.mode !== "active") return 0;
