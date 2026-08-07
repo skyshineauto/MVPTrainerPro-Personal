@@ -176,18 +176,6 @@ function formatTimelineDate(date: Date | null) {
     .toUpperCase();
 }
 
-function formatRecommendedDate(date: Date | null) {
-  if (!date) return "As scheduled";
-  const today = startOfDay(new Date());
-  if (sameDay(date, today)) return "Today";
-  if (sameDay(date, addDays(today, 1))) return "Tomorrow";
-
-  return date.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function startOfDay(date: Date) {
   const out = new Date(date);
@@ -316,9 +304,7 @@ function readinessForSession(
   }
 
   let recoveryDays = 0;
-  let tone: Readiness["tone"] = plannedStart.getTime() > today.getTime() ? "soon" : "ready";
-  let label = plannedStart.getTime() > today.getTime() ? "ON SCHEDULE" : "READY TO TRAIN";
-  let detail = "";
+  let recoveryTone: Readiness["tone"] = "soon";
 
   if (latestConflict) {
     const hard = latestConflict.history.postDifficulty === "too_hard";
@@ -328,33 +314,53 @@ function readinessForSession(
 
     if (pain >= 7 && days < 3) {
       recoveryDays = Math.max(1, 3 - Math.floor(days));
-      tone = "recovering";
-      label = "RECOVERY CHECK";
+      recoveryTone = "recovering";
     } else if ((pain >= 3 || hard) && overlap >= 2 && days < 2) {
       recoveryDays = Math.max(1, 2 - Math.floor(days));
-      tone = "recovering";
-      label = "RECOVERING";
+      recoveryTone = "recovering";
     } else if (overlap >= 2 && days < 1) {
       recoveryDays = 1;
-      tone = "monitor";
-      label = "RECOVERY WINDOW";
+      recoveryTone = "monitor";
     } else if (overlap === 1 && days < 1) {
       recoveryDays = 1;
-      tone = "monitor";
-      label = "MONITOR RECOVERY";
+      recoveryTone = "monitor";
     }
   }
 
   const recoveryDate = recoveryDays > 0 ? addDays(today, recoveryDays) : today;
   const recommendedDate =
     recoveryDate.getTime() > plannedStart.getTime() ? recoveryDate : plannedStart;
+  const shiftedForRecovery = recommendedDate.getTime() > plannedStart.getTime();
 
-  if (recoveryDays === 0 && plannedStart.getTime() <= today.getTime()) {
-    label = "READY TO TRAIN";
-    tone = "ready";
+  if (shiftedForRecovery) {
+    return {
+      tone: recoveryTone,
+      label: "RECOVERY EXTENDED",
+      detail: "",
+      recommendedDate,
+    };
   }
 
-  return { tone, label, detail, recommendedDate };
+  if (sameDay(recommendedDate, today)) {
+    return { tone: "ready", label: "READY TO TRAIN", detail: "", recommendedDate };
+  }
+
+  if (sameDay(recommendedDate, addDays(today, 1))) {
+    return { tone: "soon", label: "READY TOMORROW", detail: "", recommendedDate };
+  }
+
+  return { tone: "soon", label: "ON SCHEDULE", detail: "", recommendedDate };
+}
+
+function overlapCount(a: SessionMeta | null | undefined, b: SessionMeta | null | undefined) {
+  if (!a || !b) return 0;
+  const left = new Set(a.allMuscleKeys);
+  return b.allMuscleKeys.filter((key) => left.has(key)).length;
+}
+
+function laterDate(a: Date, b: Date | null | undefined) {
+  if (!b) return a;
+  return b.getTime() > a.getTime() ? b : a;
 }
 
 function MuscleStrip({ muscles, compact = false }: { muscles: MuscleFocus[]; compact?: boolean }) {
@@ -387,11 +393,6 @@ function ReadinessBadge({ readiness, compact = false }: { readiness: Readiness; 
       <div className="tr-readinessCopy">
         {!compact ? <span className="tr-readinessLabel">READINESS</span> : null}
         <strong>{readiness.label}</strong>
-        {!compact && readiness.recommendedDate ? (
-          <span className="tr-readinessDate">
-            Recommended {formatRecommendedDate(readiness.recommendedDate)}
-          </span>
-        ) : null}
       </div>
     </div>
   );
@@ -692,37 +693,70 @@ export function TodayPage() {
     const firstStored = firstStoredRaw ? startOfDay(firstStoredRaw) : null;
     const staleSchedule = !firstStored || firstStored.getTime() < today.getTime();
 
-    let previousEffective = staleSchedule ? today : firstStored ?? today;
-    let previousStored = firstStored;
+    let previousEffective: Date | null = null;
+    let previousPreviousEffective: Date | null = null;
+    let previousStored: Date | null = firstStored;
 
-    if (sessions[0]?.id) result.set(sessions[0].id, previousEffective);
-
-    for (let index = 1; index < sessions.length; index += 1) {
-      const session = sessions[index];
+    sessions.forEach((session, index) => {
       const storedRaw = normalizeSessionDate(session);
       const stored = storedRaw ? startOfDay(storedRaw) : null;
+      const meta = session?.id ? metaBySession.get(session.id) ?? null : null;
       let effective: Date;
 
-      if (staleSchedule) {
-        let gap = 1;
-        if (stored && previousStored) {
-          gap = Math.max(1, Math.round(daysBetween(stored, previousStored)));
-        }
-        effective = addDays(previousEffective, gap);
+      if (index === 0) {
+        effective = staleSchedule ? today : laterDate(today, stored ?? today);
       } else {
-        effective = stored ?? addDays(previousEffective, 1);
-        if (effective.getTime() <= previousEffective.getTime()) {
-          effective = addDays(previousEffective, 1);
+        const previousSession = sessions[index - 1];
+        const previousMeta = previousSession?.id
+          ? metaBySession.get(previousSession.id) ?? null
+          : null;
+
+        let storedGap = 1;
+        if (stored && previousStored) {
+          storedGap = Math.max(1, Math.round(daysBetween(stored, previousStored)));
+        }
+
+        const baseFromRotation = addDays(previousEffective ?? today, storedGap);
+        effective = staleSchedule
+          ? baseFromRotation
+          : laterDate(baseFromRotation, stored ?? baseFromRotation);
+
+        const overlap = overlapCount(previousMeta, meta);
+        if (overlap >= 2) {
+          effective = laterDate(effective, addDays(previousEffective ?? today, 2));
+        }
+
+        const trainedYesterday =
+          !!previousPreviousEffective &&
+          !!previousEffective &&
+          Math.round(daysBetween(previousEffective, previousPreviousEffective)) === 1;
+        const wouldBeThirdStraightDay =
+          !!previousEffective &&
+          Math.round(daysBetween(effective, previousEffective)) === 1 &&
+          trainedYesterday;
+
+        if (wouldBeThirdStraightDay) {
+          effective = addDays(effective, 1);
         }
       }
 
+      const readiness = readinessForSession(
+        session,
+        meta ?? summarizeTemplate(null, new Map(), new Map(), new Map()),
+        historySignals,
+        metaByTemplate,
+        effective
+      );
+      effective = laterDate(effective, readiness.recommendedDate);
+
       if (session?.id) result.set(session.id, effective);
+      previousPreviousEffective = previousEffective;
       previousEffective = effective;
       previousStored = stored ?? previousStored;
-    }
+    });
 
     return result;
-  }, [qd, upcomingSessions]);
+  }, [qd, upcomingSessions, metaBySession, metaByTemplate, historySignals]);
 
   const nextPlannedDate =
     nextSessionId && scheduleDateBySession.has(nextSessionId)
@@ -738,19 +772,6 @@ export function TodayPage() {
         nextPlannedDate
       )
     : null;
-
-  const rotationLabels = useMemo(() => {
-    const sessions = [qd?.nextSession, ...upcomingSessions].filter(Boolean).slice(0, 5);
-    return sessions.map((session: any) => {
-      const label = formatSessionLabel({
-        sessionType: session.session_type,
-        goal,
-        goalMode,
-        symptomKey,
-      });
-      return splitLabel(label).title;
-    });
-  }, [qd, upcomingSessions, goal, goalMode, symptomKey]);
 
   const onPrimary = () => {
     if (activeSessionId) {
@@ -783,22 +804,9 @@ export function TodayPage() {
               <div className="tr-trainingSectionEyebrow">
                 {activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}
               </div>
-
-              {!activeSessionId && nextReadiness ? (
-                <ReadinessBadge readiness={nextReadiness} />
-              ) : (
-                <ReadinessBadge
-                  readiness={{
-                    tone: "ready",
-                    label: "IN PROGRESS",
-                    detail: "",
-                    recommendedDate: null,
-                  }}
-                />
-              )}
             </div>
 
-            <div className="tr-nextHeroBody">
+            <div className="tr-nextHeroStage">
               <div className="tr-nextHeroCopy">
                 <h1>
                   {activeSessionId
@@ -819,28 +827,42 @@ export function TodayPage() {
                 {!activeSessionId ? <MuscleStrip muscles={nextMeta?.muscles ?? []} /> : null}
               </div>
 
-              {!activeSessionId ? (
-                <div className="tr-nextHeroMetrics" aria-label="Next workout details">
-                  <div className="tr-nextMetric">
-                    <strong>{formatTimelineDate(nextPlannedDate)}</strong>
-                  </div>
-                  <div className="tr-nextMetric">
-                    <strong>
-                      {nextMeta?.exerciseCount
-                        ? `${nextMeta.exerciseCount} EXERCISES`
-                        : "EXERCISES —"}
-                    </strong>
-                  </div>
-                  <div className="tr-nextMetric">
-                    <strong>
-                      {nextMeta?.estimatedMinutes
-                        ? `~${nextMeta.estimatedMinutes} MIN`
-                        : "TIME —"}
-                    </strong>
-                  </div>
+              <div className="tr-nextHeroReadiness">
+                <span className="tr-nextHeroReadinessLabel">READINESS</span>
+                <div className={`tr-nextHeroReadinessState is-${activeSessionId ? "ready" : nextReadiness?.tone ?? "soon"}`}>
+                  <span className="tr-nextHeroReadinessDot" aria-hidden />
+                  <strong>{activeSessionId ? "IN PROGRESS" : nextReadiness?.label ?? "ON SCHEDULE"}</strong>
                 </div>
-              ) : null}
+                <div className="tr-nextHeroReadinessRule" aria-hidden>
+                  <span />
+                </div>
+                <div className="tr-nextHeroReadinessWhen">
+                  {activeSessionId ? "NOW" : formatTimelineDate(nextReadiness?.recommendedDate ?? nextPlannedDate)}
+                </div>
+              </div>
             </div>
+
+            {!activeSessionId ? (
+              <div className="tr-nextHeroMetrics" aria-label="Next workout details">
+                <div className="tr-nextMetric">
+                  <strong>{formatTimelineDate(nextPlannedDate)}</strong>
+                </div>
+                <div className="tr-nextMetric">
+                  <strong>
+                    {nextMeta?.exerciseCount
+                      ? `${nextMeta.exerciseCount} EXERCISES`
+                      : "EXERCISES —"}
+                  </strong>
+                </div>
+                <div className="tr-nextMetric">
+                  <strong>
+                    {nextMeta?.estimatedMinutes
+                      ? `~${nextMeta.estimatedMinutes} MIN`
+                      : "TIME —"}
+                  </strong>
+                </div>
+              </div>
+            ) : null}
 
             <div className="tr-nextHeroActions">
               <button
@@ -865,19 +887,6 @@ export function TodayPage() {
           <section className="tr-upcomingBoard">
             <div className="tr-upcomingHeader">
               <div className="tr-trainingSectionEyebrow">UPCOMING TRAINING</div>
-
-              {rotationLabels.length ? (
-                <div className="tr-rotationStrip" aria-label="Program rotation">
-                  <div>
-                    {rotationLabels.map((label, index) => (
-                      <span key={`${label}-${index}`}>
-                        {label}
-                        {index < rotationLabels.length - 1 ? <b aria-hidden>›</b> : null}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
             </div>
 
             {loading ? (
@@ -938,9 +947,6 @@ export function TodayPage() {
                         <div className="tr-sessionRight">
                           <div className="tr-sessionReadiness">
                             <ReadinessBadge readiness={readiness} compact />
-                            <span>
-                              Recommended {formatRecommendedDate(readiness.recommendedDate)}
-                            </span>
                           </div>
 
                           <div className="tr-sessionActions">
@@ -1614,6 +1620,180 @@ export function TodayPage() {
           }
         }
 
+        /* STEP 6C: adaptive schedule + flagship next-workout hero */
+        .tr-nextHero{
+          padding:28px 28px 24px;
+          background:
+            linear-gradient(rgba(73,201,255,.025) 1px, transparent 1px),
+            linear-gradient(90deg,rgba(73,201,255,.02) 1px, transparent 1px),
+            radial-gradient(circle at 82% 20%,rgba(54,199,255,.13),transparent 30%),
+            radial-gradient(circle at 12% 110%,rgba(50,115,255,.08),transparent 36%),
+            linear-gradient(135deg,rgba(20,30,43,.998),rgba(7,12,19,.998) 64%,rgba(5,9,15,.998));
+          background-size:42px 42px,42px 42px,auto,auto,auto;
+          border-color:rgba(76,202,249,.31);
+          box-shadow:
+            0 34px 90px rgba(0,0,0,.46),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 0 48px rgba(31,157,220,.025);
+        }
+
+        .tr-nextHeroTopline{
+          display:block;
+        }
+
+        .tr-nextHeroStage{
+          position:relative;
+          z-index:1;
+          display:grid;
+          grid-template-columns:minmax(0,1.35fr) minmax(230px,.65fr);
+          align-items:end;
+          gap:30px;
+          min-width:0;
+          margin-top:18px;
+          padding-bottom:24px;
+        }
+
+        .tr-nextHeroCopy h1{
+          max-width:720px;
+          font-size:clamp(42px,5.1vw,66px);
+          line-height:.92;
+          letter-spacing:-.055em;
+        }
+
+        .tr-nextHeroProgram{
+          margin-top:10px;
+          color:rgba(231,240,248,.7);
+          font-size:14px;
+          font-weight:900;
+        }
+
+        .tr-nextHero .tr-scheduleMuscles{
+          gap:10px 16px;
+          margin-top:22px;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle{
+          min-height:42px;
+          padding:5px 10px 5px 6px;
+          border:1px solid rgba(69,199,249,.13);
+          border-radius:12px;
+          background:linear-gradient(180deg,rgba(48,190,246,.075),rgba(255,255,255,.018));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+        }
+
+        .tr-nextHeroReadiness{
+          align-self:stretch;
+          display:flex;
+          flex-direction:column;
+          justify-content:flex-end;
+          min-width:0;
+          padding:18px 0 4px 24px;
+          border-left:1px solid rgba(93,210,252,.16);
+          background:linear-gradient(90deg,rgba(56,195,246,.035),transparent 72%);
+        }
+
+        .tr-nextHeroReadinessLabel{
+          color:rgba(194,210,224,.44);
+          font-size:9px;
+          font-weight:1000;
+          letter-spacing:.17em;
+        }
+
+        .tr-nextHeroReadinessState{
+          display:flex;
+          align-items:center;
+          gap:9px;
+          margin-top:8px;
+          min-width:0;
+        }
+
+        .tr-nextHeroReadinessState strong{
+          color:#a9e8ff;
+          font-size:16px;
+          line-height:1.05;
+          font-weight:1000;
+          letter-spacing:.025em;
+        }
+
+        .tr-nextHeroReadinessDot{
+          width:8px;
+          height:8px;
+          flex:0 0 8px;
+          border-radius:50%;
+          background:#5bd8ff;
+          box-shadow:0 0 14px rgba(91,216,255,.38);
+        }
+
+        .tr-nextHeroReadinessState.is-ready strong{color:#8ef0b8;}
+        .tr-nextHeroReadinessState.is-ready .tr-nextHeroReadinessDot{
+          background:#50df91;
+          box-shadow:0 0 14px rgba(80,223,145,.38);
+        }
+        .tr-nextHeroReadinessState.is-soon strong,
+        .tr-nextHeroReadinessState.is-monitor strong{color:#efd09a;}
+        .tr-nextHeroReadinessState.is-soon .tr-nextHeroReadinessDot,
+        .tr-nextHeroReadinessState.is-monitor .tr-nextHeroReadinessDot{
+          background:#dcb86e;
+          box-shadow:0 0 14px rgba(220,184,110,.3);
+        }
+        .tr-nextHeroReadinessState.is-recovering strong{color:#ffc476;}
+        .tr-nextHeroReadinessState.is-recovering .tr-nextHeroReadinessDot{
+          background:#efa54a;
+          box-shadow:0 0 14px rgba(239,165,74,.34);
+        }
+
+        .tr-nextHeroReadinessRule{
+          position:relative;
+          width:100%;
+          max-width:250px;
+          height:3px;
+          margin-top:16px;
+          overflow:hidden;
+          border-radius:999px;
+          background:rgba(255,255,255,.055);
+        }
+
+        .tr-nextHeroReadinessRule span{
+          display:block;
+          width:72%;
+          height:100%;
+          border-radius:inherit;
+          background:linear-gradient(90deg,#45c9ff,#55df9b);
+          box-shadow:0 0 12px rgba(68,204,255,.24);
+        }
+
+        .tr-nextHeroReadinessWhen{
+          margin-top:10px;
+          color:rgba(238,247,253,.84);
+          font-size:12px;
+          font-weight:1000;
+          letter-spacing:.08em;
+        }
+
+        .tr-nextHeroMetrics{
+          position:relative;
+          z-index:1;
+          margin-top:0;
+          background:rgba(0,0,0,.08);
+        }
+
+        .tr-nextMetric{
+          padding:16px 14px;
+        }
+
+        .tr-nextMetric strong{
+          font-size:12px;
+          letter-spacing:.055em;
+        }
+
+        .tr-nextHeroActions{
+          margin-top:16px;
+        }
+
+        .tr-upcomingHeader{
+          justify-content:flex-start;
+        }
+
         @media (max-width:680px){
           .tr-trainingBoard{
             gap:12px;
@@ -1638,9 +1818,7 @@ export function TodayPage() {
           }
 
           .tr-nextHeroTopline{
-            display:grid;
-            grid-template-columns:1fr;
-            gap:12px;
+            display:block;
           }
 
           .tr-readinessStatus{
@@ -1649,14 +1827,31 @@ export function TodayPage() {
             min-width:0;
           }
 
-          .tr-nextHeroBody{
+          .tr-nextHeroStage{
+            grid-template-columns:1fr;
             gap:16px;
-            margin-top:17px;
+            margin-top:16px;
+            padding-bottom:16px;
           }
 
           .tr-nextHeroCopy h1{
-            font-size:clamp(31px,10vw,42px);
-            line-height:1;
+            font-size:clamp(34px,11vw,46px);
+            line-height:.95;
+          }
+
+          .tr-nextHeroReadiness{
+            padding:13px 0 0;
+            border-left:0;
+            border-top:1px solid rgba(93,210,252,.12);
+            background:transparent;
+          }
+
+          .tr-nextHeroReadinessState strong{
+            font-size:14px;
+          }
+
+          .tr-nextHeroReadinessRule{
+            max-width:none;
           }
 
           .tr-nextHeroProgram{
