@@ -1159,6 +1159,7 @@ type RestTimerState = {
   totalSeconds: number;
   remainingSeconds: number;
   deadlineMs: number | null;
+  finishedAtMs: number | null;
   exerciseName: string;
   setIndex: number | null;
   nextSetNumber: number | null;
@@ -1179,7 +1180,8 @@ type RestTimerController = RestTimerState & {
   skip: () => void;
 };
 
-const REST_TIMER_STORAGE_KEY = "mvp_rest_timer_v2";
+const REST_TIMER_STORAGE_KEY = "mvp_rest_timer_v3";
+const REST_COMPLETE_VISIBLE_MS = 1400;
 
 function emptyRestTimer(): RestTimerState {
   return {
@@ -1187,6 +1189,7 @@ function emptyRestTimer(): RestTimerState {
     totalSeconds: 0,
     remainingSeconds: 0,
     deadlineMs: null,
+    finishedAtMs: null,
     exerciseName: "",
     setIndex: null,
     nextSetNumber: null,
@@ -1202,6 +1205,7 @@ function readStoredRestTimer(): RestTimerState {
   try {
     const raw =
       localStorage.getItem(REST_TIMER_STORAGE_KEY) ??
+      localStorage.getItem("mvp_rest_timer_v2") ??
       localStorage.getItem("mvp_rest_timer_v1");
 
     if (!raw) return idle;
@@ -1224,11 +1228,33 @@ function readStoredRestTimer(): RestTimerState {
         Math.ceil((normalized.deadlineMs - Date.now()) / 1000)
       );
 
+      if (remaining > 0) {
+        return { ...normalized, remainingSeconds: remaining };
+      }
+
       return {
         ...normalized,
-        remainingSeconds: remaining,
-        status: remaining > 0 ? "running" : "finished",
-        deadlineMs: remaining > 0 ? normalized.deadlineMs : null,
+        status: "finished",
+        remainingSeconds: 0,
+        deadlineMs: null,
+        finishedAtMs: Date.now(),
+      };
+    }
+
+    if (normalized.status === "finished") {
+      const finishedAt = Number(normalized.finishedAtMs ?? 0);
+      if (
+        finishedAt > 0 &&
+        Date.now() - finishedAt >= REST_COMPLETE_VISIBLE_MS
+      ) {
+        return idle;
+      }
+
+      return {
+        ...normalized,
+        remainingSeconds: 0,
+        deadlineMs: null,
+        finishedAtMs: finishedAt > 0 ? finishedAt : Date.now(),
       };
     }
 
@@ -1245,6 +1271,7 @@ function useRestTimer(): RestTimerController {
   useEffect(() => {
     try {
       localStorage.removeItem("mvp_rest_timer_v1");
+      localStorage.removeItem("mvp_rest_timer_v2");
 
       if (timer.status === "idle") {
         localStorage.removeItem(REST_TIMER_STORAGE_KEY);
@@ -1252,14 +1279,14 @@ function useRestTimer(): RestTimerController {
         localStorage.setItem(REST_TIMER_STORAGE_KEY, JSON.stringify(timer));
       }
     } catch {
-      // Timer persistence is helpful but not required.
+      // Persistence is helpful, but the timer still works without it.
     }
   }, [timer]);
 
   useEffect(() => {
     if (timer.status !== "running" || !timer.deadlineMs) return;
 
-    const tick = () => {
+    const updateFromDeadline = () => {
       setTimer((current) => {
         if (current.status !== "running" || !current.deadlineMs) return current;
 
@@ -1274,6 +1301,7 @@ function useRestTimer(): RestTimerController {
             status: "finished",
             remainingSeconds: 0,
             deadlineMs: null,
+            finishedAtMs: Date.now(),
           };
         }
 
@@ -1282,9 +1310,18 @@ function useRestTimer(): RestTimerController {
       });
     };
 
-    tick();
-    const id = window.setInterval(tick, 200);
-    return () => window.clearInterval(id);
+    updateFromDeadline();
+    const intervalId = window.setInterval(updateFromDeadline, 200);
+    const onVisibilityOrFocus = () => updateFromDeadline();
+
+    document.addEventListener("visibilitychange", onVisibilityOrFocus);
+    window.addEventListener("focus", onVisibilityOrFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityOrFocus);
+      window.removeEventListener("focus", onVisibilityOrFocus);
+    };
   }, [timer.status, timer.deadlineMs]);
 
   useEffect(() => {
@@ -1300,12 +1337,23 @@ function useRestTimer(): RestTimerController {
       void playWorkoutAlert("rest_complete");
     }
 
+    const finishedAt = Number(timer.finishedAtMs ?? Date.now());
+    const remainingVisibleMs = Math.max(
+      0,
+      REST_COMPLETE_VISIBLE_MS - (Date.now() - finishedAt)
+    );
+
+    if (remainingVisibleMs <= 0) {
+      setTimer(emptyRestTimer());
+      return;
+    }
+
     const dismissId = window.setTimeout(() => {
       setTimer(emptyRestTimer());
-    }, 1600);
+    }, remainingVisibleMs);
 
     return () => window.clearTimeout(dismissId);
-  }, [timer.status]);
+  }, [timer.status, timer.finishedAtMs]);
 
   const start = (
     seconds: number,
@@ -1325,6 +1373,7 @@ function useRestTimer(): RestTimerController {
       totalSeconds: total,
       remainingSeconds: total,
       deadlineMs: Date.now() + total * 1000,
+      finishedAtMs: null,
       exerciseName,
       setIndex: completedSetIndex,
       nextSetNumber:
@@ -1344,10 +1393,7 @@ function useRestTimer(): RestTimerController {
       if (current.status !== "running") return current;
 
       const currentRemaining = current.deadlineMs
-        ? Math.max(
-            0,
-            Math.ceil((current.deadlineMs - Date.now()) / 1000)
-          )
+        ? Math.max(0, Math.ceil((current.deadlineMs - Date.now()) / 1000))
         : current.remainingSeconds;
 
       const nextRemaining = Math.max(0, currentRemaining + seconds);
@@ -1358,6 +1404,7 @@ function useRestTimer(): RestTimerController {
           status: "finished",
           remainingSeconds: 0,
           deadlineMs: null,
+          finishedAtMs: Date.now(),
         };
       }
 
@@ -1365,6 +1412,7 @@ function useRestTimer(): RestTimerController {
         ...current,
         remainingSeconds: nextRemaining,
         deadlineMs: Date.now() + nextRemaining * 1000,
+        finishedAtMs: null,
       };
     });
   };
@@ -1404,6 +1452,7 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
 
   if (!visible) return null;
 
+  const finished = timer.status === "finished";
   const progress =
     timer.totalSeconds > 0
       ? Math.max(
@@ -1416,8 +1465,6 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
           )
         )
       : 0;
-
-  const finished = timer.status === "finished";
   const finalTen = !finished && timer.remainingSeconds <= 10;
   const finalThree = !finished && timer.remainingSeconds <= 3;
   const nextSetNumber =
@@ -1425,19 +1472,16 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
   const setLabel = nextSetNumber
     ? `SET ${nextSetNumber}${timer.totalSets ? ` OF ${timer.totalSets}` : ""}`
     : "NEXT SET";
-
   const cleanInstruction = timer.nextInstruction
     .replace(/\s*Rest\s+\d+\s+seconds\.?\s*$/i, "")
     .trim();
 
   return createPortal(
-    <div className="tr-restTimerOverlay" role="presentation">
+    <div className="tr-recoveryOverlay" role="presentation">
       <section
-        className={`tr-restTimerDock tr-restTimerDock--pro ${
-          finished ? "is-finished" : ""
-        } ${finalTen ? "is-final-ten" : ""} ${
-          finalThree ? "is-final-three" : ""
-        }`}
+        className={`tr-recoveryPanel ${finished ? "is-ready" : ""} ${
+          finalTen ? "is-final-ten" : ""
+        } ${finalThree ? "is-final-three" : ""}`}
         role="timer"
         aria-live="polite"
         aria-label={
@@ -1445,95 +1489,72 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
             ? `Rest complete. ${setLabel} ready.`
             : `${formatRestClock(timer.remainingSeconds)} remaining in rest period.`
         }
+        style={{ "--tr-recovery-progress": `${progress}%` } as React.CSSProperties}
       >
-        <div className="tr-restTimerTop">
-          <div className="tr-restTimerIdentity">
-            <div className="tr-restTimerKicker">
-              {finished ? "REST COMPLETE" : "REST PERIOD"}
+        {finished ? (
+          <div className="tr-recoveryReadyState">
+            <div className="tr-recoveryReadyIcon" aria-hidden="true">✓</div>
+            <div className="tr-recoveryReadyKicker">REST COMPLETE</div>
+            <div className="tr-recoveryReadyTitle">{setLabel} READY</div>
+            <div className="tr-recoveryReadyGo">GO</div>
+            <div className="tr-recoveryReadyNote">Opening automatically</div>
+          </div>
+        ) : (
+          <>
+            <header className="tr-recoveryHeader">
+              <div>
+                <div className="tr-recoveryKicker">REST RECOVERY</div>
+                <div className="tr-recoveryExercise">
+                  {timer.exerciseName || "Current exercise"}
+                </div>
+              </div>
+              <div className="tr-recoverySetChip">{setLabel}</div>
+            </header>
+
+            <div className="tr-recoveryClockStage">
+              <div className="tr-recoveryProgressRing" aria-hidden="true">
+                <div className="tr-recoveryClock">
+                  {formatRestClock(timer.remainingSeconds)}
+                </div>
+              </div>
+              <div className="tr-recoveryClockLabel">
+                {finalTen ? "FINAL COUNTDOWN" : "BREATHE • RESET • PREPARE"}
+              </div>
             </div>
-            <div className="tr-restTimerExercise">
-              {finished
-                ? `${setLabel} READY`
-                : `${timer.exerciseName || "Exercise"} • Recovery`}
+
+            <div className="tr-recoveryInstruction">
+              <div className="tr-recoveryInstructionLabel">NEXT SET TARGET</div>
+              <div className="tr-recoveryInstructionText">
+                {cleanInstruction ||
+                  "Return to the prescribed working weight and complete clean, controlled reps."}
+              </div>
+              <div className="tr-recoveryInstructionMeta">
+                <span>60 SEC REST</span>
+                <span>AUTO-CLOSES AT ZERO</span>
+              </div>
             </div>
-          </div>
 
-          <div className="tr-restTimerRestTarget">60 SEC TARGET</div>
-        </div>
-
-        <div className="tr-restTimerClockWrap">
-          <div className="tr-restTimerClock">
-            {formatRestClock(timer.remainingSeconds)}
-          </div>
-          <div className="tr-restTimerClockCaption">
-            {finished
-              ? "NEXT SET IS READY"
-              : finalTen
-                ? "FINAL COUNTDOWN"
-                : "BREATHE • RESET • PREPARE"}
-          </div>
-        </div>
-
-        <div
-          className="tr-restTimerProgressTrack"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={timer.totalSeconds || 60}
-          aria-valuenow={Math.max(
-            0,
-            (timer.totalSeconds || 60) - timer.remainingSeconds
-          )}
-        >
-          <span style={{ width: `${progress}%` }} />
-        </div>
-
-        <div className="tr-restTimerNext">
-          <div>
-            <span>NEXT SET</span>
-            <strong>{setLabel}</strong>
-          </div>
-
-          <p>
-            {cleanInstruction ||
-              "Return to the prescribed working weight and complete clean, controlled reps."}
-          </p>
-
-          <div className="tr-restTimerNextMeta">
-            <span>REST 60 SECONDS</span>
-            <span>AUTO-CLOSES AT ZERO</span>
-          </div>
-        </div>
-
-        {!finished ? (
-          <div className="tr-restTimerActions tr-restTimerActions--simple">
-            <button
-              type="button"
-              onClick={() => timer.addSeconds(-15)}
-              disabled={timer.remainingSeconds <= 15}
-            >
-              −15 SEC
-            </button>
+            <div className="tr-recoveryAdjustments">
+              <button
+                type="button"
+                onClick={() => timer.addSeconds(-15)}
+                disabled={timer.remainingSeconds <= 15}
+              >
+                −15 SEC
+              </button>
+              <button type="button" onClick={() => timer.addSeconds(15)}>
+                +15 SEC
+              </button>
+            </div>
 
             <button
               type="button"
-              onClick={() => timer.addSeconds(15)}
-            >
-              +15 SEC
-            </button>
-
-            <button
-              type="button"
-              className="tr-restTimerSkip"
+              className="tr-recoverySkip"
               onClick={timer.skip}
             >
               SKIP REST
             </button>
-          </div>
-        ) : (
-          <div className="tr-restTimerReady">
-            <span aria-hidden="true">✓</span>
-            OPENING {setLabel}
-          </div>
+          </>
         )}
       </section>
     </div>,
@@ -7136,420 +7157,351 @@ const unlock = async () => {
   .tr-workingSetComplete small{font-size:7px;}
 }
 
-/* STEP 5 • PROFESSIONAL REST TIMER */
-.tr-restTimerOverlay{
+/* STEP 5B • POLISHED AUTO-DISMISSING REST RECOVERY */
+.tr-recoveryOverlay{
   position:fixed;
   inset:0;
-  z-index:16000;
+  z-index:22000;
   display:grid;
   place-items:center;
-  padding:clamp(18px,4vw,48px);
-  background:rgba(2,7,11,.93);
+  padding:clamp(18px,4vw,46px);
+  background:rgba(1,6,10,.90);
   overscroll-behavior:none;
 }
 
-.tr-restTimerDock.tr-restTimerDock--pro{
-  position:relative !important;
-  inset:auto !important;
-  left:auto !important;
-  right:auto !important;
-  top:auto !important;
-  bottom:auto !important;
-  transform:none !important;
-  width:min(620px,100%) !important;
-  max-width:620px !important;
-  min-height:0 !important;
-  margin:0 !important;
-  padding:0 !important;
-  display:grid !important;
-  grid-template-columns:1fr !important;
-  gap:0 !important;
-  overflow:hidden !important;
-  border:1px solid rgba(0,190,255,.50) !important;
-  border-radius:26px !important;
+.tr-recoveryPanel{
+  --tr-recovery-progress:0%;
+  position:relative;
+  width:min(600px,100%);
+  overflow:hidden;
+  border:1px solid rgba(37,199,244,.48);
+  border-radius:28px;
   background:
-    radial-gradient(circle at 50% -15%,rgba(0,174,255,.13),transparent 45%),
-    linear-gradient(180deg,#0c1821 0%,#071018 54%,#050b10 100%) !important;
+    radial-gradient(circle at 50% -20%,rgba(32,177,232,.14),transparent 44%),
+    linear-gradient(180deg,#0b1821 0%,#071118 52%,#040a0f 100%);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.10),
-    inset 0 0 0 1px rgba(0,0,0,.58),
-    0 30px 90px rgba(0,0,0,.70),
-    0 0 48px rgba(0,170,255,.10) !important;
-  backdrop-filter:none !important;
-  -webkit-backdrop-filter:none !important;
-  color:rgba(242,251,255,.98);
+    inset 0 0 0 1px rgba(0,0,0,.64),
+    0 34px 100px rgba(0,0,0,.76),
+    0 0 44px rgba(0,177,229,.10);
+  color:#effaff;
+  isolation:isolate;
 }
 
-.tr-restTimerDock.tr-restTimerDock--pro::before{
+.tr-recoveryPanel::before{
   content:"";
   position:absolute;
   inset:0;
+  z-index:-1;
   pointer-events:none;
   background:
-    linear-gradient(90deg,transparent,rgba(255,255,255,.035),transparent);
-  opacity:.45;
+    linear-gradient(120deg,transparent 18%,rgba(255,255,255,.035) 42%,transparent 64%),
+    repeating-linear-gradient(90deg,transparent 0 79px,rgba(255,255,255,.014) 80px);
 }
 
-.tr-restTimerTop{
-  position:relative;
-  z-index:1;
+.tr-recoveryHeader{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:18px;
-  padding:22px 24px 16px;
-  border-bottom:1px solid rgba(255,255,255,.065);
+  padding:22px 24px 17px;
+  border-bottom:1px solid rgba(255,255,255,.07);
 }
 
-.tr-restTimerIdentity{
-  min-width:0;
-  display:grid;
-  gap:5px;
+.tr-recoveryKicker{
+  color:#71dcff;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.19em;
+  line-height:1;
 }
 
-.tr-restTimerKicker{
-  color:#71dcff !important;
-  font-size:11px !important;
-  font-weight:1100 !important;
-  letter-spacing:.18em !important;
-  line-height:1 !important;
+.tr-recoveryExercise{
+  margin-top:6px;
+  color:rgba(218,237,246,.72);
+  font-size:13px;
+  font-weight:850;
+  line-height:1.25;
 }
 
-.tr-restTimerExercise{
-  color:rgba(221,239,247,.74) !important;
-  font-size:13px !important;
-  font-weight:850 !important;
-  letter-spacing:.03em !important;
-  line-height:1.25 !important;
-  white-space:normal !important;
-}
-
-.tr-restTimerRestTarget{
+.tr-recoverySetChip{
   flex:0 0 auto;
-  min-height:30px;
-  padding:0 10px;
-  border:1px solid rgba(220,190,105,.32);
+  min-height:32px;
+  padding:0 12px;
+  border:1px solid rgba(213,181,91,.34);
   border-radius:999px;
-  background:rgba(127,87,8,.10);
-  color:#e7ce8a;
+  background:rgba(121,85,15,.11);
+  color:#ead18a;
   display:grid;
   place-items:center;
-  font-size:8px;
-  font-weight:1100;
-  letter-spacing:.12em;
-}
-
-.tr-restTimerClockWrap{
-  position:relative;
-  z-index:1;
-  display:grid;
-  place-items:center;
-  gap:7px;
-  padding:30px 20px 24px;
-}
-
-.tr-restTimerClock{
-  min-width:0 !important;
-  color:#f4fbff !important;
-  font-family:Arial,Helvetica,sans-serif !important;
-  font-size:clamp(72px,16vw,118px) !important;
-  font-weight:800 !important;
-  line-height:.88 !important;
-  letter-spacing:-.055em !important;
-  font-variant-numeric:tabular-nums !important;
-  font-feature-settings:"tnum" 1,"zero" 0 !important;
-  text-shadow:
-    0 3px 0 rgba(0,0,0,.70),
-    0 0 34px rgba(0,190,255,.17) !important;
-}
-
-.tr-restTimerClockCaption{
-  color:rgba(151,184,198,.66);
   font-size:8px;
   font-weight:1000;
-  letter-spacing:.16em;
+  letter-spacing:.13em;
 }
 
-.tr-restTimerProgressTrack{
-  position:relative;
-  z-index:1;
-  height:8px;
-  margin:0 24px;
-  overflow:hidden;
-  border:1px solid rgba(255,255,255,.09);
-  border-radius:999px;
-  background:rgba(0,0,0,.42);
-  box-shadow:inset 0 1px 4px rgba(0,0,0,.74);
-}
-
-.tr-restTimerProgressTrack > span{
-  display:block;
-  width:0;
-  height:100%;
-  border-radius:inherit;
-  background:linear-gradient(90deg,#0e8fd2,#42d9f5);
-  box-shadow:0 0 15px rgba(0,195,255,.46);
-  transition:width .20s linear,background .18s ease;
-}
-
-.tr-restTimerNext{
-  position:relative;
-  z-index:1;
-  margin:20px 24px 0;
-  padding:18px;
-  border:1px solid rgba(222,188,92,.22);
-  border-radius:18px;
-  background:
-    linear-gradient(180deg,rgba(120,83,10,.085),rgba(0,0,0,.11)),
-    rgba(7,13,18,.90);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
+.tr-recoveryClockStage{
   display:grid;
-  gap:12px;
+  place-items:center;
+  gap:10px;
+  padding:25px 20px 18px;
 }
 
-.tr-restTimerNext > div:first-child{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
+.tr-recoveryProgressRing{
+  width:clamp(235px,56vw,330px);
+  aspect-ratio:1;
+  border-radius:50%;
+  padding:9px;
+  display:grid;
+  place-items:center;
+  background:
+    conic-gradient(from -90deg,#34d9f6 var(--tr-recovery-progress),rgba(255,255,255,.055) 0);
+  box-shadow:
+    0 0 30px rgba(25,194,236,.12),
+    inset 0 0 0 1px rgba(255,255,255,.035);
 }
 
-.tr-restTimerNext span{
+.tr-recoveryProgressRing::before{
+  content:"";
+  grid-area:1/1;
+  width:100%;
+  height:100%;
+  border-radius:50%;
+  background:
+    radial-gradient(circle at 50% 32%,rgba(26,168,219,.12),transparent 48%),
+    linear-gradient(180deg,#0b1720,#050b10);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 0 34px rgba(0,0,0,.58);
+}
+
+.tr-recoveryClock{
+  grid-area:1/1;
+  position:relative;
+  z-index:1;
+  color:#f5fbff;
+  font-family:"Helvetica Neue",Arial,Helvetica,sans-serif !important;
+  font-size:clamp(68px,14vw,102px);
+  font-weight:800;
+  line-height:1;
+  letter-spacing:-.055em;
+  font-variant-numeric:tabular-nums lining-nums !important;
+  font-feature-settings:"tnum" 1,"lnum" 1,"zero" 0 !important;
+  font-variation-settings:normal !important;
+  font-synthesis:none;
+  text-decoration:none !important;
+  text-shadow:0 3px 0 rgba(0,0,0,.72),0 0 28px rgba(34,202,244,.15);
+}
+
+.tr-recoveryClockLabel{
+  color:rgba(149,182,196,.66);
+  font-size:8px;
+  font-weight:1000;
+  letter-spacing:.17em;
+}
+
+.tr-recoveryInstruction{
+  margin:0 24px;
+  padding:17px 18px;
+  border:1px solid rgba(213,181,91,.22);
+  border-radius:18px;
+  background:linear-gradient(180deg,rgba(122,86,17,.08),rgba(0,0,0,.10));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.tr-recoveryInstructionLabel{
   color:#d8bb6d;
   font-size:8px;
-  font-weight:1050;
-  letter-spacing:.14em;
+  font-weight:1000;
+  letter-spacing:.15em;
 }
 
-.tr-restTimerNext strong{
-  color:#fff2ca;
-  font-size:18px;
-  font-weight:1100;
-  letter-spacing:.04em;
-}
-
-.tr-restTimerNext p{
-  margin:0;
-  color:rgba(225,240,247,.86);
+.tr-recoveryInstructionText{
+  margin-top:8px;
+  color:rgba(231,244,249,.90);
   font-size:14px;
-  font-weight:800;
+  font-weight:850;
   line-height:1.45;
 }
 
-.tr-restTimerNextMeta{
+.tr-recoveryInstructionMeta{
   display:flex;
   flex-wrap:wrap;
-  gap:8px 14px;
+  gap:8px 15px;
+  margin-top:12px;
   padding-top:10px;
-  border-top:1px solid rgba(255,255,255,.055);
+  border-top:1px solid rgba(255,255,255,.06);
 }
 
-.tr-restTimerNextMeta span{
-  color:rgba(150,180,194,.57);
+.tr-recoveryInstructionMeta span{
+  color:rgba(147,178,192,.59);
   font-size:7px;
+  font-weight:950;
+  letter-spacing:.12em;
 }
 
-.tr-restTimerActions.tr-restTimerActions--simple{
-  position:relative;
-  z-index:1;
-  display:grid !important;
-  grid-template-columns:1fr 1fr 1.18fr !important;
-  gap:10px !important;
-  padding:18px 24px 24px !important;
+.tr-recoveryAdjustments{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  padding:18px 24px 10px;
 }
 
-.tr-restTimerActions.tr-restTimerActions--simple button{
-  min-height:52px !important;
-  padding:0 12px !important;
-  border:1px solid rgba(255,255,255,.11) !important;
-  border-radius:14px !important;
-  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.18)) !important;
-  color:rgba(222,239,247,.88) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.055),
-    0 10px 24px rgba(0,0,0,.22) !important;
-  font-size:10px !important;
-  font-weight:1050 !important;
-  letter-spacing:.10em !important;
+.tr-recoveryAdjustments button,
+.tr-recoverySkip{
+  min-height:50px;
+  border-radius:14px;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.11em;
   cursor:pointer;
   transition:transform .14s ease,border-color .14s ease,background .14s ease;
 }
 
-.tr-restTimerActions.tr-restTimerActions--simple button:hover:not(:disabled){
+.tr-recoveryAdjustments button{
+  border:1px solid rgba(255,255,255,.11);
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.18));
+  color:rgba(222,239,247,.88);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 10px 24px rgba(0,0,0,.22);
+}
+
+.tr-recoveryAdjustments button:hover:not(:disabled),
+.tr-recoverySkip:hover{
   transform:translateY(-1px);
-  border-color:rgba(0,200,255,.42) !important;
-  background:linear-gradient(180deg,rgba(0,177,235,.13),rgba(0,53,84,.16)) !important;
+  border-color:rgba(0,200,255,.43);
 }
 
-.tr-restTimerActions.tr-restTimerActions--simple button:active:not(:disabled){
-  transform:translateY(1px);
-}
-
-.tr-restTimerActions.tr-restTimerActions--simple button:disabled{
-  opacity:.30 !important;
+.tr-recoveryAdjustments button:disabled{
+  opacity:.28;
   cursor:not-allowed;
 }
 
-.tr-restTimerActions.tr-restTimerActions--simple .tr-restTimerSkip{
-  border-color:rgba(78,205,235,.35) !important;
-  background:
-    linear-gradient(180deg,rgba(0,181,229,.16),rgba(0,74,114,.11)),
-    #07131c !important;
-  color:#dff8ff !important;
+.tr-recoverySkip{
+  width:calc(100% - 48px);
+  margin:0 24px 24px;
+  border:1px solid rgba(64,203,237,.38);
+  background:linear-gradient(180deg,rgba(0,177,231,.15),rgba(0,67,102,.10)),#07131b;
+  color:#dff8ff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 12px 28px rgba(0,0,0,.24);
 }
 
-.tr-restTimerDock.is-final-ten{
-  border-color:rgba(223,177,62,.54) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.10),
-    0 30px 90px rgba(0,0,0,.70),
-    0 0 46px rgba(218,164,38,.11) !important;
+.tr-recoveryPanel.is-final-ten{
+  border-color:rgba(221,179,69,.52);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 34px 100px rgba(0,0,0,.76),0 0 44px rgba(221,172,47,.11);
 }
 
-.tr-restTimerDock.is-final-ten .tr-restTimerClock{
-  color:#f2d67c !important;
-  text-shadow:0 3px 0 rgba(0,0,0,.72),0 0 34px rgba(228,175,47,.18) !important;
+.tr-recoveryPanel.is-final-ten .tr-recoveryProgressRing{
+  background:conic-gradient(from -90deg,#f0cf70 var(--tr-recovery-progress),rgba(255,255,255,.055) 0);
+  box-shadow:0 0 30px rgba(225,177,48,.12),inset 0 0 0 1px rgba(255,255,255,.035);
 }
 
-.tr-restTimerDock.is-final-ten .tr-restTimerProgressTrack > span{
-  background:linear-gradient(90deg,#d79a21,#f2d46e);
-  box-shadow:0 0 15px rgba(229,174,50,.36);
+.tr-recoveryPanel.is-final-ten .tr-recoveryClock{
+  color:#f2d77f;
+  text-shadow:0 3px 0 rgba(0,0,0,.72),0 0 28px rgba(225,177,48,.16);
 }
 
-.tr-restTimerDock.is-final-three .tr-restTimerClock{
-  animation:tr-restTimerPulse .72s ease-in-out infinite alternate;
+.tr-recoveryPanel.is-final-three .tr-recoveryClock{
+  animation:trRecoveryPulse .72s ease-in-out infinite alternate;
 }
 
-@keyframes tr-restTimerPulse{
-  from{transform:scale(1);opacity:.88;}
+@keyframes trRecoveryPulse{
+  from{transform:scale(1);opacity:.90;}
   to{transform:scale(1.025);opacity:1;}
 }
 
-.tr-restTimerDock.is-finished{
-  border-color:rgba(40,218,131,.55) !important;
+.tr-recoveryPanel.is-ready{
+  width:min(500px,100%);
+  border-color:rgba(48,224,143,.54);
   background:
-    radial-gradient(circle at 50% -15%,rgba(24,214,124,.15),transparent 48%),
-    linear-gradient(180deg,#0b1b18 0%,#07120f 56%,#050b09 100%) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.10),
-    0 30px 90px rgba(0,0,0,.70),
-    0 0 52px rgba(30,219,128,.13) !important;
+    radial-gradient(circle at 50% -15%,rgba(27,214,126,.17),transparent 48%),
+    linear-gradient(180deg,#0a1b17 0%,#06110e 58%,#040a08 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 34px 100px rgba(0,0,0,.76),0 0 54px rgba(31,218,132,.14);
 }
 
-.tr-restTimerDock.is-finished .tr-restTimerKicker,
-.tr-restTimerDock.is-finished .tr-restTimerClock{
-  color:#70efb4 !important;
-}
-
-.tr-restTimerDock.is-finished .tr-restTimerProgressTrack > span{
-  width:100% !important;
-  background:linear-gradient(90deg,#16a66a,#53edaa);
-  box-shadow:0 0 18px rgba(45,227,145,.40);
-}
-
-.tr-restTimerReady{
-  position:relative;
-  z-index:1;
-  margin:18px 24px 24px;
-  min-height:58px;
-  border:1px solid rgba(52,223,143,.42);
-  border-radius:15px;
-  background:rgba(22,155,93,.12);
-  color:#bff9dc;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:10px;
-  font-size:11px;
-  font-weight:1100;
-  letter-spacing:.12em;
-}
-
-.tr-restTimerReady > span{
-  width:25px;
-  height:25px;
-  border-radius:999px;
-  background:rgba(51,226,143,.18);
+.tr-recoveryReadyState{
+  min-height:390px;
+  padding:42px 24px;
   display:grid;
   place-items:center;
-  color:#67efad;
+  align-content:center;
+  gap:9px;
+  text-align:center;
+}
+
+.tr-recoveryReadyIcon{
+  width:62px;
+  height:62px;
+  margin-bottom:8px;
+  border:1px solid rgba(72,235,158,.45);
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:rgba(31,187,111,.14);
+  color:#73efb6;
+  font-size:28px;
+  font-weight:1000;
+  box-shadow:0 0 28px rgba(43,223,139,.14);
+}
+
+.tr-recoveryReadyKicker{
+  color:#70efb4;
+  font-size:11px;
+  font-weight:1000;
+  letter-spacing:.20em;
+}
+
+.tr-recoveryReadyTitle{
+  color:#e9fff5;
+  font-size:clamp(24px,6vw,36px);
+  font-weight:1000;
+  letter-spacing:.025em;
+}
+
+.tr-recoveryReadyGo{
+  margin-top:8px;
+  color:#82f3be;
+  font-family:"Helvetica Neue",Arial,Helvetica,sans-serif;
+  font-size:clamp(58px,14vw,90px);
+  font-weight:900;
+  line-height:1;
+  text-shadow:0 0 28px rgba(54,226,144,.20);
+}
+
+.tr-recoveryReadyNote{
+  color:rgba(167,204,184,.64);
+  font-size:8px;
+  font-weight:950;
+  letter-spacing:.15em;
 }
 
 @media (prefers-reduced-motion:reduce){
-  .tr-restTimerDock.is-final-three .tr-restTimerClock{
-    animation:none;
-  }
+  .tr-recoveryPanel.is-final-three .tr-recoveryClock{animation:none;}
 }
 
 @media (max-width:720px){
-  .tr-restTimerOverlay{
+  .tr-recoveryOverlay{
     align-items:end;
-    padding:12px 12px calc(82px + env(safe-area-inset-bottom));
+    padding:12px 12px calc(84px + env(safe-area-inset-bottom));
   }
 
-  .tr-restTimerDock.tr-restTimerDock--pro{
-    width:100% !important;
-    max-width:none !important;
-    max-height:calc(100dvh - 100px) !important;
-    border-radius:24px !important;
+  .tr-recoveryPanel{
+    width:100%;
+    max-height:calc(100dvh - 104px);
+    overflow:auto;
+    border-radius:24px;
   }
 
-  .tr-restTimerTop{
-    padding:17px 17px 13px;
-  }
-
-  .tr-restTimerKicker{
-    font-size:9px !important;
-  }
-
-  .tr-restTimerExercise{
-    font-size:11px !important;
-  }
-
-  .tr-restTimerRestTarget{
-    min-height:27px;
-    padding:0 8px;
-    font-size:6px;
-  }
-
-  .tr-restTimerClockWrap{
-    padding:24px 14px 18px;
-  }
-
-  .tr-restTimerClock{
-    font-size:clamp(72px,25vw,104px) !important;
-  }
-
-  .tr-restTimerProgressTrack{
-    margin:0 17px;
-  }
-
-  .tr-restTimerNext{
-    margin:16px 17px 0;
-    padding:14px;
-    border-radius:15px;
-  }
-
-  .tr-restTimerNext strong{
-    font-size:15px;
-  }
-
-  .tr-restTimerNext p{
-    font-size:12px;
-  }
-
-  .tr-restTimerActions.tr-restTimerActions--simple{
-    grid-template-columns:1fr 1fr !important;
-    padding:14px 17px 17px !important;
-  }
-
-  .tr-restTimerActions.tr-restTimerActions--simple .tr-restTimerSkip{
-    grid-column:1/-1;
-  }
-
-  .tr-restTimerReady{
-    margin:14px 17px 17px;
-  }
+  .tr-recoveryHeader{padding:17px 17px 13px;}
+  .tr-recoveryKicker{font-size:9px;}
+  .tr-recoveryExercise{font-size:11px;}
+  .tr-recoverySetChip{min-height:28px;padding:0 9px;font-size:7px;}
+  .tr-recoveryClockStage{padding:20px 12px 15px;}
+  .tr-recoveryProgressRing{width:min(68vw,270px);padding:7px;}
+  .tr-recoveryClock{font-size:clamp(62px,18vw,84px);}
+  .tr-recoveryInstruction{margin:0 17px;padding:14px;}
+  .tr-recoveryInstructionText{font-size:12px;}
+  .tr-recoveryAdjustments{padding:14px 17px 9px;}
+  .tr-recoverySkip{width:calc(100% - 34px);margin:0 17px 17px;}
+  .tr-recoveryReadyState{min-height:330px;padding:34px 18px;}
 }
 
 `}</style>
