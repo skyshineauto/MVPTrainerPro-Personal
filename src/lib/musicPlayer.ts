@@ -383,16 +383,41 @@ let preloadedAudio: HTMLAudioElement | null = null;
 let preloadedTrackId: string | null = null;
 let preloadedTrackUrl: string | null = null;
 let autoSkipDepth = 0;
+let hardRecoveryInFlight: Promise<void> | null = null;
+let lifecycleListenersInstalled = false;
 const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
+const SIGNED_URL_TTL_MS = 10 * 60 * 1000;
+const MAX_SIGNED_URL_CACHE = 12;
+
+function pruneSignedUrlCache() {
+  const now = Date.now();
+
+  for (const [trackId, entry] of signedUrlCache.entries()) {
+    if (now - entry.cachedAt >= SIGNED_URL_TTL_MS) {
+      signedUrlCache.delete(trackId);
+    }
+  }
+
+  while (signedUrlCache.size > MAX_SIGNED_URL_CACHE) {
+    const oldest = [...signedUrlCache.entries()].sort(
+      (left, right) => left[1].cachedAt - right[1].cachedAt
+    )[0];
+    if (!oldest) break;
+    signedUrlCache.delete(oldest[0]);
+  }
+}
 
 async function resolveTrackUrl(track: MusicTrack) {
+  pruneSignedUrlCache();
+
   const cached = signedUrlCache.get(track.id);
-  if (cached && Date.now() - cached.cachedAt < 10 * 60 * 1000) {
+  if (cached && Date.now() - cached.cachedAt < SIGNED_URL_TTL_MS) {
     return cached.url;
   }
 
   const url = await getMusicTrackSignedUrl(track);
   signedUrlCache.set(track.id, { url, cachedAt: Date.now() });
+  pruneSignedUrlCache();
   return url;
 }
 
@@ -481,6 +506,11 @@ function getAudioContext() {
     }).webkitAudioContext;
 
   if (!Context) return null;
+
+  if (audioContext?.state === "closed") {
+    audioContext = null;
+  }
+
   if (!audioContext) audioContext = new Context();
   return audioContext;
 }
@@ -637,6 +667,101 @@ function clearStallTimer() {
   }
 }
 
+function clearPlaybackWatchdog() {
+  if (watchdogTimer) {
+    window.clearInterval(watchdogTimer);
+    watchdogTimer = 0;
+  }
+
+  lastWatchdogTime = 0;
+  lastWatchdogPosition = 0;
+}
+
+function disconnectNode(node: AudioNode | null) {
+  if (!node) return;
+  try {
+    node.disconnect();
+  } catch {
+    // A partially-built Web Audio graph may already be disconnected.
+  }
+}
+
+function releaseMusicGraphNodes() {
+  disconnectNode(mediaSource);
+  disconnectNode(preampGain);
+  equalizerFilters.forEach((filter) => disconnectNode(filter));
+  disconnectNode(normalizerNode);
+  disconnectNode(headphoneBassShelf);
+  disconnectNode(headphoneSplitter);
+  disconnectNode(headphoneMerger);
+  disconnectNode(headphoneLeftDirect);
+  disconnectNode(headphoneRightDirect);
+  disconnectNode(headphoneLeftWidthCross);
+  disconnectNode(headphoneRightWidthCross);
+  disconnectNode(headphoneLeftCrossfeed);
+  disconnectNode(headphoneRightCrossfeed);
+  disconnectNode(headphoneLeftCrossDelay);
+  disconnectNode(headphoneRightCrossDelay);
+  disconnectNode(headphoneLeftCrossLowpass);
+  disconnectNode(headphoneRightCrossLowpass);
+  disconnectNode(limiterNode);
+  disconnectNode(analyserNode);
+  disconnectNode(musicGain);
+
+  mediaSource = null;
+  preampGain = null;
+  equalizerFilters = [];
+  normalizerNode = null;
+  limiterNode = null;
+  analyserNode = null;
+  musicGain = null;
+  headphoneBassShelf = null;
+  headphoneSplitter = null;
+  headphoneMerger = null;
+  headphoneLeftDirect = null;
+  headphoneRightDirect = null;
+  headphoneLeftWidthCross = null;
+  headphoneRightWidthCross = null;
+  headphoneLeftCrossfeed = null;
+  headphoneRightCrossfeed = null;
+  headphoneLeftCrossDelay = null;
+  headphoneRightCrossDelay = null;
+  headphoneLeftCrossLowpass = null;
+  headphoneRightCrossLowpass = null;
+  mediaSourceConnected = false;
+}
+
+async function destroyMusicAudioEngine() {
+  clearStallTimer();
+  clearPlaybackWatchdog();
+  resetPreloadedAudio();
+
+  const oldAudio = audioElement;
+  audioElement = null;
+
+  if (oldAudio) {
+    try {
+      oldAudio.pause();
+    } catch {}
+
+    try {
+      oldAudio.removeAttribute("src");
+      oldAudio.load();
+    } catch {}
+  }
+
+  releaseMusicGraphNodes();
+
+  const oldContext = audioContext;
+  audioContext = null;
+
+  if (oldContext && oldContext.state !== "closed") {
+    try {
+      await oldContext.close();
+    } catch {}
+  }
+}
+
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -653,6 +778,38 @@ async function safeAudioPlay(audio: HTMLAudioElement, attempts = 3) {
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Playback could not start.");
+}
+
+async function confirmHealthyPlayback(
+  audio: HTMLAudioElement,
+  timeoutMs = 1800
+) {
+  if (!playbackIntent) return;
+
+  const startedAt = performance.now();
+  const startPosition = Number(audio.currentTime || 0);
+
+  while (performance.now() - startedAt < timeoutMs) {
+    if (!playbackIntent) return;
+
+    const contextState = String(audioContext?.state ?? "running");
+    const position = Number(audio.currentTime || 0);
+    const progressed = position > startPosition + 0.04;
+
+    if (
+      !audio.paused &&
+      !audio.ended &&
+      audio.readyState >= 2 &&
+      contextState === "running" &&
+      (progressed || performance.now() - startedAt > 650)
+    ) {
+      return;
+    }
+
+    await wait(120);
+  }
+
+  throw new Error("The browser audio engine did not enter a healthy playing state.");
 }
 
 async function skipUnplayableCurrent(reason: string) {
@@ -684,12 +841,77 @@ async function skipUnplayableCurrent(reason: string) {
   }
 }
 
+async function hardResetCurrentPlayback(reason: string) {
+  if (hardRecoveryInFlight) return hardRecoveryInFlight;
+
+  hardRecoveryInFlight = (async () => {
+    const track = state.currentTrack;
+    if (!track) return;
+
+    const oldAudio = audioElement;
+    const resumeAt = Math.max(
+      0,
+      Number(oldAudio?.currentTime || state.currentTime || 0)
+    );
+
+    emit({
+      playing: false,
+      loading: true,
+      error: "Rebuilding audio engine…",
+    });
+
+    signedUrlCache.delete(track.id);
+    clearMusicUrlCache(track.id);
+    await destroyMusicAudioEngine();
+
+    if (!playbackIntent || state.currentTrack?.id !== track.id) {
+      emit({ loading: false });
+      return;
+    }
+
+    await unlockMusicAudio();
+    const freshAudio = ensureAudioElement();
+    await loadTrack(track, resumeAt);
+
+    if (!playbackIntent || state.currentTrack?.id !== track.id) {
+      emit({ loading: false });
+      return;
+    }
+
+    await safeAudioPlay(freshAudio, 2);
+    await confirmHealthyPlayback(freshAudio, 2200);
+
+    recoveryAttempt = 0;
+    autoSkipDepth = 0;
+    emit({ playing: true, loading: false, error: null });
+    preloadUpcomingTrack();
+
+    console.info(`MVP music audio engine rebuilt after ${reason}.`);
+  })()
+    .catch((error) => {
+      console.warn(`Hard music recovery failed after ${reason}:`, error);
+      throw error;
+    })
+    .finally(() => {
+      hardRecoveryInFlight = null;
+    });
+
+  return hardRecoveryInFlight;
+}
+
 async function recoverCurrentPlayback(reason: string) {
   if (!playbackIntent || !state.currentTrack) return;
+
   if (recoveryAttempt >= 2) {
     recoveryAttempt = 0;
-    await skipUnplayableCurrent(reason);
-    return;
+
+    try {
+      await hardResetCurrentPlayback(reason);
+      return;
+    } catch {
+      await skipUnplayableCurrent(`${reason}; hard audio reset failed`);
+      return;
+    }
   }
 
   recoveryAttempt += 1;
@@ -734,14 +956,21 @@ async function recoverCurrentPlayback(reason: string) {
     }
 
     await safeAudioPlay(audio, 2);
+    await confirmHealthyPlayback(audio, 1900);
     recoveryAttempt = 0;
     autoSkipDepth = 0;
     preloadUpcomingTrack();
   } catch (error) {
     console.warn(`Music recovery attempt failed after ${reason}:`, error);
+
     if (recoveryAttempt >= 2) {
       recoveryAttempt = 0;
-      await skipUnplayableCurrent(reason);
+
+      try {
+        await hardResetCurrentPlayback(reason);
+      } catch {
+        await skipUnplayableCurrent(`${reason}; hard audio reset failed`);
+      }
     } else {
       window.setTimeout(() => void recoverCurrentPlayback(reason), 650);
     }
@@ -763,6 +992,17 @@ function ensurePlaybackWatchdog(audio: HTMLAudioElement) {
   lastWatchdogPosition = audio.currentTime || 0;
 
   watchdogTimer = window.setInterval(() => {
+    if (audio !== audioElement) {
+      clearPlaybackWatchdog();
+      return;
+    }
+
+    if (document.visibilityState === "hidden") {
+      lastWatchdogTime = Date.now();
+      lastWatchdogPosition = audio.currentTime || 0;
+      return;
+    }
+
     if (!playbackIntent || audio.paused || audio.ended || !audio.src) {
       lastWatchdogTime = Date.now();
       lastWatchdogPosition = audio.currentTime || 0;
@@ -783,8 +1023,45 @@ function ensurePlaybackWatchdog(audio: HTMLAudioElement) {
   }, 1800);
 }
 
+function installMusicLifecycleListeners() {
+  if (lifecycleListenersInstalled || typeof window === "undefined") return;
+  lifecycleListenersInstalled = true;
+
+  const recoverOnReturn = () => {
+    if (document.visibilityState !== "visible") return;
+    if (!playbackIntent || !state.currentTrack) return;
+
+    const audio = audioElement;
+    const contextState = String(audioContext?.state ?? "running");
+
+    if (
+      !audio ||
+      audio.paused ||
+      audio.ended ||
+      !audio.src ||
+      contextState !== "running"
+    ) {
+      window.setTimeout(() => {
+        if (playbackIntent) {
+          void recoverCurrentPlayback("app returned to foreground");
+        }
+      }, 120);
+    }
+  };
+
+  document.addEventListener("visibilitychange", recoverOnReturn);
+  window.addEventListener("pageshow", recoverOnReturn);
+
+  window.addEventListener("pagehide", () => {
+    savePlaybackPosition();
+    clearStallTimer();
+  });
+}
+
 function ensureAudioElement() {
   if (audioElement) return audioElement;
+
+  installMusicLifecycleListeners();
 
   const audio = new Audio();
   audio.preload = "auto";
@@ -813,7 +1090,10 @@ function ensureAudioElement() {
     emit({ playing: true, loading: false, error: null });
   });
 
-  audio.addEventListener("pause", () => emit({ playing: false }));
+  audio.addEventListener("pause", () => {
+    if (!playbackIntent) clearPlaybackWatchdog();
+    emit({ playing: false });
+  });
 
   audio.addEventListener("loadedmetadata", () => {
     const duration = Number(audio.duration);
@@ -842,6 +1122,7 @@ function ensureAudioElement() {
 
   audio.addEventListener("ended", () => {
     clearStallTimer();
+    clearPlaybackWatchdog();
     recordedPlayToken = "";
     emit({ playing: false, currentTime: 0 });
     if (playbackIntent) void handleTrackEnded();
@@ -955,9 +1236,15 @@ function connectMusicGraph() {
 async function unlockMusicAudio() {
   connectMusicGraph();
   const context = getAudioContext();
+  if (!context) return;
 
-  if (context?.state === "suspended") {
-    await context.resume();
+  const currentState = String(context.state);
+  if (currentState !== "running" && currentState !== "closed") {
+    try {
+      await context.resume();
+    } catch {
+      // Hard recovery will rebuild an interrupted Safari context.
+    }
   }
 }
 
@@ -1366,18 +1653,28 @@ export async function playMusic() {
     await fadeGainTo(1, 180);
   }
 
-  await safeAudioPlay(audio);
+  try {
+    await safeAudioPlay(audio);
+    await confirmHealthyPlayback(audio, 1800);
+  } catch (error) {
+    console.warn("Normal music Play failed; rebuilding the audio engine.", error);
+    await hardResetCurrentPlayback("manual Play could not recover");
+  }
 }
 
 export function pauseMusic() {
   playbackIntent = false;
   clearStallTimer();
+  clearPlaybackWatchdog();
+  resetPreloadedAudio();
   ensureAudioElement().pause();
 }
 
 export function stopMusic() {
   playbackIntent = false;
   clearStallTimer();
+  clearPlaybackWatchdog();
+  resetPreloadedAudio();
   const audio = ensureAudioElement();
   audio.pause();
 
@@ -1866,6 +2163,23 @@ export async function playWithMusicDucked(
     await playAlert();
   } finally {
     audio.volume = originalVolume;
+  }
+}
+
+export async function rebuildMusicAudioEngine() {
+  if (!state.currentTrack) return;
+
+  const previousIntent = playbackIntent;
+  playbackIntent = true;
+
+  try {
+    await hardResetCurrentPlayback("manual audio-engine rebuild");
+  } finally {
+    if (!previousIntent && audioElement) {
+      playbackIntent = false;
+      audioElement.pause();
+      clearPlaybackWatchdog();
+    }
   }
 }
 
