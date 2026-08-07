@@ -203,49 +203,48 @@ function Spectrum({
   const peaksRef = useRef<number[]>([]);
   const peakHoldRef = useRef<number[]>([]);
   const lastTelemetryRef = useRef(0);
+  const lastFrameRef = useRef(0);
 
   useEffect(() => {
     let frame = 0;
-    const draw = () => {
+    let disposed = false;
+    const targetFrameMs = 1000 / 24;
+
+    const paint = (timestamp: number, forceStatic = false) => {
+      if (disposed) return;
+
       const canvas = canvasRef.current;
       if (!canvas) return;
+
       const rect = canvas.getBoundingClientRect();
-      const ratio = Math.min(2, window.devicePixelRatio || 1);
+      const ratio = Math.min(1.6, window.devicePixelRatio || 1);
       const width = Math.max(1, Math.round(rect.width * ratio));
       const height = Math.max(1, Math.round(rect.height * ratio));
+
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
       }
 
-      const context = canvas.getContext("2d");
+      const context = canvas.getContext("2d", { alpha: false });
       if (!context) return;
+
       context.clearRect(0, 0, width, height);
-      const levels = getMusicVisualizerLevels(48);
-      if (peaksRef.current.length !== levels.length) {
-        peaksRef.current = Array(levels.length).fill(0);
-        peakHoldRef.current = Array(levels.length).fill(0);
-      }
 
       const horizontalPadding = 7 * ratio;
       const topPadding = 4 * ratio;
       const bottomPadding = 6 * ratio;
       const usableWidth = Math.max(1, width - horizontalPadding * 2);
       const usableHeight = Math.max(1, height - topPadding - bottomPadding);
-      const gap = Math.max(1.35 * ratio, usableWidth * 0.0024);
-      const barWidth = Math.max(
-        1.5 * ratio,
-        (usableWidth - gap * (levels.length - 1)) / levels.length
-      );
 
       const panelGradient = context.createLinearGradient(0, 0, 0, height);
       panelGradient.addColorStop(0, "rgba(2, 17, 27, .34)");
-      panelGradient.addColorStop(1, "rgba(0, 2, 5, .7)");
+      panelGradient.addColorStop(1, "rgba(0, 2, 5, .92)");
       context.fillStyle = panelGradient;
       context.fillRect(0, 0, width, height);
 
       context.save();
-      context.strokeStyle = "rgba(126, 204, 239, .085)";
+      context.strokeStyle = "rgba(126, 204, 239, .075)";
       context.lineWidth = Math.max(1, ratio * 0.55);
       context.setLineDash([3 * ratio, 5 * ratio]);
       for (let line = 1; line <= 4; line += 1) {
@@ -259,7 +258,7 @@ function Spectrum({
 
       const zoneStops = [0.18, 0.36, 0.57, 0.78];
       context.save();
-      context.strokeStyle = "rgba(255,255,255,.055)";
+      context.strokeStyle = "rgba(255,255,255,.045)";
       context.lineWidth = Math.max(1, ratio * 0.45);
       for (const stop of zoneStops) {
         const x = horizontalPadding + usableWidth * stop;
@@ -270,16 +269,33 @@ function Spectrum({
       }
       context.restore();
 
+      if (forceStatic || !playing || document.visibilityState !== "visible") {
+        peaksRef.current = [];
+        peakHoldRef.current = [];
+        onTelemetry({ bass: 0, peak: 0 });
+        return;
+      }
+
+      const levels = getMusicVisualizerLevels(48);
+
+      if (peaksRef.current.length !== levels.length) {
+        peaksRef.current = Array(levels.length).fill(0);
+        peakHoldRef.current = Array(levels.length).fill(0);
+      }
+
+      const gap = Math.max(1.35 * ratio, usableWidth * 0.0024);
+      const barWidth = Math.max(
+        1.5 * ratio,
+        (usableWidth - gap * (levels.length - 1)) / levels.length
+      );
+
       let outputPeak = 0;
       let bassTotal = 0;
       const bassBands = Math.max(1, Math.floor(levels.length * 0.2));
 
       levels.forEach((level, index) => {
         const frequencyPosition = index / Math.max(1, levels.length - 1);
-        const idleWave = playing
-          ? 0
-          : 0.014 + Math.sin(index * 0.7 + performance.now() / 680) * 0.006;
-        const normalized = Math.max(idleWave, level);
+        const normalized = Math.max(0, level);
         outputPeak = Math.max(outputPeak, normalized);
         if (index < bassBands) bassTotal += normalized;
 
@@ -299,28 +315,46 @@ function Spectrum({
         );
 
         context.fillStyle = barGradient;
-        context.shadowColor = `hsla(${hue}, 93%, 61%, ${0.14 + normalized * 0.32})`;
-        context.shadowBlur = normalized > 0.16 ? 7 * ratio : 0;
+        context.shadowColor = `hsla(${hue}, 93%, 61%, ${0.10 + normalized * 0.22})`;
+        context.shadowBlur = normalized > 0.20 ? 4.5 * ratio : 0;
         context.beginPath();
-        context.roundRect(x, y, barWidth, barHeight, Math.max(1, barWidth * 0.34));
+        context.roundRect(
+          x,
+          y,
+          barWidth,
+          barHeight,
+          Math.max(1, barWidth * 0.34)
+        );
         context.fill();
 
         const previousPeak = peaksRef.current[index] || 0;
-        const nextPeak = Math.max(normalized, previousPeak - (playing ? 0.014 : 0.03));
+        const nextPeak = Math.max(normalized, previousPeak - 0.018);
         peaksRef.current[index] = nextPeak;
 
         const previousHold = peakHoldRef.current[index] || 0;
-        const held = normalized >= previousHold ? normalized : Math.max(0, previousHold - 0.0045);
+        const held =
+          normalized >= previousHold
+            ? normalized
+            : Math.max(0, previousHold - 0.006);
         peakHoldRef.current[index] = held;
 
-        const peakY = height - bottomPadding - nextPeak * usableHeight * 0.94 - ratio;
-        const holdY = height - bottomPadding - held * usableHeight * 0.94 - 3 * ratio;
+        const peakY =
+          height - bottomPadding - nextPeak * usableHeight * 0.94 - ratio;
+        const holdY =
+          height - bottomPadding - held * usableHeight * 0.94 - 3 * ratio;
+
         context.shadowBlur = 0;
         context.fillStyle =
           frequencyPosition < 0.34
             ? "rgba(255, 207, 119, .96)"
             : "rgba(143, 226, 255, .96)";
-        context.fillRect(x, Math.max(topPadding, peakY), barWidth, Math.max(1, ratio));
+        context.fillRect(
+          x,
+          Math.max(topPadding, peakY),
+          barWidth,
+          Math.max(1, ratio)
+        );
+
         context.fillStyle = "rgba(255,255,255,.78)";
         context.fillRect(
           x,
@@ -330,20 +364,59 @@ function Spectrum({
         );
       });
 
-      const now = performance.now();
-      if (now - lastTelemetryRef.current > 120) {
-        lastTelemetryRef.current = now;
+      if (timestamp - lastTelemetryRef.current > 250) {
+        lastTelemetryRef.current = timestamp;
         onTelemetry({
           bass: bassTotal / bassBands,
           peak: outputPeak,
         });
       }
-
-      frame = window.requestAnimationFrame(draw);
     };
 
-    frame = window.requestAnimationFrame(draw);
-    return () => window.cancelAnimationFrame(frame);
+    const loop = (timestamp: number) => {
+      if (disposed) return;
+
+      if (!playing || document.visibilityState !== "visible") {
+        paint(timestamp, true);
+        frame = 0;
+        return;
+      }
+
+      if (timestamp - lastFrameRef.current >= targetFrameMs) {
+        lastFrameRef.current = timestamp;
+        paint(timestamp);
+      }
+
+      frame = window.requestAnimationFrame(loop);
+    };
+
+    const startLoop = () => {
+      if (disposed) return;
+
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+
+      if (!playing || document.visibilityState !== "visible") {
+        paint(performance.now(), true);
+        return;
+      }
+
+      lastFrameRef.current = 0;
+      frame = window.requestAnimationFrame(loop);
+    };
+
+    const onVisibilityChange = () => startLoop();
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    startLoop();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [onTelemetry, playing]);
 
   return (
