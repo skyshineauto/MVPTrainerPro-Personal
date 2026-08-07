@@ -383,6 +383,8 @@ function MuscleStrip({ muscles, compact = false }: { muscles: MuscleFocus[]; com
 }
 
 function ReadinessBadge({ readiness, compact = false }: { readiness: Readiness; compact?: boolean }) {
+  if (readiness.label === "ON SCHEDULE") return null;
+
   return (
     <div
       className={`tr-readinessStatus tr-readinessStatus--${readiness.tone} ${
@@ -804,9 +806,21 @@ export function TodayPage() {
               <div className="tr-trainingSectionEyebrow">
                 {activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}
               </div>
+
+              <div
+                className={`tr-heroReadinessInline is-${
+                  activeSessionId ? "ready" : nextReadiness?.tone ?? "soon"
+                }`}
+              >
+                <span className="tr-heroReadinessLine" aria-hidden />
+                <span className="tr-heroReadinessDot" aria-hidden />
+                <strong>
+                  {activeSessionId ? "IN PROGRESS" : nextReadiness?.label ?? "READY"}
+                </strong>
+              </div>
             </div>
 
-            <div className="tr-nextHeroStage">
+            <div className="tr-heroIdentityStage">
               <div className="tr-nextHeroCopy">
                 <h1>
                   {activeSessionId
@@ -826,28 +840,12 @@ export function TodayPage() {
 
                 {!activeSessionId ? <MuscleStrip muscles={nextMeta?.muscles ?? []} /> : null}
               </div>
-
-              <div className="tr-nextHeroReadiness">
-                <span className="tr-nextHeroReadinessLabel">READINESS</span>
-                <div className={`tr-nextHeroReadinessState is-${activeSessionId ? "ready" : nextReadiness?.tone ?? "soon"}`}>
-                  <span className="tr-nextHeroReadinessDot" aria-hidden />
-                  <strong>{activeSessionId ? "IN PROGRESS" : nextReadiness?.label ?? "ON SCHEDULE"}</strong>
-                </div>
-                <div className="tr-nextHeroReadinessRule" aria-hidden>
-                  <span />
-                </div>
-                <div className="tr-nextHeroReadinessWhen">
-                  {activeSessionId ? "NOW" : formatTimelineDate(nextReadiness?.recommendedDate ?? nextPlannedDate)}
-                </div>
-              </div>
             </div>
 
             {!activeSessionId ? (
-              <div className="tr-nextHeroMetrics" aria-label="Next workout details">
+              <div className="tr-nextHeroMetrics tr-nextHeroMetrics--two" aria-label="Next workout details">
                 <div className="tr-nextMetric">
-                  <strong>{formatTimelineDate(nextPlannedDate)}</strong>
-                </div>
-                <div className="tr-nextMetric">
+                  <span>SESSION</span>
                   <strong>
                     {nextMeta?.exerciseCount
                       ? `${nextMeta.exerciseCount} EXERCISES`
@@ -855,6 +853,7 @@ export function TodayPage() {
                   </strong>
                 </div>
                 <div className="tr-nextMetric">
+                  <span>DURATION</span>
                   <strong>
                     {nextMeta?.estimatedMinutes
                       ? `~${nextMeta.estimatedMinutes} MIN`
@@ -2697,6 +2696,709 @@ export function TodayPage() {
             box-shadow:
               0 9px 18px rgba(0,167,235,.11),
               inset 0 1px 0 rgba(255,255,255,.42);
+          }
+        }
+
+
+        /* STEP 6E: flagship hero + high-end planner card rendering */
+        .tr-nextHero{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          padding:22px 22px 20px;
+          border:1px solid rgba(110,220,255,.30);
+          border-radius:22px;
+          background:
+            radial-gradient(720px 300px at 8% 18%, rgba(55,200,255,.18), transparent 54%),
+            radial-gradient(480px 300px at 96% 104%, rgba(0,0,0,.62), transparent 72%),
+            radial-gradient(420px 220px at 77% 0%, rgba(20,103,159,.10), transparent 70%),
+            linear-gradient(145deg, #132130 0%, #0a141e 46%, #050a10 100%);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,.035),
+            0 13px 28px rgba(0,0,0,.34),
+            0 38px 90px rgba(0,0,0,.48),
+            0 16px 50px rgba(0,145,215,.10),
+            inset 0 1px 0 rgba(255,255,255,.11),
+            inset 0 -18px 34px rgba(0,0,0,.24),
+            inset 0 0 0 1px rgba(94,210,255,.035);
+        }
+
+        .tr-nextHero::before{
+          content:"";
+          position:absolute;
+          z-index:0;
+          left:0;
+          top:18px;
+          bottom:18px;
+          width:3px;
+          border-radius:0 999px 999px 0;
+          background:linear-gradient(180deg,#b8f3ff 0%,#57d7ff 27%,#12a1e8 72%,rgba(18,161,232,.06) 100%);
+          box-shadow:
+            0 0 18px rgba(76,210,255,.34),
+            1px 0 0 rgba(255,255,255,.12);
+        }
+
+        .tr-nextHero::after{
+          content:"";
+          position:absolute;
+          z-index:0;
+          left:3px;
+          right:3px;
+          top:0;
+          height:1px;
+          pointer-events:none;
+          background:linear-gradient(
+            90deg,
+            rgba(205,248,255,.86) 0%,
+            rgba(103,220,255,.42) 17%,
+            rgba(103,220,255,.10) 48%,
+            rgba(255,255,255,.025) 76%,
+            transparent 100%
+          );
+          box-shadow:0 1px 10px rgba(67,200,248,.10);
+        }
+
+        .tr-nextHeroTopline{
+          position:relative;
+          z-index:2;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:18px;
+          min-width:0;
+          padding:0 0 8px;
+        }
+
+        .tr-heroReadinessInline{
+          position:relative;
+          display:flex;
+          align-items:center;
+          gap:8px;
+          min-width:0;
+          padding-left:12px;
+          color:#a9d8eb;
+          font-size:10px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.10em;
+          white-space:nowrap;
+        }
+
+        .tr-heroReadinessLine{
+          position:absolute;
+          left:0;
+          top:-3px;
+          bottom:-3px;
+          width:2px;
+          border-radius:999px;
+          background:#5ad7ff;
+          box-shadow:0 0 11px rgba(74,208,255,.34);
+        }
+
+        .tr-heroReadinessDot{
+          width:7px;
+          height:7px;
+          flex:0 0 7px;
+          border-radius:50%;
+          background:#5ad7ff;
+          box-shadow:
+            0 0 0 4px rgba(90,215,255,.045),
+            0 0 13px rgba(90,215,255,.48);
+        }
+
+        .tr-heroReadinessInline.is-ready{
+          color:#8df0b8;
+        }
+
+        .tr-heroReadinessInline.is-ready .tr-heroReadinessLine,
+        .tr-heroReadinessInline.is-ready .tr-heroReadinessDot{
+          background:#54e29a;
+          box-shadow:
+            0 0 0 4px rgba(84,226,154,.04),
+            0 0 14px rgba(84,226,154,.42);
+        }
+
+        .tr-heroReadinessInline.is-soon,
+        .tr-heroReadinessInline.is-monitor{
+          color:#efd09a;
+        }
+
+        .tr-heroReadinessInline.is-soon .tr-heroReadinessLine,
+        .tr-heroReadinessInline.is-soon .tr-heroReadinessDot,
+        .tr-heroReadinessInline.is-monitor .tr-heroReadinessLine,
+        .tr-heroReadinessInline.is-monitor .tr-heroReadinessDot{
+          background:#e8bd6d;
+          box-shadow:
+            0 0 0 4px rgba(232,189,109,.035),
+            0 0 12px rgba(232,189,109,.30);
+        }
+
+        .tr-heroReadinessInline.is-recovering{
+          color:#ffc476;
+        }
+
+        .tr-heroReadinessInline.is-recovering .tr-heroReadinessLine,
+        .tr-heroReadinessInline.is-recovering .tr-heroReadinessDot{
+          background:#ffb65a;
+          box-shadow:
+            0 0 0 4px rgba(255,182,90,.035),
+            0 0 13px rgba(255,182,90,.30);
+        }
+
+        .tr-heroIdentityStage{
+          position:relative;
+          z-index:1;
+          overflow:hidden;
+          min-height:185px;
+          display:flex;
+          align-items:center;
+          padding:14px 0 20px;
+        }
+
+        .tr-heroIdentityStage::before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          width:540px;
+          height:260px;
+          left:-92px;
+          top:-66px;
+          border-radius:50%;
+          background:radial-gradient(circle,rgba(69,204,255,.11),rgba(31,154,218,.035) 45%,transparent 72%);
+          filter:blur(2px);
+          pointer-events:none;
+        }
+
+        .tr-heroIdentityStage::after{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          right:-80px;
+          bottom:-120px;
+          width:440px;
+          height:280px;
+          border-radius:50%;
+          background:radial-gradient(circle,rgba(0,0,0,.50),transparent 70%);
+          pointer-events:none;
+        }
+
+        .tr-nextHeroCopy{
+          width:100%;
+          min-width:0;
+          position:relative;
+          z-index:2;
+        }
+
+        .tr-nextHeroCopy h1{
+          max-width:820px;
+          margin:0;
+          color:#f9fcff;
+          font-size:clamp(48px,5.4vw,72px);
+          line-height:.89;
+          font-weight:1000;
+          letter-spacing:-.060em;
+          text-shadow:
+            0 2px 0 rgba(255,255,255,.025),
+            0 12px 34px rgba(0,0,0,.48),
+            0 0 42px rgba(70,199,255,.045);
+        }
+
+        .tr-nextHeroProgram{
+          margin-top:12px;
+          color:rgba(222,237,248,.70);
+          font-size:14px;
+          line-height:1.25;
+          font-weight:900;
+          letter-spacing:.025em;
+        }
+
+        .tr-nextHero .tr-scheduleMuscles{
+          gap:12px;
+          margin-top:23px;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle{
+          position:relative;
+          overflow:hidden;
+          min-height:48px;
+          padding:6px 15px 6px 7px;
+          gap:9px;
+          border:1px solid rgba(103,214,255,.19);
+          border-radius:14px;
+          background:
+            radial-gradient(circle at 18% 8%,rgba(84,210,255,.08),transparent 55%),
+            linear-gradient(145deg,rgba(18,42,57,.88),rgba(5,14,21,.94));
+          box-shadow:
+            0 9px 22px rgba(0,0,0,.22),
+            inset 2px 2px 5px rgba(255,255,255,.025),
+            inset -3px -5px 9px rgba(0,0,0,.26),
+            inset 0 1px 0 rgba(255,255,255,.065);
+          transition:
+            transform .16s ease,
+            border-color .16s ease,
+            box-shadow .16s ease;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle::before{
+          content:"";
+          position:absolute;
+          left:8%;
+          right:8%;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);
+          pointer-events:none;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle:hover{
+          transform:translateY(-2px);
+          border-color:rgba(121,225,255,.31);
+          box-shadow:
+            0 14px 28px rgba(0,0,0,.26),
+            0 6px 18px rgba(0,153,219,.07),
+            inset 2px 2px 5px rgba(255,255,255,.03),
+            inset -3px -5px 9px rgba(0,0,0,.28),
+            inset 0 1px 0 rgba(255,255,255,.08);
+        }
+
+        .tr-nextHero .tr-scheduleMuscleIcon{
+          width:36px;
+          height:36px;
+          flex:0 0 36px;
+          border:1px solid rgba(99,214,255,.22);
+          border-radius:11px;
+          background:
+            radial-gradient(circle at 50% 20%,rgba(82,211,255,.16),transparent 57%),
+            linear-gradient(145deg,#123348,#071722);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            inset 0 -4px 8px rgba(0,0,0,.28),
+            0 7px 16px rgba(0,0,0,.28);
+        }
+
+        .tr-nextHero .tr-scheduleMuscleIcon img{
+          width:26px;
+          height:26px;
+          filter:
+            drop-shadow(0 4px 6px rgba(0,0,0,.26))
+            drop-shadow(0 0 7px rgba(54,197,255,.12));
+        }
+
+        .tr-nextHeroMetrics--two{
+          position:relative;
+          z-index:2;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          overflow:hidden;
+          margin-top:1px;
+          border:1px solid rgba(115,210,247,.085);
+          border-left-color:rgba(115,210,247,.12);
+          border-right-color:rgba(115,210,247,.12);
+          border-radius:13px;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.026),rgba(0,0,0,.14));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.035),
+            inset 0 -5px 10px rgba(0,0,0,.18),
+            0 9px 22px rgba(0,0,0,.11);
+        }
+
+        .tr-nextHeroMetrics--two::before{
+          content:"";
+          position:absolute;
+          left:4%;
+          right:4%;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(178,235,255,.18),transparent);
+          pointer-events:none;
+        }
+
+        .tr-nextHeroMetrics--two .tr-nextMetric{
+          min-height:64px;
+          display:flex;
+          flex-direction:column;
+          align-items:center;
+          justify-content:center;
+          gap:6px;
+          padding:12px 16px;
+        }
+
+        .tr-nextHeroMetrics--two .tr-nextMetric > span{
+          color:rgba(165,193,210,.43);
+          font-size:8px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.18em;
+        }
+
+        .tr-nextHeroMetrics--two .tr-nextMetric strong{
+          color:#f6fbff;
+          font-size:13px;
+          line-height:1.05;
+          font-weight:1000;
+          letter-spacing:.07em;
+          text-shadow:0 5px 15px rgba(0,0,0,.26);
+        }
+
+        .tr-nextHeroMetrics--two .tr-nextMetric + .tr-nextMetric{
+          border-left:1px solid rgba(118,213,248,.075);
+        }
+
+        .tr-nextHeroActions{
+          position:relative;
+          z-index:2;
+          display:grid;
+          grid-template-columns:minmax(0,1fr) 130px;
+          gap:12px;
+          margin-top:14px;
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn{
+          min-height:50px;
+          border-radius:13px;
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn--primary{
+          position:relative;
+          overflow:hidden;
+          color:#03121a;
+          border-color:rgba(174,238,255,.40);
+          background:
+            linear-gradient(180deg,#83e8ff 0%,#54d4ff 38%,#24acef 100%);
+          box-shadow:
+            0 3px 0 rgba(0,92,144,.28),
+            0 12px 25px rgba(0,0,0,.18),
+            0 17px 38px rgba(0,164,230,.21),
+            inset 0 1px 0 rgba(255,255,255,.70),
+            inset 0 -5px 9px rgba(0,91,145,.15);
+          text-shadow:0 1px 0 rgba(255,255,255,.20);
+          transition:
+            transform .14s ease,
+            box-shadow .14s ease,
+            filter .14s ease;
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn--primary::before{
+          content:"";
+          position:absolute;
+          left:6%;
+          right:6%;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.92),transparent);
+          opacity:.78;
+          pointer-events:none;
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn--primary:hover{
+          transform:translateY(-2px);
+          filter:saturate(1.05) brightness(1.03);
+          box-shadow:
+            0 3px 0 rgba(0,92,144,.26),
+            0 15px 30px rgba(0,0,0,.20),
+            0 22px 46px rgba(0,164,230,.27),
+            inset 0 1px 0 rgba(255,255,255,.76),
+            inset 0 -5px 9px rgba(0,91,145,.14);
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn--primary:active{
+          transform:translateY(1px);
+          box-shadow:
+            0 1px 0 rgba(0,92,144,.24),
+            0 7px 16px rgba(0,0,0,.18),
+            0 10px 24px rgba(0,164,230,.15),
+            inset 0 1px 0 rgba(255,255,255,.58);
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn--edit{
+          border-color:rgba(119,200,233,.13);
+          background:
+            linear-gradient(145deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+          box-shadow:
+            inset 1px 1px 0 rgba(255,255,255,.035),
+            inset -2px -3px 7px rgba(0,0,0,.18),
+            0 8px 18px rgba(0,0,0,.14);
+        }
+
+        .tr-upcomingBoard{
+          border-color:rgba(90,200,241,.13);
+          background:
+            radial-gradient(700px 250px at 100% -12%,rgba(38,158,210,.055),transparent 62%),
+            linear-gradient(148deg,#0e1721 0%,#080d14 75%);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,.018),
+            0 20px 52px rgba(0,0,0,.31),
+            0 8px 30px rgba(0,129,188,.035),
+            inset 0 1px 0 rgba(255,255,255,.038),
+            inset 0 -10px 22px rgba(0,0,0,.10);
+        }
+
+        .tr-sessionReadiness:empty{
+          display:none;
+        }
+
+        .tr-sessionCard{
+          position:relative;
+          overflow:hidden;
+          border:1px solid rgba(255,255,255,.075);
+          border-top-color:rgba(137,218,248,.105);
+          border-radius:15px;
+          background:
+            radial-gradient(390px 130px at 9% 0%,rgba(58,178,225,.055),transparent 66%),
+            radial-gradient(320px 190px at 100% 100%,rgba(0,0,0,.26),transparent 76%),
+            linear-gradient(145deg,#14202b 0%,#0b121a 58%,#070c12 100%);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,.012),
+            0 11px 25px rgba(0,0,0,.22),
+            0 19px 44px rgba(0,0,0,.16),
+            inset 0 1px 0 rgba(255,255,255,.045),
+            inset 0 -7px 14px rgba(0,0,0,.13);
+          transition:
+            transform .16s ease,
+            border-color .16s ease,
+            box-shadow .16s ease,
+            background .16s ease;
+        }
+
+        .tr-sessionCard::before{
+          content:"";
+          position:absolute;
+          left:3%;
+          right:36%;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,rgba(178,238,255,.24),rgba(83,203,247,.08),transparent);
+          pointer-events:none;
+        }
+
+        .tr-sessionCard::after{
+          content:"";
+          position:absolute;
+          width:300px;
+          height:150px;
+          left:-110px;
+          top:-90px;
+          border-radius:50%;
+          background:radial-gradient(circle,rgba(75,201,247,.045),transparent 70%);
+          pointer-events:none;
+        }
+
+        .tr-sessionCard:hover{
+          transform:translateY(-2px);
+          border-color:rgba(101,210,249,.18);
+          border-top-color:rgba(154,229,255,.17);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,.018),
+            0 15px 32px rgba(0,0,0,.25),
+            0 25px 55px rgba(0,0,0,.19),
+            0 8px 26px rgba(0,146,210,.045),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 -7px 14px rgba(0,0,0,.14);
+        }
+
+        .tr-trainingTimelineRow .tr-timelineNode{
+          border-color:rgba(89,209,255,.74);
+          background:#071019;
+          box-shadow:
+            0 0 0 4px rgba(66,193,239,.028),
+            0 0 11px rgba(66,193,239,.16);
+        }
+
+        .tr-trainingTimelineRow.is-ready .tr-timelineNode{
+          border-color:#5ce3a0;
+          box-shadow:
+            0 0 0 4px rgba(92,227,160,.03),
+            0 0 12px rgba(92,227,160,.19);
+        }
+
+        .tr-trainingTimelineRow.is-soon .tr-timelineNode,
+        .tr-trainingTimelineRow.is-monitor .tr-timelineNode{
+          border-color:#e5bd70;
+          box-shadow:
+            0 0 0 4px rgba(229,189,112,.026),
+            0 0 10px rgba(229,189,112,.14);
+        }
+
+        .tr-sessionTitleRow h3{
+          color:#f7fbfe;
+          text-shadow:0 4px 14px rgba(0,0,0,.22);
+        }
+
+        .tr-sessionDate{
+          color:rgba(202,231,245,.78);
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowStart{
+          position:relative;
+          overflow:hidden;
+          color:#07131b;
+          border-color:rgba(118,214,250,.23);
+          background:linear-gradient(180deg,#51cef7,#269fd7);
+          box-shadow:
+            0 2px 0 rgba(0,79,118,.22),
+            0 8px 18px rgba(0,0,0,.16),
+            0 8px 21px rgba(0,151,214,.10),
+            inset 0 1px 0 rgba(255,255,255,.48),
+            inset 0 -3px 6px rgba(0,74,112,.12);
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowStart:hover{
+          transform:translateY(-1px);
+          border-color:rgba(143,226,255,.32);
+          box-shadow:
+            0 2px 0 rgba(0,79,118,.20),
+            0 11px 22px rgba(0,0,0,.18),
+            0 12px 27px rgba(0,151,214,.14),
+            inset 0 1px 0 rgba(255,255,255,.54);
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowEdit{
+          border-color:rgba(117,192,223,.10);
+          background:linear-gradient(145deg,rgba(255,255,255,.035),rgba(255,255,255,.009));
+          box-shadow:
+            inset 1px 1px 0 rgba(255,255,255,.025),
+            inset -2px -2px 5px rgba(0,0,0,.15);
+        }
+
+        @media (max-width:680px){
+          .tr-nextHero{
+            padding:18px 16px 17px;
+            border-radius:19px;
+            background:
+              radial-gradient(520px 250px at 7% 9%,rgba(55,200,255,.13),transparent 55%),
+              radial-gradient(340px 230px at 105% 100%,rgba(0,0,0,.44),transparent 74%),
+              linear-gradient(146deg,#111e2b,#071019 66%,#05090e);
+            box-shadow:
+              0 2px 0 rgba(255,255,255,.025),
+              0 17px 42px rgba(0,0,0,.38),
+              0 10px 32px rgba(0,145,215,.07),
+              inset 0 1px 0 rgba(255,255,255,.07),
+              inset 0 -12px 22px rgba(0,0,0,.19);
+          }
+
+          .tr-nextHeroTopline{
+            align-items:flex-start;
+            gap:10px;
+          }
+
+          .tr-heroReadinessInline{
+            max-width:54%;
+            padding-left:10px;
+            font-size:8.5px;
+            letter-spacing:.07em;
+            white-space:normal;
+            text-align:right;
+            justify-content:flex-end;
+          }
+
+          .tr-heroReadinessLine{
+            left:auto;
+            right:-1px;
+          }
+
+          .tr-heroIdentityStage{
+            min-height:0;
+            padding:16px 0 18px;
+          }
+
+          .tr-heroIdentityStage::before{
+            width:360px;
+            height:200px;
+            left:-110px;
+            top:-50px;
+          }
+
+          .tr-nextHeroCopy h1{
+            font-size:clamp(39px,13.2vw,55px);
+            line-height:.91;
+          }
+
+          .tr-nextHeroProgram{
+            margin-top:9px;
+            font-size:12.5px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscles{
+            display:flex;
+            flex-wrap:wrap;
+            gap:7px;
+            margin-top:16px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscle{
+            min-height:39px;
+            padding:4px 9px 4px 5px;
+            border-radius:11px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscleIcon{
+            width:29px;
+            height:29px;
+            flex-basis:29px;
+            border-radius:9px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscleIcon img{
+            width:21px;
+            height:21px;
+          }
+
+          .tr-nextHeroMetrics--two{
+            border-radius:11px;
+          }
+
+          .tr-nextHeroMetrics--two .tr-nextMetric{
+            min-height:56px;
+            padding:10px 6px;
+          }
+
+          .tr-nextHeroMetrics--two .tr-nextMetric > span{
+            font-size:7px;
+            letter-spacing:.14em;
+          }
+
+          .tr-nextHeroMetrics--two .tr-nextMetric strong{
+            font-size:10.5px;
+            letter-spacing:.04em;
+          }
+
+          .tr-nextHeroActions{
+            grid-template-columns:1fr;
+            gap:8px;
+            margin-top:11px;
+          }
+
+          .tr-nextHeroActions .tr-scheduleBtn{
+            min-height:47px;
+          }
+
+          .tr-sessionCard{
+            padding:14px 13px;
+            border-radius:14px;
+            background:
+              radial-gradient(280px 115px at 8% 0%,rgba(58,178,225,.045),transparent 66%),
+              linear-gradient(148deg,#111b25,#080e15 68%);
+            box-shadow:
+              0 2px 0 rgba(255,255,255,.01),
+              0 10px 24px rgba(0,0,0,.20),
+              inset 0 1px 0 rgba(255,255,255,.035),
+              inset 0 -5px 11px rgba(0,0,0,.10);
+          }
+
+          .tr-sessionCard:hover{
+            transform:none;
+          }
+
+          .tr-sessionRight{
+            gap:10px;
+          }
+        }
+
+        @media (prefers-reduced-motion:reduce){
+          .tr-nextHero .tr-scheduleMuscle,
+          .tr-sessionCard,
+          .tr-scheduleBtn{
+            transition:none !important;
           }
         }
 
