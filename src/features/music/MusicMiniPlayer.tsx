@@ -64,6 +64,70 @@ type SpectrumTelemetry = {
   peak: number;
 };
 
+type SavedDspProfile = {
+  name: string;
+  eqEnabled: boolean;
+  eqGains: number[];
+  preampDb: number;
+  headphoneMode: MusicHeadphoneMode;
+  headphoneWidth: number;
+  headphoneDepth: number;
+  headphoneCrossfeed: number;
+  headphoneCenter: number;
+  headphoneBassImpact: number;
+  savedAt: number;
+};
+
+type SavedDspProfiles = Record<MusicCustomPresetSlot, SavedDspProfile | null>;
+
+const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
+const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
+
+function emptyDspProfiles(): SavedDspProfiles {
+  return {
+    custom_1: null,
+    custom_2: null,
+    custom_3: null,
+  };
+}
+
+function isCustomSlot(value: MusicEqPreset): value is MusicCustomPresetSlot {
+  return value === "custom_1" || value === "custom_2" || value === "custom_3";
+}
+
+function readSavedDspProfiles(): SavedDspProfiles {
+  if (typeof window === "undefined") return emptyDspProfiles();
+
+  try {
+    const raw = window.localStorage.getItem(DSP_PROFILE_STORAGE_KEY);
+    if (!raw) return emptyDspProfiles();
+
+    const parsed = JSON.parse(raw) as Partial<SavedDspProfiles>;
+    return {
+      custom_1: parsed.custom_1 ?? null,
+      custom_2: parsed.custom_2 ?? null,
+      custom_3: parsed.custom_3 ?? null,
+    };
+  } catch {
+    return emptyDspProfiles();
+  }
+}
+
+function writeSavedDspProfiles(profiles: SavedDspProfiles) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(DSP_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
+}
+
+function slotFallbackLabel(slot: MusicCustomPresetSlot) {
+  if (slot === "custom_1") return "Custom 1";
+  if (slot === "custom_2") return "Custom 2";
+  return "Custom 3";
+}
+
+function sameDspNumber(left: number, right: number) {
+  return Math.abs(Number(left) - Number(right)) < 0.01;
+}
+
 function PlayerIcon({ name }: { name: IconName }) {
   if (name === "play") {
     return (
@@ -308,6 +372,15 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [queueBusy, setQueueBusy] = useState(false);
   const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<SpectrumTelemetry>({ bass: 0, peak: 0 });
+  const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
+  const [activeCustomSlot, setActiveCustomSlot] = useState<MusicCustomPresetSlot | null>(
+    isCustomSlot(player.eqPreset) ? player.eqPreset : null
+  );
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
+  const [savePresetName, setSavePresetName] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+  const restoredProfileRef = useRef<string>("");
 
   useEffect(() => {
     const refreshPlaylists = () => {
@@ -348,6 +421,124 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     }
   };
 
+
+  useEffect(() => {
+    if (!isCustomSlot(player.eqPreset)) return;
+
+    setActiveCustomSlot(player.eqPreset);
+    const profile = dspProfiles[player.eqPreset];
+    if (!profile) return;
+
+    const restorationKey = `${player.eqPreset}:${profile.savedAt}`;
+    if (restoredProfileRef.current === restorationKey) return;
+    restoredProfileRef.current = restorationKey;
+
+    setMusicEqEnabled(profile.eqEnabled);
+    setMusicHeadphoneMode(profile.headphoneMode);
+    setMusicHeadphoneWidth(profile.headphoneWidth);
+    setMusicHeadphoneDepth(profile.headphoneDepth);
+    setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
+    setMusicHeadphoneCenter(profile.headphoneCenter);
+    setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
+  }, [player.eqPreset, dspProfiles]);
+
+  function currentDspSnapshot(name: string): SavedDspProfile {
+    return {
+      name: name.trim() || "Custom DSP",
+      eqEnabled: player.eqEnabled,
+      eqGains: [...player.eqGains],
+      preampDb: player.preampDb,
+      headphoneMode: player.headphoneMode,
+      headphoneWidth: player.headphoneWidth,
+      headphoneDepth: player.headphoneDepth,
+      headphoneCrossfeed: player.headphoneCrossfeed,
+      headphoneCenter: player.headphoneCenter,
+      headphoneBassImpact: player.headphoneBassImpact,
+      savedAt: Date.now(),
+    };
+  }
+
+  function profileMatchesCurrent(profile: SavedDspProfile | null) {
+    if (!profile) return false;
+    if (profile.eqEnabled !== player.eqEnabled) return false;
+    if (profile.headphoneMode !== player.headphoneMode) return false;
+    if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
+    if (!sameDspNumber(profile.headphoneWidth, player.headphoneWidth)) return false;
+    if (!sameDspNumber(profile.headphoneDepth, player.headphoneDepth)) return false;
+    if (!sameDspNumber(profile.headphoneCrossfeed, player.headphoneCrossfeed)) return false;
+    if (!sameDspNumber(profile.headphoneCenter, player.headphoneCenter)) return false;
+    if (!sameDspNumber(profile.headphoneBassImpact, player.headphoneBassImpact)) return false;
+    if (profile.eqGains.length !== player.eqGains.length) return false;
+
+    return profile.eqGains.every((gain, index) =>
+      sameDspNumber(gain, player.eqGains[index] ?? 0)
+    );
+  }
+
+  function applySavedDspProfile(slot: MusicCustomPresetSlot) {
+    const profile = dspProfiles[slot];
+
+    applyMusicEqPreset(slot);
+    setActiveCustomSlot(slot);
+
+    if (!profile) {
+      setProfileMessage(`${slotFallbackLabel(slot)} has no full DSP profile saved yet.`);
+      return;
+    }
+
+    setMusicEqEnabled(profile.eqEnabled);
+    setMusicHeadphoneMode(profile.headphoneMode);
+    setMusicHeadphoneWidth(profile.headphoneWidth);
+    setMusicHeadphoneDepth(profile.headphoneDepth);
+    setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
+    setMusicHeadphoneCenter(profile.headphoneCenter);
+    setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
+    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
+    setProfileMessage(`${profile.name} loaded.`);
+  }
+
+  function handlePresetSelection(value: MusicEqPreset) {
+    if (isCustomSlot(value)) {
+      applySavedDspProfile(value);
+      return;
+    }
+
+    setActiveCustomSlot(null);
+    applyMusicEqPreset(value);
+    setProfileMessage("");
+  }
+
+  function saveCurrentDspProfile(slot: MusicCustomPresetSlot, name: string) {
+    const profile = currentDspSnapshot(name || slotFallbackLabel(slot));
+    const nextProfiles: SavedDspProfiles = {
+      ...dspProfiles,
+      [slot]: profile,
+    };
+
+    saveMusicEqCustomPreset(slot);
+    writeSavedDspProfiles(nextProfiles);
+    setDspProfiles(nextProfiles);
+    setActiveCustomSlot(slot);
+    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
+    setProfileMessage(`${profile.name} saved.`);
+    setSavePresetOpen(false);
+  }
+
+  function openSavePresetDialog(preferredSlot?: MusicCustomPresetSlot) {
+    const firstEmpty = DSP_SLOTS.find((slot) => !dspProfiles[slot]);
+    const slot = preferredSlot ?? firstEmpty ?? activeCustomSlot ?? "custom_1";
+    const existing = dspProfiles[slot];
+
+    setSavePresetSlot(slot);
+    setSavePresetName(existing?.name ?? "");
+    setSavePresetOpen(true);
+  }
+
+  function chooseSaveSlot(slot: MusicCustomPresetSlot) {
+    setSavePresetSlot(slot);
+    setSavePresetName(dspProfiles[slot]?.name ?? "");
+  }
+
   async function selectQueue(value: string) {
     setQueueBusy(true);
     try {
@@ -386,6 +577,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     "--tr-bass-energy": String(Math.min(1, Math.max(0, telemetry.bass))),
     "--tr-output-peak": String(Math.min(1, Math.max(0, telemetry.peak))),
   } as CSSProperties;
+
+  const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
+  const activeProfileDirty = activeSavedProfile
+    ? !profileMatchesCurrent(activeSavedProfile)
+    : false;
+  const presetSelectValue: MusicEqPreset =
+    activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
+  const presetStatusLabel = activeSavedProfile
+    ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
+    : player.eqPreset === "custom"
+      ? "Unsaved custom DSP"
+      : "Built-in preset";
 
   return (
     <section
@@ -590,9 +793,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <label className="tr-audioEqPreset">
               <span>EQ PRESET</span>
               <select
-                value={player.eqPreset}
+                value={presetSelectValue}
                 onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  applyMusicEqPreset(event.target.value as MusicEqPreset)
+                  handlePresetSelection(event.target.value as MusicEqPreset)
                 }
               >
                 {Object.entries(MUSIC_EQ_PRESETS).map(([value, preset]) => (
@@ -600,10 +803,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                     {preset.label}
                   </option>
                 ))}
-                <option value="custom_1">Custom 1</option>
-                <option value="custom_2">Custom 2</option>
-                <option value="custom_3">Custom 3</option>
-                <option value="custom">Unsaved Custom</option>
+                {DSP_SLOTS.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}
+                  </option>
+                ))}
+                <option value="custom">
+                  {activeSavedProfile && activeProfileDirty
+                    ? `${activeSavedProfile.name} • Modified`
+                    : "Unsaved Custom"}
+                </option>
               </select>
             </label>
           </div>
@@ -672,13 +881,33 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <div className="tr-customPresetRail" aria-label="Save custom equalizer presets">
-            <span>SAVE CURRENT EQ</span>
-            {(["custom_1", "custom_2", "custom_3"] as MusicCustomPresetSlot[]).map((slot, index) => (
-              <button key={slot} type="button" onClick={() => saveMusicEqCustomPreset(slot)}>
-                CUSTOM {index + 1}
+          <div className="tr-dspProfileSave" aria-label="Save DSP profile">
+            <div className="tr-dspProfileSaveStatus">
+              <span>DSP PROFILE</span>
+              <strong>{presetStatusLabel}</strong>
+              {profileMessage ? <small aria-live="polite">{profileMessage}</small> : null}
+            </div>
+
+            <div className="tr-dspProfileSaveActions">
+              {activeCustomSlot && activeSavedProfile ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    saveCurrentDspProfile(activeCustomSlot, activeSavedProfile.name)
+                  }
+                >
+                  UPDATE PRESET
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="is-primary"
+                onClick={() => openSavePresetDialog()}
+              >
+                {activeCustomSlot ? "SAVE AS NEW" : "SAVE CUSTOM PRESET"}
               </button>
-            ))}
+            </div>
           </div>
 
           <section className="tr-headphoneProcessor">
@@ -748,6 +977,96 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div>
       ) : null}
 
+
+      {savePresetOpen ? (
+        <div
+          className="tr-dspSaveOverlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setSavePresetOpen(false);
+          }}
+        >
+          <section
+            className="tr-dspSaveDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tr-dsp-save-title"
+          >
+            <header>
+              <div>
+                <span className="tr-audioEyebrow">CUSTOM DSP PROFILE</span>
+                <h3 id="tr-dsp-save-title">Save your sound profile</h3>
+              </div>
+              <button
+                type="button"
+                className="tr-dspSaveClose"
+                onClick={() => setSavePresetOpen(false)}
+                aria-label="Close save preset dialog"
+              >
+                ×
+              </button>
+            </header>
+
+            <label className="tr-dspSaveName">
+              <span>PRESET NAME</span>
+              <input
+                type="text"
+                maxLength={32}
+                value={savePresetName}
+                placeholder="My Workout EQ"
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setSavePresetName(event.target.value)
+                }
+                autoFocus
+              />
+            </label>
+
+            <div className="tr-dspSaveSlots">
+              <span>SAVE TO</span>
+              <div>
+                {DSP_SLOTS.map((slot, index) => (
+                  <button
+                    key={slot}
+                    type="button"
+                    className={savePresetSlot === slot ? "is-active" : ""}
+                    onClick={() => chooseSaveSlot(slot)}
+                  >
+                    <b>CUSTOM {index + 1}</b>
+                    <small>{dspProfiles[slot]?.name ?? "Empty slot"}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="tr-dspSaveIncludes">
+              <span>SAVES</span>
+              <p>
+                31-band EQ • Preamp • DSP active state • Headphone mode • Width •
+                Depth • Crossfeed • Center focus • Bass impact
+              </p>
+            </div>
+
+            <footer>
+              <button type="button" onClick={() => setSavePresetOpen(false)}>
+                CANCEL
+              </button>
+              <button
+                type="button"
+                className="is-primary"
+                onClick={() =>
+                  saveCurrentDspProfile(
+                    savePresetSlot,
+                    savePresetName.trim() || slotFallbackLabel(savePresetSlot)
+                  )
+                }
+              >
+                SAVE PRESET
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+
       {player.error ? <div className="tr-audioError">{player.error}</div> : null}
 
       <style>{`
@@ -773,9 +1092,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-audioEqBands--31 .tr-audioEqBand>span:last-child{font-size:7px!important;white-space:nowrap;}
         .tr-audioEqBands--31 .tr-audioEqGain{font-size:8px!important;}
         .tr-audioEqFooter--pro7{margin-top:5px;}
-        .tr-customPresetRail{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(118,204,236,.09);}
-        .tr-customPresetRail>span{margin-right:auto;color:rgba(183,209,222,.54);font-size:8px;font-weight:1000;letter-spacing:.14em;}
-        .tr-customPresetRail button,.tr-headphoneModes button{min-height:32px;padding:0 11px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer;}
+        .tr-dspProfileSave{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px;padding:10px 0 1px;border-top:1px solid rgba(118,204,236,.09);}
+        .tr-dspProfileSaveStatus{display:grid;gap:3px;min-width:0}.tr-dspProfileSaveStatus>span{color:rgba(183,209,222,.50);font-size:7px;font-weight:1000;letter-spacing:.14em}.tr-dspProfileSaveStatus>strong{color:#eef7fb;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspProfileSaveStatus>small{color:#7edfb2;font-size:8px}
+        .tr-dspProfileSaveActions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+        .tr-dspProfileSaveActions button,.tr-headphoneModes button{min-height:32px;padding:0 11px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer;}
+        .tr-dspProfileSaveActions button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18);box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 5px 14px rgba(240,154,24,.14)}
+        .tr-dspSaveOverlay{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px;background:rgba(2,7,11,.78);backdrop-filter:blur(7px)}
+        .tr-dspSaveDialog{width:min(520px,100%);overflow:hidden;border:1px solid rgba(86,197,237,.28);border-radius:16px;background:linear-gradient(180deg,#101d27,#081118);box-shadow:0 28px 85px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.055)}
+        .tr-dspSaveDialog header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:16px 17px 14px;border-bottom:1px solid rgba(126,200,226,.10)}
+        .tr-dspSaveDialog header>div{display:grid;gap:3px}.tr-dspSaveDialog h3{margin:0;color:#f4f9fc;font-size:19px}.tr-dspSaveClose{width:36px;height:36px;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#dcebf2;background:#0b141b;font-size:22px;cursor:pointer}
+        .tr-dspSaveName{display:grid;gap:6px;padding:15px 17px 8px}.tr-dspSaveName>span,.tr-dspSaveSlots>span,.tr-dspSaveIncludes>span{color:rgba(180,205,217,.52);font-size:7px;font-weight:1000;letter-spacing:.14em}
+        .tr-dspSaveName input{height:42px;border:1px solid rgba(116,198,228,.20);border-radius:10px;padding:0 12px;color:#f5f9fb;background:#060d12;outline:none;font:inherit;font-weight:850}.tr-dspSaveName input:focus{border-color:rgba(72,199,246,.55);box-shadow:0 0 0 3px rgba(39,176,229,.08)}
+        .tr-dspSaveSlots{display:grid;gap:7px;padding:9px 17px}.tr-dspSaveSlots>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+        .tr-dspSaveSlots button{min-height:60px;display:grid;align-content:center;gap:4px;padding:8px;border:1px solid rgba(255,255,255,.07);border-radius:10px;color:#d8e7ee;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.15));cursor:pointer;text-align:left}.tr-dspSaveSlots button b{font-size:9px;letter-spacing:.07em}.tr-dspSaveSlots button small{color:rgba(184,205,216,.50);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspSaveSlots button.is-active{border-color:rgba(65,200,248,.52);background:rgba(0,158,223,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+        .tr-dspSaveIncludes{display:grid;gap:5px;margin:7px 17px 0;padding:11px;border:1px solid rgba(255,255,255,.055);border-radius:10px;background:rgba(0,0,0,.13)}.tr-dspSaveIncludes p{margin:0;color:rgba(212,227,235,.62);font-size:9px;line-height:1.45}
+        .tr-dspSaveDialog footer{display:flex;justify-content:flex-end;gap:8px;padding:15px 17px 17px}.tr-dspSaveDialog footer button{min-height:38px;padding:0 16px;border:1px solid rgba(120,193,220,.14);border-radius:10px;color:#dceaf1;background:#0b151c;font-size:9px;font-weight:1000;letter-spacing:.06em;cursor:pointer}.tr-dspSaveDialog footer button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18);box-shadow:inset 0 1px 0 rgba(255,255,255,.40)}
         .tr-headphoneProcessor{margin-top:12px;padding:13px;border:1px solid rgba(71,186,229,.20);border-radius:14px;background:linear-gradient(180deg,rgba(11,27,38,.88),rgba(5,13,19,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.035);}
         .tr-headphoneProcessor header{display:grid;grid-template-columns:minmax(0,1fr) 190px;align-items:end;gap:12px;}
         .tr-headphoneProcessor header>div{display:grid;gap:3px;}.tr-headphoneProcessor header strong{color:#f4f9fc;font-size:12px;}
@@ -791,7 +1122,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioEqBands--31{grid-template-columns:repeat(31,44px)!important;min-width:1530px!important;}
           .tr-headphoneProcessor header{grid-template-columns:1fr;}
           .tr-headphoneControls{grid-template-columns:repeat(2,minmax(0,1fr));}
-          .tr-customPresetRail{flex-wrap:wrap;justify-content:flex-start}.tr-customPresetRail>span{width:100%;margin:0;}
+          .tr-dspProfileSave{align-items:flex-start;flex-direction:column}.tr-dspProfileSaveActions{width:100%;justify-content:flex-start}.tr-dspSaveSlots>div{grid-template-columns:1fr}.tr-dspSaveDialog{max-height:calc(100vh - 24px);overflow:auto;}
         }
       `}</style>
     </section>
