@@ -86,6 +86,7 @@ const MUSCLE_DEFS: Record<string, { label: string; icon: string }> = {
   triceps: { label: "Triceps", icon: icoArms },
   forearms: { label: "Forearms", icon: icoArms },
   core: { label: "Core", icon: icoCore },
+  abs: { label: "Abs", icon: icoCore },
   quads: { label: "Quads", icon: icoQuads },
   hamstrings: { label: "Hamstrings", icon: icoLegs },
   glutes: { label: "Glutes", icon: icoLegs },
@@ -127,7 +128,14 @@ function muscleKey(raw: unknown): string | null {
   if (value.includes("calf") || value.includes("soleus") || value.includes("gastro")) return "calves";
   if (value.includes("adductor")) return "adductors";
   if (value.includes("abductor")) return "abductors";
-  if (value.includes("ab") || value.includes("core") || value.includes("oblique")) return "core";
+  if (
+    value.includes("abdominal") ||
+    value === "abs" ||
+    value.includes("rectus abdominis")
+  ) {
+    return "abs";
+  }
+  if (value.includes("core") || value.includes("oblique")) return "core";
   if (value.includes("leg")) return "legs";
   return null;
 }
@@ -255,7 +263,10 @@ function summarizeTemplate(
     }));
 
   const primaryHigh = ranked.filter((item) => item.score >= 0.85);
-  const display = (primaryHigh.length ? primaryHigh : ranked).slice(0, 3);
+  // Show the actual major focus of the workout. Upper sessions can now
+  // correctly surface Back + Shoulders + Core or Chest + Biceps + Triceps
+  // + Core, while lower sessions can show the complete leg emphasis.
+  const display = (primaryHigh.length ? primaryHigh : ranked).slice(0, 5);
   const templateMinutes = Number(template?.estimated_minutes ?? 0);
 
   return {
@@ -341,15 +352,11 @@ function readinessForSession(
     };
   }
 
-  if (sameDay(recommendedDate, today)) {
-    return { tone: "ready", label: "READY TO TRAIN", detail: "", recommendedDate };
-  }
-
-  if (sameDay(recommendedDate, addDays(today, 1))) {
-    return { tone: "soon", label: "READY TOMORROW", detail: "", recommendedDate };
-  }
-
-  return { tone: "soon", label: "ON SCHEDULE", detail: "", recommendedDate };
+  // Dates are advisory. If recovery has not pushed the session later,
+  // the workout is available now even when its suggested date is later.
+  // Upcoming cards therefore show only the suggested date unless a real
+  // recovery exception exists.
+  return { tone: "ready", label: "READY TO TRAIN", detail: "", recommendedDate };
 }
 
 function overlapCount(a: SessionMeta | null | undefined, b: SessionMeta | null | undefined) {
@@ -383,7 +390,14 @@ function MuscleStrip({ muscles, compact = false }: { muscles: MuscleFocus[]; com
 }
 
 function ReadinessBadge({ readiness, compact = false }: { readiness: Readiness; compact?: boolean }) {
-  if (readiness.label === "ON SCHEDULE") return null;
+  // Normal schedule = date only. Compact status is reserved for meaningful
+  // exceptions such as recovery being extended.
+  if (
+    readiness.label === "ON SCHEDULE" ||
+    (compact && readiness.label === "READY TO TRAIN")
+  ) {
+    return null;
+  }
 
   return (
     <div
@@ -863,7 +877,8 @@ export function TodayPage() {
                 disabled={!activeSessionId && !nextSessionId}
                 onClick={onPrimary}
               >
-                {activeSessionId ? "RESUME WORKOUT" : "START WORKOUT"}
+                <span className="tr-primaryActionGlyph" aria-hidden>▶</span>
+                <span>{activeSessionId ? "RESUME WORKOUT" : "START WORKOUT"}</span>
               </button>
 
               {!activeSessionId && nextSessionId ? (
@@ -880,6 +895,7 @@ export function TodayPage() {
           <section className="tr-upcomingBoard">
             <div className="tr-upcomingHeader">
               <div className="tr-trainingSectionEyebrow">UPCOMING TRAINING</div>
+              <div className="tr-upcomingAdvisory">SUGGESTED DATES</div>
             </div>
 
             {loading ? (
@@ -4083,6 +4099,889 @@ export function TodayPage() {
           .tr-nextHero .tr-scheduleMuscle,
           .tr-sessionCard,
           .tr-scheduleBtn{
+            transition:none !important;
+          }
+        }
+
+
+        /* STEP 6G: FLAGSHIP PERFORMANCE COCKPIT
+           Precise layered materials, instrument-like controls, deeper
+           contact rendering and advisory scheduling. This block is the
+           final visual authority for the Workouts planner. */
+
+        .tr-trainingBoard{
+          --tr-surface-0:#05090d;
+          --tr-surface-1:#081018;
+          --tr-surface-2:#0d1720;
+          --tr-surface-3:#121f29;
+          --tr-edge:rgba(151,218,241,.16);
+          --tr-edge-hot:rgba(180,235,253,.31);
+          --tr-cyan:#43bee9;
+          --tr-cyan-hi:#79d9f7;
+          --tr-green:#63dfa0;
+          --tr-amber:#e3bd72;
+        }
+
+        .tr-nextHero{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          padding:17px 18px 15px;
+          border:1px solid rgba(138,210,236,.23);
+          border-top-color:rgba(193,239,255,.36);
+          border-bottom-color:rgba(54,95,112,.24);
+          border-radius:18px;
+          background:
+            repeating-linear-gradient(
+              90deg,
+              rgba(255,255,255,.006) 0,
+              rgba(255,255,255,.006) 1px,
+              transparent 1px,
+              transparent 5px
+            ),
+            linear-gradient(180deg,#14222d 0%,#0e1821 42%,#091117 100%);
+          background-blend-mode:soft-light,normal;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.055),
+            0 2px 3px rgba(0,0,0,.44),
+            0 10px 22px rgba(0,0,0,.31),
+            0 26px 54px rgba(0,0,0,.18),
+            inset 0 1px 0 rgba(255,255,255,.085),
+            inset 0 -1px 0 rgba(0,0,0,.92),
+            inset 1px 0 0 rgba(255,255,255,.018),
+            inset -1px 0 0 rgba(0,0,0,.36);
+        }
+
+        .tr-nextHero::before{
+          content:"";
+          position:absolute;
+          z-index:0;
+          inset:0;
+          pointer-events:none;
+          border-radius:inherit;
+          background:
+            linear-gradient(
+              90deg,
+              rgba(91,205,244,.095) 0,
+              rgba(91,205,244,.025) 9%,
+              transparent 22%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255,255,255,.042) 0,
+              transparent 12%,
+              transparent 83%,
+              rgba(0,0,0,.13) 100%
+            );
+          box-shadow:
+            inset 4px 0 0 rgba(75,195,236,.54),
+            inset 6px 0 0 rgba(20,79,101,.28);
+        }
+
+        .tr-nextHero::after{
+          content:"";
+          position:absolute;
+          z-index:1;
+          left:22px;
+          right:22px;
+          top:0;
+          height:1px;
+          pointer-events:none;
+          background:linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(226,249,255,.52) 14%,
+            rgba(118,215,247,.34) 42%,
+            rgba(118,215,247,.08) 78%,
+            transparent 100%
+          );
+          filter:drop-shadow(0 1px 0 rgba(48,143,177,.22));
+        }
+
+        .tr-nextHeroTopline,
+        .tr-nextHeroCompact,
+        .tr-nextHeroActions{
+          position:relative;
+          z-index:3;
+        }
+
+        .tr-nextHeroTopline{
+          padding:0 2px 7px 7px;
+        }
+
+        .tr-trainingSectionEyebrow{
+          color:rgba(119,211,244,.84);
+          font-weight:1000;
+          letter-spacing:.17em;
+        }
+
+        .tr-heroReadinessInline{
+          padding:7px 10px 7px 12px;
+          gap:7px;
+          border:1px solid rgba(102,217,157,.11);
+          border-top-color:rgba(127,235,179,.16);
+          border-radius:8px;
+          background:
+            linear-gradient(180deg,rgba(20,45,37,.56),rgba(8,25,22,.34));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.03),
+            inset 0 -1px 0 rgba(0,0,0,.48);
+        }
+
+        .tr-heroReadinessLine{
+          display:none;
+        }
+
+        .tr-heroReadinessDot{
+          width:6px;
+          height:6px;
+          flex-basis:6px;
+          background:var(--tr-green);
+          box-shadow:
+            0 0 0 2px rgba(99,223,160,.08),
+            0 0 8px rgba(99,223,160,.24);
+        }
+
+        .tr-heroReadinessInline.is-recovering{
+          color:#efc383;
+          border-color:rgba(227,189,114,.16);
+          background:linear-gradient(180deg,rgba(47,38,21,.54),rgba(25,20,12,.33));
+        }
+
+        .tr-heroReadinessInline.is-recovering .tr-heroReadinessDot{
+          background:var(--tr-amber);
+          box-shadow:
+            0 0 0 2px rgba(227,189,114,.08),
+            0 0 7px rgba(227,189,114,.20);
+        }
+
+        .tr-nextHeroCompact{
+          grid-template-columns:minmax(0,1fr) 232px;
+          gap:23px;
+          min-height:116px;
+          padding:8px 3px 11px 8px;
+        }
+
+        .tr-nextHeroCompact::before{
+          left:8px;
+          right:0;
+          background:linear-gradient(
+            90deg,
+            rgba(126,208,237,.16),
+            rgba(126,208,237,.055) 70%,
+            transparent
+          );
+        }
+
+        .tr-nextHeroCopy h1{
+          margin:0;
+          color:#f8fcff;
+          font-size:clamp(45px,4.65vw,61px);
+          line-height:.91;
+          font-weight:1000;
+          letter-spacing:-.058em;
+          text-shadow:
+            0 1px 0 rgba(255,255,255,.045),
+            0 3px 3px rgba(0,0,0,.38),
+            0 9px 19px rgba(0,0,0,.19);
+        }
+
+        .tr-nextHeroProgram{
+          margin-top:8px;
+          color:rgba(207,225,235,.61);
+          font-size:12px;
+          font-weight:900;
+          letter-spacing:.025em;
+        }
+
+        .tr-nextHero .tr-scheduleMuscles{
+          gap:7px;
+          margin-top:14px;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle{
+          min-height:36px;
+          padding:3px 9px 3px 4px;
+          gap:6px;
+          border:1px solid rgba(119,196,224,.13);
+          border-top-color:rgba(166,222,242,.19);
+          border-bottom-color:rgba(42,80,96,.27);
+          border-radius:9px;
+          color:rgba(222,236,243,.78);
+          background:
+            linear-gradient(180deg,#11232f 0%,#0a1720 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.45),
+            0 3px 7px rgba(0,0,0,.17),
+            inset 0 1px 0 rgba(255,255,255,.045),
+            inset 0 -2px 3px rgba(0,0,0,.30);
+        }
+
+        .tr-nextHero .tr-scheduleMuscle::before{
+          left:8px;
+          right:8px;
+          background:linear-gradient(
+            90deg,
+            transparent,
+            rgba(206,244,255,.11),
+            transparent
+          );
+        }
+
+        .tr-nextHero .tr-scheduleMuscleIcon{
+          width:28px;
+          height:28px;
+          flex-basis:28px;
+          border:1px solid rgba(96,200,236,.16);
+          border-top-color:rgba(151,225,249,.21);
+          border-radius:7px;
+          background:
+            linear-gradient(180deg,#143448 0%,#0a202c 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.38),
+            inset 0 1px 0 rgba(255,255,255,.055),
+            inset 0 -3px 5px rgba(0,0,0,.27);
+        }
+
+        .tr-nextHeroQuickStats{
+          overflow:hidden;
+          align-self:center;
+          border:1px solid rgba(124,194,220,.10);
+          border-top-color:rgba(169,221,240,.15);
+          border-radius:11px;
+          background:
+            linear-gradient(180deg,rgba(8,18,25,.72),rgba(5,11,16,.54));
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.45),
+            inset 0 2px 5px rgba(0,0,0,.34),
+            inset 0 1px 0 rgba(255,255,255,.025),
+            inset 0 -1px 0 rgba(255,255,255,.014);
+        }
+
+        .tr-nextHeroQuickStat{
+          min-height:72px;
+          padding:11px 17px;
+          align-items:center;
+          text-align:center;
+        }
+
+        .tr-nextHeroQuickStat + .tr-nextHeroQuickStat{
+          border-left:1px solid rgba(122,198,226,.09);
+        }
+
+        .tr-nextHeroQuickStat strong{
+          color:#f6fbfd;
+          font-size:26px;
+          text-shadow:
+            0 1px 0 rgba(255,255,255,.035),
+            0 3px 7px rgba(0,0,0,.34);
+        }
+
+        .tr-nextHeroQuickStat span{
+          color:rgba(157,189,205,.51);
+          font-size:7px;
+          letter-spacing:.15em;
+        }
+
+        .tr-nextHeroActions{
+          grid-template-columns:minmax(0,1fr) 106px;
+          gap:9px;
+          margin-top:10px;
+          padding-left:7px;
+        }
+
+        .tr-nextHeroActions .tr-scheduleBtn{
+          min-height:45px;
+          border-radius:10px;
+        }
+
+        .tr-scheduleBtn--primary{
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:9px;
+          border:1px solid rgba(113,210,243,.57);
+          border-top-color:rgba(190,239,255,.72);
+          border-bottom-color:rgba(16,80,105,.76);
+          color:#f7fcff;
+          background:
+            linear-gradient(180deg,#2b91b7 0%,#217da0 42%,#16617f 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.06),
+            0 2px 2px rgba(0,0,0,.45),
+            0 6px 12px rgba(0,0,0,.27),
+            inset 0 1px 0 rgba(255,255,255,.23),
+            inset 0 -1px 0 rgba(0,0,0,.38),
+            inset 0 -5px 9px rgba(7,62,82,.18);
+          text-shadow:
+            0 1px 1px rgba(0,0,0,.42),
+            0 2px 5px rgba(0,0,0,.18);
+        }
+
+        .tr-scheduleBtn--primary::before{
+          left:12%;
+          right:12%;
+          background:linear-gradient(
+            90deg,
+            transparent,
+            rgba(255,255,255,.53),
+            transparent
+          );
+        }
+
+        .tr-primaryActionGlyph{
+          display:grid;
+          place-items:center;
+          width:22px;
+          height:22px;
+          padding-left:1px;
+          border:1px solid rgba(225,249,255,.24);
+          border-radius:50%;
+          color:#f8fdff;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.13),rgba(0,0,0,.08));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.13),
+            0 1px 2px rgba(0,0,0,.24);
+          font-size:8px;
+        }
+
+        .tr-scheduleBtn--primary:hover{
+          transform:translateY(-1px);
+          border-color:rgba(139,221,249,.70);
+          border-top-color:rgba(214,248,255,.79);
+          background:
+            linear-gradient(180deg,#329ac0 0%,#2584a8 43%,#196987 100%);
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.07),
+            0 2px 2px rgba(0,0,0,.42),
+            0 8px 15px rgba(0,0,0,.29),
+            inset 0 1px 0 rgba(255,255,255,.25),
+            inset 0 -1px 0 rgba(0,0,0,.37),
+            inset 0 -5px 9px rgba(7,62,82,.15);
+        }
+
+        .tr-scheduleBtn--primary:active{
+          transform:translateY(1px);
+          background:
+            linear-gradient(180deg,#1d718f 0%,#1b6d8b 48%,#145b76 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.33),
+            inset 0 2px 5px rgba(0,0,0,.25),
+            inset 0 1px 0 rgba(255,255,255,.09);
+        }
+
+        .tr-scheduleBtn--edit,
+        .tr-scheduleBtn--rowEdit{
+          border:1px solid rgba(132,184,204,.12);
+          border-top-color:rgba(182,220,234,.17);
+          border-bottom-color:rgba(29,53,64,.34);
+          color:rgba(225,237,243,.75);
+          background:
+            linear-gradient(180deg,#131d25 0%,#0a1117 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.42),
+            inset 0 1px 0 rgba(255,255,255,.038),
+            inset 0 -2px 3px rgba(0,0,0,.30);
+        }
+
+        .tr-scheduleBtn--edit:hover,
+        .tr-scheduleBtn--rowEdit:hover{
+          border-color:rgba(130,208,237,.22);
+          color:#eef7fb;
+          background:linear-gradient(180deg,#17252f 0%,#0b151c 100%);
+        }
+
+        .tr-upcomingBoard{
+          position:relative;
+          overflow:hidden;
+          margin-top:13px;
+          padding:0;
+          border:1px solid rgba(124,188,211,.105);
+          border-top-color:rgba(173,220,237,.15);
+          border-bottom-color:rgba(37,65,77,.22);
+          border-radius:17px;
+          background:
+            repeating-linear-gradient(
+              0deg,
+              rgba(255,255,255,.004) 0,
+              rgba(255,255,255,.004) 1px,
+              transparent 1px,
+              transparent 5px
+            ),
+            linear-gradient(180deg,#0d161e 0%,#080e14 100%);
+          background-blend-mode:soft-light,normal;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.02),
+            0 2px 3px rgba(0,0,0,.36),
+            0 12px 28px rgba(0,0,0,.20),
+            inset 0 1px 0 rgba(255,255,255,.028),
+            inset 0 -1px 0 rgba(0,0,0,.72);
+        }
+
+        .tr-upcomingBoard::before{
+          left:20px;
+          right:20px;
+          background:linear-gradient(
+            90deg,
+            transparent,
+            rgba(187,232,248,.18) 18%,
+            rgba(187,232,248,.055) 72%,
+            transparent
+          );
+        }
+
+        .tr-upcomingHeader{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          min-height:45px;
+          padding:0 16px;
+          border-bottom:1px solid rgba(131,190,211,.075);
+          background:linear-gradient(180deg,rgba(255,255,255,.012),rgba(0,0,0,.035));
+        }
+
+        .tr-upcomingAdvisory{
+          color:rgba(154,185,200,.42);
+          font-size:7px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.16em;
+          white-space:nowrap;
+        }
+
+        .tr-trainingTimeline{
+          gap:8px;
+          padding:11px 12px 13px;
+        }
+
+        .tr-trainingTimelineRow{
+          grid-template-columns:20px minmax(0,1fr);
+        }
+
+        .tr-timelineRail{
+          width:20px;
+        }
+
+        .tr-timelineNode{
+          width:8px;
+          height:8px;
+          border:1px solid rgba(127,200,226,.28);
+          background:
+            linear-gradient(180deg,#13232d,#081118);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.45),
+            inset 0 1px 0 rgba(255,255,255,.05);
+        }
+
+        .tr-trainingTimelineRow.is-ready .tr-timelineNode{
+          border-color:rgba(100,212,157,.42);
+          background:linear-gradient(180deg,#173229,#0a1c17);
+          box-shadow:
+            0 1px 2px rgba(0,0,0,.42),
+            inset 0 1px 0 rgba(255,255,255,.045);
+        }
+
+        .tr-timelineLine{
+          width:1px;
+          background:linear-gradient(
+            180deg,
+            rgba(119,187,211,.16),
+            rgba(119,187,211,.055)
+          );
+        }
+
+        .tr-sessionCard{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          padding:13px 14px;
+          border:1px solid rgba(255,255,255,.058);
+          border-top-color:rgba(154,211,231,.105);
+          border-bottom-color:rgba(24,43,52,.52);
+          border-radius:13px;
+          background:
+            linear-gradient(180deg,#121c25 0%,#0b1218 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.48),
+            0 4px 9px rgba(0,0,0,.22),
+            0 11px 22px rgba(0,0,0,.10),
+            inset 0 1px 0 rgba(255,255,255,.032),
+            inset 0 -1px 0 rgba(0,0,0,.68);
+          transition:
+            transform .16s cubic-bezier(.2,.8,.2,1),
+            border-color .16s ease,
+            background .16s ease,
+            box-shadow .16s ease;
+        }
+
+        .tr-sessionCard::before{
+          content:"";
+          position:absolute;
+          z-index:0;
+          left:0;
+          top:0;
+          bottom:0;
+          width:2px;
+          background:linear-gradient(180deg,rgba(77,184,224,.50),rgba(25,91,117,.23));
+        }
+
+        .tr-sessionCard::after{
+          content:"";
+          display:block;
+          position:absolute;
+          z-index:0;
+          left:14px;
+          right:34%;
+          top:0;
+          height:1px;
+          pointer-events:none;
+          background:linear-gradient(
+            90deg,
+            rgba(215,244,253,.14),
+            rgba(117,206,239,.07),
+            transparent
+          );
+        }
+
+        .tr-sessionCard > *{
+          position:relative;
+          z-index:2;
+        }
+
+        .tr-sessionCard:hover{
+          transform:translateY(-2px);
+          border-color:rgba(104,194,226,.13);
+          border-top-color:rgba(171,224,243,.16);
+          background:linear-gradient(180deg,#14212b 0%,#0c151c 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.44),
+            0 6px 12px rgba(0,0,0,.24),
+            0 16px 28px rgba(0,0,0,.11),
+            inset 0 1px 0 rgba(255,255,255,.038),
+            inset 0 -1px 0 rgba(0,0,0,.68);
+        }
+
+        .tr-sessionTitleRow{
+          gap:14px;
+        }
+
+        .tr-sessionTitleRow h3{
+          color:#f5f9fb;
+          font-size:19px;
+          line-height:1.02;
+          letter-spacing:-.025em;
+          text-shadow:
+            0 1px 0 rgba(255,255,255,.025),
+            0 2px 4px rgba(0,0,0,.31);
+        }
+
+        .tr-sessionTitleRow p{
+          margin-top:4px;
+          color:rgba(187,207,218,.47);
+          font-size:10px;
+        }
+
+        .tr-sessionDate{
+          align-self:flex-start;
+          padding:6px 8px;
+          border:1px solid rgba(124,190,214,.09);
+          border-top-color:rgba(172,218,235,.13);
+          border-radius:8px;
+          color:rgba(218,236,244,.72);
+          background:linear-gradient(180deg,rgba(10,22,29,.75),rgba(5,12,17,.50));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.018),
+            inset 0 -1px 0 rgba(0,0,0,.38);
+          font-size:8px;
+          font-weight:1000;
+          letter-spacing:.10em;
+        }
+
+        .tr-scheduleMuscles.is-compact{
+          gap:7px;
+          margin-top:9px;
+        }
+
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
+          min-height:29px;
+          padding:2px 7px 2px 3px;
+          gap:5px;
+          border:1px solid rgba(102,177,205,.085);
+          border-radius:8px;
+          color:rgba(199,220,230,.62);
+          background:
+            linear-gradient(180deg,rgba(14,31,40,.64),rgba(7,17,24,.58));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.018),
+            inset 0 -1px 0 rgba(0,0,0,.38);
+        }
+
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon{
+          width:23px;
+          height:23px;
+          flex-basis:23px;
+          border:1px solid rgba(97,185,219,.10);
+          border-top-color:rgba(142,214,239,.15);
+          border-radius:6px;
+          background:linear-gradient(180deg,#102b3a,#091a24);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.026),
+            inset 0 -2px 3px rgba(0,0,0,.27);
+        }
+
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon img{
+          width:18px;
+          height:18px;
+        }
+
+        .tr-sessionMeta{
+          margin-top:9px;
+          color:rgba(160,188,202,.44);
+          font-size:9px;
+        }
+
+        .tr-sessionRight{
+          min-width:200px;
+          gap:9px;
+        }
+
+        .tr-sessionReadiness:empty{
+          display:none;
+        }
+
+        .tr-readinessStatus.is-compact{
+          min-height:27px;
+          padding:5px 8px;
+          border:1px solid rgba(221,178,104,.14);
+          border-radius:7px;
+          background:
+            linear-gradient(180deg,rgba(45,35,18,.50),rgba(22,17,10,.32));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.025),
+            inset 0 -1px 0 rgba(0,0,0,.36);
+        }
+
+        .tr-readinessStatus.is-compact .tr-readinessAccent{
+          width:2px;
+          border-radius:2px;
+          box-shadow:none;
+        }
+
+        .tr-readinessStatus.is-compact strong{
+          font-size:7px;
+          letter-spacing:.10em;
+        }
+
+        .tr-sessionActions{
+          gap:7px;
+        }
+
+        .tr-sessionActions .tr-scheduleBtn{
+          min-height:35px;
+          border-radius:8px;
+          font-size:8px;
+          letter-spacing:.08em;
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowStart{
+          border:1px solid rgba(96,192,227,.36);
+          border-top-color:rgba(148,220,246,.46);
+          border-bottom-color:rgba(16,69,90,.53);
+          background:
+            linear-gradient(180deg,#1e6d8c 0%,#155775 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.42),
+            0 3px 6px rgba(0,0,0,.18),
+            inset 0 1px 0 rgba(255,255,255,.105),
+            inset 0 -2px 3px rgba(0,0,0,.19);
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowStart:hover{
+          transform:translateY(-1px);
+          background:
+            linear-gradient(180deg,#257a9a 0%,#18617e 100%);
+          box-shadow:
+            0 1px 1px rgba(0,0,0,.39),
+            0 4px 8px rgba(0,0,0,.20),
+            inset 0 1px 0 rgba(255,255,255,.12),
+            inset 0 -2px 3px rgba(0,0,0,.18);
+        }
+
+        @media (hover:hover) and (pointer:fine){
+          .tr-nextHero .tr-scheduleMuscle:hover{
+            transform:translateY(-1px);
+            border-color:rgba(128,213,242,.23);
+            background:linear-gradient(180deg,#142a38 0%,#0a1922 100%);
+          }
+        }
+
+        @media (max-width:900px){
+          .tr-nextHeroCompact{
+            grid-template-columns:minmax(0,1fr) 208px;
+            gap:18px;
+          }
+
+          .tr-sessionRight{
+            min-width:175px;
+          }
+        }
+
+        @media (max-width:680px){
+          .tr-nextHero{
+            padding:15px 13px 13px;
+            border-radius:15px;
+          }
+
+          .tr-nextHero::before{
+            box-shadow:
+              inset 3px 0 0 rgba(75,195,236,.48),
+              inset 5px 0 0 rgba(20,79,101,.22);
+          }
+
+          .tr-nextHeroTopline{
+            align-items:center;
+            gap:8px;
+            padding:0 0 6px 5px;
+          }
+
+          .tr-heroReadinessInline{
+            max-width:60%;
+            padding:6px 8px;
+            font-size:7px;
+            letter-spacing:.065em;
+          }
+
+          .tr-nextHeroCompact{
+            grid-template-columns:1fr;
+            gap:10px;
+            min-height:0;
+            padding:10px 0 10px 5px;
+          }
+
+          .tr-nextHeroCopy h1{
+            font-size:clamp(38px,12vw,50px);
+            line-height:.91;
+          }
+
+          .tr-nextHeroProgram{
+            font-size:11px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscles{
+            gap:5px;
+            margin-top:12px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscle{
+            min-height:33px;
+            padding:2px 7px 2px 3px;
+          }
+
+          .tr-nextHero .tr-scheduleMuscleIcon{
+            width:26px;
+            height:26px;
+            flex-basis:26px;
+          }
+
+          .tr-nextHeroQuickStats{
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            border-radius:9px;
+          }
+
+          .tr-nextHeroQuickStat{
+            min-height:50px;
+            padding:8px 7px;
+          }
+
+          .tr-nextHeroQuickStat strong{
+            font-size:20px;
+          }
+
+          .tr-nextHeroActions{
+            grid-template-columns:minmax(0,1fr) 80px;
+            gap:7px;
+            margin-top:8px;
+            padding-left:5px;
+          }
+
+          .tr-nextHeroActions .tr-scheduleBtn{
+            min-height:43px;
+            border-radius:9px;
+          }
+
+          .tr-primaryActionGlyph{
+            width:20px;
+            height:20px;
+            font-size:7px;
+          }
+
+          .tr-upcomingBoard{
+            margin-top:11px;
+            border-radius:14px;
+          }
+
+          .tr-upcomingHeader{
+            min-height:42px;
+            padding:0 12px;
+          }
+
+          .tr-upcomingAdvisory{
+            font-size:6px;
+            letter-spacing:.13em;
+          }
+
+          .tr-trainingTimeline{
+            padding:9px 8px 11px;
+            gap:7px;
+          }
+
+          .tr-trainingTimelineRow{
+            grid-template-columns:15px minmax(0,1fr);
+          }
+
+          .tr-timelineRail{
+            width:15px;
+          }
+
+          .tr-sessionCard{
+            padding:12px 11px;
+            border-radius:11px;
+          }
+
+          .tr-sessionCard:hover{
+            transform:none;
+          }
+
+          .tr-sessionDate{
+            padding:5px 6px;
+            font-size:7px;
+          }
+
+          .tr-scheduleMuscles.is-compact{
+            gap:5px;
+          }
+
+          .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
+            min-height:27px;
+            padding-right:6px;
+          }
+
+          .tr-sessionRight{
+            min-width:0;
+            gap:8px;
+          }
+
+          .tr-sessionActions{
+            width:100%;
+          }
+        }
+
+        @media (prefers-reduced-motion:reduce){
+          .tr-sessionCard,
+          .tr-scheduleBtn,
+          .tr-scheduleMuscle{
             transition:none !important;
           }
         }
