@@ -946,7 +946,7 @@ export function TodayPage() {
                       <strong>
                         {nextMeta?.estimatedMinutes ? `~${nextMeta.estimatedMinutes}` : "—"}
                       </strong>
-                      <span>EST. MINUTES</span>
+                      <span>EST. TIME</span>
                     </div>
                   </div>
                 </div>
@@ -1019,7 +1019,6 @@ export function TodayPage() {
                                 <p>{parts.subtitle || meta?.templateName}</p>
                               ) : null}
                             </div>
-                            <ScheduleDateBadge date={plannedDate} />
                           </div>
 
                           <MuscleStrip muscles={meta?.muscles ?? []} compact />
@@ -1046,6 +1045,8 @@ export function TodayPage() {
                         </div>
 
                         <div className="tr-sessionRight">
+                          <ScheduleDateBadge date={plannedDate} />
+
                           <div className="tr-sessionReadiness">
                             <ReadinessBadge readiness={readiness} compact />
                           </div>
@@ -5553,6 +5554,604 @@ export function TodayPage() {
 
           .tr-sessionMetaItem strong{
             font-size:10px;
+          }
+        }
+
+
+
+        /* ==========================================================
+           STEP 6I FINAL VISUAL AUTHORITY
+           Premium de-boxed planner, stronger readability, exact
+           active-WORKOUTS-nav START treatment and aligned schedule rail.
+           ========================================================== */
+
+        .tr-trainingBoard{
+          --tr-nav-blue:rgba(0,170,255,.12);
+          --tr-nav-blue-border:rgba(0,170,255,.72);
+          --tr-nav-blue-inner:rgba(0,170,255,.18);
+          --tr-orange-hi:#ffe1a1;
+          --tr-orange-1:#ffad2c;
+          --tr-orange-2:#ef7c08;
+          --tr-orange-3:#9c3d00;
+          --tr-orange-border:rgba(255,214,145,.92);
+        }
+
+        /* Strong section labels */
+        .tr-nextHeroTopline .tr-trainingSectionEyebrow,
+        .tr-upcomingHeader .tr-trainingSectionEyebrow{
+          position:relative;
+          display:flex;
+          align-items:center;
+          gap:9px;
+          color:#c9f2ff!important;
+          font-size:11.5px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.16em!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.55),0 0 12px rgba(0,170,255,.16)!important;
+        }
+
+        .tr-nextHeroTopline .tr-trainingSectionEyebrow::before,
+        .tr-upcomingHeader .tr-trainingSectionEyebrow::before{
+          content:"";
+          width:3px;
+          height:16px;
+          flex:0 0 3px;
+          border-radius:3px;
+          background:linear-gradient(180deg,#8ae6ff,#16a6e2);
+          box-shadow:0 0 10px rgba(49,189,240,.26);
+        }
+
+        .tr-upcomingAdvisory{
+          color:rgba(220,237,244,.72)!important;
+          font-size:8.5px!important;
+          font-weight:950!important;
+          letter-spacing:.14em!important;
+        }
+
+        /* Give hero metrics enough space */
+        .tr-nextHeroCompact{
+          grid-template-columns:minmax(0,1fr) 282px!important;
+          gap:30px!important;
+        }
+
+        /* Hero metrics are information, not nested buttons */
+        .tr-nextHeroQuickStats{
+          display:grid!important;
+          grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          align-items:center!important;
+          gap:0!important;
+          width:100%!important;
+          min-width:0!important;
+          overflow:visible!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+        }
+
+        .tr-nextHeroQuickStat{
+          position:relative!important;
+          min-width:0!important;
+          min-height:88px!important;
+          display:grid!important;
+          grid-template-columns:30px minmax(0,1fr)!important;
+          align-items:center!important;
+          gap:10px!important;
+          padding:10px 17px!important;
+          overflow:visible!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+          text-align:left!important;
+        }
+
+        .tr-nextHeroQuickStat::after{display:none!important;}
+
+        .tr-nextHeroQuickStat + .tr-nextHeroQuickStat{
+          border-left:1px solid rgba(170,216,233,.20)!important;
+        }
+
+        .tr-heroMetricIcon{
+          width:27px!important;
+          height:27px!important;
+          display:grid!important;
+          place-items:center!important;
+          border:0!important;
+          border-radius:0!important;
+          color:#58d1fa!important;
+          background:none!important;
+          box-shadow:none!important;
+          filter:drop-shadow(0 0 6px rgba(0,170,255,.17));
+        }
+
+        .tr-nextHeroQuickStat.is-time .tr-heroMetricIcon{
+          color:var(--tr-orange-1)!important;
+          filter:drop-shadow(0 0 4px rgba(239,124,8,.28)) drop-shadow(0 0 9px rgba(255,119,0,.12));
+        }
+
+        .tr-heroMetricIcon svg{
+          width:24px!important;
+          height:24px!important;
+          stroke-width:2!important;
+        }
+
+        .tr-heroMetricCopy{
+          min-width:0!important;
+          display:grid!important;
+          align-content:center!important;
+          gap:6px!important;
+        }
+
+        .tr-heroMetricCopy strong{
+          color:#fff!important;
+          font-size:32px!important;
+          line-height:.86!important;
+          font-weight:1000!important;
+          letter-spacing:-.05em!important;
+          font-variant-numeric:tabular-nums!important;
+          white-space:nowrap!important;
+          text-shadow:0 2px 3px rgba(0,0,0,.48)!important;
+        }
+
+        .tr-nextHeroQuickStat.is-time .tr-heroMetricCopy strong{
+          color:var(--tr-orange-1)!important;
+          text-shadow:0 2px 3px rgba(0,0,0,.50),0 0 10px rgba(239,124,8,.14)!important;
+        }
+
+        .tr-heroMetricCopy span{
+          color:rgba(236,246,250,.88)!important;
+          font-size:10px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.11em!important;
+          white-space:nowrap!important;
+          overflow:visible!important;
+        }
+
+        /* Muscle labels integrated into surface, not fake pills */
+        .tr-nextHero .tr-scheduleMuscles,
+        .tr-scheduleMuscles.is-compact{gap:13px!important;}
+
+        .tr-nextHero .tr-scheduleMuscle,
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
+          min-height:28px!important;
+          padding:0!important;
+          gap:6px!important;
+          border:0!important;
+          border-radius:0!important;
+          color:rgba(235,245,249,.88)!important;
+          background:none!important;
+          box-shadow:none!important;
+          font-size:9.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.055em!important;
+        }
+
+        .tr-nextHero .tr-scheduleMuscle::before,
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscle::before{display:none!important;}
+
+        .tr-nextHero .tr-scheduleMuscleIcon,
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon{
+          width:25px!important;
+          height:25px!important;
+          flex-basis:25px!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+        }
+
+        .tr-nextHero .tr-scheduleMuscleIcon img,
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscleIcon img{
+          width:23px!important;
+          height:23px!important;
+          filter:drop-shadow(0 1px 1px rgba(0,0,0,.50)) drop-shadow(0 0 4px rgba(0,170,255,.08));
+        }
+
+        /* START buttons match active bottom WORKOUTS nav visual values */
+        .tr-scheduleBtn--primary,
+        .tr-sessionActions .tr-scheduleBtn--rowStart{
+          color:rgba(255,255,255,.96)!important;
+          background:var(--tr-nav-blue)!important;
+          border:2px solid var(--tr-nav-blue-border)!important;
+          border-radius:14px!important;
+          box-shadow:
+            0 0 0 1px var(--tr-nav-blue-inner) inset,
+            0 12px 34px rgba(0,0,0,.55),
+            0 0 20px rgba(0,170,255,.18)!important;
+          text-shadow:0 2px 0 rgba(0,0,0,.55),0 0 10px rgba(0,170,255,.18)!important;
+          font-weight:950!important;
+          letter-spacing:.08em!important;
+          text-transform:uppercase!important;
+          transition:transform .14s ease,filter .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease!important;
+        }
+
+        .tr-scheduleBtn--primary{
+          min-height:48px!important;
+          font-size:12.5px!important;
+          line-height:16px!important;
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowStart{
+          min-height:38px!important;
+          font-size:10px!important;
+          line-height:14px!important;
+        }
+
+        .tr-scheduleBtn--primary::before,
+        .tr-sessionActions .tr-scheduleBtn--rowStart::before{
+          display:none!important;
+          content:none!important;
+        }
+
+        .tr-scheduleBtn--primary:hover,
+        .tr-sessionActions .tr-scheduleBtn--rowStart:hover{
+          transform:translateY(-1px)!important;
+          filter:brightness(1.10)!important;
+          background:var(--tr-nav-blue)!important;
+          border-color:rgba(68,196,255,.86)!important;
+          box-shadow:
+            0 0 0 1px rgba(0,170,255,.22) inset,
+            0 14px 36px rgba(0,0,0,.56),
+            0 0 22px rgba(0,170,255,.22)!important;
+        }
+
+        .tr-scheduleBtn--primary:active,
+        .tr-sessionActions .tr-scheduleBtn--rowStart:active{
+          transform:translateY(1px)!important;
+          filter:brightness(.96)!important;
+        }
+
+        .tr-primaryActionGlyph{
+          width:auto!important;
+          height:auto!important;
+          display:inline!important;
+          padding:0!important;
+          border:0!important;
+          border-radius:0!important;
+          color:inherit!important;
+          background:none!important;
+          box-shadow:none!important;
+          font-size:9px!important;
+        }
+
+        /* Stronger upcoming tray/card depth */
+        .tr-upcomingBoard{
+          overflow:hidden!important;
+          border:1px solid rgba(93,153,177,.14)!important;
+          border-top-color:rgba(163,211,229,.18)!important;
+          background:linear-gradient(180deg,#080e13 0%,#05090d 100%)!important;
+          box-shadow:
+            0 2px 4px rgba(0,0,0,.40),
+            0 18px 42px rgba(0,0,0,.24),
+            inset 0 2px 8px rgba(0,0,0,.24),
+            inset 0 1px 0 rgba(255,255,255,.020)!important;
+        }
+
+        .tr-upcomingHeader{
+          min-height:52px!important;
+          padding:0 18px!important;
+          border-bottom:1px solid rgba(127,191,216,.10)!important;
+          background:linear-gradient(180deg,rgba(18,33,43,.74),rgba(8,15,20,.50))!important;
+        }
+
+        .tr-trainingTimeline{
+          gap:14px!important;
+          padding:15px 13px 17px!important;
+        }
+
+        .tr-sessionCard{
+          display:grid!important;
+          grid-template-columns:minmax(0,1fr) 198px!important;
+          align-items:stretch!important;
+          gap:22px!important;
+          padding:16px!important;
+          overflow:hidden!important;
+          border:1px solid rgba(133,201,226,.17)!important;
+          border-top-color:rgba(199,233,245,.25)!important;
+          border-bottom-color:rgba(27,56,68,.52)!important;
+          border-radius:15px!important;
+          background:linear-gradient(180deg,#182a35 0%,#12212b 45%,#0d171e 100%)!important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.045),
+            0 3px 4px rgba(0,0,0,.44),
+            0 10px 20px rgba(0,0,0,.29),
+            0 24px 42px rgba(0,0,0,.15),
+            inset 0 1px 0 rgba(255,255,255,.045),
+            inset 0 -2px 5px rgba(0,0,0,.28)!important;
+        }
+
+        .tr-sessionCard::before{
+          width:3px!important;
+          background:linear-gradient(180deg,rgba(85,206,246,.78),rgba(32,126,160,.38) 60%,rgba(16,63,83,.14))!important;
+          box-shadow:none!important;
+        }
+
+        .tr-sessionCard::after{
+          left:18px!important;
+          right:30%!important;
+          background:linear-gradient(90deg,rgba(225,247,255,.20),rgba(121,210,242,.08) 46%,transparent)!important;
+        }
+
+        .tr-sessionCard:hover{
+          transform:translateY(-2px)!important;
+          border-color:rgba(126,212,243,.24)!important;
+          border-top-color:rgba(213,241,250,.31)!important;
+          background:linear-gradient(180deg,#1c303c 0%,#152630 48%,#0f1b23 100%)!important;
+        }
+
+        .tr-sessionPrimary{
+          min-width:0!important;
+          display:grid!important;
+          align-content:center!important;
+        }
+
+        .tr-sessionTitleRow{display:block!important;}
+
+        .tr-sessionTitleRow h3{
+          color:#fff!important;
+          font-size:21px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:-.026em!important;
+          text-shadow:0 2px 3px rgba(0,0,0,.40)!important;
+        }
+
+        .tr-sessionTitleRow p{
+          margin-top:5px!important;
+          color:rgba(222,236,242,.74)!important;
+          font-size:10.5px!important;
+          font-weight:850!important;
+        }
+
+        /* Upcoming exercise/time rail: larger, bright, de-boxed */
+        .tr-sessionMeta{
+          display:flex!important;
+          align-items:center!important;
+          gap:0!important;
+          margin-top:12px!important;
+          color:inherit!important;
+        }
+
+        .tr-sessionMetaItem{
+          position:relative!important;
+          min-height:28px!important;
+          display:flex!important;
+          align-items:center!important;
+          gap:7px!important;
+          padding:0 14px!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+        }
+
+        .tr-sessionMetaItem:first-child{padding-left:0!important;}
+
+        .tr-sessionMetaItem + .tr-sessionMetaItem{
+          border-left:1px solid rgba(158,205,223,.20)!important;
+        }
+
+        .tr-sessionMetaIcon{
+          width:20px!important;
+          height:20px!important;
+          display:grid!important;
+          place-items:center!important;
+          border:0!important;
+          border-radius:0!important;
+          color:#54cff9!important;
+          background:none!important;
+          box-shadow:none!important;
+          filter:drop-shadow(0 0 5px rgba(0,170,255,.13));
+        }
+
+        .tr-sessionMetaItem:nth-child(2) .tr-sessionMetaIcon{
+          color:var(--tr-orange-1)!important;
+          filter:drop-shadow(0 0 4px rgba(239,124,8,.24)) drop-shadow(0 0 8px rgba(255,119,0,.10));
+        }
+
+        .tr-sessionMetaIcon svg{
+          width:17px!important;
+          height:17px!important;
+          stroke-width:2!important;
+        }
+
+        .tr-sessionMetaItem strong{
+          color:#fff!important;
+          font-size:12.5px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:-.01em!important;
+          font-variant-numeric:tabular-nums!important;
+        }
+
+        .tr-sessionMetaItem:nth-child(2) strong{
+          color:var(--tr-orange-1)!important;
+          text-shadow:0 0 8px rgba(239,124,8,.10)!important;
+        }
+
+        .tr-sessionMetaItem > span:last-child{
+          color:rgba(236,246,250,.86)!important;
+          font-size:9.5px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.095em!important;
+        }
+
+        /* Exact date / action alignment */
+        .tr-sessionRight{
+          width:198px!important;
+          min-width:198px!important;
+          display:grid!important;
+          grid-template-rows:auto 1fr auto!important;
+          align-items:stretch!important;
+          gap:9px!important;
+        }
+
+        .tr-sessionReadiness{
+          min-height:0!important;
+          display:flex!important;
+          align-items:flex-start!important;
+        }
+
+        .tr-sessionReadiness:empty{display:block!important;}
+
+        .tr-sessionDate{
+          width:100%!important;
+          min-width:0!important;
+          min-height:38px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:8px!important;
+          padding:7px 10px!important;
+          border:1px solid rgba(87,177,211,.21)!important;
+          border-top-color:rgba(147,216,241,.30)!important;
+          border-bottom-color:rgba(27,61,75,.46)!important;
+          border-radius:10px!important;
+          color:#d6f0f9!important;
+          background:linear-gradient(180deg,rgba(14,39,51,.82),rgba(7,22,30,.80))!important;
+          box-shadow:0 1px 2px rgba(0,0,0,.39),inset 0 1px 0 rgba(255,255,255,.035),inset 0 -2px 3px rgba(0,0,0,.24)!important;
+        }
+
+        /* Same orange family as music PLAY */
+        .tr-sessionDate.is-immediate{
+          color:#170d03!important;
+          border-color:var(--tr-orange-border)!important;
+          background:linear-gradient(145deg,var(--tr-orange-hi) 0%,var(--tr-orange-1) 36%,var(--tr-orange-2) 72%,var(--tr-orange-3) 100%)!important;
+          box-shadow:
+            0 8px 20px rgba(255,119,0,.20),
+            0 0 0 1px rgba(255,152,25,.14),
+            inset 0 2px 0 rgba(255,255,255,.44),
+            inset 0 -4px 9px rgba(80,24,0,.26)!important;
+        }
+
+        .tr-sessionDateIcon{
+          width:19px!important;
+          height:19px!important;
+          flex:0 0 19px!important;
+          display:grid!important;
+          place-items:center!important;
+          border:0!important;
+          border-radius:0!important;
+          color:#63d1f7!important;
+          background:none!important;
+        }
+
+        .tr-sessionDate.is-immediate .tr-sessionDateIcon{
+          color:#170d03!important;
+          filter:drop-shadow(0 1px 0 rgba(255,255,255,.16));
+        }
+
+        .tr-sessionDateIcon svg{
+          width:16px!important;
+          height:16px!important;
+          stroke-width:2!important;
+        }
+
+        .tr-sessionDate strong{
+          color:inherit!important;
+          font-size:9px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.095em!important;
+          white-space:nowrap!important;
+        }
+
+        .tr-sessionActions{
+          width:100%!important;
+          display:grid!important;
+          grid-template-columns:minmax(0,1fr) 64px!important;
+          gap:8px!important;
+          align-self:end!important;
+        }
+
+        .tr-sessionActions .tr-scheduleBtn{
+          width:100%!important;
+          min-width:0!important;
+          padding:0 10px!important;
+        }
+
+        .tr-sessionActions .tr-scheduleBtn--rowEdit{
+          min-height:38px!important;
+          border:1px solid rgba(149,190,206,.15)!important;
+          border-top-color:rgba(196,224,235,.20)!important;
+          border-radius:10px!important;
+          color:rgba(237,245,248,.86)!important;
+          background:linear-gradient(180deg,#17232b,#0b1217)!important;
+          box-shadow:0 2px 4px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.035)!important;
+          font-size:9px!important;
+          font-weight:1000!important;
+          letter-spacing:.08em!important;
+        }
+
+        @media(max-width:760px){
+          .tr-nextHeroCompact{
+            grid-template-columns:1fr!important;
+            gap:15px!important;
+          }
+
+          .tr-nextHeroQuickStats{width:min(100%,360px)!important;}
+
+          .tr-nextHeroQuickStat{
+            min-height:70px!important;
+            padding:8px 13px!important;
+          }
+
+          .tr-heroMetricCopy strong{font-size:27px!important;}
+          .tr-heroMetricCopy span{font-size:9px!important;}
+
+          .tr-sessionCard{
+            grid-template-columns:minmax(0,1fr) 164px!important;
+            gap:12px!important;
+            padding:13px!important;
+          }
+
+          .tr-sessionRight{
+            width:164px!important;
+            min-width:164px!important;
+          }
+
+          .tr-sessionActions{
+            grid-template-columns:minmax(0,1fr) 55px!important;
+            gap:6px!important;
+          }
+
+          .tr-sessionMetaItem{padding:0 9px!important;}
+          .tr-sessionMetaItem strong{font-size:11px!important;}
+          .tr-sessionMetaItem > span:last-child{font-size:8px!important;}
+        }
+
+        @media(max-width:560px){
+          .tr-nextHeroTopline .tr-trainingSectionEyebrow,
+          .tr-upcomingHeader .tr-trainingSectionEyebrow{
+            font-size:10px!important;
+          }
+
+          .tr-nextHeroQuickStats{width:100%!important;}
+
+          .tr-sessionCard{
+            grid-template-columns:1fr!important;
+            gap:12px!important;
+          }
+
+          .tr-sessionRight{
+            width:100%!important;
+            min-width:0!important;
+            grid-template-columns:minmax(0,1fr) minmax(160px,.72fr)!important;
+            grid-template-rows:auto!important;
+            align-items:center!important;
+            gap:8px!important;
+          }
+
+          .tr-sessionRight .tr-sessionDate{grid-column:1!important;}
+          .tr-sessionRight .tr-sessionReadiness{display:none!important;}
+          .tr-sessionRight .tr-sessionActions{grid-column:2!important;}
+
+          .tr-sessionActions{
+            grid-template-columns:minmax(0,1fr) 52px!important;
           }
         }
 
