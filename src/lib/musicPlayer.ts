@@ -352,7 +352,6 @@ let preampGain: GainNode | null = null;
 let equalizerFilters: BiquadFilterNode[] = [];
 let normalizerNode: DynamicsCompressorNode | null = null;
 let limiterNode: DynamicsCompressorNode | null = null;
-let analyserNode: AnalyserNode | null = null;
 let musicGain: GainNode | null = null;
 let headphoneBassShelf: BiquadFilterNode | null = null;
 let headphoneSplitter: ChannelSplitterNode | null = null;
@@ -379,7 +378,6 @@ let stallTimer = 0;
 let watchdogTimer = 0;
 let lastWatchdogTime = 0;
 let lastWatchdogPosition = 0;
-let preloadedAudio: HTMLAudioElement | null = null;
 let preloadedTrackId: string | null = null;
 let preloadedTrackUrl: string | null = null;
 let autoSkipDepth = 0;
@@ -387,7 +385,7 @@ let hardRecoveryInFlight: Promise<void> | null = null;
 let lifecycleListenersInstalled = false;
 const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
 const SIGNED_URL_TTL_MS = 10 * 60 * 1000;
-const MAX_SIGNED_URL_CACHE = 12;
+const MAX_SIGNED_URL_CACHE = 6;
 
 function pruneSignedUrlCache() {
   const now = Date.now();
@@ -422,15 +420,9 @@ async function resolveTrackUrl(track: MusicTrack) {
 }
 
 function resetPreloadedAudio() {
-  if (preloadedAudio) {
-    preloadedAudio.removeAttribute("src");
-    try {
-      preloadedAudio.load();
-    } catch {
-      // Preloading is opportunistic.
-    }
-  }
-  preloadedAudio = null;
+  // STEP 9: signed-URL hint only. We intentionally do not keep a second
+  // HTMLAudioElement alive because iOS/WebKit can retain its decoded media
+  // pipeline and accumulate memory across track changes.
   preloadedTrackId = null;
   preloadedTrackUrl = null;
 }
@@ -444,19 +436,13 @@ function preloadUpcomingTrack() {
     : state.tracks[(currentIndex + 1) % state.tracks.length];
 
   if (!nextTrack || nextTrack.id === state.currentTrack?.id) return;
-  if (preloadedTrackId === nextTrack.id && preloadedAudio) return;
+  if (preloadedTrackId === nextTrack.id && preloadedTrackUrl) return;
 
+  // Prefetch only the short-lived signed URL. The actual media element is
+  // created once and reused for playback, which is substantially lighter on iOS.
   void resolveTrackUrl(nextTrack)
     .then((url) => {
       if (state.currentTrack?.id === nextTrack.id) return;
-      resetPreloadedAudio();
-      const preload = new Audio();
-      preload.preload = "auto";
-      preload.crossOrigin = "anonymous";
-      preload.muted = true;
-      preload.src = url;
-      preload.load();
-      preloadedAudio = preload;
       preloadedTrackId = nextTrack.id;
       preloadedTrackUrl = url;
     })
@@ -705,7 +691,6 @@ function releaseMusicGraphNodes() {
   disconnectNode(headphoneLeftCrossLowpass);
   disconnectNode(headphoneRightCrossLowpass);
   disconnectNode(limiterNode);
-  disconnectNode(analyserNode);
   disconnectNode(musicGain);
 
   mediaSource = null;
@@ -713,7 +698,6 @@ function releaseMusicGraphNodes() {
   equalizerFilters = [];
   normalizerNode = null;
   limiterNode = null;
-  analyserNode = null;
   musicGain = null;
   headphoneBassShelf = null;
   headphoneSplitter = null;
@@ -1182,9 +1166,6 @@ function connectMusicGraph() {
     headphoneRightCrossLowpass.Q.value = 0.7;
 
     limiterNode = context.createDynamicsCompressor();
-    analyserNode = context.createAnalyser();
-    analyserNode.fftSize = 2048;
-    analyserNode.smoothingTimeConstant = 0.72;
     musicGain = context.createGain();
     musicGain.gain.value = 1;
 
@@ -1222,8 +1203,7 @@ function connectMusicGraph() {
     headphoneRightCrossfeed.connect(headphoneMerger, 0, 0);
 
     headphoneMerger.connect(limiterNode);
-    limiterNode.connect(analyserNode);
-    analyserNode.connect(musicGain);
+    limiterNode.connect(musicGain);
     musicGain.connect(context.destination);
 
     mediaSourceConnected = true;
@@ -1312,6 +1292,16 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     if (audio.dataset.trackId !== track.id || audio.src !== url) {
       audio.pause();
       recordedPlayToken = "";
+
+      // Explicitly release the previous media resource before moving to the
+      // next track. This helps WebKit discard the old decode/buffer pipeline.
+      try {
+        audio.removeAttribute("src");
+        audio.load();
+      } catch {
+        // Releasing the old resource is best-effort.
+      }
+
       audio.src = url;
       audio.dataset.trackId = track.id;
       audio.load();
@@ -2006,105 +1996,20 @@ export function getNextMusicTrackPreview() {
 let visualizerEnvelope: number[] = [];
 
 export function getMusicVisualizerLevels(barCount = 32) {
-  const count = Math.max(
-    8,
-    Math.min(64, Math.floor(barCount))
-  );
+  // Compatibility export only. The normal player no longer runs a live RTA.
+  // Keeping this function avoids breaking older callers while removing all
+  // continuous analyser reads from the audio engine.
+  const count = Math.max(8, Math.min(64, Math.floor(barCount)));
 
   if (visualizerEnvelope.length !== count) {
     visualizerEnvelope = Array(count).fill(0);
   }
 
-  if (!analyserNode || !audioContext) {
-    return visualizerEnvelope.map((value, index) => {
-      const next = Math.max(
-        0,
-        value * 0.82 - index * 0.00015
-      );
-
-      visualizerEnvelope[index] = next;
-      return next;
-    });
-  }
-
-  const data = new Uint8Array(
-    analyserNode.frequencyBinCount
+  visualizerEnvelope = visualizerEnvelope.map((value) =>
+    Math.max(0, value * 0.72 - 0.008)
   );
 
-  analyserNode.getByteFrequencyData(data);
-
-  const nyquist = audioContext.sampleRate / 2;
-  const minHz = 35;
-  const maxHz = Math.min(18000, nyquist * 0.92);
-  const ratio = maxHz / minHz;
-  const levels: number[] = [];
-
-  for (let index = 0; index < count; index += 1) {
-    const lowHz =
-      minHz * Math.pow(ratio, index / count);
-    const highHz =
-      minHz * Math.pow(ratio, (index + 1) / count);
-
-    const lowBin = Math.max(
-      0,
-      Math.floor((lowHz / nyquist) * data.length)
-    );
-
-    const highBin = Math.max(
-      lowBin + 1,
-      Math.ceil((highHz / nyquist) * data.length)
-    );
-
-    let weightedTotal = 0;
-    let weightTotal = 0;
-
-    for (
-      let bin = lowBin;
-      bin < Math.min(highBin, data.length);
-      bin += 1
-    ) {
-      const center = (lowBin + highBin - 1) / 2;
-      const distance =
-        Math.abs(bin - center) /
-        Math.max(1, (highBin - lowBin) / 2);
-
-      const weight =
-        1 - Math.min(0.72, distance * 0.72);
-
-      weightedTotal += data[bin] * weight;
-      weightTotal += weight;
-    }
-
-    const raw = weightTotal
-      ? weightedTotal / weightTotal / 255
-      : 0;
-
-    const lowFrequencyLift =
-      index < count * 0.22 ? 1.13 : 1;
-
-    const highFrequencyLift =
-      index > count * 0.68 ? 1.18 : 1;
-
-    const shaped = Math.min(
-      1,
-      Math.pow(
-        raw * lowFrequencyLift * highFrequencyLift,
-        0.82
-      )
-    );
-
-    const previous = visualizerEnvelope[index] || 0;
-    const attack = shaped > previous ? 0.58 : 0.18;
-
-    const next = state.playing
-      ? previous + (shaped - previous) * attack
-      : Math.max(0, previous * 0.84 - 0.006);
-
-    visualizerEnvelope[index] = next;
-    levels.push(next);
-  }
-
-  return levels;
+  return [...visualizerEnvelope];
 }
 
 function duckTargetForStrength(
