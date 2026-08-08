@@ -6535,6 +6535,139 @@ export function TodayPage() {
         }
 
 
+        /* ==========================================================
+           STEP 6K MOBILE LAYOUT HARDENING
+           Phone-first reflow for upcoming workout dates/actions.
+           Keeps all schedule information inside the viewport.
+           ========================================================== */
+        @media(max-width:620px){
+          .tr-trainingBoard,
+          .tr-trainingBoard > *,
+          .tr-upcomingBoard,
+          .tr-trainingTimeline,
+          .tr-trainingTimelineRow,
+          .tr-sessionCard,
+          .tr-sessionPrimary,
+          .tr-sessionRight{
+            min-width:0!important;
+            max-width:100%!important;
+          }
+
+          .tr-trainingBoard,
+          .tr-upcomingBoard{
+            overflow-x:hidden!important;
+          }
+
+          .tr-trainingTimeline{
+            padding-left:8px!important;
+            padding-right:8px!important;
+          }
+
+          .tr-trainingTimelineRow{
+            grid-template-columns:14px minmax(0,1fr)!important;
+            gap:7px!important;
+          }
+
+          .tr-sessionCard{
+            width:100%!important;
+            grid-template-columns:minmax(0,1fr)!important;
+            gap:14px!important;
+            padding:14px 13px!important;
+            overflow:hidden!important;
+          }
+
+          .tr-sessionPrimary{
+            width:100%!important;
+          }
+
+          .tr-scheduleMuscles.is-compact{
+            max-width:100%!important;
+            flex-wrap:wrap!important;
+            row-gap:9px!important;
+          }
+
+          .tr-sessionMeta{
+            max-width:100%!important;
+            flex-wrap:wrap!important;
+            row-gap:8px!important;
+          }
+
+          .tr-sessionMetaItem{
+            min-width:0!important;
+          }
+
+          .tr-sessionRight{
+            width:100%!important;
+            min-width:0!important;
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            grid-template-rows:auto auto!important;
+            align-items:stretch!important;
+            gap:9px!important;
+            padding-top:2px!important;
+          }
+
+          .tr-sessionRight .tr-sessionDate{
+            grid-column:1!important;
+            grid-row:1!important;
+            width:100%!important;
+            justify-content:flex-start!important;
+            min-height:32px!important;
+            padding:2px 2px 8px!important;
+          }
+
+          .tr-sessionRight .tr-sessionDate::after{
+            left:0!important;
+            right:0!important;
+          }
+
+          .tr-sessionRight .tr-sessionReadiness{
+            display:none!important;
+          }
+
+          .tr-sessionRight .tr-sessionActions{
+            grid-column:1!important;
+            grid-row:2!important;
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:minmax(0,1fr) minmax(84px,.5fr)!important;
+            gap:9px!important;
+            align-items:stretch!important;
+          }
+
+          .tr-sessionActions .tr-scheduleBtn{
+            min-width:0!important;
+            width:100%!important;
+            min-height:44px!important;
+          }
+
+          .tr-sessionActions .tr-scheduleBtn--rowStart{
+            padding-left:14px!important;
+            padding-right:14px!important;
+          }
+
+          .tr-sessionActions .tr-scheduleBtn--rowEdit{
+            padding-left:10px!important;
+            padding-right:10px!important;
+          }
+        }
+
+        @media(max-width:430px){
+          .tr-sessionMetaItem{
+            padding-left:8px!important;
+            padding-right:8px!important;
+          }
+
+          .tr-sessionMetaItem:first-child{
+            padding-left:0!important;
+          }
+
+          .tr-sessionRight .tr-sessionActions{
+            grid-template-columns:minmax(0,1fr) 86px!important;
+          }
+        }
+
+
       `}</style>
     </div>
   );
