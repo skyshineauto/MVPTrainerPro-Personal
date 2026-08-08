@@ -1,10 +1,11 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
 } from "react";
-import { getMusicArtworkSignedUrl } from "../../lib/musicStorage";
+import { getMusicArtworkSignedUrl, type MusicTrack } from "../../lib/musicStorage";
 import {
   listMusicPlaylists,
   listMusicPlaylistTrackLinks,
@@ -16,24 +17,23 @@ import {
   applyMusicEqPreset,
   cycleMusicRepeat,
   formatMusicTime,
+  getMusicRtaLevels,
   loadMusicLibrary,
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
   MUSIC_HEADPHONE_MODES,
   MUSIC_RTA_FREQUENCIES,
-  getMusicRtaLevels,
   nextMusicTrack,
   pauseMusic,
   playMusic,
   playMusicPlaylist,
   previousMusicTrack,
+  recoverMusicDsp,
   saveMusicEqCustomPreset,
   seekMusic,
+  setMusicDspBypass,
   setMusicEqBand,
   setMusicEqEnabled,
-  setMusicDspBypass,
-  recoverMusicDsp,
-  setPlayerMusicPreference,
   setMusicHeadphoneBassImpact,
   setMusicHeadphoneCenter,
   setMusicHeadphoneCrossfeed,
@@ -41,6 +41,7 @@ import {
   setMusicHeadphoneMode,
   setMusicHeadphoneWidth,
   setMusicPreamp,
+  setPlayerMusicPreference,
   stopMusic,
   toggleMusicShuffle,
   useMusicPlayer,
@@ -50,21 +51,14 @@ import {
 } from "../../lib/musicPlayer";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
+const PROFILE_KEY = "mvp_music_dsp_profiles_v1";
+const PROFILE_SLOTS: MusicCustomPresetSlot[] = [
+  "custom_1",
+  "custom_2",
+  "custom_3",
+];
 
-type IconName =
-  | "back"
-  | "next"
-  | "play"
-  | "pause"
-  | "stop"
-  | "shuffle"
-  | "repeat"
-  | "equalizer"
-  | "like"
-  | "dislike"
-  | "music";
-
-type SavedDspProfile = {
+type DspProfile = {
   name: string;
   eqEnabled: boolean;
   eqGains: number[];
@@ -78,147 +72,92 @@ type SavedDspProfile = {
   savedAt: number;
 };
 
-type SavedDspProfiles = Record<MusicCustomPresetSlot, SavedDspProfile | null>;
+type DspProfiles = Record<MusicCustomPresetSlot, DspProfile | null>;
 
-const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
-const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
-
-function emptyDspProfiles(): SavedDspProfiles {
-  return {
-    custom_1: null,
-    custom_2: null,
-    custom_3: null,
-  };
+function blankProfiles(): DspProfiles {
+  return { custom_1: null, custom_2: null, custom_3: null };
 }
 
-function isCustomSlot(value: MusicEqPreset): value is MusicCustomPresetSlot {
-  return value === "custom_1" || value === "custom_2" || value === "custom_3";
-}
-
-function readSavedDspProfiles(): SavedDspProfiles {
-  if (typeof window === "undefined") return emptyDspProfiles();
-
+function readProfiles(): DspProfiles {
+  if (typeof window === "undefined") return blankProfiles();
   try {
-    const raw = window.localStorage.getItem(DSP_PROFILE_STORAGE_KEY);
-    if (!raw) return emptyDspProfiles();
-
-    const parsed = JSON.parse(raw) as Partial<SavedDspProfiles>;
+    const parsed = JSON.parse(
+      window.localStorage.getItem(PROFILE_KEY) || "{}"
+    ) as Partial<DspProfiles>;
     return {
-      custom_1: parsed.custom_1 ?? null,
-      custom_2: parsed.custom_2 ?? null,
-      custom_3: parsed.custom_3 ?? null,
+      custom_1: parsed.custom_1 || null,
+      custom_2: parsed.custom_2 || null,
+      custom_3: parsed.custom_3 || null,
     };
   } catch {
-    return emptyDspProfiles();
+    return blankProfiles();
   }
 }
 
-function writeSavedDspProfiles(profiles: SavedDspProfiles) {
+function writeProfiles(value: DspProfiles) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(DSP_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
+  window.localStorage.setItem(PROFILE_KEY, JSON.stringify(value));
 }
 
-function slotFallbackLabel(slot: MusicCustomPresetSlot) {
-  if (slot === "custom_1") return "Custom 1";
-  if (slot === "custom_2") return "Custom 2";
-  return "Custom 3";
+function hzLabel(frequency: number) {
+  if (frequency >= 1000) {
+    const value = frequency / 1000;
+    return `${Number.isInteger(value) ? value : value.toFixed(1)}K`;
+  }
+  return String(frequency);
 }
 
-function sameDspNumber(left: number, right: number) {
-  return Math.abs(Number(left) - Number(right)) < 0.01;
+function dbFromLinear(value: number) {
+  if (value <= 0.001) return -60;
+  return Math.max(-60, Math.min(0, 20 * Math.log10(value)));
 }
 
-function PlayerIcon({ name }: { name: IconName }) {
-  if (name === "play") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M8 5.4v13.2L19 12 8 5.4Z" />
-      </svg>
-    );
-  }
-  if (name === "pause") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z" />
-      </svg>
-    );
-  }
-  if (name === "stop") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <rect x="6" y="6" width="12" height="12" rx="1.6" />
-      </svg>
-    );
-  }
-  if (name === "back") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M5 6h2.5v12H5V6Zm3.8 6 9.7-6v12l-9.7-6Z" />
-      </svg>
-    );
-  }
-  if (name === "next") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M16.5 6H19v12h-2.5V6ZM5.5 6l9.7 6-9.7 6V6Z" />
-      </svg>
-    );
-  }
-  if (name === "shuffle") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M16.8 4.5H20V7.7h-2V6.9l-3.7 3.7-1.4-1.4 3.6-3.6h-.7v-2Zm-12.8 2h3.2c1.6 0 2.7.5 3.7 1.5l6.8 6.8V14H20v5.5h-5.5v-2h1.8l-6.8-6.8c-.6-.6-1.2-.8-2.3-.8H4v-3.4Zm0 11h3.2c1.1 0 1.7-.2 2.3-.8l1.5-1.5 1.4 1.4-1.5 1.5c-1 1-2.1 1.4-3.7 1.4H4v-2Z" />
-      </svg>
-    );
-  }
-  if (name === "repeat") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M7 5h9.3l-1.8-1.8L16 1.8 20.2 6 16 10.2l-1.5-1.4L16.3 7H7a3 3 0 0 0-3 3v1H2v-1a5 5 0 0 1 5-5Zm15 8v1a5 5 0 0 1-5 5H7.7l1.8 1.8L8 22.2 3.8 18 8 13.8l1.5 1.4L7.7 17H17a3 3 0 0 0 3-3v-1h2Z" />
-      </svg>
-    );
-  }
-  if (name === "like") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M9.2 21H5.5A2.5 2.5 0 0 1 3 18.5v-8A2.5 2.5 0 0 1 5.5 8H9l3.2-5.1A2 2 0 0 1 16 4v4h3.2a2.8 2.8 0 0 1 2.7 3.5l-1.8 7A3.4 3.4 0 0 1 16.8 21H9.2Zm-1.7-2V10H5.5a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h2Zm2 0h7.3a1.4 1.4 0 0 0 1.4-1.1l1.8-7a.8.8 0 0 0-.8-.9H14V4.8l-4.5 7.1V19Z" />
-      </svg>
-    );
-  }
-  if (name === "dislike") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M14.8 3h3.7A2.5 2.5 0 0 1 21 5.5v8a2.5 2.5 0 0 1-2.5 2.5H15l-3.2 5.1A2 2 0 0 1 8 20v-4H4.8a2.8 2.8 0 0 1-2.7-3.5l1.8-7A3.4 3.4 0 0 1 7.2 3h7.6Zm1.7 2v9h2a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2Zm-2 0H7.2a1.4 1.4 0 0 0-1.4 1.1L4 13.1a.8.8 0 0 0 .8.9H10v5.2l4.5-7.1V5Z" />
-      </svg>
-    );
-  }
-  if (name === "equalizer") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M5 3h2v18H5V3Zm6 4h2v14h-2V7Zm6-4h2v18h-2V3ZM3 8h6v3H3V8Zm6 5h6v3H9v-3Zm6-4h6v3h-6V9Z" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" />
-    </svg>
-  );
+function buildSpectrum(levels: number[], count = 36) {
+  if (!levels.length) return Array(count).fill(0);
+
+  return Array.from({ length: count }, (_, index) => {
+    const position =
+      (index / Math.max(1, count - 1)) * (levels.length - 1);
+    const left = Math.floor(position);
+    const right = Math.min(levels.length - 1, left + 1);
+    const ratio = position - left;
+    const interpolated =
+      (levels[left] || 0) * (1 - ratio) +
+      (levels[right] || 0) * ratio;
+
+    // Tiny deterministic contour prevents the display from looking like ten
+    // duplicated rectangles while remaining driven by the real analyser.
+    const contour =
+      0.94 +
+      Math.sin(index * 1.71) * 0.035 +
+      Math.sin(index * 0.57) * 0.02;
+
+    return Math.max(0, Math.min(1, interpolated * contour));
+  });
 }
 
-function TenBandRta({ playing }: { playing: boolean }) {
+function ProRta({
+  playing,
+  dspStatus,
+}: {
+  playing: boolean;
+  dspStatus: string;
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(true);
-  const [levels, setLevels] = useState<number[]>(() => Array(10).fill(0));
-  const [peaks, setPeaks] = useState<number[]>(() => Array(10).fill(0));
+  const [levels, setLevels] = useState<number[]>(() =>
+    Array(MUSIC_RTA_FREQUENCIES.length).fill(0)
+  );
+  const [peaks, setPeaks] = useState<number[]>(() => Array(36).fill(0));
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host || typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
-      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
-      { threshold: 0.05 }
+      (entries) =>
+        setVisible(entries.some((entry) => entry.isIntersecting)),
+      { threshold: 0.04 }
     );
 
     observer.observe(host);
@@ -226,142 +165,277 @@ function TenBandRta({ playing }: { playing: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (!playing || !visible) {
-      setLevels((current) => current.map((value) => value * 0.52));
-      setPeaks((current) => current.map((value) => value * 0.86));
-      return;
-    }
+    if (!visible) return;
 
     const timer = window.setInterval(() => {
-      const next = getMusicRtaLevels();
-      setLevels(next);
-      setPeaks((current) =>
-        next.map((value, index) =>
-          Math.max(value, (current[index] || 0) * 0.955)
-        )
+      const raw = playing
+        ? getMusicRtaLevels()
+        : Array(MUSIC_RTA_FREQUENCIES.length).fill(0);
+
+      setLevels((current) =>
+        raw.map((targetValue, index) => {
+          const target = Math.max(
+            0,
+            Math.min(1, Number(targetValue) || 0)
+          );
+          const previous = current[index] || 0;
+          const coefficient = target > previous ? 0.62 : 0.19;
+          const smoothed =
+            previous + (target - previous) * coefficient;
+          return smoothed < 0.004 ? 0 : smoothed;
+        })
       );
-    }, 110);
+    }, 52);
 
     return () => window.clearInterval(timer);
   }, [playing, visible]);
 
+  const spectrum = useMemo(() => buildSpectrum(levels, 36), [levels]);
+
+  useEffect(() => {
+    setPeaks((current) =>
+      spectrum.map((value, index) =>
+        Math.max(value, (current[index] || 0) * 0.968)
+      )
+    );
+  }, [spectrum]);
+
+  const outputPeak = Math.max(0, ...spectrum);
+  const bass = spectrum.slice(0, 10).reduce((sum, value) => sum + value, 0) / 10;
+  const peakDb = dbFromLinear(outputPeak);
+
   return (
-    <div
-      ref={hostRef}
-      className="tr-rta10"
-      aria-label="10 band real-time audio analyzer"
-    >
-      <div className="tr-rta10Head">
-        <span><i />10-BAND REAL-TIME ANALYZER</span>
-        <span>{playing ? "PROCESSED OUTPUT • LIVE" : "PROCESSED OUTPUT • READY"}</span>
+    <div ref={hostRef} className="tr12-rta" aria-label="Live DSP real-time analyzer">
+      <div className="tr12-rtaTop">
+        <div>
+          <span className={`tr12-liveDot ${playing ? "is-live" : ""}`} />
+          <strong>LIVE DSP ANALYZER</strong>
+          <small>36 COLUMN • PEAK HOLD • LOG SCALE</small>
+        </div>
+        <div className="tr12-rtaReadouts">
+          <span>
+            <small>OUTPUT</small>
+            <b>{playing ? `${peakDb.toFixed(1)} dB` : "READY"}</b>
+          </span>
+          <span>
+            <small>BASS DRIVE</small>
+            <b>{playing ? `${Math.round(bass * 100)}%` : "0%"}</b>
+          </span>
+          <span>
+            <small>DSP</small>
+            <b>{String(dspStatus || "ready").toUpperCase()}</b>
+          </span>
+        </div>
       </div>
 
-      <div className="tr-rta10Body" aria-hidden>
-        <div className="tr-rta10Scale">
+      <div className="tr12-rtaBody" aria-hidden>
+        <div className="tr12-dbScale">
           <span>0</span>
           <span>-12</span>
           <span>-24</span>
           <span>-36</span>
           <span>-48</span>
           <span>-60</span>
-          <small>dB</small>
+          <i>dB</i>
         </div>
 
-        <div className="tr-rta10Grid">
-          {MUSIC_RTA_FREQUENCIES.map((frequency, bandIndex) => {
-            const value = Math.max(0.012, Math.min(1, levels[bandIndex] || 0));
-            const peak = Math.max(value, Math.min(1, peaks[bandIndex] || 0));
-
-            return (
-              <div className="tr-rta10Band" key={frequency}>
-                <div className="tr-rta10Meter">
-                  <span className="tr-rta10Inactive" />
+        <div className="tr12-spectrumWrap">
+          <div className="tr12-spectrum">
+            {spectrum.map((value, index) => {
+              const peak = peaks[index] || 0;
+              return (
+                <div className="tr12-spectrumColumn" key={index}>
                   <span
-                    className="tr-rta10Fill"
-                    style={{ transform: `scaleY(${value})` }}
+                    className="tr12-spectrumFill"
+                    style={{
+                      transform: `scaleY(${Math.max(0.008, value)})`,
+                    }}
                   />
-                  <span
-                    className="tr-rta10Peak"
-                    style={{ bottom: `${Math.max(2, peak * 96)}%` }}
+                  <i
+                    className="tr12-spectrumPeak"
+                    style={{
+                      bottom: `${Math.max(1.5, peak * 97)}%`,
+                    }}
                   />
                 </div>
-                <strong>{frequency >= 1000 ? `${frequency / 1000}K` : frequency}</strong>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+
+          <div className="tr12-rtaLabels">
+            {MUSIC_RTA_FREQUENCIES.map((frequency) => (
+              <span key={frequency}>{hzLabel(frequency)}</span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
+function TransportIcon({
+  type,
+}: {
+  type:
+    | "prev"
+    | "play"
+    | "pause"
+    | "stop"
+    | "next"
+    | "shuffle"
+    | "repeat"
+    | "eq";
+}) {
+  if (type === "prev") {
+    return <span aria-hidden>◀◀</span>;
+  }
+  if (type === "next") {
+    return <span aria-hidden>▶▶</span>;
+  }
+  if (type === "play") {
+    return <span aria-hidden>▶</span>;
+  }
+  if (type === "pause") {
+    return <span aria-hidden>Ⅱ</span>;
+  }
+  if (type === "stop") {
+    return <span aria-hidden>■</span>;
+  }
+  if (type === "shuffle") {
+    return <span aria-hidden>⇄</span>;
+  }
+  if (type === "repeat") {
+    return <span aria-hidden>↻</span>;
+  }
+  return <span aria-hidden>EQ</span>;
+}
+
+export function MusicMiniPlayer({
+  navigate,
+}: {
+  navigate: (to: string) => void;
+}) {
   const player = useMusicPlayer();
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
+  const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
   const [eqOpen, setEqOpen] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
-  const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
-  const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
-  const [activeCustomSlot, setActiveCustomSlot] = useState<MusicCustomPresetSlot | null>(
-    isCustomSlot(player.eqPreset) ? player.eqPreset : null
-  );
-  const [savePresetOpen, setSavePresetOpen] = useState(false);
-  const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
-  const [savePresetName, setSavePresetName] = useState("");
-  const [profileMessage, setProfileMessage] = useState("");
-  const restoredProfileRef = useRef<string>("");
+  const [profiles, setProfiles] = useState<DspProfiles>(() => readProfiles());
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveSlot, setSaveSlot] =
+    useState<MusicCustomPresetSlot>("custom_1");
+  const [saveName, setSaveName] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const refreshPlaylists = () => {
+    const refresh = () => {
       void listMusicPlaylists()
         .then(setPlaylists)
         .catch(() => setPlaylists([]));
     };
 
     void loadMusicLibrary();
-    refreshPlaylists();
-    window.addEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
-    return () => window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
+    refresh();
+    window.addEventListener(PLAYLISTS_CHANGED_EVENT, refresh);
+    return () =>
+      window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refresh);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const current = player.currentTrack;
     setArtworkUrl(null);
-    if (!current?.artwork_path && !current?.external_artwork_url) return () => { cancelled = true; };
 
-    void getMusicArtworkSignedUrl(current)
+    const track = player.currentTrack;
+    if (!track) return () => { cancelled = true; };
+
+    void getMusicArtworkSignedUrl(track)
       .then((url) => {
         if (!cancelled) setArtworkUrl(url);
       })
       .catch(() => {
-        if (!cancelled) setArtworkUrl(null);
+        if (!cancelled) {
+          setArtworkUrl(track.external_artwork_url || null);
+        }
       });
 
-    return () => { cancelled = true; };
-  }, [player.currentTrack?.id, player.currentTrack?.artwork_path, player.currentTrack?.external_artwork_url]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    player.currentTrack?.id,
+    player.currentTrack?.artwork_path,
+    player.currentTrack?.external_artwork_url,
+  ]);
 
   const run = (action: () => void | Promise<void>) => {
     try {
       const result = action();
-      if (result instanceof Promise) void result.catch(() => undefined);
+      if (result instanceof Promise) {
+        void result.catch(() => undefined);
+      }
     } catch {
-      // The player state surfaces useful errors.
+      // musicPlayer exposes transport errors in player.error.
     }
   };
 
+  async function selectQueue(value: string) {
+    setQueueBusy(true);
+    try {
+      if (value === "all") {
+        const keepPlaying = player.playing;
+        activateAllMusicTracks();
+        if (keepPlaying) await playMusic();
+        return;
+      }
 
-  useEffect(() => {
-    if (!isCustomSlot(player.eqPreset)) return;
+      const playlist = playlists.find((item) => item.id === value);
+      if (!playlist) return;
 
-    setActiveCustomSlot(player.eqPreset);
-    const profile = dspProfiles[player.eqPreset];
-    if (!profile) return;
+      const links = await listMusicPlaylistTrackLinks(playlist.id);
+      const byId = new Map(
+        player.libraryTracks.map((track) => [track.id, track])
+      );
+      const tracks = links
+        .map((link) => byId.get(link.track_id))
+        .filter((track): track is MusicTrack => Boolean(track));
 
-    const restorationKey = `${player.eqPreset}:${profile.savedAt}`;
-    if (restoredProfileRef.current === restorationKey) return;
-    restoredProfileRef.current = restorationKey;
+      if (player.playing) {
+        await playMusicPlaylist(playlist, tracks);
+      } else {
+        activateMusicPlaylistQueue(playlist, tracks);
+      }
+    } finally {
+      setQueueBusy(false);
+    }
+  }
 
+  function changeSeek(event: ChangeEvent<HTMLInputElement>) {
+    seekMusic(Number(event.target.value));
+  }
+
+  async function changePreference(
+    preference: "like" | "play_less" | "neutral"
+  ) {
+    const track = player.currentTrack;
+    if (!track) return;
+    try {
+      await setPlayerMusicPreference(track.id, preference);
+    } catch {
+      // player state will reflect errors from the data layer.
+    }
+  }
+
+  function loadProfile(slot: MusicCustomPresetSlot) {
+    const profile = profiles[slot];
+    if (!profile) {
+      applyMusicEqPreset(slot);
+      return;
+    }
+
+    profile.eqGains.forEach((gain, index) =>
+      setMusicEqBand(index, gain)
+    );
+    setMusicPreamp(profile.preampDb);
     setMusicEqEnabled(profile.eqEnabled);
     setMusicHeadphoneMode(profile.headphoneMode);
     setMusicHeadphoneWidth(profile.headphoneWidth);
@@ -369,11 +443,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
     setMusicHeadphoneCenter(profile.headphoneCenter);
     setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
-  }, [player.eqPreset, dspProfiles]);
+    setNotice(`${profile.name} loaded.`);
+    window.setTimeout(() => setNotice(""), 1400);
+  }
 
-  function currentDspSnapshot(name: string): SavedDspProfile {
-    return {
-      name: name.trim() || "Custom DSP",
+  function saveProfile() {
+    const slot = saveSlot;
+    const profile: DspProfile = {
+      name:
+        saveName.trim() ||
+        `Custom ${PROFILE_SLOTS.indexOf(slot) + 1}`,
       eqEnabled: player.eqEnabled,
       eqGains: [...player.eqGains],
       preampDb: player.preampDb,
@@ -385,665 +464,496 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       headphoneBassImpact: player.headphoneBassImpact,
       savedAt: Date.now(),
     };
-  }
 
-  function profileMatchesCurrent(profile: SavedDspProfile | null) {
-    if (!profile) return false;
-    if (profile.eqEnabled !== player.eqEnabled) return false;
-    if (profile.headphoneMode !== player.headphoneMode) return false;
-    if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
-    if (!sameDspNumber(profile.headphoneWidth, player.headphoneWidth)) return false;
-    if (!sameDspNumber(profile.headphoneDepth, player.headphoneDepth)) return false;
-    if (!sameDspNumber(profile.headphoneCrossfeed, player.headphoneCrossfeed)) return false;
-    if (!sameDspNumber(profile.headphoneCenter, player.headphoneCenter)) return false;
-    if (!sameDspNumber(profile.headphoneBassImpact, player.headphoneBassImpact)) return false;
-    if (profile.eqGains.length !== player.eqGains.length) return false;
-
-    return profile.eqGains.every((gain, index) =>
-      sameDspNumber(gain, player.eqGains[index] ?? 0)
-    );
-  }
-
-  function applySavedDspProfile(slot: MusicCustomPresetSlot) {
-    const profile = dspProfiles[slot];
-
-    applyMusicEqPreset(slot);
-    setActiveCustomSlot(slot);
-
-    if (!profile) {
-      setProfileMessage(`${slotFallbackLabel(slot)} has no full DSP profile saved yet.`);
-      return;
-    }
-
-    setMusicEqEnabled(profile.eqEnabled);
-    setMusicHeadphoneMode(profile.headphoneMode);
-    setMusicHeadphoneWidth(profile.headphoneWidth);
-    setMusicHeadphoneDepth(profile.headphoneDepth);
-    setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
-    setMusicHeadphoneCenter(profile.headphoneCenter);
-    setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
-    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
-    setProfileMessage(`${profile.name} loaded.`);
-  }
-
-  function handlePresetSelection(value: MusicEqPreset) {
-    if (isCustomSlot(value)) {
-      applySavedDspProfile(value);
-      return;
-    }
-
-    setActiveCustomSlot(null);
-    applyMusicEqPreset(value);
-    setProfileMessage("");
-  }
-
-  function saveCurrentDspProfile(slot: MusicCustomPresetSlot, name: string) {
-    const profile = currentDspSnapshot(name || slotFallbackLabel(slot));
-    const nextProfiles: SavedDspProfiles = {
-      ...dspProfiles,
-      [slot]: profile,
-    };
-
+    const next = { ...profiles, [slot]: profile };
+    setProfiles(next);
+    writeProfiles(next);
     saveMusicEqCustomPreset(slot);
-    writeSavedDspProfiles(nextProfiles);
-    setDspProfiles(nextProfiles);
-    setActiveCustomSlot(slot);
-    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
-    setProfileMessage(`${profile.name} saved.`);
-    setSavePresetOpen(false);
-  }
-
-  function openSavePresetDialog(preferredSlot?: MusicCustomPresetSlot) {
-    const firstEmpty = DSP_SLOTS.find((slot) => !dspProfiles[slot]);
-    const slot = preferredSlot ?? firstEmpty ?? activeCustomSlot ?? "custom_1";
-    const existing = dspProfiles[slot];
-
-    setSavePresetSlot(slot);
-    setSavePresetName(existing?.name ?? "");
-    setSavePresetOpen(true);
-  }
-
-  function chooseSaveSlot(slot: MusicCustomPresetSlot) {
-    setSavePresetSlot(slot);
-    setSavePresetName(dspProfiles[slot]?.name ?? "");
-  }
-
-  async function selectQueue(value: string) {
-    setQueueBusy(true);
-    try {
-      if (value === "all") {
-        const wasPlaying = player.playing;
-        activateAllMusicTracks();
-        if (wasPlaying) await playMusic();
-        return;
-      }
-
-      const playlist = playlists.find((item) => item.id === value);
-      if (!playlist) return;
-      const links = await listMusicPlaylistTrackLinks(playlist.id);
-      const byId = new Map(player.libraryTracks.map((track) => [track.id, track]));
-      const tracks = links
-        .map((link) => byId.get(link.track_id))
-        .filter((track): track is NonNullable<typeof track> => Boolean(track));
-
-      if (player.playing) await playMusicPlaylist(playlist, tracks);
-      else activateMusicPlaylistQueue(playlist, tracks);
-    } finally {
-      setQueueBusy(false);
-    }
+    setSaveOpen(false);
+    setSaveName("");
+    setNotice(`${profile.name} saved.`);
+    window.setTimeout(() => setNotice(""), 1600);
   }
 
   const track = player.currentTrack;
-  const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
-  const currentTime = Math.min(
-    duration || Number.MAX_SAFE_INTEGER,
-    Math.max(0, player.currentTime)
-  );
-  const queueLabel = player.activePlaylistName || "All Uploaded Songs";
-
-  const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
-  const activeProfileDirty = activeSavedProfile
-    ? !profileMatchesCurrent(activeSavedProfile)
-    : false;
-  const presetSelectValue: MusicEqPreset =
-    activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
-  const presetStatusLabel = activeSavedProfile
-    ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
-    : player.eqPreset === "custom"
-      ? "Unsaved custom DSP"
-      : "Built-in preset";
+  const duration =
+    player.duration || track?.duration_seconds || 0;
+  const progressMax = Math.max(1, duration);
+  const presetEntries = Object.entries(MUSIC_EQ_PRESETS) as Array<
+    [MusicEqPreset, { label: string; gains: number[]; preamp: number }]
+  >;
 
   return (
-    <section
-      className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${
-        player.loading || queueBusy ? "is-busy" : ""
-      }`}
-      aria-label="MVP Trainer music console"
-    >
-      <div className="tr-audioDeckTop">
-        <button
-          type="button"
-          className="tr-audioArtwork"
-          onClick={() => navigate("/music")}
-          aria-label="Open My Music"
-        >
-          {artworkUrl ? (
-            <img className="tr-audioArtworkImage" src={artworkUrl} alt="" />
-          ) : (
-            <span className="tr-audioArtworkFallback">
-              <PlayerIcon name="music" />
+    <section className="tr12-player" aria-label="MVP Trainer music player">
+      <div className="tr12-playerTop">
+        <div className="tr12-trackIdentity">
+          <div className="tr12-artwork">
+            {artworkUrl ? (
+              <img src={artworkUrl} alt="" />
+            ) : (
+              <span>♫</span>
+            )}
+          </div>
+          <div className="tr12-trackText">
+            <small>NOW PLAYING</small>
+            <strong>{track?.title || "Your workout music"}</strong>
+            <span>
+              {track?.artist?.trim() || "Select a song to begin"}
             </span>
-          )}
-        </button>
-
-        <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}>
-          <span className="tr-audioEyebrow">
-            {player.playing ? "NOW PLAYING" : "MVP PERFORMANCE AUDIO"}
-          </span>
-          <strong>
-            {track?.title || (player.loading ? "Loading music…" : "Your workout soundtrack")}
-          </strong>
-          <small>
-            {track
-              ? [track.artist || "MVP Trainer library", track.album].filter(Boolean).join(" • ")
-              : "Choose a playlist or upload your music"}
-          </small>
-        </button>
-
-        <div className="tr-audioQueueSelector">
-          <span>PLAYING FROM</span>
-          <select
-            value={player.activePlaylistId || "all"}
-            disabled={queueBusy}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              void selectQueue(event.target.value)
-            }
-            aria-label="Choose music playlist"
-          >
-            <option value="all">All Uploaded Songs</option>
-            {playlists.map((playlist) => (
-              <option key={playlist.id} value={playlist.id}>
-                {playlist.name}
-              </option>
-            ))}
-          </select>
-          <small>{queueLabel}</small>
+          </div>
         </div>
 
-        <button
-          type="button"
-          className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`}
-          onClick={() => setEqOpen((current) => !current)}
-          aria-expanded={eqOpen}
-        >
-          <PlayerIcon name="equalizer" />
-          <span>DSP</span>
-        </button>
+        <div className="tr12-playerTopActions">
+          <label className="tr12-queue">
+            <span>QUEUE</span>
+            <select
+              disabled={queueBusy}
+              value={player.activePlaylistId || "all"}
+              onChange={(event) =>
+                void selectQueue(event.target.value)
+              }
+            >
+              <option value="all">All Songs</option>
+              {playlists.map((playlist) => (
+                <option key={playlist.id} value={playlist.id}>
+                  {playlist.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            className={`tr12-dspButton ${eqOpen ? "is-active" : ""}`}
+            onClick={() => setEqOpen((value) => !value)}
+          >
+            <TransportIcon type="eq" />
+            <span>DSP / EQ</span>
+          </button>
+
+          <button
+            type="button"
+            className="tr12-libraryButton"
+            onClick={() => navigate("/music")}
+          >
+            MY MUSIC
+          </button>
+        </div>
       </div>
 
-      <div className="tr-audioTelemetry">
-        <span className={player.playing ? "is-live" : ""}>
-          <i /> {player.playing ? "RTA ACTIVE" : "RTA READY"}
-        </span>
-        <span>EQ {player.dspBypass ? "BYPASS" : player.eqEnabled ? "ACTIVE" : "FLAT"}</span>
-        <span>DSP {player.dspStatus.toUpperCase()}</span>
-        <button
-          type="button"
-          className={`tr-dspHealth is-${player.dspStatus}`}
-          onClick={() => void recoverMusicDsp()}
-        >
-          {player.dspStatus === "active" ? "PROCESSING LOCKED" : player.dspStatus === "bypassed" ? "A/B BYPASS" : "RECOVER DSP"}
-        </button>
-      </div>
+      <ProRta
+        playing={player.playing}
+        dspStatus={player.dspStatus}
+      />
 
-      <TenBandRta playing={player.playing} />
-
-      <div className="tr-audioTimeline">
-        <span>{formatMusicTime(currentTime)}</span>
+      <div className="tr12-timeline">
+        <span>{formatMusicTime(player.currentTime)}</span>
         <input
           type="range"
-          min="0"
-          max={Math.max(1, duration)}
-          step="1"
-          value={Math.min(Math.max(1, duration), currentTime)}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            seekMusic(Number(event.target.value))
-          }
-          disabled={!track || !duration}
-          aria-label="Music playback position"
+          min={0}
+          max={progressMax}
+          step={0.1}
+          value={Math.min(player.currentTime, progressMax)}
+          onChange={changeSeek}
+          aria-label="Song position"
         />
         <span>{formatMusicTime(duration)}</span>
       </div>
 
-      <div className="tr-mainAudioTuning">
-        <label className="tr-mainPreamp">
+      <div className="tr12-controlDeck">
+        <div className="tr12-sideControl">
           <span>PREAMP</span>
-          <input
-            type="range"
-            min="-12"
-            max="12"
-            step="0.5"
-            value={player.preampDb}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              setMusicPreamp(Number(event.target.value))
-            }
-            aria-label="Music preamp"
-          />
-          <strong>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</strong>
-        </label>
+          <b>
+            {player.preampDb > 0 ? "+" : ""}
+            {player.preampDb.toFixed(1)} dB
+          </b>
+        </div>
 
-        <div className="tr-trackPreference" aria-label="Track preference">
+        <div className="tr12-transport">
           <button
             type="button"
-            className={track?.play_less ? "is-disliked" : ""}
-            disabled={!track}
-            onClick={() => {
-              if (!track) return;
-              const next = track.play_less ? "neutral" : "play_less";
-              void setPlayerMusicPreference(track.id, next).then(() => {
-                if (next === "play_less") void nextMusicTrack();
-              });
-            }}
-            aria-label="Play this song less"
+            className={player.shuffle ? "is-active" : ""}
+            onClick={toggleMusicShuffle}
+            title="Shuffle"
           >
-            <PlayerIcon name="dislike" />
-            <span>PLAY LESS</span>
+            <TransportIcon type="shuffle" />
+          </button>
+          <button
+            type="button"
+            onClick={() => run(previousMusicTrack)}
+            disabled={!player.tracks.length}
+            title="Previous"
+          >
+            <TransportIcon type="prev" />
+          </button>
+          <button
+            type="button"
+            className="is-primary"
+            onClick={() =>
+              run(player.playing ? pauseMusic : playMusic)
+            }
+            title={player.playing ? "Pause" : "Play"}
+          >
+            <TransportIcon
+              type={player.playing ? "pause" : "play"}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={stopMusic}
+            disabled={!track}
+            title="Stop"
+          >
+            <TransportIcon type="stop" />
+          </button>
+          <button
+            type="button"
+            onClick={() => run(() => nextMusicTrack())}
+            disabled={!player.tracks.length}
+            title="Next"
+          >
+            <TransportIcon type="next" />
+          </button>
+          <button
+            type="button"
+            className={player.repeat !== "off" ? "is-active" : ""}
+            onClick={cycleMusicRepeat}
+            title={`Repeat ${player.repeat}`}
+          >
+            <TransportIcon type="repeat" />
+            {player.repeat === "one" ? <small>1</small> : null}
+          </button>
+        </div>
+
+        <div className="tr12-preference">
+          <button
+            type="button"
+            className={track?.play_less ? "is-down" : ""}
+            disabled={!track}
+            onClick={() =>
+              void changePreference(
+                track?.play_less ? "neutral" : "play_less"
+              )
+            }
+            title="Play less"
+          >
+            ↓
           </button>
           <button
             type="button"
             className={track?.favorite ? "is-liked" : ""}
             disabled={!track}
-            onClick={() => {
-              if (!track) return;
-              void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
-            }}
-            aria-label="Like this song"
+            onClick={() =>
+              void changePreference(
+                track?.favorite ? "neutral" : "like"
+              )
+            }
+            title="Like"
           >
-            <PlayerIcon name="like" />
-            <span>{track?.favorite ? "LIKED" : "LIKE"}</span>
+            ♥
           </button>
         </div>
       </div>
 
-      <div className="tr-audioControls">
-        <button
-          type="button"
-          className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`}
-          onClick={() => toggleMusicShuffle()}
-          aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}
-        >
-          <PlayerIcon name="shuffle" />
-          <span>SHUFFLE</span>
-        </button>
-
-        <div className="tr-audioTransport" aria-label="Music transport controls">
-          <div className="tr-audioTransportUnit">
-            <button
-              type="button"
-              className="tr-audioTransportButton"
-              onClick={() => run(previousMusicTrack)}
-              disabled={!player.tracks.length || player.loading || queueBusy}
-              aria-label="Previous song"
-            >
-              <span className="tr-audioTransportFace">
-                <PlayerIcon name="back" />
-              </span>
-            </button>
-            <span>PREVIOUS</span>
-          </div>
-
-          <div className="tr-audioTransportUnit is-primary">
-            <button
-              type="button"
-              className="tr-audioTransportButton tr-audioTransportButton--primary"
-              onClick={() => run(player.playing ? pauseMusic : playMusic)}
-              disabled={player.loading || queueBusy}
-              aria-label={player.playing ? "Pause music" : "Play music"}
-            >
-              <span className="tr-audioTransportFace">
-                <PlayerIcon name={player.playing ? "pause" : "play"} />
-              </span>
-            </button>
-            <span>{player.playing ? "PAUSE" : "PLAY"}</span>
-          </div>
-
-          <div className="tr-audioTransportUnit">
-            <button
-              type="button"
-              className="tr-audioTransportButton"
-              onClick={() => stopMusic()}
-              disabled={!track || player.loading || queueBusy}
-              aria-label="Stop music"
-            >
-              <span className="tr-audioTransportFace">
-                <PlayerIcon name="stop" />
-              </span>
-            </button>
-            <span>STOP</span>
-          </div>
-
-          <div className="tr-audioTransportUnit">
-            <button
-              type="button"
-              className="tr-audioTransportButton"
-              onClick={() => run(() => nextMusicTrack())}
-              disabled={!player.tracks.length || player.loading || queueBusy}
-              aria-label="Next song"
-            >
-              <span className="tr-audioTransportFace">
-                <PlayerIcon name="next" />
-              </span>
-            </button>
-            <span>NEXT</span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`}
-          onClick={() => cycleMusicRepeat()}
-          aria-label={`Repeat ${player.repeat}`}
-        >
-          <PlayerIcon name="repeat" />
-          <span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT TRACK"}</span>
-        </button>
-      </div>
+      {notice ? <div className="tr12-notice">{notice}</div> : null}
+      {player.error ? (
+        <div className="tr12-error">{player.error}</div>
+      ) : null}
 
       {eqOpen ? (
-        <div className="tr-audioEqPanel tr-audioEqPanel--v4 tr-audioEqPanel--pro7">
-          <div className="tr-audioEqHead">
+        <section className="tr12-dspPanel">
+          <header className="tr12-dspHeader">
             <div>
-              <span className="tr-audioEyebrow">PERFORMANCE DSP</span>
-              <strong>31-band 1/3-octave EQ + headphone immersion</strong>
+              <small>PRO AUDIO PROCESSING</small>
+              <h3>31-Band Equalizer + Headphone DSP</h3>
+              <p>
+                RTA shows the processed output after your active DSP.
+              </p>
             </div>
-            <div className="tr-dspAbControls">
-              <label className="tr-audioEqSwitch">
-                <input
-                  type="checkbox"
-                  checked={player.eqEnabled}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setMusicEqEnabled(event.target.checked)
-                  }
-                />
-                <span>EQ {player.eqEnabled ? "ON" : "FLAT"}</span>
-              </label>
+            <div className="tr12-dspStatus">
+              <span
+                className={`is-${player.dspStatus}`}
+              >
+                {player.dspStatus.toUpperCase()}
+              </span>
               <button
                 type="button"
-                className={`tr-dspBypassButton ${player.dspBypass ? "is-active" : ""}`}
-                onClick={() => setMusicDspBypass(!player.dspBypass)}
-              >
-                A/B {player.dspBypass ? "BYPASSED" : "PROCESSED"}
-              </button>
-            </div>
-            <label className="tr-audioEqPreset">
-              <span>EQ PRESET</span>
-              <select
-                value={presetSelectValue}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  handlePresetSelection(event.target.value as MusicEqPreset)
+                onClick={() =>
+                  setMusicDspBypass(!player.dspBypass)
                 }
               >
-                {Object.entries(MUSIC_EQ_PRESETS).map(([value, preset]) => (
+                {player.dspBypass ? "RESTORE DSP" : "BYPASS DSP"}
+              </button>
+              {player.dspStatus === "unavailable" ? (
+                <button
+                  type="button"
+                  onClick={() => void recoverMusicDsp()}
+                >
+                  REBUILD AUDIO
+                </button>
+              ) : null}
+            </div>
+          </header>
+
+          <div className="tr12-presetRail">
+            <label>
+              <span>EQ</span>
+              <button
+                type="button"
+                className={player.eqEnabled ? "is-on" : ""}
+                onClick={() =>
+                  setMusicEqEnabled(!player.eqEnabled)
+                }
+              >
+                {player.eqEnabled ? "ACTIVE" : "OFF"}
+              </button>
+            </label>
+
+            <label className="tr12-presetSelect">
+              <span>FACTORY PRESET</span>
+              <select
+                value={
+                  presetEntries.some(
+                    ([value]) => value === player.eqPreset
+                  )
+                    ? player.eqPreset
+                    : "flat"
+                }
+                onChange={(event) =>
+                  applyMusicEqPreset(
+                    event.target.value as MusicEqPreset
+                  )
+                }
+              >
+                {presetEntries.map(([value, definition]) => (
                   <option key={value} value={value}>
-                    {preset.label}
+                    {definition.label}
                   </option>
                 ))}
-                {DSP_SLOTS.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}
-                  </option>
-                ))}
-                <option value="custom">
-                  {activeSavedProfile && activeProfileDirty
-                    ? `${activeSavedProfile.name} • Modified`
-                    : "Unsaved Custom"}
-                </option>
               </select>
             </label>
+
+            <div className="tr12-profileRail">
+              <span>SAVED DSP</span>
+              <div>
+                {PROFILE_SLOTS.map((slot, index) => (
+                  <button
+                    type="button"
+                    key={slot}
+                    onClick={() => loadProfile(slot)}
+                  >
+                    <b>{index + 1}</b>
+                    <span>
+                      {profiles[slot]?.name || `Custom ${index + 1}`}
+                    </span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="is-save"
+                  onClick={() => setSaveOpen(true)}
+                >
+                  SAVE CURRENT
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="tr-audioDspSignalPath" aria-label="Audio processing path">
-            <span>INPUT</span><i />
-            <span>PREAMP</span><i />
-            <span>31-BAND EQ</span><i />
-            <span>HEADPHONE</span><i />
-            <span>LIMITER / OUTPUT</span><i />
-            <span>OUTPUT</span>
+          <div className="tr12-preampRow">
+            <div>
+              <span>MASTER PREAMP</span>
+              <strong>
+                {player.preampDb > 0 ? "+" : ""}
+                {player.preampDb.toFixed(1)} dB
+              </strong>
+            </div>
+            <input
+              type="range"
+              min={-12}
+              max={12}
+              step={0.5}
+              value={player.preampDb}
+              onChange={(event) =>
+                setMusicPreamp(Number(event.target.value))
+              }
+            />
           </div>
 
-          <div className="tr-audioEqScroll" aria-label="31 band equalizer">
-            <div className="tr-audioEqBands tr-audioEqBands--31">
+          <div className="tr12-eqWrap">
+            <div className="tr12-eqScale" aria-hidden>
+              <span>+12</span>
+              <span>+6</span>
+              <span>0</span>
+              <span>-6</span>
+              <span>-12</span>
+            </div>
+            <div className="tr12-eqBands">
               {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
-                <label key={frequency} className="tr-audioEqBand">
-                  <span className="tr-audioEqGain">
-                    {Number(player.eqGains[index] || 0) > 0 ? "+" : ""}
-                    {Number(player.eqGains[index] || 0).toFixed(0)}
-                  </span>
-                  <span className="tr-audioEqSliderShell">
+                <label key={frequency}>
+                  <b>
+                    {(player.eqGains[index] || 0) > 0 ? "+" : ""}
+                    {(player.eqGains[index] || 0).toFixed(1)}
+                  </b>
+                  <div>
                     <input
                       type="range"
-                      min="-12"
-                      max="12"
-                      step="0.5"
+                      min={-12}
+                      max={12}
+                      step={0.5}
                       value={player.eqGains[index] || 0}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                        setMusicEqBand(index, Number(event.target.value))
+                      onChange={(event) =>
+                        setMusicEqBand(
+                          index,
+                          Number(event.target.value)
+                        )
                       }
-                      aria-label={`${frequency} hertz equalizer gain`}
+                      aria-label={`${frequency} Hz equalizer`}
                     />
-                  </span>
-                  <span>
-                    {frequency >= 1000
-                      ? `${Number((frequency / 1000).toFixed(frequency % 1000 ? 2 : 0))}K`
-                      : frequency}
-                  </span>
+                  </div>
+                  <span>{hzLabel(frequency)}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
-            <label className="tr-audioPreamp">
-              <span>PREAMP</span>
-              <input
-                type="range"
-                min="-12"
-                max="12"
-                step="0.5"
-                value={player.preampDb}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMusicPreamp(Number(event.target.value))
-                }
-              />
-              <strong>
-                {player.preampDb > 0 ? "+" : ""}
-                {player.preampDb.toFixed(1)} dB
-              </strong>
-            </label>
-            <div className="tr-audioEqQuickActions">
-              <button type="button" onClick={() => applyMusicEqPreset("flat")}>FLAT</button>
-              <button type="button" onClick={() => applyMusicEqPreset("power")}>POWER TRAINING</button>
-            </div>
-          </div>
-
-          <div className="tr-dspProfileSave" aria-label="Save DSP profile">
-            <div className="tr-dspProfileSaveStatus">
-              <span>DSP PROFILE</span>
-              <strong>{presetStatusLabel}</strong>
-              {profileMessage ? <small aria-live="polite">{profileMessage}</small> : null}
-            </div>
-
-            <div className="tr-dspProfileSaveActions">
-              {activeCustomSlot && activeSavedProfile ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    saveCurrentDspProfile(activeCustomSlot, activeSavedProfile.name)
-                  }
-                >
-                  UPDATE PRESET
-                </button>
-              ) : null}
-
-              <button
-                type="button"
-                className="is-primary"
-                onClick={() => openSavePresetDialog()}
-              >
-                {activeCustomSlot ? "SAVE AS NEW" : "SAVE CUSTOM PRESET"}
-              </button>
-            </div>
-          </div>
-
-          <section className="tr-headphoneProcessor">
+          <section className="tr12-headphone">
             <header>
               <div>
-                <span className="tr-audioEyebrow">HEADPHONE IMMERSION</span>
-                <strong>Virtual soundstage and natural crossfeed</strong>
+                <small>HEADPHONE DSP</small>
+                <h4>Stage & Spatial Control</h4>
               </div>
-              <label>
-                <span>MODE</span>
-                <select
-                  value={player.headphoneMode}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode)
-                  }
-                >
-                  {Object.entries(MUSIC_HEADPHONE_MODES).map(([value, mode]) => (
-                    <option key={value} value={value}>{mode.label}</option>
-                  ))}
-                </select>
-              </label>
+              <span>{MUSIC_HEADPHONE_MODES[player.headphoneMode].label}</span>
             </header>
 
-            <div className="tr-headphoneModes">
-              {(Object.entries(MUSIC_HEADPHONE_MODES) as Array<
-                [MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]
-              >).map(([value, mode]) => (
+            <div className="tr12-modeButtons">
+              {(
+                Object.keys(
+                  MUSIC_HEADPHONE_MODES
+                ) as MusicHeadphoneMode[]
+              ).map((mode) => (
                 <button
-                  key={value}
                   type="button"
-                  className={player.headphoneMode === value ? "is-active" : ""}
-                  onClick={() => setMusicHeadphoneMode(value)}
+                  key={mode}
+                  className={
+                    player.headphoneMode === mode ? "is-active" : ""
+                  }
+                  onClick={() => setMusicHeadphoneMode(mode)}
                 >
-                  {mode.label}
+                  {MUSIC_HEADPHONE_MODES[mode].label}
                 </button>
               ))}
             </div>
 
-            <div className="tr-headphoneControls">
-              <label>
-                <span>WIDTH <b>{player.headphoneWidth}%</b></span>
-                <input type="range" min="0" max="100" value={player.headphoneWidth}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneWidth(Number(event.target.value))} />
-              </label>
-              <label>
-                <span>DEPTH <b>{player.headphoneDepth}%</b></span>
-                <input type="range" min="0" max="100" value={player.headphoneDepth}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneDepth(Number(event.target.value))} />
-              </label>
-              <label>
-                <span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span>
-                <input type="range" min="0" max="100" value={player.headphoneCrossfeed}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCrossfeed(Number(event.target.value))} />
-              </label>
-              <label>
-                <span>CENTER FOCUS <b>{player.headphoneCenter}%</b></span>
-                <input type="range" min="0" max="100" value={player.headphoneCenter}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCenter(Number(event.target.value))} />
-              </label>
-              <label>
-                <span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span>
-                <input type="range" min="0" max="100" value={player.headphoneBassImpact}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneBassImpact(Number(event.target.value))} />
-              </label>
+            <div className="tr12-dspSliders">
+              {[
+                {
+                  label: "WIDTH",
+                  value: player.headphoneWidth,
+                  set: setMusicHeadphoneWidth,
+                },
+                {
+                  label: "DEPTH",
+                  value: player.headphoneDepth,
+                  set: setMusicHeadphoneDepth,
+                },
+                {
+                  label: "CROSSFEED",
+                  value: player.headphoneCrossfeed,
+                  set: setMusicHeadphoneCrossfeed,
+                },
+                {
+                  label: "CENTER",
+                  value: player.headphoneCenter,
+                  set: setMusicHeadphoneCenter,
+                },
+                {
+                  label: "BASS IMPACT",
+                  value: player.headphoneBassImpact,
+                  set: setMusicHeadphoneBassImpact,
+                },
+              ].map((control) => (
+                <label key={control.label}>
+                  <span>
+                    {control.label}
+                    <b>{Math.round(control.value)}%</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={control.value}
+                    onChange={(event) =>
+                      control.set(Number(event.target.value))
+                    }
+                  />
+                </label>
+              ))}
             </div>
           </section>
-        </div>
+        </section>
       ) : null}
 
-
-      {savePresetOpen ? (
+      {saveOpen ? (
         <div
-          className="tr-dspSaveOverlay"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) setSavePresetOpen(false);
-          }}
+          className="tr12-saveBack"
+          onMouseDown={() => setSaveOpen(false)}
         >
           <section
-            className="tr-dspSaveDialog"
+            className="tr12-saveDialog"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="tr-dsp-save-title"
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <header>
               <div>
-                <span className="tr-audioEyebrow">CUSTOM DSP PROFILE</span>
-                <h3 id="tr-dsp-save-title">Save your sound profile</h3>
+                <small>SAVE DSP PROFILE</small>
+                <h3>Store this complete sound setup</h3>
               </div>
-              <button
-                type="button"
-                className="tr-dspSaveClose"
-                onClick={() => setSavePresetOpen(false)}
-                aria-label="Close save preset dialog"
-              >
+              <button type="button" onClick={() => setSaveOpen(false)}>
                 ×
               </button>
             </header>
 
-            <label className="tr-dspSaveName">
-              <span>PRESET NAME</span>
+            <label className="tr12-saveName">
+              <span>PROFILE NAME</span>
               <input
-                type="text"
+                value={saveName}
+                onChange={(event) => setSaveName(event.target.value)}
+                placeholder="Example: Gym Headphones"
                 maxLength={32}
-                value={savePresetName}
-                placeholder="My Workout EQ"
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setSavePresetName(event.target.value)
-                }
-                autoFocus
               />
             </label>
 
-            <div className="tr-dspSaveSlots">
-              <span>SAVE TO</span>
-              <div>
-                {DSP_SLOTS.map((slot, index) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    className={savePresetSlot === slot ? "is-active" : ""}
-                    onClick={() => chooseSaveSlot(slot)}
-                  >
-                    <b>CUSTOM {index + 1}</b>
-                    <small>{dspProfiles[slot]?.name ?? "Empty slot"}</small>
-                  </button>
-                ))}
-              </div>
+            <div className="tr12-saveSlots">
+              {PROFILE_SLOTS.map((slot, index) => (
+                <button
+                  type="button"
+                  key={slot}
+                  className={saveSlot === slot ? "is-active" : ""}
+                  onClick={() => setSaveSlot(slot)}
+                >
+                  <b>CUSTOM {index + 1}</b>
+                  <small>
+                    {profiles[slot]?.name || "Empty slot"}
+                  </small>
+                </button>
+              ))}
             </div>
 
-            <div className="tr-dspSaveIncludes">
-              <span>SAVES</span>
-              <p>
-                31-band EQ • Preamp • DSP active state • Headphone mode • Width •
-                Depth • Crossfeed • Center focus • Bass impact
-              </p>
-            </div>
+            <p className="tr12-saveIncludes">
+              Saves the 31-band EQ, preamp, EQ active state, headphone
+              mode, width, depth, crossfeed, center and bass impact.
+            </p>
 
             <footer>
-              <button type="button" onClick={() => setSavePresetOpen(false)}>
+              <button type="button" onClick={() => setSaveOpen(false)}>
                 CANCEL
               </button>
               <button
                 type="button"
                 className="is-primary"
-                onClick={() =>
-                  saveCurrentDspProfile(
-                    savePresetSlot,
-                    savePresetName.trim() || slotFallbackLabel(savePresetSlot)
-                  )
-                }
+                onClick={saveProfile}
               >
                 SAVE PRESET
               </button>
@@ -1052,351 +962,48 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div>
       ) : null}
 
-      {player.error ? <div className="tr-audioError">{player.error}</div> : null}
-
       <style>{`
-        .tr-audioDeck--pro7 .tr-rta10{
-          margin:8px 0 5px;
-          border:1px solid rgba(77,178,215,.18);
-          border-top-color:rgba(169,226,246,.31);
-          border-radius:10px;
-          overflow:hidden;
-          background:
-            linear-gradient(180deg,rgba(4,16,24,.99),rgba(2,8,13,.995));
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.025),
-            inset 0 -1px 0 rgba(32,106,132,.08),
-            0 8px 22px rgba(0,0,0,.22)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Head{
-          height:29px;
-          padding:0 11px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-          border-bottom:1px solid rgba(80,177,214,.09);
-          font-size:7px;
-          font-weight:950;
-          letter-spacing:.105em;
-          color:rgba(172,204,217,.5)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Head span:first-child{
-          display:inline-flex;
-          align-items:center;
-          gap:7px;
-          color:#d8f5ff
-        }
-        .tr-audioDeck--pro7 .tr-rta10Head i{
-          width:5px;
-          height:5px;
-          border-radius:50%;
-          background:#52d7ff;
-          box-shadow:0 0 8px rgba(82,215,255,.34)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Body{
-          display:grid;
-          grid-template-columns:34px minmax(0,1fr);
-          min-height:126px;
-          background:
-            repeating-linear-gradient(
-              0deg,
-              transparent 0,
-              transparent 20px,
-              rgba(92,174,205,.045) 20px,
-              rgba(92,174,205,.045) 21px
-            )
-        }
-        .tr-audioDeck--pro7 .tr-rta10Scale{
-          position:relative;
-          display:flex;
-          flex-direction:column;
-          justify-content:space-between;
-          align-items:flex-end;
-          padding:9px 6px 22px 0;
-          border-right:1px solid rgba(79,157,187,.08);
-          color:rgba(137,170,183,.46);
-          font-size:6px;
-          font-weight:850;
-          font-variant-numeric:tabular-nums
-        }
-        .tr-audioDeck--pro7 .tr-rta10Scale small{
-          position:absolute;
-          bottom:5px;
-          right:6px;
-          font-size:5px;
-          letter-spacing:.08em;
-          color:rgba(122,153,165,.38)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Grid{
-          min-width:0;
-          padding:9px 12px 7px;
-          display:grid;
-          grid-template-columns:repeat(10,minmax(0,1fr));
-          gap:7px
-        }
-        .tr-audioDeck--pro7 .tr-rta10Band{
-          min-width:0;
-          display:grid;
-          grid-template-rows:92px 13px;
-          gap:5px;
-          text-align:center
-        }
-        .tr-audioDeck--pro7 .tr-rta10Meter{
-          position:relative;
-          min-width:0;
-          overflow:hidden;
-          border-left:1px solid rgba(87,165,193,.045);
-          border-right:1px solid rgba(87,165,193,.045);
-          background:linear-gradient(180deg,rgba(6,20,28,.36),rgba(2,10,15,.12))
-        }
-        .tr-audioDeck--pro7 .tr-rta10Inactive,
-        .tr-audioDeck--pro7 .tr-rta10Fill{
-          position:absolute;
-          inset:3px 5px;
-          transform-origin:bottom;
-          -webkit-mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px);
-          mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Inactive{
-          background:rgba(80,124,141,.14)
-        }
-        .tr-audioDeck--pro7 .tr-rta10Fill{
-          background:linear-gradient(to top,#55cbe9 0 74%,#94d9c8 74% 90%,#dfa64b 90% 100%);
-          box-shadow:0 0 8px rgba(65,194,228,.16);
-          transition:transform .10s linear
-        }
-        .tr-audioDeck--pro7 .tr-rta10Peak{
-          position:absolute;
-          left:18%;
-          right:18%;
-          height:1px;
-          background:#eefbff;
-          box-shadow:0 0 5px rgba(213,248,255,.46);
-          transition:bottom .12s linear
-        }
-        .tr-audioDeck--pro7 .tr-rta10Band strong{
-          align-self:end;
-          color:rgba(171,204,216,.57);
-          font-size:6px;
-          font-weight:900;
-          letter-spacing:.035em;
-          font-variant-numeric:tabular-nums
-        }
-        .tr-audioDeck--pro7 .tr-mainAudioTuning{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;margin:3px 0 10px}
-        .tr-audioDeck--pro7 .tr-mainPreamp{min-width:0;display:grid;grid-template-columns:54px minmax(100px,1fr) 62px;gap:8px;align-items:center;padding:8px 11px;border:1px solid rgba(80,172,207,.12);border-radius:9px;background:rgba(5,16,23,.64)}
-        .tr-audioDeck--pro7 .tr-mainPreamp span{font-size:7px;font-weight:950;letter-spacing:.09em;color:#8da8b3}.tr-audioDeck--pro7 .tr-mainPreamp strong{text-align:right;font-size:9px;color:#f3fbff}.tr-audioDeck--pro7 .tr-mainPreamp input{width:100%;accent-color:#ff9e2d}
-        .tr-audioDeck--pro7 .tr-trackPreference{display:flex;gap:6px}.tr-audioDeck--pro7 .tr-trackPreference button{height:38px;min-width:74px;padding:0 10px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(107,164,186,.16);border-radius:9px;background:linear-gradient(180deg,#0b1720,#071017);color:#b9cbd3;font-size:7px;font-weight:950;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-trackPreference svg{width:14px;height:14px;fill:currentColor}.tr-audioDeck--pro7 .tr-trackPreference button.is-liked{color:#5ee3a7;border-color:rgba(69,219,153,.38);background:rgba(22,76,57,.22)}.tr-audioDeck--pro7 .tr-trackPreference button.is-disliked{color:#ff8585;border-color:rgba(255,105,105,.36);background:rgba(91,29,31,.20)}
-        .tr-audioDeck--pro7 .tr-dspHealth{border:0;background:transparent;font:inherit;color:#8fa8b1;cursor:pointer}.tr-audioDeck--pro7 .tr-dspHealth.is-active{color:#58dca5}.tr-audioDeck--pro7 .tr-dspHealth.is-unavailable{color:#ff7777}.tr-audioDeck--pro7 .tr-dspHealth.is-recovering{color:#ffb34d}
-        .tr-audioDeck--pro7 .tr-dspAbControls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.tr-audioDeck--pro7 .tr-dspBypassButton{height:34px;padding:0 12px;border:1px solid rgba(95,190,224,.22);border-radius:8px;background:#07131a;color:#b8d5df;font-size:8px;font-weight:900;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-dspBypassButton.is-active{border-color:rgba(255,176,73,.5);color:#ffb34d;background:rgba(91,54,12,.2)}
-        @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr);min-height:110px}.tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 5px 6px;gap:3px}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:78px 12px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{inset:2px 2px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5px}.tr-audioDeck--pro7 .tr-rta10Scale{padding-right:4px;font-size:5px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference{justify-content:stretch}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}}
-        /* STEP 9 — LOW-POWER PLAYBACK SIGNAL
-           Visual motion is CSS-only. No canvas, no spectrum analyser, no
-           frequency polling. DSP/EQ/headphone processing remains untouched. */
-        .tr-audioDeck--pro7 .tr-audioSignalPanel{
-          position:relative;
-          overflow:hidden;
-          margin:8px 0 6px;
-          border:1px solid rgba(111,194,224,.16);
-          border-top-color:rgba(184,228,244,.24);
-          border-radius:11px;
-          background:
-            linear-gradient(180deg,rgba(5,18,27,.96),rgba(2,8,13,.99)),
-            radial-gradient(circle at 50% 0%,rgba(55,181,228,.08),transparent 54%);
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.025),
-            0 8px 22px rgba(0,0,0,.22);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalHead,
-        .tr-audioDeck--pro7 .tr-audioSignalFooter{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-          padding:7px 10px;
-          color:rgba(187,215,227,.58);
-          font-size:7px;
-          line-height:1;
-          font-weight:950;
-          letter-spacing:.10em;
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalHead{
-          border-bottom:1px solid rgba(122,192,219,.08);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalHead>span:first-child{
-          display:inline-flex;
-          align-items:center;
-          gap:7px;
-          color:#d9f4fc;
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalHead i{
-          width:6px;
-          height:6px;
-          border-radius:50%;
-          background:rgba(124,156,169,.55);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalHead i{
-          background:#50d3fb;
-          box-shadow:0 0 10px rgba(80,211,251,.44);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalField{
-          position:relative;
-          height:78px;
-          display:flex;
-          align-items:center;
-          padding:8px 12px 9px;
-          background:
-            repeating-linear-gradient(
-              90deg,
-              transparent 0,
-              transparent calc(8.333% - 1px),
-              rgba(115,190,219,.035) calc(8.333% - 1px),
-              rgba(115,190,219,.035) 8.333%
-            );
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalBaseline{
-          position:absolute;
-          left:12px;
-          right:12px;
-          top:50%;
-          height:1px;
-          background:linear-gradient(90deg,transparent,rgba(95,205,244,.22),transparent);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalBars{
-          position:relative;
-          z-index:2;
-          width:100%;
-          height:100%;
-          display:grid;
-          grid-template-columns:repeat(12,1fr);
-          align-items:center;
-          gap:5px;
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalBars span{
-          justify-self:center;
-          width:min(7px,48%);
-          height:70%;
-          border-radius:4px;
-          transform:scaleY(calc(.17 + var(--signal-height) * .30));
-          transform-origin:center;
-          background:
-            linear-gradient(
-              180deg,
-              rgba(139,226,255,.96),
-              rgba(57,184,230,.80) 46%,
-              rgba(255,168,59,.64)
-            );
-          opacity:.46;
-          will-change:auto;
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalBars span{
-          opacity:.90;
-          animation:trPlaybackPulse calc(1.25s + (var(--signal-index) * .055s)) ease-in-out infinite alternate;
-          animation-delay:calc(var(--signal-index) * -0.073s);
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalProgress{
-          position:absolute;
-          z-index:3;
-          left:12px;
-          right:12px;
-          bottom:6px;
-          height:2px;
-          border-radius:2px;
-          transform-origin:left center;
-          background:linear-gradient(90deg,#ff9e32,#5fd5fb 66%,#a8edff);
-          box-shadow:0 0 8px rgba(70,198,240,.18);
-          transition:transform .28s linear;
-        }
-
-        .tr-audioDeck--pro7 .tr-audioSignalFooter{
-          border-top:1px solid rgba(122,192,219,.07);
-          color:rgba(163,195,208,.47);
-        }
-
-        @keyframes trPlaybackPulse{
-          0%{transform:scaleY(calc(.16 + var(--signal-height) * .22))}
-          100%{transform:scaleY(calc(.38 + var(--signal-height) * .62))}
-        }
-
-        @media(max-width:700px){
-          .tr-audioDeck--pro7 .tr-audioSignalField{height:62px}
-          .tr-audioDeck--pro7 .tr-audioSignalBars{gap:3px}
-          .tr-audioDeck--pro7 .tr-audioSignalBars span{width:min(6px,52%)}
-          .tr-audioDeck--pro7 .tr-audioSignalFooter span:nth-child(2){display:none}
-        }
-
-        @media(prefers-reduced-motion:reduce){
-          .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalBars span{
-            animation:none!important;
-            transform:scaleY(calc(.22 + var(--signal-height) * .34));
-          }
-        }
-
-        .tr-audioDeck--pro7 .tr-audioArtwork{
-          background:linear-gradient(180deg,#111a21,#070b0f)!important;
-          border-color:rgba(132,196,221,.20)!important;
-          box-shadow:0 5px 14px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.055)!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%;height:100%;object-fit:cover;display:block;}
-        .tr-audioDeck--pro7 .tr-audioArtworkFallback{width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(145deg,#132332,#09131c);color:#ffc061;}
-        .tr-audioDeck--pro7 .tr-audioArtworkFallback svg{width:28px;height:28px;fill:currentColor;}
-        .tr-audioDeck--pro7 .tr-audioTransportButton--primary::before{
-          background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(95,30,0,.10))!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioTransportButton--primary::after,
-        .tr-audioDeck--pro7 .tr-audioTransportFace::before,
-        .tr-audioDeck--pro7 .tr-audioTransportFace::after{display:none!important;content:none!important;}
-        .tr-audioDeck--pro7 .tr-audioTransportButton--primary svg{filter:none!important;}
-        .tr-audioEqPanel--pro7{overflow:hidden;}
-        .tr-audioEqScroll{width:100%;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 8px;scrollbar-width:thin;scrollbar-color:rgba(83,199,240,.35) rgba(255,255,255,.04);}
-        .tr-audioEqBands--31{display:grid!important;grid-template-columns:repeat(31,minmax(42px,1fr))!important;gap:6px!important;min-width:1380px!important;}
-        .tr-audioEqBands--31 .tr-audioEqBand{min-width:42px!important;padding:8px 4px!important;}
-        .tr-audioEqBands--31 .tr-audioEqBand>span:last-child{font-size:7px!important;white-space:nowrap;}
-        .tr-audioEqBands--31 .tr-audioEqGain{font-size:8px!important;}
-        .tr-audioEqFooter--pro7{margin-top:5px;}
-        .tr-dspProfileSave{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px;padding:10px 0 1px;border-top:1px solid rgba(118,204,236,.09);}
-        .tr-dspProfileSaveStatus{display:grid;gap:3px;min-width:0}.tr-dspProfileSaveStatus>span{color:rgba(183,209,222,.50);font-size:7px;font-weight:1000;letter-spacing:.14em}.tr-dspProfileSaveStatus>strong{color:#eef7fb;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspProfileSaveStatus>small{color:#7edfb2;font-size:8px}
-        .tr-dspProfileSaveActions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
-        .tr-dspProfileSaveActions button,.tr-headphoneModes button{min-height:32px;padding:0 11px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer;}
-        .tr-dspProfileSaveActions button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18);box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 5px 14px rgba(240,154,24,.14)}
-        .tr-dspSaveOverlay{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px;background:rgba(2,7,11,.78);backdrop-filter:blur(7px)}
-        .tr-dspSaveDialog{width:min(520px,100%);overflow:hidden;border:1px solid rgba(86,197,237,.28);border-radius:16px;background:linear-gradient(180deg,#101d27,#081118);box-shadow:0 28px 85px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.055)}
-        .tr-dspSaveDialog header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:16px 17px 14px;border-bottom:1px solid rgba(126,200,226,.10)}
-        .tr-dspSaveDialog header>div{display:grid;gap:3px}.tr-dspSaveDialog h3{margin:0;color:#f4f9fc;font-size:19px}.tr-dspSaveClose{width:36px;height:36px;border:1px solid rgba(255,255,255,.08);border-radius:10px;color:#dcebf2;background:#0b141b;font-size:22px;cursor:pointer}
-        .tr-dspSaveName{display:grid;gap:6px;padding:15px 17px 8px}.tr-dspSaveName>span,.tr-dspSaveSlots>span,.tr-dspSaveIncludes>span{color:rgba(180,205,217,.52);font-size:7px;font-weight:1000;letter-spacing:.14em}
-        .tr-dspSaveName input{height:42px;border:1px solid rgba(116,198,228,.20);border-radius:10px;padding:0 12px;color:#f5f9fb;background:#060d12;outline:none;font:inherit;font-weight:850}.tr-dspSaveName input:focus{border-color:rgba(72,199,246,.55);box-shadow:0 0 0 3px rgba(39,176,229,.08)}
-        .tr-dspSaveSlots{display:grid;gap:7px;padding:9px 17px}.tr-dspSaveSlots>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-        .tr-dspSaveSlots button{min-height:60px;display:grid;align-content:center;gap:4px;padding:8px;border:1px solid rgba(255,255,255,.07);border-radius:10px;color:#d8e7ee;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.15));cursor:pointer;text-align:left}.tr-dspSaveSlots button b{font-size:9px;letter-spacing:.07em}.tr-dspSaveSlots button small{color:rgba(184,205,216,.50);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspSaveSlots button.is-active{border-color:rgba(65,200,248,.52);background:rgba(0,158,223,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-        .tr-dspSaveIncludes{display:grid;gap:5px;margin:7px 17px 0;padding:11px;border:1px solid rgba(255,255,255,.055);border-radius:10px;background:rgba(0,0,0,.13)}.tr-dspSaveIncludes p{margin:0;color:rgba(212,227,235,.62);font-size:9px;line-height:1.45}
-        .tr-dspSaveDialog footer{display:flex;justify-content:flex-end;gap:8px;padding:15px 17px 17px}.tr-dspSaveDialog footer button{min-height:38px;padding:0 16px;border:1px solid rgba(120,193,220,.14);border-radius:10px;color:#dceaf1;background:#0b151c;font-size:9px;font-weight:1000;letter-spacing:.06em;cursor:pointer}.tr-dspSaveDialog footer button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18);box-shadow:inset 0 1px 0 rgba(255,255,255,.40)}
-        .tr-headphoneProcessor{margin-top:12px;padding:13px;border:1px solid rgba(71,186,229,.20);border-radius:14px;background:linear-gradient(180deg,rgba(11,27,38,.88),rgba(5,13,19,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.035);}
-        .tr-headphoneProcessor header{display:grid;grid-template-columns:minmax(0,1fr) 190px;align-items:end;gap:12px;}
-        .tr-headphoneProcessor header>div{display:grid;gap:3px;}.tr-headphoneProcessor header strong{color:#f4f9fc;font-size:12px;}
-        .tr-headphoneProcessor header label{display:grid;gap:4px;}.tr-headphoneProcessor header label>span{color:rgba(180,204,217,.52);font-size:7px;font-weight:1000;letter-spacing:.14em;}
-        .tr-headphoneProcessor select{min-height:35px;border:1px solid rgba(125,198,224,.16);border-radius:9px;color:#f2f8fb;background:#081119;padding:0 10px;font-weight:900;}
-        .tr-headphoneModes{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
-        .tr-headphoneModes button.is-active{border-color:rgba(65,199,248,.52);color:#9de5ff;background:rgba(0,158,223,.11);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);}
-        .tr-headphoneControls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:11px;}
-        .tr-headphoneControls label{display:grid;gap:6px;padding:9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(0,0,0,.15);}
-        .tr-headphoneControls label>span{display:flex;justify-content:space-between;gap:6px;color:rgba(184,208,220,.55);font-size:7px;font-weight:1000;letter-spacing:.08em;}.tr-headphoneControls b{color:#91defb;}
-        .tr-headphoneControls input{width:100%;}
-        @media(max-width:760px){
-          .tr-audioEqBands--31{grid-template-columns:repeat(31,44px)!important;min-width:1530px!important;}
-          .tr-headphoneProcessor header{grid-template-columns:1fr;}
-          .tr-headphoneControls{grid-template-columns:repeat(2,minmax(0,1fr));}
-          .tr-dspProfileSave{align-items:flex-start;flex-direction:column}.tr-dspProfileSaveActions{width:100%;justify-content:flex-start}.tr-dspSaveSlots>div{grid-template-columns:1fr}.tr-dspSaveDialog{max-height:calc(100vh - 24px);overflow:auto;}
-        }
+        .tr12-player{position:relative;width:100%;color:#e8f6fb;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+        .tr12-player button,.tr12-player select,.tr12-player input{font:inherit}
+        .tr12-playerTop{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border:1px solid rgba(86,167,198,.16);border-bottom:0;border-radius:14px 14px 0 0;background:linear-gradient(180deg,rgba(7,19,26,.98),rgba(3,10,15,.99))}
+        .tr12-trackIdentity{min-width:0;display:flex;align-items:center;gap:10px}
+        .tr12-artwork{width:50px;height:50px;flex:0 0 auto;display:grid;place-items:center;overflow:hidden;border:1px solid rgba(106,205,238,.22);border-radius:11px;background:radial-gradient(circle at 35% 25%,#153a4b,#06131b 70%);color:#7fe4ff;font-size:20px;box-shadow:inset 0 1px rgba(255,255,255,.04),0 8px 22px rgba(0,0,0,.22)}
+        .tr12-artwork img{width:100%;height:100%;object-fit:cover}
+        .tr12-trackText{min-width:0;display:grid;gap:2px}.tr12-trackText small{font-size:7px;font-weight:1000;letter-spacing:.16em;color:#57d5fa}.tr12-trackText strong{max-width:430px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}.tr12-trackText span{color:#708b96;font-size:9px}
+        .tr12-playerTopActions{display:flex;align-items:end;gap:7px}.tr12-queue{display:grid;gap:4px}.tr12-queue>span{font-size:6px;font-weight:1000;letter-spacing:.15em;color:#607c87}.tr12-queue select{height:34px;min-width:145px;padding:0 30px 0 10px;border:1px solid rgba(78,164,196,.18);border-radius:8px;background:#06131a;color:#cfe4ec;font-size:8px;font-weight:900}
+        .tr12-dspButton,.tr12-libraryButton{height:34px;padding:0 11px;border:1px solid rgba(78,164,196,.18);border-radius:8px;background:#07141b;color:#c8dce4;font-size:8px;font-weight:1000;letter-spacing:.05em}.tr12-dspButton{display:flex;align-items:center;gap:6px}.tr12-dspButton.is-active{border-color:rgba(71,210,251,.55);background:linear-gradient(180deg,#0b394a,#082531);color:#dff9ff;box-shadow:0 0 20px rgba(40,187,231,.1)}
+        .tr12-rta{overflow:hidden;border:1px solid rgba(89,190,226,.22);border-radius:0 0 14px 14px;background:linear-gradient(180deg,#04131b,#02080d);box-shadow:inset 0 1px rgba(255,255,255,.025),inset 0 -20px 45px rgba(0,0,0,.26),0 10px 30px rgba(0,0,0,.22)}
+        .tr12-rtaTop{min-height:38px;padding:7px 11px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(81,171,204,.12);background:linear-gradient(180deg,rgba(11,35,45,.62),rgba(5,19,27,.22))}
+        .tr12-rtaTop>div:first-child{display:grid;grid-template-columns:auto auto;align-items:center;column-gap:7px}.tr12-rtaTop strong{font-size:8px;letter-spacing:.13em}.tr12-rtaTop small{grid-column:2;color:#5f7882;font-size:6px;font-weight:900;letter-spacing:.1em}
+        .tr12-liveDot{width:6px;height:6px;grid-row:1/3;border-radius:50%;background:#32444c;box-shadow:0 0 0 3px rgba(80,110,120,.06)}.tr12-liveDot.is-live{background:#5cf0b1;box-shadow:0 0 10px rgba(92,240,177,.75),0 0 0 3px rgba(92,240,177,.08)}
+        .tr12-rtaReadouts{display:flex;gap:6px}.tr12-rtaReadouts>span{min-width:72px;padding:5px 8px;display:grid;gap:1px;border:1px solid rgba(85,155,180,.1);border-radius:6px;background:rgba(0,6,10,.36);text-align:right}.tr12-rtaReadouts small{grid-column:auto;color:#58727d;font-size:5.5px;letter-spacing:.12em}.tr12-rtaReadouts b{font-size:8px;color:#a9eaff;font-variant-numeric:tabular-nums}
+        .tr12-rtaBody{display:grid;grid-template-columns:34px minmax(0,1fr);min-height:158px;background:radial-gradient(circle at 50% 110%,rgba(8,84,110,.13),transparent 58%),repeating-linear-gradient(0deg,transparent 0,transparent 23px,rgba(102,185,215,.052) 24px),linear-gradient(90deg,rgba(255,255,255,.01),transparent 12%,transparent 88%,rgba(255,255,255,.01))}
+        .tr12-dbScale{padding:12px 4px 24px 0;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;border-right:1px solid rgba(79,151,178,.09);color:#506a75;font-size:6px;font-weight:900;font-variant-numeric:tabular-nums}.tr12-dbScale i{position:absolute;margin-top:124px;font-style:normal;color:#3e5964;font-size:5px}
+        .tr12-spectrumWrap{min-width:0;padding:10px 12px 6px}.tr12-spectrum{height:112px;display:grid;grid-template-columns:repeat(36,minmax(2px,1fr));align-items:end;gap:3px}
+        .tr12-spectrumColumn{position:relative;height:100%;overflow:hidden;border-left:1px solid rgba(87,177,209,.035);border-right:1px solid rgba(0,0,0,.16);border-radius:2px;background:linear-gradient(180deg,rgba(103,218,245,.045),rgba(35,104,128,.025))}
+        .tr12-spectrumFill{position:absolute;inset:2px 1px 1px;transform-origin:bottom;will-change:transform;border-radius:1px;background:linear-gradient(to top,#24acd4 0%,#43dcf0 56%,#68e8ad 76%,#f1cd64 90%,#ff8b55 100%);box-shadow:0 0 8px rgba(55,203,239,.22);mask-image:repeating-linear-gradient(to top,#000 0,#000 4px,transparent 4px,transparent 6px);-webkit-mask-image:repeating-linear-gradient(to top,#000 0,#000 4px,transparent 4px,transparent 6px);transition:transform .045s linear}
+        .tr12-spectrumPeak{position:absolute;left:1px;right:1px;height:2px;border-radius:2px;background:#e9fbff;box-shadow:0 0 6px rgba(188,242,255,.65);transition:bottom .05s linear}
+        .tr12-rtaLabels{height:22px;display:grid;grid-template-columns:repeat(10,1fr);align-items:end;text-align:center;color:#55727e;font-size:6px;font-weight:1000;font-variant-numeric:tabular-nums}
+        .tr12-timeline{display:grid;grid-template-columns:42px 1fr 42px;align-items:center;gap:8px;padding:8px 11px;color:#6f8a95;font-size:8px;font-weight:900;font-variant-numeric:tabular-nums}.tr12-timeline span:last-child{text-align:right}.tr12-timeline input{width:100%;accent-color:#50d6f8}
+        .tr12-controlDeck{min-height:58px;padding:8px 10px;display:grid;grid-template-columns:110px 1fr 110px;align-items:center;gap:10px;border:1px solid rgba(83,158,186,.13);border-radius:12px;background:linear-gradient(180deg,#071219,#040b0f)}
+        .tr12-sideControl{display:grid;gap:2px}.tr12-sideControl span{font-size:6px;font-weight:1000;letter-spacing:.13em;color:#607a85}.tr12-sideControl b{font-size:11px;color:#b9d5df;font-variant-numeric:tabular-nums}
+        .tr12-transport{display:flex;justify-content:center;align-items:center;gap:6px}.tr12-transport button,.tr12-preference button{position:relative;width:38px;height:38px;border:1px solid rgba(91,165,192,.14);border-radius:9px;background:linear-gradient(180deg,#0b1d25,#061117);color:#9cb2bb;font-size:9px;font-weight:1000;box-shadow:inset 0 1px rgba(255,255,255,.025)}.tr12-transport button:hover,.tr12-preference button:hover{border-color:rgba(84,204,244,.34);color:#d8f6ff}.tr12-transport button.is-primary{width:48px;height:48px;border-color:rgba(81,213,252,.5);background:linear-gradient(180deg,#157593,#0b4258);color:white;font-size:15px;box-shadow:0 6px 20px rgba(22,154,196,.2),inset 0 1px rgba(255,255,255,.12)}.tr12-transport button.is-active{color:#65e3ff;border-color:rgba(70,210,249,.4);background:#0a2732}.tr12-transport small{position:absolute;right:5px;bottom:3px;font-size:6px}
+        .tr12-preference{display:flex;justify-content:flex-end;gap:6px}.tr12-preference button.is-liked{color:#63e6ab;border-color:rgba(78,220,162,.35);background:rgba(15,66,49,.42)}.tr12-preference button.is-down{color:#ff8c91;border-color:rgba(255,100,108,.33);background:rgba(76,20,25,.42)}
+        .tr12-notice,.tr12-error{margin-top:7px;padding:8px 10px;border-radius:8px;font-size:8px;font-weight:850}.tr12-notice{border:1px solid rgba(72,218,157,.22);background:rgba(18,70,51,.22);color:#88e6b8}.tr12-error{border:1px solid rgba(255,88,98,.3);background:rgba(89,20,25,.28);color:#ffacb0}
+        .tr12-dspPanel{margin-top:8px;overflow:hidden;border:1px solid rgba(79,181,219,.2);border-radius:14px;background:linear-gradient(180deg,#07171f,#030a0e);box-shadow:0 16px 38px rgba(0,0,0,.24)}
+        .tr12-dspHeader{padding:14px 16px;display:flex;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(79,158,187,.11);background:linear-gradient(180deg,rgba(11,37,49,.58),rgba(5,17,24,.18))}.tr12-dspHeader small,.tr12-headphone small,.tr12-saveDialog small{color:#54d1f5;font-size:7px;font-weight:1000;letter-spacing:.14em}.tr12-dspHeader h3{margin:4px 0 2px;font-size:17px}.tr12-dspHeader p{margin:0;color:#647f89;font-size:8px}
+        .tr12-dspStatus{display:flex;align-items:center;gap:6px}.tr12-dspStatus>span{padding:6px 8px;border:1px solid rgba(90,178,208,.15);border-radius:6px;color:#76d9f2;font-size:6px;font-weight:1000;letter-spacing:.08em}.tr12-dspStatus>span.is-active{color:#67e5ad;border-color:rgba(71,214,157,.23)}.tr12-dspStatus button{height:30px;padding:0 9px;border:1px solid rgba(82,166,197,.17);border-radius:7px;background:#06141b;color:#aac5cf;font-size:7px;font-weight:950}
+        .tr12-presetRail{padding:10px 14px;display:grid;grid-template-columns:auto minmax(180px,260px) 1fr;gap:12px;align-items:end;border-bottom:1px solid rgba(76,146,172,.09)}.tr12-presetRail label,.tr12-profileRail{display:grid;gap:5px}.tr12-presetRail label>span,.tr12-profileRail>span{color:#5d7781;font-size:6px;font-weight:1000;letter-spacing:.12em}.tr12-presetRail button,.tr12-presetRail select{height:34px;border:1px solid rgba(81,158,186,.16);border-radius:8px;background:#06131a;color:#b9d0d8;font-size:8px;font-weight:900}.tr12-presetRail label>button{padding:0 10px}.tr12-presetRail label>button.is-on{color:#6de9b1;border-color:rgba(76,218,160,.3);background:rgba(13,66,48,.3)}.tr12-presetSelect select{padding:0 10px}
+        .tr12-profileRail>div{display:flex;gap:5px;flex-wrap:wrap}.tr12-profileRail button{padding:0 9px;display:flex;align-items:center;gap:6px}.tr12-profileRail button b{width:18px;height:18px;display:grid;place-items:center;border-radius:5px;background:rgba(76,181,217,.1);color:#71dcf5;font-size:7px}.tr12-profileRail button span{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tr12-profileRail button.is-save{color:#efc66e;border-color:rgba(227,175,72,.25)}
+        .tr12-preampRow{padding:10px 14px;display:grid;grid-template-columns:130px 1fr;gap:12px;align-items:center;border-bottom:1px solid rgba(75,145,170,.08)}.tr12-preampRow>div{display:flex;justify-content:space-between;gap:8px}.tr12-preampRow span{color:#617b86;font-size:7px;font-weight:1000;letter-spacing:.1em}.tr12-preampRow strong{font-size:9px;color:#a9dcea}.tr12-preampRow input{width:100%;accent-color:#52d6f7}
+        .tr12-eqWrap{display:grid;grid-template-columns:30px minmax(0,1fr);padding:13px 12px 12px}.tr12-eqScale{height:178px;padding:3px 4px 23px 0;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;color:#4d6873;font-size:6px;font-weight:900}.tr12-eqBands{min-width:0;display:grid;grid-template-columns:repeat(31,minmax(13px,1fr));gap:2px}.tr12-eqBands label{min-width:0;display:grid;grid-template-rows:16px 142px 18px;justify-items:center;text-align:center}.tr12-eqBands label>b{font-size:5.5px;color:#6f8b96;font-variant-numeric:tabular-nums}.tr12-eqBands label>div{position:relative;width:14px;height:138px;display:grid;place-items:center;border-radius:7px;background:linear-gradient(90deg,transparent 46%,rgba(86,168,198,.15) 47%,rgba(86,168,198,.15) 53%,transparent 54%)}.tr12-eqBands input{width:128px;transform:rotate(-90deg);accent-color:#56d6f6}.tr12-eqBands span{font-size:5.5px;color:#52707b;writing-mode:vertical-rl;transform:rotate(180deg);font-weight:900}
+        .tr12-headphone{margin:0 12px 12px;overflow:hidden;border:1px solid rgba(77,159,190,.13);border-radius:10px;background:#041016}.tr12-headphone>header{padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(73,149,176,.09)}.tr12-headphone h4{margin:3px 0 0;font-size:13px}.tr12-headphone>header>span{color:#80dff5;font-size:8px;font-weight:1000}
+        .tr12-modeButtons{padding:9px 10px;display:flex;gap:5px;flex-wrap:wrap}.tr12-modeButtons button{height:31px;padding:0 10px;border:1px solid rgba(75,151,178,.13);border-radius:7px;background:#07151c;color:#819aa4;font-size:7px;font-weight:950}.tr12-modeButtons button.is-active{border-color:rgba(79,207,247,.45);background:#0a3342;color:#d9f8ff}
+        .tr12-dspSliders{padding:5px 11px 12px;display:grid;grid-template-columns:repeat(5,1fr);gap:9px}.tr12-dspSliders label{display:grid;gap:5px}.tr12-dspSliders label>span{display:flex;justify-content:space-between;color:#617b85;font-size:6px;font-weight:1000}.tr12-dspSliders b{color:#a6dbe8;font-size:7px}.tr12-dspSliders input{width:100%;accent-color:#53d5f6}
+        .tr12-saveBack{position:fixed;inset:0;z-index:5000;padding:20px;display:grid;place-items:center;background:rgba(0,4,7,.88);backdrop-filter:blur(10px)}.tr12-saveDialog{width:min(560px,100%);overflow:hidden;border:1px solid rgba(88,199,237,.3);border-radius:16px;background:linear-gradient(180deg,#0b202a,#050d12);box-shadow:0 30px 80px rgba(0,0,0,.65)}.tr12-saveDialog header{padding:16px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(82,157,184,.12)}.tr12-saveDialog h3{margin:4px 0 0;font-size:18px}.tr12-saveDialog header>button{width:34px;height:34px;border:1px solid rgba(82,157,184,.16);border-radius:8px;background:#071219;color:#d7e9ef;font-size:19px}.tr12-saveName{padding:14px 18px;display:grid;gap:6px}.tr12-saveName span{font-size:7px;font-weight:1000;letter-spacing:.12em;color:#617b85}.tr12-saveName input{height:40px;padding:0 11px;border:1px solid rgba(76,164,195,.18);border-radius:8px;background:#06131a;color:#e9f7fb;outline:none}.tr12-saveName input:focus{border-color:rgba(73,210,251,.5)}
+        .tr12-saveSlots{padding:0 18px;display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.tr12-saveSlots button{min-height:56px;padding:8px;display:grid;gap:3px;text-align:left;border:1px solid rgba(75,151,178,.14);border-radius:9px;background:#07151c;color:#bcd2da}.tr12-saveSlots button.is-active{border-color:rgba(74,211,251,.52);background:#0a3040}.tr12-saveSlots b{font-size:8px}.tr12-saveSlots small{color:#6f8993;font-size:7px}.tr12-saveIncludes{margin:13px 18px;padding:10px;border:1px solid rgba(76,151,178,.1);border-radius:8px;background:#061219;color:#718a94;font-size:8px;line-height:1.5}.tr12-saveDialog footer{padding:13px 18px;display:flex;justify-content:flex-end;gap:7px;border-top:1px solid rgba(79,151,178,.1)}.tr12-saveDialog footer button{height:36px;padding:0 12px;border:1px solid rgba(76,159,188,.17);border-radius:8px;background:#07141b;color:#c8dde5;font-size:8px;font-weight:1000}.tr12-saveDialog footer button.is-primary{border-color:rgba(74,207,248,.46);background:#0a3443;color:#dff9ff}
+        @media(max-width:850px){.tr12-playerTop{align-items:flex-start}.tr12-playerTopActions{flex-wrap:wrap;justify-content:flex-end}.tr12-rtaReadouts span:nth-child(2){display:none}.tr12-controlDeck{grid-template-columns:70px 1fr 70px}.tr12-transport{gap:4px}.tr12-transport button,.tr12-preference button{width:34px;height:34px}.tr12-transport button.is-primary{width:44px;height:44px}.tr12-presetRail{grid-template-columns:auto 1fr}.tr12-profileRail{grid-column:1/-1}.tr12-eqBands{overflow-x:auto;grid-template-columns:repeat(31,18px);padding-bottom:4px}.tr12-dspSliders{grid-template-columns:1fr 1fr}}
+        @media(max-width:600px){.tr12-playerTop{display:block}.tr12-playerTopActions{margin-top:9px;display:grid;grid-template-columns:1fr 1fr}.tr12-queue{grid-column:1/-1}.tr12-queue select{width:100%}.tr12-trackText strong{max-width:250px}.tr12-rtaTop{align-items:flex-start}.tr12-rtaReadouts span:nth-child(2),.tr12-rtaReadouts span:nth-child(3){display:none}.tr12-rtaBody{grid-template-columns:28px minmax(0,1fr);min-height:142px}.tr12-spectrumWrap{padding-left:7px;padding-right:7px}.tr12-spectrum{height:100px;gap:2px}.tr12-rtaLabels span:nth-child(even){display:none}.tr12-rtaLabels{grid-template-columns:repeat(5,1fr)}.tr12-controlDeck{grid-template-columns:1fr}.tr12-sideControl{display:none}.tr12-preference{justify-content:center}.tr12-transport{order:-1}.tr12-presetRail{grid-template-columns:1fr}.tr12-profileRail{grid-column:auto}.tr12-preampRow{grid-template-columns:1fr}.tr12-dspHeader{display:block}.tr12-dspStatus{margin-top:10px;flex-wrap:wrap}.tr12-modeButtons{display:grid;grid-template-columns:1fr 1fr 1fr}.tr12-saveSlots{grid-template-columns:1fr}}
       `}</style>
     </section>
   );
