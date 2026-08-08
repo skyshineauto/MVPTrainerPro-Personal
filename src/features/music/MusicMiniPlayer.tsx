@@ -17,7 +17,6 @@ import {
   applyMusicEqPreset,
   cycleMusicRepeat,
   formatMusicTime,
-  getMusicVisualizerLevels,
   loadMusicLibrary,
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
@@ -58,11 +57,6 @@ type IconName =
   | "repeat"
   | "equalizer"
   | "music";
-
-type SpectrumTelemetry = {
-  bass: number;
-  peak: number;
-};
 
 type SavedDspProfile = {
   name: string;
@@ -192,247 +186,66 @@ function PlayerIcon({ name }: { name: IconName }) {
   );
 }
 
-function Spectrum({
+function PlaybackSignal({
   playing,
-  onTelemetry,
+  currentTime,
+  duration,
+  trackIndex,
+  trackCount,
 }: {
   playing: boolean;
-  onTelemetry: (telemetry: SpectrumTelemetry) => void;
+  currentTime: number;
+  duration: number;
+  trackIndex: number;
+  trackCount: number;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const peaksRef = useRef<number[]>([]);
-  const peakHoldRef = useRef<number[]>([]);
-  const lastTelemetryRef = useRef(0);
-  const lastFrameRef = useRef(0);
+  const progress =
+    duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
 
-  useEffect(() => {
-    let frame = 0;
-    let disposed = false;
-    const targetFrameMs = 1000 / 24;
-
-    const paint = (timestamp: number, forceStatic = false) => {
-      if (disposed) return;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const ratio = Math.min(1.6, window.devicePixelRatio || 1);
-      const width = Math.max(1, Math.round(rect.width * ratio));
-      const height = Math.max(1, Math.round(rect.height * ratio));
-
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-
-      const context = canvas.getContext("2d", { alpha: false });
-      if (!context) return;
-
-      context.clearRect(0, 0, width, height);
-
-      const horizontalPadding = 7 * ratio;
-      const topPadding = 4 * ratio;
-      const bottomPadding = 6 * ratio;
-      const usableWidth = Math.max(1, width - horizontalPadding * 2);
-      const usableHeight = Math.max(1, height - topPadding - bottomPadding);
-
-      const panelGradient = context.createLinearGradient(0, 0, 0, height);
-      panelGradient.addColorStop(0, "rgba(2, 17, 27, .34)");
-      panelGradient.addColorStop(1, "rgba(0, 2, 5, .92)");
-      context.fillStyle = panelGradient;
-      context.fillRect(0, 0, width, height);
-
-      context.save();
-      context.strokeStyle = "rgba(126, 204, 239, .075)";
-      context.lineWidth = Math.max(1, ratio * 0.55);
-      context.setLineDash([3 * ratio, 5 * ratio]);
-      for (let line = 1; line <= 4; line += 1) {
-        const y = topPadding + (usableHeight / 5) * line;
-        context.beginPath();
-        context.moveTo(horizontalPadding, y);
-        context.lineTo(width - horizontalPadding, y);
-        context.stroke();
-      }
-      context.restore();
-
-      const zoneStops = [0.18, 0.36, 0.57, 0.78];
-      context.save();
-      context.strokeStyle = "rgba(255,255,255,.045)";
-      context.lineWidth = Math.max(1, ratio * 0.45);
-      for (const stop of zoneStops) {
-        const x = horizontalPadding + usableWidth * stop;
-        context.beginPath();
-        context.moveTo(x, topPadding);
-        context.lineTo(x, height - bottomPadding);
-        context.stroke();
-      }
-      context.restore();
-
-      if (forceStatic || !playing || document.visibilityState !== "visible") {
-        peaksRef.current = [];
-        peakHoldRef.current = [];
-        onTelemetry({ bass: 0, peak: 0 });
-        return;
-      }
-
-      const levels = getMusicVisualizerLevels(48);
-
-      if (peaksRef.current.length !== levels.length) {
-        peaksRef.current = Array(levels.length).fill(0);
-        peakHoldRef.current = Array(levels.length).fill(0);
-      }
-
-      const gap = Math.max(1.35 * ratio, usableWidth * 0.0024);
-      const barWidth = Math.max(
-        1.5 * ratio,
-        (usableWidth - gap * (levels.length - 1)) / levels.length
-      );
-
-      let outputPeak = 0;
-      let bassTotal = 0;
-      const bassBands = Math.max(1, Math.floor(levels.length * 0.2));
-
-      levels.forEach((level, index) => {
-        const frequencyPosition = index / Math.max(1, levels.length - 1);
-        const normalized = Math.max(0, level);
-        outputPeak = Math.max(outputPeak, normalized);
-        if (index < bassBands) bassTotal += normalized;
-
-        const barHeight = Math.max(2 * ratio, normalized * usableHeight * 0.94);
-        const x = horizontalPadding + index * (barWidth + gap);
-        const y = height - bottomPadding - barHeight;
-
-        const hue = 32 + frequencyPosition * 171;
-        const saturation = 94 - frequencyPosition * 16;
-        const lightness = 48 + normalized * 18;
-        const barGradient = context.createLinearGradient(0, height, 0, y);
-        barGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, 30%, .76)`);
-        barGradient.addColorStop(0.58, `hsla(${hue}, ${saturation}%, ${lightness}%, .97)`);
-        barGradient.addColorStop(
-          1,
-          `hsla(${Math.min(207, hue + 9)}, 95%, 79%, 1)`
-        );
-
-        context.fillStyle = barGradient;
-        context.shadowColor = `hsla(${hue}, 93%, 61%, ${0.10 + normalized * 0.22})`;
-        context.shadowBlur = normalized > 0.20 ? 4.5 * ratio : 0;
-        context.beginPath();
-        context.roundRect(
-          x,
-          y,
-          barWidth,
-          barHeight,
-          Math.max(1, barWidth * 0.34)
-        );
-        context.fill();
-
-        const previousPeak = peaksRef.current[index] || 0;
-        const nextPeak = Math.max(normalized, previousPeak - 0.018);
-        peaksRef.current[index] = nextPeak;
-
-        const previousHold = peakHoldRef.current[index] || 0;
-        const held =
-          normalized >= previousHold
-            ? normalized
-            : Math.max(0, previousHold - 0.006);
-        peakHoldRef.current[index] = held;
-
-        const peakY =
-          height - bottomPadding - nextPeak * usableHeight * 0.94 - ratio;
-        const holdY =
-          height - bottomPadding - held * usableHeight * 0.94 - 3 * ratio;
-
-        context.shadowBlur = 0;
-        context.fillStyle =
-          frequencyPosition < 0.34
-            ? "rgba(255, 207, 119, .96)"
-            : "rgba(143, 226, 255, .96)";
-        context.fillRect(
-          x,
-          Math.max(topPadding, peakY),
-          barWidth,
-          Math.max(1, ratio)
-        );
-
-        context.fillStyle = "rgba(255,255,255,.78)";
-        context.fillRect(
-          x,
-          Math.max(topPadding, holdY),
-          barWidth,
-          Math.max(1, 0.7 * ratio)
-        );
-      });
-
-      if (timestamp - lastTelemetryRef.current > 250) {
-        lastTelemetryRef.current = timestamp;
-        onTelemetry({
-          bass: bassTotal / bassBands,
-          peak: outputPeak,
-        });
-      }
-    };
-
-    const loop = (timestamp: number) => {
-      if (disposed) return;
-
-      if (!playing || document.visibilityState !== "visible") {
-        paint(timestamp, true);
-        frame = 0;
-        return;
-      }
-
-      if (timestamp - lastFrameRef.current >= targetFrameMs) {
-        lastFrameRef.current = timestamp;
-        paint(timestamp);
-      }
-
-      frame = window.requestAnimationFrame(loop);
-    };
-
-    const startLoop = () => {
-      if (disposed) return;
-
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-        frame = 0;
-      }
-
-      if (!playing || document.visibilityState !== "visible") {
-        paint(performance.now(), true);
-        return;
-      }
-
-      lastFrameRef.current = 0;
-      frame = window.requestAnimationFrame(loop);
-    };
-
-    const onVisibilityChange = () => startLoop();
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    startLoop();
-
-    return () => {
-      disposed = true;
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [onTelemetry, playing]);
+  const bars = [0.48, 0.74, 0.56, 0.86, 0.62, 0.94, 0.68, 0.82, 0.52, 0.78, 0.58, 0.70];
 
   return (
-    <div className="tr-audioSpectrumPanel" aria-label="Live 48-band music spectrum">
-      <div className="tr-audioRtaHead">
-        <span>LIVE RTA • 48 BAND</span>
-        <span>LOG FREQUENCY SCALE</span>
-        <span>PEAK HOLD</span>
+    <div
+      className={`tr-audioSignalPanel ${playing ? "is-live" : "is-idle"}`}
+      aria-label={playing ? "Music playback active" : "Music playback ready"}
+    >
+      <div className="tr-audioSignalHead">
+        <span>
+          <i />
+          {playing ? "PLAYBACK SIGNAL • ACTIVE" : "PLAYBACK SIGNAL • READY"}
+        </span>
+        <span>
+          {trackCount > 0 && trackIndex >= 0
+            ? `TRACK ${String(trackIndex + 1).padStart(2, "0")} / ${String(trackCount).padStart(2, "0")}`
+            : "MVP PERFORMANCE AUDIO"}
+        </span>
       </div>
-      <canvas ref={canvasRef} className="tr-audioSpectrum" />
-      <div className="tr-audioSpectrumScale" aria-hidden>
-        <span>SUB / LOW</span>
-        <span>LOW-MID</span>
-        <span>MID</span>
-        <span>HIGH-MID</span>
-        <span>AIR / HIGH</span>
+
+      <div className="tr-audioSignalField" aria-hidden>
+        <div className="tr-audioSignalBaseline" />
+        <div className="tr-audioSignalBars">
+          {bars.map((height, index) => (
+            <span
+              key={index}
+              style={
+                {
+                  "--signal-height": String(height),
+                  "--signal-index": String(index),
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+        <div
+          className="tr-audioSignalProgress"
+          style={{ transform: `scaleX(${progress})` }}
+        />
+      </div>
+
+      <div className="tr-audioSignalFooter">
+        <span>{playing ? "STREAM LOCKED" : "STANDBY"}</span>
+        <span>31-BAND DSP PATH</span>
+        <span>LOW-POWER VISUAL MODE</span>
       </div>
     </div>
   );
@@ -444,7 +257,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [eqOpen, setEqOpen] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
-  const [telemetry, setTelemetry] = useState<SpectrumTelemetry>({ bass: 0, peak: 0 });
   const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
   const [activeCustomSlot, setActiveCustomSlot] = useState<MusicCustomPresetSlot | null>(
     isCustomSlot(player.eqPreset) ? player.eqPreset : null
@@ -644,12 +456,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     Math.max(0, player.currentTime)
   );
   const queueLabel = player.activePlaylistName || "All Uploaded Songs";
-  const outputState = telemetry.peak > 0.94 ? "PEAK" : telemetry.peak > 0.78 ? "HOT" : "SAFE";
-
-  const deckStyle = {
-    "--tr-bass-energy": String(Math.min(1, Math.max(0, telemetry.bass))),
-    "--tr-output-peak": String(Math.min(1, Math.max(0, telemetry.peak))),
-  } as CSSProperties;
+  const currentTrackIndex = track
+    ? player.tracks.findIndex((item) => item.id === track.id)
+    : -1;
 
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile
@@ -668,7 +477,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${
         player.loading || queueBusy ? "is-busy" : ""
       }`}
-      style={deckStyle}
       aria-label="MVP Trainer music console"
     >
       <div className="tr-audioDeckTop">
@@ -734,16 +542,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       <div className="tr-audioTelemetry">
         <span className={player.playing ? "is-live" : ""}>
-          <i /> {player.playing ? "RTA LIVE" : "RTA READY"}
+          <i /> {player.playing ? "SIGNAL ACTIVE" : "SIGNAL READY"}
         </span>
         <span>EQ {player.eqEnabled ? "ACTIVE" : "BYPASSED"}</span>
-        <span>PEAK HOLD</span>
-        <span className={`tr-audioOutputState is-${outputState.toLowerCase()}`}>
-          OUTPUT {outputState}
-        </span>
+        <span>DSP {player.headphoneMode === "off" ? "STEREO" : "SPATIAL"}</span>
+        <span className="tr-audioOutputState is-safe">OUTPUT READY</span>
       </div>
 
-      <Spectrum playing={player.playing} onTelemetry={setTelemetry} />
+      <PlaybackSignal
+        playing={player.playing}
+        currentTime={currentTime}
+        duration={duration}
+        trackIndex={currentTrackIndex}
+        trackCount={player.tracks.length}
+      />
 
       <div className="tr-audioTimeline">
         <span>{formatMusicTime(currentTime)}</span>
@@ -895,7 +707,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <span>PREAMP</span><i />
             <span>31-BAND EQ</span><i />
             <span>HEADPHONE</span><i />
-            <span>LIMITER / RTA</span><i />
+            <span>LIMITER / OUTPUT</span><i />
             <span>OUTPUT</span>
           </div>
 
@@ -1143,6 +955,159 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       {player.error ? <div className="tr-audioError">{player.error}</div> : null}
 
       <style>{`
+        /* STEP 9 — LOW-POWER PLAYBACK SIGNAL
+           Visual motion is CSS-only. No canvas, no spectrum analyser, no
+           frequency polling. DSP/EQ/headphone processing remains untouched. */
+        .tr-audioDeck--pro7 .tr-audioSignalPanel{
+          position:relative;
+          overflow:hidden;
+          margin:8px 0 6px;
+          border:1px solid rgba(111,194,224,.16);
+          border-top-color:rgba(184,228,244,.24);
+          border-radius:11px;
+          background:
+            linear-gradient(180deg,rgba(5,18,27,.96),rgba(2,8,13,.99)),
+            radial-gradient(circle at 50% 0%,rgba(55,181,228,.08),transparent 54%);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.025),
+            0 8px 22px rgba(0,0,0,.22);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalHead,
+        .tr-audioDeck--pro7 .tr-audioSignalFooter{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:10px;
+          padding:7px 10px;
+          color:rgba(187,215,227,.58);
+          font-size:7px;
+          line-height:1;
+          font-weight:950;
+          letter-spacing:.10em;
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalHead{
+          border-bottom:1px solid rgba(122,192,219,.08);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalHead>span:first-child{
+          display:inline-flex;
+          align-items:center;
+          gap:7px;
+          color:#d9f4fc;
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalHead i{
+          width:6px;
+          height:6px;
+          border-radius:50%;
+          background:rgba(124,156,169,.55);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalHead i{
+          background:#50d3fb;
+          box-shadow:0 0 10px rgba(80,211,251,.44);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalField{
+          position:relative;
+          height:78px;
+          display:flex;
+          align-items:center;
+          padding:8px 12px 9px;
+          background:
+            repeating-linear-gradient(
+              90deg,
+              transparent 0,
+              transparent calc(8.333% - 1px),
+              rgba(115,190,219,.035) calc(8.333% - 1px),
+              rgba(115,190,219,.035) 8.333%
+            );
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalBaseline{
+          position:absolute;
+          left:12px;
+          right:12px;
+          top:50%;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(95,205,244,.22),transparent);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalBars{
+          position:relative;
+          z-index:2;
+          width:100%;
+          height:100%;
+          display:grid;
+          grid-template-columns:repeat(12,1fr);
+          align-items:center;
+          gap:5px;
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalBars span{
+          justify-self:center;
+          width:min(7px,48%);
+          height:70%;
+          border-radius:4px;
+          transform:scaleY(calc(.17 + var(--signal-height) * .30));
+          transform-origin:center;
+          background:
+            linear-gradient(
+              180deg,
+              rgba(139,226,255,.96),
+              rgba(57,184,230,.80) 46%,
+              rgba(255,168,59,.64)
+            );
+          opacity:.46;
+          will-change:auto;
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalBars span{
+          opacity:.90;
+          animation:trPlaybackPulse calc(1.25s + (var(--signal-index) * .055s)) ease-in-out infinite alternate;
+          animation-delay:calc(var(--signal-index) * -0.073s);
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalProgress{
+          position:absolute;
+          z-index:3;
+          left:12px;
+          right:12px;
+          bottom:6px;
+          height:2px;
+          border-radius:2px;
+          transform-origin:left center;
+          background:linear-gradient(90deg,#ff9e32,#5fd5fb 66%,#a8edff);
+          box-shadow:0 0 8px rgba(70,198,240,.18);
+          transition:transform .28s linear;
+        }
+
+        .tr-audioDeck--pro7 .tr-audioSignalFooter{
+          border-top:1px solid rgba(122,192,219,.07);
+          color:rgba(163,195,208,.47);
+        }
+
+        @keyframes trPlaybackPulse{
+          0%{transform:scaleY(calc(.16 + var(--signal-height) * .22))}
+          100%{transform:scaleY(calc(.38 + var(--signal-height) * .62))}
+        }
+
+        @media(max-width:700px){
+          .tr-audioDeck--pro7 .tr-audioSignalField{height:62px}
+          .tr-audioDeck--pro7 .tr-audioSignalBars{gap:3px}
+          .tr-audioDeck--pro7 .tr-audioSignalBars span{width:min(6px,52%)}
+          .tr-audioDeck--pro7 .tr-audioSignalFooter span:nth-child(2){display:none}
+        }
+
+        @media(prefers-reduced-motion:reduce){
+          .tr-audioDeck--pro7 .tr-audioSignalPanel.is-live .tr-audioSignalBars span{
+            animation:none!important;
+            transform:scaleY(calc(.22 + var(--signal-height) * .34));
+          }
+        }
+
         .tr-audioDeck--pro7 .tr-audioArtwork{
           background:linear-gradient(180deg,#111a21,#070b0f)!important;
           border-color:rgba(132,196,221,.20)!important;
