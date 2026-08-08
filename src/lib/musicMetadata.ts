@@ -43,6 +43,16 @@ type ItunesResponse = {
 
 type SearchAttribute = "songTerm" | "artistTerm" | null;
 
+export type MusicLookupRetryInfo = {
+  status: number;
+  attempt: number;
+  delayMs: number;
+};
+
+type LookupOptions = {
+  onRetry?: (info: MusicLookupRetryInfo) => void;
+};
+
 type LookupSignals = {
   primaryTitle: string;
   titleVariants: string[];
@@ -54,6 +64,29 @@ const LOOKUP_CACHE = new Map<
   string,
   Omit<MusicMetadataCandidate, "confidence">[]
 >();
+
+const LOOKUP_MIN_GAP_MS = 700;
+const LOOKUP_RETRY_DELAYS_MS = [1400, 2800, 4800];
+let lastLookupRequestAt = 0;
+let lookupGate: Promise<void> = Promise.resolve();
+
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function enterLookupGate() {
+  const previousGate = lookupGate;
+  let release!: () => void;
+  lookupGate = new Promise<void>((resolve) => { release = resolve; });
+  await previousGate;
+
+  const elapsed = Date.now() - lastLookupRequestAt;
+  if (elapsed < LOOKUP_MIN_GAP_MS) {
+    await wait(LOOKUP_MIN_GAP_MS - elapsed);
+  }
+  lastLookupRequestAt = Date.now();
+  release();
+}
 
 function normalize(value: string) {
   return value
@@ -378,7 +411,8 @@ function scoreCandidate(
 async function searchItunes(
   term: string,
   attribute: SearchAttribute = null,
-  limit = 50
+  limit = 40,
+  options?: LookupOptions
 ) {
   const cleanTerm = term.replace(/\s+/g, " ").trim();
   const cacheKey = `${attribute || "all"}:${normalize(cleanTerm)}:${limit}`;
@@ -393,42 +427,96 @@ async function searchItunes(
 
   if (attribute) params.set("attribute", attribute);
 
-  const response = await fetch(
-    `https://itunes.apple.com/search?${params.toString()}`,
-    { mode: "cors", cache: "no-store" }
-  );
+  let lastStatus = 0;
 
-  if (!response.ok) {
-    throw new Error(`Music lookup failed (${response.status}).`);
+  for (let attempt = 0; attempt <= LOOKUP_RETRY_DELAYS_MS.length; attempt += 1) {
+    await enterLookupGate();
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://itunes.apple.com/search?${params.toString()}`,
+        { mode: "cors", cache: "no-store" }
+      );
+    } catch {
+      if (attempt >= LOOKUP_RETRY_DELAYS_MS.length) {
+        throw new Error("Music lookup service could not be reached. Try again in a moment.");
+      }
+
+      const delayMs = LOOKUP_RETRY_DELAYS_MS[attempt];
+      options?.onRetry?.({ status: 0, attempt: attempt + 1, delayMs });
+      await wait(delayMs);
+      continue;
+    }
+
+    lastStatus = response.status;
+
+    if (response.ok) {
+      const payload = (await response.json()) as ItunesResponse;
+
+      const rows = (payload.results || [])
+        .filter((item) => item.trackName && item.artistName)
+        .map((item) => ({
+          sourceId: String(
+            item.trackId ||
+              `${item.artistName}-${item.trackName}-${item.collectionName || ""}`
+          ),
+          title: item.trackName || "",
+          artist: item.artistName || "",
+          album: item.collectionName || "",
+          releaseYear: yearFromDate(item.releaseDate),
+          genre: item.primaryGenreName || null,
+          artworkUrl: artwork600(item.artworkUrl100),
+          durationSeconds: item.trackTimeMillis
+            ? Math.round(item.trackTimeMillis / 1000)
+            : null,
+          source: "itunes" as const,
+        }));
+
+      LOOKUP_CACHE.set(cacheKey, rows);
+      return rows;
+    }
+
+    const retryable =
+      response.status === 403 ||
+      response.status === 408 ||
+      response.status === 429 ||
+      response.status >= 500;
+
+    if (!retryable || attempt >= LOOKUP_RETRY_DELAYS_MS.length) break;
+
+    const delayMs = LOOKUP_RETRY_DELAYS_MS[attempt];
+    options?.onRetry?.({
+      status: response.status,
+      attempt: attempt + 1,
+      delayMs,
+    });
+    await wait(delayMs);
   }
 
-  const payload = (await response.json()) as ItunesResponse;
+  if (lastStatus === 403 || lastStatus === 429) {
+    throw new Error("Music lookup service is temporarily busy. Wait a moment and try again.");
+  }
 
-  const rows = (payload.results || [])
-    .filter((item) => item.trackName && item.artistName)
-    .map((item) => ({
-      sourceId: String(
-        item.trackId ||
-          `${item.artistName}-${item.trackName}-${item.collectionName || ""}`
-      ),
-      title: item.trackName || "",
-      artist: item.artistName || "",
-      album: item.collectionName || "",
-      releaseYear: yearFromDate(item.releaseDate),
-      genre: item.primaryGenreName || null,
-      artworkUrl: artwork600(item.artworkUrl100),
-      durationSeconds: item.trackTimeMillis
-        ? Math.round(item.trackTimeMillis / 1000)
-        : null,
-      source: "itunes" as const,
-    }));
-
-  LOOKUP_CACHE.set(cacheKey, rows);
-  return rows;
+  throw new Error(
+    lastStatus
+      ? `Music lookup service could not complete the request (${lastStatus}).`
+      : "Music lookup service could not complete the request."
+  );
 }
 
-export async function findMusicMetadataCandidates(track: MusicTrack) {
+export async function findMusicMetadataCandidates(
+  track: MusicTrack,
+  options?: LookupOptions
+) {
   const signals = buildLookupSignals(track);
+  const combined = new Map<string, MusicMetadataCandidate>();
+
+  const primaryTitle = signals.primaryTitle;
+  const bestArtist = signals.knownArtist || signals.artistVariants[0] || null;
+  const secondaryTitle = signals.titleVariants.find(
+    (title) => normalize(title) !== normalize(primaryTitle)
+  );
 
   const searchPlan: Array<{
     term: string;
@@ -436,64 +524,28 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
     limit: number;
   }> = [];
 
-  const addSearch = (
-    term: string,
-    attribute: SearchAttribute = null,
-    limit = 50
-  ) => {
+  const addSearch = (term: string, attribute: SearchAttribute = null, limit = 40) => {
     const clean = term.replace(/\s+/g, " ").trim();
     if (!clean) return;
-
     const key = `${attribute || "all"}:${normalize(clean)}`;
-    if (
-      searchPlan.some(
-        (item) =>
-          `${item.attribute || "all"}:${normalize(item.term)}` === key
-      )
-    ) {
-      return;
-    }
-
+    if (searchPlan.some((item) => `${item.attribute || "all"}:${normalize(item.term)}` === key)) return;
     searchPlan.push({ term: clean, attribute, limit });
   };
 
-  // Search title as a song first. iTunes' songTerm index is far less likely
-  // to return a popular but unrelated song by the same artist.
-  for (const title of signals.titleVariants.slice(0, 4)) {
-    addSearch(title, "songTerm", 60);
+  // Keep automated enrichment deliberately light on the catalog. A precise
+  // artist + title query is first, followed by the song-title index. One broad
+  // fallback is used only if needed. This prevents library scans from creating
+  // the request burst that previously triggered 403 responses.
+  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 40);
+  addSearch(primaryTitle, "songTerm", 40);
+  if (secondaryTitle) {
+    if (bestArtist) addSearch(`${bestArtist} ${secondaryTitle}`, null, 30);
+    else addSearch(secondaryTitle, "songTerm", 30);
+  } else {
+    addSearch(primaryTitle, null, 30);
   }
 
-  // Artist + title is excellent when either embedded tags or filename parsing
-  // supplied an artist.
-  for (const artist of signals.artistVariants.slice(0, 2)) {
-    for (const title of signals.titleVariants.slice(0, 3)) {
-      addSearch(`${artist} ${title}`, null, 60);
-    }
-  }
-
-  // Broad title search catches punctuation, catalog naming, and alternate
-  // release formatting that songTerm occasionally misses.
-  for (const title of signals.titleVariants.slice(0, 3)) {
-    addSearch(title, null, 60);
-  }
-
-  // Last-resort artist query is intentionally last because artist-only results
-  // used to crowd out the correct title.
-  if (signals.knownArtist) {
-    addSearch(signals.knownArtist, "artistTerm", 35);
-  }
-
-  const combined = new Map<string, MusicMetadataCandidate>();
-
-  // Keep the request count bounded even when a messy filename generated many
-  // useful variants.
-  for (const request of searchPlan.slice(0, 10)) {
-    const rows = await searchItunes(
-      request.term,
-      request.attribute,
-      request.limit
-    );
-
+  const addRows = (rows: Omit<MusicMetadataCandidate, "confidence">[]) => {
     for (const row of rows) {
       const scored: MusicMetadataCandidate = {
         ...row,
@@ -509,48 +561,53 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
         combined.set(dedupeKey, scored);
       }
     }
+  };
+
+  for (const request of searchPlan.slice(0, 3)) {
+    addRows(
+      await searchItunes(
+        request.term,
+        request.attribute,
+        request.limit,
+        options
+      )
+    );
+
+    const perfect = [...combined.values()].some((candidate) =>
+      exactAgainst(signals.titleVariants, candidate.title) &&
+      signals.artistVariants.length > 0 &&
+      exactAgainst(signals.artistVariants, candidate.artist) &&
+      candidate.confidence >= 0.985
+    );
+
+    if (perfect) break;
   }
 
-  const ranked = [...combined.values()]
-    // Keep the review list focused on the actual song. Artist-only searches are
-    // useful as a last resort, but they must never flood the panel with unrelated
-    // songs from the same artist.
-    .filter((candidate) => {
-      const titleSimilarity = bestTextScore(
-        signals.titleVariants,
-        candidate.title
-      );
-      const titleExact = exactAgainst(
-        signals.titleVariants,
-        candidate.title
-      );
+  let filtered = [...combined.values()].filter((candidate) => {
+    const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
+    const titleExact = exactAgainst(signals.titleVariants, candidate.title);
+    if (titleExact) return true;
 
-      if (titleExact) return true;
+    if (signals.artistVariants.length) {
+      const artistSimilarity = bestTextScore(signals.artistVariants, candidate.artist);
+      return (titleSimilarity >= 0.72 && artistSimilarity >= 0.78) || titleSimilarity >= 0.88;
+    }
 
-      if (signals.artistVariants.length) {
-        const artistSimilarity = bestTextScore(
-          signals.artistVariants,
-          candidate.artist
-        );
+    return titleSimilarity >= 0.72;
+  });
 
-        return (
-          titleSimilarity >= 0.62 ||
-          (titleSimilarity >= 0.52 && artistSimilarity >= 0.92)
-        );
-      }
+  // Once the catalog contains the exact requested title, do not clutter the
+  // review window with other songs. Keep release/version variants of that exact
+  // title so album artwork and recording duration can still be compared.
+  const exactTitleMatches = filtered.filter((candidate) =>
+    exactAgainst(signals.titleVariants, candidate.title)
+  );
+  if (exactTitleMatches.length) filtered = exactTitleMatches;
 
-      return titleSimilarity >= 0.58;
-    })
+  return filtered
     .sort((left, right) => {
-      const leftTitleExact = exactAgainst(
-        signals.titleVariants,
-        left.title
-      );
-      const rightTitleExact = exactAgainst(
-        signals.titleVariants,
-        right.title
-      );
-
+      const leftTitleExact = exactAgainst(signals.titleVariants, left.title);
+      const rightTitleExact = exactAgainst(signals.titleVariants, right.title);
       const leftArtistExact = signals.artistVariants.length
         ? exactAgainst(signals.artistVariants, left.artist)
         : false;
@@ -560,27 +617,16 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
 
       const leftPerfect = leftTitleExact && leftArtistExact;
       const rightPerfect = rightTitleExact && rightArtistExact;
-
       if (leftPerfect !== rightPerfect) return leftPerfect ? -1 : 1;
       if (leftTitleExact !== rightTitleExact) return leftTitleExact ? -1 : 1;
-
-      if (right.confidence !== left.confidence) {
-        return right.confidence - left.confidence;
-      }
+      if (right.confidence !== left.confidence) return right.confidence - left.confidence;
 
       const trackDuration = track.duration_seconds || 0;
-      const leftDifference = Math.abs(
-        trackDuration - (left.durationSeconds || trackDuration)
-      );
-      const rightDifference = Math.abs(
-        trackDuration - (right.durationSeconds || trackDuration)
-      );
+      const leftDifference = Math.abs(trackDuration - (left.durationSeconds || trackDuration));
+      const rightDifference = Math.abs(trackDuration - (right.durationSeconds || trackDuration));
       return leftDifference - rightDifference;
-    });
-
-  // Twelve review choices is still compact in the scrollable result panel,
-  // but gives obscure/older recordings a much better chance of appearing.
-  return ranked.slice(0, 12);
+    })
+    .slice(0, 10);
 }
 
 export function musicMatchTier(confidence: number) {
@@ -635,6 +681,7 @@ export async function enrichMusicTrack(
   options?: {
     artworkOnly?: boolean;
     autoApplyThreshold?: number;
+    onLookupRetry?: (info: MusicLookupRetryInfo) => void;
   }
 ): Promise<MusicEnrichmentResult> {
   // Existing artwork is locked during automatic enrichment. The only code path
@@ -649,7 +696,9 @@ export async function enrichMusicTrack(
     };
   }
 
-  const candidates = await findMusicMetadataCandidates(track);
+  const candidates = await findMusicMetadataCandidates(track, {
+    onRetry: options?.onLookupRetry,
+  });
   const candidate = candidates[0] || null;
   const threshold = options?.autoApplyThreshold ?? 0.98;
 
@@ -730,7 +779,7 @@ export async function enrichMusicTrack(
   };
 }
 
-export async function delayMusicLookup(milliseconds = 225) {
+export async function delayMusicLookup(milliseconds = 450) {
   await new Promise<void>((resolve) =>
     window.setTimeout(resolve, milliseconds)
   );
