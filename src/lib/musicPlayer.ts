@@ -362,7 +362,7 @@ let normalizerNode: DynamicsCompressorNode | null = null;
 let limiterNode: DynamicsCompressorNode | null = null;
 let musicGain: GainNode | null = null;
 let analyserNode: AnalyserNode | null = null;
-let rtaBuffer: Uint8Array | null = null;
+let rtaBuffer: Uint8Array<ArrayBuffer> | null = null;
 let rtaEnvelope = Array(10).fill(0) as number[];
 let headphoneBassShelf: BiquadFilterNode | null = null;
 let headphoneSplitter: ChannelSplitterNode | null = null;
@@ -1191,7 +1191,7 @@ function connectMusicGraph() {
     analyserNode = context.createAnalyser();
     analyserNode.fftSize = 1024;
     analyserNode.smoothingTimeConstant = 0.66;
-    rtaBuffer = new Uint8Array(analyserNode.frequencyBinCount);
+    rtaBuffer = new Uint8Array(new ArrayBuffer(analyserNode.frequencyBinCount));
     musicGain = context.createGain();
     musicGain.gain.value = 1;
 
