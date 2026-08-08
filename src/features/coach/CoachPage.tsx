@@ -2160,6 +2160,466 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           .co-nutritionGrid{grid-template-columns:1fr}.co-nutritionAdvice{grid-column:auto}.co-historyRow{grid-template-columns:9px 70px 1fr}.co-historyRow>span:last-child{grid-column:3}
           .co-programRow{grid-template-columns:20px 1fr 70px}.co-programRow>button{grid-column:2/-1;justify-self:start}.co-manageFooter{align-items:flex-start;flex-direction:column}.co-bodyFields{grid-template-columns:1fr 1fr}.co-segmentRow.co-four{grid-template-columns:1fr 1fr}
         }
+
+        /* ==========================================================
+           STEP 10B MOBILE RESPONSIVE HARDENING
+           Phone-native Coach reflow. No page-wide overflow, no clipped
+           recommendations, pain values, program review, or tip content.
+           ========================================================== */
+        @media(max-width:680px){
+          .co-page{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+            overflow-x:hidden!important;
+          }
+
+          .co-page > *,
+          .co-surface,
+          .co-section,
+          .co-hero,
+          .co-sectionTitle,
+          .co-sectionTitleText,
+          .co-sectionTitleText > div,
+          .co-briefingGrid,
+          .co-briefCard,
+          .co-nextWorkoutHead,
+          .co-decisionRows,
+          .co-decisionRow,
+          .co-progressionGrid,
+          .co-progressionColumn,
+          .co-signalRail,
+          .co-attentionList,
+          .co-attentionRow,
+          .co-muscleGrid,
+          .co-muscleCard,
+          .co-recoveryStrip,
+          .co-painRows,
+          .co-programReview,
+          .co-reviewIdentity,
+          .co-reviewMetrics,
+          .co-assessment,
+          .co-featuredTip,
+          .co-tipMain,
+          .co-nutritionGrid,
+          .co-historyList,
+          .co-historyRow,
+          .co-currentProgram,
+          .co-programActions,
+          .co-managePanel,
+          .co-builder{
+            min-width:0!important;
+            max-width:100%!important;
+          }
+
+          .co-surface{
+            width:100%!important;
+            overflow:visible!important;
+          }
+
+          .co-sectionTitle{
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            gap:10px!important;
+          }
+
+          .co-sectionTitle h2{
+            font-size:clamp(27px,8vw,36px)!important;
+            line-height:.98!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-sectionTitle p,
+          .co-briefCard p,
+          .co-briefAction,
+          .co-decisionRow > p,
+          .co-progressionColumn > p,
+          .co-attentionRow p,
+          .co-muscleCard p,
+          .co-assessment p,
+          .co-tipMain > p,
+          .co-tipWhy strong,
+          .co-tipAction strong,
+          .co-nutritionAdvice strong,
+          .co-historyRow > span:last-child{
+            max-width:100%!important;
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:anywhere!important;
+            word-break:normal!important;
+          }
+
+          .co-sectionRight{
+            width:100%!important;
+            justify-content:flex-start!important;
+          }
+
+          .co-hero{
+            width:100%!important;
+            grid-template-columns:1fr!important;
+          }
+
+          .co-heroStatus{
+            width:100%!important;
+            min-width:0!important;
+          }
+
+          .co-briefingGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .co-briefCard,
+          .co-briefCard.is-lead{
+            grid-column:auto!important;
+            min-height:0!important;
+            padding-bottom:46px!important;
+          }
+
+          .co-nextWorkoutHead{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            gap:9px!important;
+          }
+
+          .co-nextWorkoutHead .co-primaryAction{
+            width:100%!important;
+          }
+
+          /* Exercise coaching decision rows become a compact phone matrix. */
+          .co-decisionRow{
+            width:100%!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            gap:9px 10px!important;
+            padding:12px!important;
+          }
+
+          .co-decisionIdentity{
+            grid-column:1/-1!important;
+          }
+
+          .co-decisionIdentity strong{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-decisionLoad{
+            min-width:0!important;
+          }
+
+          .co-decisionState{
+            min-width:0!important;
+            justify-self:start!important;
+          }
+
+          .co-decisionRow > p{
+            grid-column:1/-1!important;
+            margin-top:2px!important;
+          }
+
+          .co-decisionRow > button{
+            grid-column:1/-1!important;
+            grid-row:auto!important;
+            width:100%!important;
+            min-height:36px!important;
+            justify-self:stretch!important;
+            border:1px solid rgba(81,207,245,.18)!important;
+            border-radius:8px!important;
+            background:rgba(14,54,70,.12)!important;
+          }
+
+          .co-progressionGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .co-progressionColumn > button strong,
+          .co-progressionColumn > button small{
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-signalRail{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .co-signalRail > div{
+            min-width:0!important;
+          }
+
+          .co-signalRail strong{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-muscleGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .co-muscleCard{
+            min-height:0!important;
+            overflow:hidden!important;
+          }
+
+          .co-muscleCard p{
+            font-size:9px!important;
+            line-height:1.48!important;
+          }
+
+          .co-recoveryStrip{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .co-recoveryStrip > div{
+            min-width:0!important;
+          }
+
+          .co-recoveryStrip > div:nth-child(3){
+            border-left:0!important;
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .co-recoveryStrip > div:nth-child(4){
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          /* Pain rows show identity first, then Current / 14D, then View. */
+          .co-painRows > button{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            gap:8px 12px!important;
+            padding:12px 10px!important;
+          }
+
+          .co-painRows > button > span:first-child{
+            grid-column:1/-1!important;
+            min-width:0!important;
+            padding-bottom:8px!important;
+            border-bottom:1px solid rgba(128,192,216,.07)!important;
+          }
+
+          .co-painRows > button > span{
+            min-width:0!important;
+          }
+
+          .co-painRows > button > span strong,
+          .co-painRows > button > span small{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-painRows > button > b{
+            grid-column:1/-1!important;
+            width:100%!important;
+            min-height:34px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:flex-start!important;
+            margin-top:2px!important;
+            padding-top:8px!important;
+            border-top:1px solid rgba(128,192,216,.07)!important;
+            text-align:left!important;
+          }
+
+          .co-programReview{
+            grid-template-columns:1fr!important;
+          }
+
+          .co-reviewIdentity,
+          .co-reviewOverall,
+          .co-reviewMetrics,
+          .co-assessment{
+            grid-column:auto!important;
+            width:100%!important;
+            min-width:0!important;
+          }
+
+          .co-reviewIdentity strong,
+          .co-reviewIdentity small{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-reviewMetrics{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .co-reviewMetrics > div{
+            min-width:0!important;
+          }
+
+          .co-reviewMetrics > div:nth-child(3){
+            border-left:0!important;
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .co-reviewMetrics > div:nth-child(4){
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .co-assessment{
+            overflow:hidden!important;
+          }
+
+          /* Category rail is the only intentionally horizontal region. */
+          .co-tipTabs{
+            width:100%!important;
+            max-width:100%!important;
+            overflow-x:auto!important;
+            overflow-y:hidden!important;
+            overscroll-behavior-inline:contain;
+            scrollbar-width:none;
+            gap:18px!important;
+            padding-bottom:10px!important;
+          }
+
+          .co-tipTabs::-webkit-scrollbar{display:none}
+
+          .co-tipTabs button{
+            flex:0 0 auto!important;
+            white-space:nowrap!important;
+          }
+
+          .co-featuredTip{
+            width:100%!important;
+            grid-template-columns:1fr!important;
+            gap:10px!important;
+            padding:14px 13px!important;
+            overflow:hidden!important;
+          }
+
+          .co-tipIcon{
+            display:none!important;
+          }
+
+          .co-tipMain{
+            width:100%!important;
+            min-width:0!important;
+          }
+
+          .co-tipMeta{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-tipMain h3{
+            max-width:100%!important;
+            margin-top:8px!important;
+            font-size:clamp(26px,8vw,36px)!important;
+            line-height:1.03!important;
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-nextTip{
+            grid-column:auto!important;
+            justify-self:start!important;
+            width:auto!important;
+            max-width:100%!important;
+          }
+
+          .co-nutritionGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .co-nutritionTarget,
+          .co-nutritionAdvice,
+          .co-nutritionGrid > button{
+            width:100%!important;
+            min-width:0!important;
+            grid-column:auto!important;
+          }
+
+          .co-nutritionGrid > button{
+            min-height:40px!important;
+          }
+
+          .co-historyRow{
+            width:100%!important;
+            grid-template-columns:10px minmax(0,1fr)!important;
+            gap:7px 10px!important;
+            padding:11px 9px!important;
+          }
+
+          .co-historyRow time,
+          .co-historyRow strong,
+          .co-historyRow > span:last-child{
+            grid-column:2!important;
+            min-width:0!important;
+          }
+
+          .co-historyRow time{
+            grid-row:1!important;
+          }
+
+          .co-historyRow strong{
+            grid-row:2!important;
+          }
+
+          .co-historyRow > span:last-child{
+            grid-row:3!important;
+          }
+
+          .co-currentProgram{
+            width:100%!important;
+            grid-template-columns:42px minmax(0,1fr)!important;
+          }
+
+          .co-currentProgram > div:nth-child(2) strong,
+          .co-currentProgram > div:nth-child(2) small{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .co-programActions{
+            grid-column:1/-1!important;
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            justify-content:stretch!important;
+          }
+
+          .co-programActions button{
+            width:100%!important;
+          }
+
+          .co-programRow{
+            width:100%!important;
+            grid-template-columns:20px minmax(0,1fr)!important;
+          }
+
+          .co-programRow > b,
+          .co-programRow > button{
+            grid-column:2!important;
+            justify-self:start!important;
+          }
+
+          .co-bodyFields,
+          .co-segmentRow.co-four{
+            grid-template-columns:1fr!important;
+          }
+        }
+
+        @media(max-width:430px){
+          .co-signalRail,
+          .co-recoveryStrip,
+          .co-reviewMetrics{
+            grid-template-columns:1fr 1fr!important;
+          }
+
+          .co-decisionRow{
+            grid-template-columns:1fr 1fr!important;
+          }
+
+          .co-sectionTitle h2{
+            font-size:clamp(26px,9vw,34px)!important;
+          }
+        }
+
         @media(prefers-reduced-motion:reduce){.co-page *{scroll-behavior:auto!important;transition:none!important}}
       `}</style>
     </div>
