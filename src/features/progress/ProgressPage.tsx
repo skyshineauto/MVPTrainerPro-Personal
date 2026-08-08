@@ -2085,7 +2085,7 @@ export function ProgressPage() {
           </div>
         ) : null}
 
-        <div className="pr-tableWrap">
+        <div className="pr-tableWrap pr-muscleTableWrap">
           <table className="pr-table">
             <thead>
               <tr>
@@ -2333,7 +2333,7 @@ export function ProgressPage() {
           </div>
         </div>
 
-        <div className="pr-tableWrap pr-scrollTable">
+        <div className="pr-tableWrap pr-scrollTable pr-painTableWrap">
           <table className="pr-table">
             <thead>
               <tr>
@@ -2633,6 +2633,408 @@ export function ProgressPage() {
         @media(max-width:1050px){.pr-performanceGrid,.pr-trendIssueGrid{grid-template-columns:1fr}.pr-recoveryGrid{grid-template-columns:1fr 1.4fr}.pr-recoveryState{grid-column:1/-1}.pr-qualityGrid.pr-six,.pr-exerciseStats.pr-six{grid-template-columns:repeat(3,1fr)}.pr-historyRow{grid-template-columns:3px minmax(190px,1fr) minmax(340px,1.4fr) 64px}}
         @media(max-width:780px){.pr-hero{display:grid;padding:13px}.pr-section{padding:13px}.pr-heroControls{display:grid;grid-template-columns:1fr 1fr}.pr-dropdown{min-width:0}.pr-sectionTitle{display:grid}.pr-coachRow{grid-template-columns:36px 1fr}.pr-coachAction{grid-column:2}.pr-majorRail.pr-four{grid-template-columns:repeat(2,1fr)}.pr-majorRail.pr-four>div:nth-child(3){border-left:0;border-top:1px solid rgba(132,195,218,.10)}.pr-majorRail.pr-four>div:nth-child(4){border-top:1px solid rgba(132,195,218,.10)}.pr-trendGrid{grid-template-columns:repeat(2,1fr)}.pr-recoveryGrid{grid-template-columns:1fr}.pr-recoveryState{grid-column:auto}.pr-recoveryMetrics.pr-four{grid-template-columns:repeat(2,1fr)}.pr-painHighlights.pr-three{grid-template-columns:1fr}.pr-workoutGrid,.pr-workoutPreview.pr-four{grid-template-columns:repeat(2,1fr)}.pr-historyRow{grid-template-columns:3px 1fr 62px}.pr-historyMetrics{grid-column:2/-1;grid-row:2;padding-top:8px;border-top:1px solid rgba(130,193,216,.08)}.pr-viewButton{grid-column:3;grid-row:1}.pr-modalSummary.pr-four{grid-template-columns:repeat(2,1fr)}}
         @media(max-width:520px){.pr-heroControls{grid-template-columns:1fr}.pr-majorRail.pr-three,.pr-majorRail.pr-four,.pr-minorRail.pr-three,.pr-qualityGrid.pr-six{grid-template-columns:1fr}.pr-majorRail>div+div,.pr-qualityGrid>div+div{border-left:0;border-top:1px solid rgba(132,195,218,.10)}.pr-trendGrid{grid-template-columns:1fr}.pr-trendGrid>div+div{border-left:0!important;border-top:1px solid rgba(131,194,216,.09)}.pr-workoutGrid,.pr-workoutPreview.pr-four{grid-template-columns:1fr}.pr-loadMore{align-items:stretch;flex-direction:column}.pr-loadMore button{width:100%}}
+
+        /* ==========================================================
+           STEP 10B MOBILE RESPONSIVE HARDENING
+           Converts wide analytics tables into readable phone cards,
+           constrains every surface, and keeps history/recovery in view.
+           ========================================================== */
+        @media(max-width:680px){
+          .pr-page{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+            overflow-x:hidden!important;
+          }
+
+          .pr-page > *,
+          .pr-surface,
+          .pr-section,
+          .pr-hero,
+          .pr-sectionTitle,
+          .pr-sectionTitleText,
+          .pr-sectionTitleText > div,
+          .pr-performanceGrid,
+          .pr-trendIssueGrid,
+          .pr-chartPanel,
+          .pr-highlightStack,
+          .pr-exerciseDetail,
+          .pr-recoveryGrid,
+          .pr-recoveryMetrics,
+          .pr-historyList,
+          .pr-historyRow,
+          .pr-historyName,
+          .pr-historyMetrics{
+            min-width:0!important;
+            max-width:100%!important;
+          }
+
+          .pr-surface{
+            width:100%!important;
+            overflow:visible!important;
+          }
+
+          .pr-sectionTitle h2{
+            font-size:clamp(27px,8vw,36px)!important;
+            line-height:.98!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .pr-sectionTitle p,
+          .pr-coachCopy p,
+          .pr-coachAction,
+          .pr-issue p,
+          .pr-highlight p,
+          .pr-trendState span,
+          .pr-exerciseCoach strong{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .pr-sectionRight{
+            width:100%!important;
+            min-width:0!important;
+          }
+
+          .pr-exerciseDropdown{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+
+          .pr-dropdownMenu{
+            max-width:calc(100vw - 54px)!important;
+          }
+
+          .pr-majorRail.pr-three,
+          .pr-majorRail.pr-four{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-majorRail.pr-three > div:nth-child(3){
+            grid-column:1/-1!important;
+          }
+
+          .pr-minorRail.pr-three{
+            grid-template-columns:repeat(3,minmax(0,1fr))!important;
+          }
+
+          .pr-majorRail > div,
+          .pr-minorRail > div{
+            min-width:0!important;
+          }
+
+          .pr-majorRail strong{
+            font-size:clamp(25px,7vw,34px)!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .pr-coachRow{
+            grid-template-columns:36px minmax(0,1fr)!important;
+          }
+
+          .pr-coachAction{
+            grid-column:2!important;
+          }
+
+          .pr-volumeChart{
+            width:100%!important;
+            max-width:100%!important;
+            overflow-x:auto!important;
+            overscroll-behavior-inline:contain;
+          }
+
+          .pr-trendGrid{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-recoveryGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-recoveryMetrics.pr-four{
+            width:100%!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-recoveryMetrics > div{
+            min-width:0!important;
+          }
+
+          .pr-recoveryMetrics > div:nth-child(3){
+            border-left:0!important;
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .pr-recoveryMetrics > div:nth-child(4){
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .pr-recoveryState{
+            width:100%!important;
+            min-width:0!important;
+            justify-content:flex-start!important;
+            text-align:left!important;
+          }
+
+          .pr-painHighlights.pr-three{
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-painHighlights strong{
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          /* Wide desktop analytics become phone-native cards. */
+          .pr-muscleTableWrap,
+          .pr-exerciseTableWrap,
+          .pr-painTableWrap{
+            max-height:none!important;
+            overflow:visible!important;
+            border:0!important;
+          }
+
+          .pr-muscleTableWrap .pr-table,
+          .pr-exerciseTableWrap .pr-table,
+          .pr-painTableWrap .pr-table{
+            display:block!important;
+            width:100%!important;
+            min-width:0!important;
+          }
+
+          .pr-muscleTableWrap .pr-table thead,
+          .pr-exerciseTableWrap .pr-table thead,
+          .pr-painTableWrap .pr-table thead{
+            display:none!important;
+          }
+
+          .pr-muscleTableWrap .pr-table tbody,
+          .pr-exerciseTableWrap .pr-table tbody,
+          .pr-painTableWrap .pr-table tbody{
+            display:grid!important;
+            gap:8px!important;
+            width:100%!important;
+          }
+
+          .pr-muscleTableWrap .pr-table tr,
+          .pr-exerciseTableWrap .pr-table tr,
+          .pr-painTableWrap .pr-table tr{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            min-width:0!important;
+            padding:10px 11px!important;
+            border:1px solid rgba(129,193,216,.10)!important;
+            border-left:3px solid rgba(82,206,244,.42)!important;
+            border-radius:10px!important;
+            background:linear-gradient(180deg,#0c171e,#081116)!important;
+          }
+
+          .pr-exerciseTableWrap .pr-table tr.is-selected{
+            border-left-color:#4ac9f2!important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important;
+            background:linear-gradient(105deg,rgba(31,138,178,.13),#081116 58%)!important;
+          }
+
+          .pr-muscleTableWrap .pr-table td,
+          .pr-exerciseTableWrap .pr-table td,
+          .pr-painTableWrap .pr-table td{
+            min-width:0!important;
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:flex-start!important;
+            justify-content:flex-start!important;
+            gap:4px!important;
+            padding:7px 7px!important;
+            border:0!important;
+            text-align:left!important;
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .pr-muscleTableWrap .pr-table td:first-child,
+          .pr-exerciseTableWrap .pr-table td:first-child,
+          .pr-painTableWrap .pr-table td:first-child{
+            grid-column:1/-1!important;
+            padding-bottom:9px!important;
+            border-bottom:1px solid rgba(130,193,216,.08)!important;
+          }
+
+          .pr-muscleTableWrap .pr-table td::before,
+          .pr-exerciseTableWrap .pr-table td::before,
+          .pr-painTableWrap .pr-table td::before{
+            display:block!important;
+            color:rgba(174,204,217,.56)!important;
+            font-size:7px!important;
+            line-height:1!important;
+            font-weight:1000!important;
+            letter-spacing:.08em!important;
+            text-transform:uppercase!important;
+          }
+
+          .pr-muscleTableWrap .pr-table td:nth-child(1)::before{content:"Muscle Group"}
+          .pr-muscleTableWrap .pr-table td:nth-child(2)::before{content:"Exercises"}
+          .pr-muscleTableWrap .pr-table td:nth-child(3)::before{content:"7D"}
+          .pr-muscleTableWrap .pr-table td:nth-child(4)::before{content:"14D"}
+          .pr-muscleTableWrap .pr-table td:nth-child(5)::before{content:"30D"}
+          .pr-muscleTableWrap .pr-table td:nth-child(6)::before{content:"1Y"}
+
+          .pr-exerciseTableWrap .pr-table td:nth-child(1)::before{content:"Exercise"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(2)::before{content:"Current"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(3)::before{content:"7D"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(4)::before{content:"14D"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(5)::before{content:"30D"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(6)::before{content:"1Y"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(7)::before{content:"Trend"}
+          .pr-exerciseTableWrap .pr-table td:nth-child(7){grid-column:1/-1!important}
+
+          .pr-painTableWrap .pr-table td:nth-child(1)::before{content:"Exercise"}
+          .pr-painTableWrap .pr-table td:nth-child(2)::before{content:"Current"}
+          .pr-painTableWrap .pr-table td:nth-child(3)::before{content:"7D"}
+          .pr-painTableWrap .pr-table td:nth-child(4)::before{content:"14D"}
+          .pr-painTableWrap .pr-table td:nth-child(5)::before{content:"30D"}
+          .pr-painTableWrap .pr-table td:nth-child(6)::before{content:"1Y"}
+
+          .pr-table td strong,
+          .pr-table td b,
+          .pr-table .pr-delta{
+            font-size:13px!important;
+          }
+
+          .pr-exerciseDetailHead{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-trendState{
+            max-width:100%!important;
+          }
+
+          .pr-baseline,
+          .pr-exerciseStats.pr-six{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-baseline > div,
+          .pr-exerciseStats > div{
+            min-width:0!important;
+          }
+
+          .pr-baseline > div:nth-child(3){
+            grid-column:1/-1!important;
+            border-left:0!important;
+            border-top:1px solid rgba(130,193,216,.09)!important;
+          }
+
+          .pr-historyRow{
+            width:100%!important;
+            min-width:0!important;
+            display:grid!important;
+            grid-template-columns:3px minmax(0,1fr)!important;
+            gap:10px!important;
+            padding:12px 12px 12px 0!important;
+          }
+
+          .pr-historyAccent{
+            grid-column:1!important;
+            grid-row:1/4!important;
+          }
+
+          .pr-historyName{
+            grid-column:2!important;
+            grid-row:1!important;
+          }
+
+          .pr-historyName p{
+            max-width:100%!important;
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:anywhere!important;
+            line-height:1.35!important;
+          }
+
+          .pr-historyMetrics{
+            grid-column:2!important;
+            grid-row:2!important;
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            gap:0!important;
+            padding-top:9px!important;
+            border-top:1px solid rgba(130,193,216,.08)!important;
+          }
+
+          .pr-historyMetrics > div{
+            min-width:0!important;
+            padding:8px 8px!important;
+            border-left:0!important;
+          }
+
+          .pr-historyMetrics > div:nth-child(even){
+            border-left:1px solid rgba(130,193,216,.08)!important;
+          }
+
+          .pr-historyMetrics > div:nth-child(n+3){
+            border-top:1px solid rgba(130,193,216,.08)!important;
+          }
+
+          .pr-historyMetrics > div:last-child{
+            grid-column:1/-1!important;
+          }
+
+          .pr-historyMetrics strong{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+
+          .pr-viewButton{
+            grid-column:2!important;
+            grid-row:3!important;
+            width:100%!important;
+            min-height:40px!important;
+            margin-top:2px!important;
+          }
+
+          .pr-workoutStats.pr-four{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-workoutStats > div:nth-child(3){
+            border-left:0!important;
+            border-top:1px solid rgba(130,193,216,.08)!important;
+            padding-top:9px!important;
+          }
+
+          .pr-workoutStats > div:nth-child(4){
+            border-top:1px solid rgba(130,193,216,.08)!important;
+            padding-top:9px!important;
+          }
+        }
+
+        @media(max-width:430px){
+          .pr-majorRail.pr-three,
+          .pr-majorRail.pr-four{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+          }
+
+          .pr-minorRail.pr-three{
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-trendGrid{
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-trendGrid > div + div{
+            border-left:0!important;
+            border-top:1px solid rgba(131,194,216,.09)!important;
+          }
+        }
+
         @media(prefers-reduced-motion:reduce){.pr-page *{transition:none!important}}
       `}</style>
     </div>
