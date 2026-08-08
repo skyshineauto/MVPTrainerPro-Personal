@@ -6,6 +6,8 @@ import {
   listMusicTracks,
   recordMusicTrackPlayed,
   recordMusicTrackSkipped,
+  recordMusicTrackCompleted,
+  setMusicTrackPreference,
   type MusicTrack,
 } from "./musicStorage";
 import {
@@ -38,6 +40,7 @@ export type MusicEqPreset =
   | MusicCustomPresetSlot
   | "custom";
 export type MusicDuckingStrength = "off" | "light" | "standard" | "strong";
+export type MusicDspStatus = "active" | "bypassed" | "recovering" | "unavailable";
 export type MusicHeadphoneMode =
   | "off"
   | "wide"
@@ -150,6 +153,8 @@ export type MusicPlayerState = {
   headphoneCrossfeed: number;
   headphoneCenter: number;
   headphoneBassImpact: number;
+  dspBypass: boolean;
+  dspStatus: MusicDspStatus;
 };
 
 const STORAGE_KEYS = {
@@ -173,6 +178,7 @@ const STORAGE_KEYS = {
   headphoneCrossfeed: "mvp_music_headphone_crossfeed",
   headphoneCenter: "mvp_music_headphone_center",
   headphoneBassImpact: "mvp_music_headphone_bass_impact",
+  dspBypass: "mvp_music_dsp_bypass",
   custom1: "mvp_music_eq_custom_1",
   custom2: "mvp_music_eq_custom_2",
   custom3: "mvp_music_eq_custom_3",
@@ -242,7 +248,7 @@ function readCustomPreset(slot: MusicCustomPresetSlot): EqDefinition | null {
       return {
         label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3",
         gains: parsed.gains.map((value: unknown) => Math.max(-12, Math.min(12, Number(value)))),
-        preamp: Math.max(-12, Math.min(6, Number(parsed.preamp))),
+        preamp: Math.max(-12, Math.min(12, Number(parsed.preamp))),
       };
     }
   } catch {
@@ -295,7 +301,7 @@ function readEqGains(presetName: MusicEqPreset) {
 
 function readPreamp(presetName: MusicEqPreset) {
   const value = Number(readStored(STORAGE_KEYS.preampDb));
-  if (Number.isFinite(value)) return Math.max(-12, Math.min(6, value));
+  if (Number.isFinite(value)) return Math.max(-12, Math.min(12, value));
   if (isCustomPresetSlot(presetName)) return readCustomPreset(presetName)?.preamp ?? 0;
   return isBuiltInPreset(presetName) ? MUSIC_EQ_PRESETS[presetName].preamp : 0;
 }
@@ -343,6 +349,8 @@ let state: MusicPlayerState = {
   headphoneCrossfeed: readNumber(STORAGE_KEYS.headphoneCrossfeed, 15, 0, 100),
   headphoneCenter: readNumber(STORAGE_KEYS.headphoneCenter, 55, 0, 100),
   headphoneBassImpact: readNumber(STORAGE_KEYS.headphoneBassImpact, 12, 0, 100),
+  dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false),
+  dspStatus: "recovering",
 };
 
 let audioElement: HTMLAudioElement | null = null;
@@ -353,6 +361,9 @@ let equalizerFilters: BiquadFilterNode[] = [];
 let normalizerNode: DynamicsCompressorNode | null = null;
 let limiterNode: DynamicsCompressorNode | null = null;
 let musicGain: GainNode | null = null;
+let analyserNode: AnalyserNode | null = null;
+let rtaBuffer: Uint8Array | null = null;
+let rtaEnvelope = Array(10).fill(0) as number[];
 let headphoneBassShelf: BiquadFilterNode | null = null;
 let headphoneSplitter: ChannelSplitterNode | null = null;
 let headphoneMerger: ChannelMergerNode | null = null;
@@ -521,7 +532,7 @@ function setAudioParam(param: AudioParam, value: number, now: number, timeConsta
 function applyHeadphoneSettings(now: number) {
   if (!audioContext) return;
 
-  const enabled = state.headphoneMode !== "off";
+  const enabled = !state.dspBypass && state.headphoneMode !== "off";
   const widthInput = enabled ? state.headphoneWidth : 0;
   const depthInput = enabled ? state.headphoneDepth : 0;
   const crossfeedInput = enabled ? state.headphoneCrossfeed : 0;
@@ -553,17 +564,17 @@ function applyProcessingSettings() {
   const now = audioContext.currentTime;
 
   if (preampGain) {
-    const target = state.eqEnabled ? dbToGain(state.preampDb) : 1;
+    const target = !state.dspBypass ? dbToGain(state.preampDb) : 1;
     setAudioParam(preampGain.gain, target, now, 0.02);
   }
 
   equalizerFilters.forEach((filter, index) => {
-    const gain = state.eqEnabled ? Number(state.eqGains[index] || 0) : 0;
+    const gain = !state.dspBypass && state.eqEnabled ? Number(state.eqGains[index] || 0) : 0;
     setAudioParam(filter.gain, gain, now, 0.02);
   });
 
   if (normalizerNode) {
-    if (state.normalizationEnabled) {
+    if (!state.dspBypass && state.normalizationEnabled) {
       normalizerNode.threshold.value = -18;
       normalizerNode.knee.value = 18;
       normalizerNode.ratio.value = 3;
@@ -577,7 +588,7 @@ function applyProcessingSettings() {
   applyHeadphoneSettings(now);
 
   if (limiterNode) {
-    if (state.limiterEnabled) {
+    if (!state.dspBypass && state.limiterEnabled) {
       limiterNode.threshold.value = -2;
       limiterNode.knee.value = 0;
       limiterNode.ratio.value = 20;
@@ -587,6 +598,9 @@ function applyProcessingSettings() {
       setCompressorBypass(limiterNode);
     }
   }
+
+  const contextRunning = audioContext.state === "running";
+  emit({ dspStatus: contextRunning ? (state.dspBypass ? "bypassed" : "active") : "recovering" });
 }
 
 function configureMediaSession() {
@@ -691,6 +705,7 @@ function releaseMusicGraphNodes() {
   disconnectNode(headphoneLeftCrossLowpass);
   disconnectNode(headphoneRightCrossLowpass);
   disconnectNode(limiterNode);
+  disconnectNode(analyserNode);
   disconnectNode(musicGain);
 
   mediaSource = null;
@@ -698,6 +713,9 @@ function releaseMusicGraphNodes() {
   equalizerFilters = [];
   normalizerNode = null;
   limiterNode = null;
+  analyserNode = null;
+  rtaBuffer = null;
+  rtaEnvelope = Array(10).fill(0);
   musicGain = null;
   headphoneBassShelf = null;
   headphoneSplitter = null;
@@ -713,6 +731,7 @@ function releaseMusicGraphNodes() {
   headphoneLeftCrossLowpass = null;
   headphoneRightCrossLowpass = null;
   mediaSourceConnected = false;
+  emit({ dspStatus: "recovering" });
 }
 
 async function destroyMusicAudioEngine() {
@@ -777,6 +796,7 @@ async function confirmHealthyPlayback(
     if (!playbackIntent) return;
 
     const contextState = String(audioContext?.state ?? "running");
+    if (mediaSourceConnected && contextState !== "running") emit({ dspStatus: "recovering" });
     const position = Number(audio.currentTime || 0);
     const progressed = position > startPosition + 0.04;
 
@@ -1107,6 +1127,8 @@ function ensureAudioElement() {
   audio.addEventListener("ended", () => {
     clearStallTimer();
     clearPlaybackWatchdog();
+    const completedTrackId = audio.dataset.trackId;
+    if (completedTrackId) void recordMusicTrackCompleted(completedTrackId).catch(() => undefined);
     recordedPlayToken = "";
     emit({ playing: false, currentTime: 0 });
     if (playbackIntent) void handleTrackEnded();
@@ -1166,6 +1188,10 @@ function connectMusicGraph() {
     headphoneRightCrossLowpass.Q.value = 0.7;
 
     limiterNode = context.createDynamicsCompressor();
+    analyserNode = context.createAnalyser();
+    analyserNode.fftSize = 1024;
+    analyserNode.smoothingTimeConstant = 0.66;
+    rtaBuffer = new Uint8Array(analyserNode.frequencyBinCount);
     musicGain = context.createGain();
     musicGain.gain.value = 1;
 
@@ -1203,17 +1229,22 @@ function connectMusicGraph() {
     headphoneRightCrossfeed.connect(headphoneMerger, 0, 0);
 
     headphoneMerger.connect(limiterNode);
-    limiterNode.connect(musicGain);
+    limiterNode.connect(analyserNode);
+    analyserNode.connect(musicGain);
     musicGain.connect(context.destination);
 
     mediaSourceConnected = true;
+    emit({ dspStatus: state.dspBypass ? "bypassed" : "active", error: null });
     applyProcessingSettings();
   } catch (error) {
-    console.warn("Music processing connection unavailable; using direct audio output.", error);
+    mediaSourceConnected = false;
+    emit({ dspStatus: "unavailable" });
+    console.warn("Music DSP graph unavailable; playback is using the browser audio path.", error);
   }
 }
 
 async function unlockMusicAudio() {
+  if (!mediaSourceConnected) emit({ dspStatus: "recovering" });
   connectMusicGraph();
   const context = getAudioContext();
   if (!context) return;
@@ -1223,8 +1254,13 @@ async function unlockMusicAudio() {
     try {
       await context.resume();
     } catch {
-      // Hard recovery will rebuild an interrupted Safari context.
+      emit({ dspStatus: mediaSourceConnected ? "recovering" : "unavailable" });
+      return;
     }
+  }
+  if (mediaSourceConnected) {
+    applyProcessingSettings();
+    emit({ dspStatus: state.dspBypass ? "bypassed" : "active" });
   }
 }
 
@@ -1443,6 +1479,41 @@ export async function loadMusicLibrary(force = false) {
   }
 }
 
+function replaceTrackEverywhere(updated: MusicTrack) {
+  const libraryTracks = state.libraryTracks.map((track) => track.id === updated.id ? updated : track);
+  const tracks = state.tracks.map((track) => track.id === updated.id ? updated : track);
+  const currentTrack = state.currentTrack?.id === updated.id ? updated : state.currentTrack;
+  emit({ libraryTracks, tracks, currentTrack });
+  configureMediaSession();
+}
+
+export async function setPlayerMusicPreference(
+  trackId: string,
+  preference: "like" | "play_less" | "neutral"
+) {
+  const updated = await setMusicTrackPreference(trackId, preference);
+  replaceTrackEverywhere(updated);
+  return updated;
+}
+
+export function playMusicNext(trackId: string) {
+  const track = state.libraryTracks.find((item) => item.id === trackId);
+  if (!track) return;
+  const currentIndex = state.currentTrack
+    ? state.tracks.findIndex((item) => item.id === state.currentTrack?.id)
+    : -1;
+  const without = state.tracks.filter((item) => item.id !== trackId);
+  const insertAt = currentIndex >= 0 ? Math.min(without.length, currentIndex + 1) : 0;
+  const tracks = [...without.slice(0, insertAt), track, ...without.slice(insertAt)];
+  emit({ tracks, activePlaylistId: null, activePlaylistName: "Custom Queue" });
+}
+
+export function addMusicToQueue(trackId: string) {
+  const track = state.libraryTracks.find((item) => item.id === trackId);
+  if (!track || state.tracks.some((item) => item.id === trackId)) return;
+  emit({ tracks: [...state.tracks, track], activePlaylistId: null, activePlaylistName: "Custom Queue" });
+}
+
 export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
   const activeIds = new Set(
     state.tracks.map((track) => track.id)
@@ -1491,6 +1562,28 @@ export function activateAllMusicTracks() {
   });
 
   configureMediaSession();
+}
+
+export function activateMusicAdHocQueue(name: string, tracks: MusicTrack[]) {
+  removePlayerSetting(STORAGE_KEYS.activePlaylistId);
+  savePlayerSetting(STORAGE_KEYS.activePlaylistName, name);
+  const currentTrack =
+    tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
+  emit({
+    tracks,
+    currentTrack,
+    activePlaylistId: null,
+    activePlaylistName: name,
+    error: tracks.length ? null : "This collection has no songs.",
+  });
+  configureMediaSession();
+}
+
+export async function playMusicAdHocQueue(name: string, tracks: MusicTrack[], startTrackId?: string) {
+  activateMusicAdHocQueue(name, tracks);
+  const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0];
+  if (!start) return;
+  await playMusicTrack(start.id, 0);
 }
 
 export function activateMusicPlaylistQueue(
@@ -1786,6 +1879,7 @@ export function cycleMusicRepeat() {
 export function setMusicEqEnabled(enabled: boolean) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled));
   emit({ eqEnabled: enabled });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1811,13 +1905,16 @@ export function applyMusicEqPreset(presetName: MusicEqPreset) {
   savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
   savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+  savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
 
   emit({
+    eqEnabled: true,
     eqPreset: presetName,
     eqGains: gains,
     preampDb: definition.preamp,
     error: null,
   });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1856,13 +1953,14 @@ export function setMusicEqBand(index: number, gainDb: number) {
     eqGains: gains,
   });
 
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
 export function setMusicPreamp(preampDb: number) {
   const next = Math.max(
     -12,
-    Math.min(6, Number(preampDb) || 0)
+    Math.min(12, Number(preampDb) || 0)
   );
 
   savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
@@ -1873,7 +1971,21 @@ export function setMusicPreamp(preampDb: number) {
     preampDb: next,
   });
 
+  void unlockMusicAudio();
   applyProcessingSettings();
+}
+
+export function setMusicDspBypass(bypassed: boolean) {
+  savePlayerSetting(STORAGE_KEYS.dspBypass, String(Boolean(bypassed)));
+  emit({ dspBypass: Boolean(bypassed) });
+  void unlockMusicAudio().then(() => applyProcessingSettings());
+}
+
+export async function recoverMusicDsp() {
+  emit({ dspStatus: "recovering" });
+  await unlockMusicAudio();
+  if (!mediaSourceConnected) emit({ dspStatus: "unavailable" });
+  return state.dspStatus;
 }
 
 export function setMusicCrossfadeSeconds(seconds: number) {
@@ -1897,6 +2009,7 @@ export function setMusicNormalizationEnabled(enabled: boolean) {
   );
 
   emit({ normalizationEnabled: enabled });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1907,6 +2020,7 @@ export function setMusicLimiterEnabled(enabled: boolean) {
   );
 
   emit({ limiterEnabled: enabled });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1937,6 +2051,7 @@ export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) {
     headphoneCenter: definition.center,
     headphoneBassImpact: definition.bass,
   });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1944,6 +2059,7 @@ export function setMusicHeadphoneWidth(value: number) {
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(next));
   emit({ headphoneWidth: next });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1951,6 +2067,7 @@ export function setMusicHeadphoneDepth(value: number) {
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(next));
   emit({ headphoneDepth: next });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1958,6 +2075,7 @@ export function setMusicHeadphoneCrossfeed(value: number) {
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(next));
   emit({ headphoneCrossfeed: next });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1965,6 +2083,7 @@ export function setMusicHeadphoneCenter(value: number) {
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(next));
   emit({ headphoneCenter: next });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1972,6 +2091,7 @@ export function setMusicHeadphoneBassImpact(value: number) {
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(next));
   emit({ headphoneBassImpact: next });
+  void unlockMusicAudio();
   applyProcessingSettings();
 }
 
@@ -1993,23 +2113,51 @@ export function getNextMusicTrackPreview() {
   };
 }
 
-let visualizerEnvelope: number[] = [];
+export const MUSIC_RTA_FREQUENCIES = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
 
-export function getMusicVisualizerLevels(barCount = 32) {
-  // Compatibility export only. The normal player no longer runs a live RTA.
-  // Keeping this function avoids breaking older callers while removing all
-  // continuous analyser reads from the audio engine.
-  const count = Math.max(8, Math.min(64, Math.floor(barCount)));
-
-  if (visualizerEnvelope.length !== count) {
-    visualizerEnvelope = Array(count).fill(0);
+export function getMusicRtaLevels() {
+  if (!analyserNode || !audioContext || !mediaSourceConnected || !rtaBuffer || !state.playing) {
+    rtaEnvelope = rtaEnvelope.map((value) => value * 0.72);
+    return [...rtaEnvelope];
   }
 
-  visualizerEnvelope = visualizerEnvelope.map((value) =>
-    Math.max(0, value * 0.72 - 0.008)
-  );
+  analyserNode.getByteFrequencyData(rtaBuffer);
+  const nyquist = audioContext.sampleRate / 2;
+  const binHz = nyquist / rtaBuffer.length;
 
-  return [...visualizerEnvelope];
+  const levels = MUSIC_RTA_FREQUENCIES.map((center, index) => {
+    const low = index === 0 ? 20 : Math.sqrt(MUSIC_RTA_FREQUENCIES[index - 1] * center);
+    const high = index === MUSIC_RTA_FREQUENCIES.length - 1
+      ? Math.min(20000, nyquist - 1)
+      : Math.sqrt(center * MUSIC_RTA_FREQUENCIES[index + 1]);
+    const start = Math.max(0, Math.floor(low / binHz));
+    const end = Math.min(rtaBuffer!.length - 1, Math.ceil(high / binHz));
+    let sum = 0;
+    let peak = 0;
+    let count = 0;
+    for (let bin = start; bin <= end; bin += 1) {
+      const value = rtaBuffer![bin] / 255;
+      sum += value;
+      peak = Math.max(peak, value);
+      count += 1;
+    }
+    const average = count ? sum / count : 0;
+    const weighted = Math.min(1, average * 0.78 + peak * 0.44);
+    const previous = rtaEnvelope[index] || 0;
+    return weighted > previous ? previous * 0.28 + weighted * 0.72 : previous * 0.78 + weighted * 0.22;
+  });
+
+  rtaEnvelope = levels;
+  return [...levels];
+}
+
+export function getMusicVisualizerLevels(barCount = 10) {
+  const levels = getMusicRtaLevels();
+  if (barCount === 10) return levels;
+  return Array.from({ length: Math.max(1, barCount) }, (_, index) => {
+    const source = Math.min(levels.length - 1, Math.floor(index * levels.length / Math.max(1, barCount)));
+    return levels[source] || 0;
+  });
 }
 
 function duckTargetForStrength(
