@@ -2,6 +2,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -376,6 +377,94 @@ function AssetIcon({
     <span className={`pr-assetIcon tone-${tone}`} aria-hidden>
       <img src={src} alt="" />
     </span>
+  );
+}
+
+
+type DropdownOption = {
+  value: string;
+  label: string;
+};
+
+function ProDropdown({
+  label,
+  value,
+  options,
+  onChange,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  options: DropdownOption[];
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointer = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (target && !rootRef.current?.contains(target)) setOpen(false);
+    };
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("touchstart", handlePointer);
+    document.addEventListener("keydown", handleKey);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("touchstart", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`pr-proDropdown ${className}`} ref={rootRef}>
+      <span className="pr-proDropdownLabel">{label}</span>
+
+      <button
+        type="button"
+        className={`pr-proDropdownTrigger ${open ? "is-open" : ""}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{selected?.label ?? "Select"}</span>
+        <SvgIcon name="chevron" size={16} />
+      </button>
+
+      {open ? (
+        <div className="pr-proDropdownMenu" role="listbox" aria-label={label}>
+          {options.map((option) => {
+            const active = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`pr-proDropdownOption ${active ? "is-selected" : ""}`}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <span>{option.label}</span>
+                {active ? <span className="pr-proDropdownCheck">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1006,21 +1095,8 @@ export function ProgressPage() {
         setSelectedExerciseId(progressRows[0]?.id ?? "");
       }
 
-      // Quietly keep the app honest when old test timer records exist.
-      const outlierCount = historyRows.filter(
-        (row) => row.sessionSeconds > 0 && !row.validDuration
-      ).length;
-      if (outlierCount > 0) {
-        setToast(
-          `${outlierCount} test/outlier session${
-            outlierCount === 1 ? "" : "s"
-          } excluded from time averages.`
-        );
-      } else {
-        setToast(null);
-      }
-
-      // Preserve a stable sort for anything derived from completion time.
+      // Invalid timer records remain in history but are silently excluded
+      // from aggregate time calculations.
       void completedTimeMap;
     } catch (error: any) {
       setErr(error?.message ?? String(error));
@@ -1128,6 +1204,7 @@ export function ProgressPage() {
     const onTarget = workouts.filter(
       (workout) => workout.post_difficulty === "just_right"
     ).length;
+    const unrated = Math.max(0, workouts.length - tooEasy - tooHard - onTarget);
 
     const dates = Array.from(
       new Set(
@@ -1203,6 +1280,7 @@ export function ProgressPage() {
       tooEasy,
       tooHard,
       onTarget,
+      unrated,
       streak,
       workoutsPerWeek,
       improvedExercises,
@@ -1269,8 +1347,8 @@ export function ProgressPage() {
 
       setClearOpen(false);
       setClearText("");
-      setToast("Training logs cleared.");
       await loadAll();
+      setToast("Workout logs cleared.");
     } catch (error: any) {
       setErr(error?.message ?? String(error));
     } finally {
@@ -1283,6 +1361,7 @@ export function ProgressPage() {
       ? "All Programs"
       : `Foundation • ${goalLabel(activeBlock?.goal)}`;
 
+  const rotationTemplates = Array.from(new Set(programTemplates)).slice(0, 4);
   const visibleHistory = history.slice(0, historyVisible);
 
   return (
@@ -1290,51 +1369,36 @@ export function ProgressPage() {
       <section className="pr-heroPanel">
         <div className="pr-heroTop">
           <div>
-            <div className="pr-pageEyebrow">PROGRESS</div>
-            <h1>Performance Intelligence</h1>
-            <p>
-              Strength, training quality, recovery and body trends from your
-              actual logged sessions.
-            </p>
+            <div className="pr-pageEyebrow">TRAINING ANALYTICS</div>
+            <h1>Progress</h1>
+            <p>See what is improving, how much work you are doing, and how recovery is trending.</p>
           </div>
 
           <div className="pr-controls">
-            <label>
-              <span>PROGRAM</span>
-              <div className="pr-selectShell">
-                <select
-                  value={scope}
-                  onChange={(event) => setScope(event.target.value as Scope)}
-                >
-                  <option value="active">Current Program</option>
-                  <option value="all">All Programs</option>
-                </select>
-                <SvgIcon name="chevron" size={16} />
-              </div>
-            </label>
+            <ProDropdown
+              label="PROGRAM"
+              value={scope}
+              options={[
+                { value: "active", label: "Current Program" },
+                { value: "all", label: "All Programs" },
+              ]}
+              onChange={(value) => setScope(value as Scope)}
+            />
 
-            <label>
-              <span>RANGE</span>
-              <div className="pr-selectShell">
-                <select
-                  value={String(range)}
-                  onChange={(event) =>
-                    setRange(
-                      event.target.value === "all"
-                        ? "all"
-                        : (Number(event.target.value) as Range)
-                    )
-                  }
-                >
-                  <option value="7">7 Days</option>
-                  <option value="14">14 Days</option>
-                  <option value="30">30 Days</option>
-                  <option value="90">90 Days</option>
-                  <option value="all">All Time</option>
-                </select>
-                <SvgIcon name="chevron" size={16} />
-              </div>
-            </label>
+            <ProDropdown
+              label="RANGE"
+              value={String(range)}
+              options={[
+                { value: "7", label: "7 Days" },
+                { value: "14", label: "14 Days" },
+                { value: "30", label: "30 Days" },
+                { value: "90", label: "90 Days" },
+                { value: "all", label: "All Time" },
+              ]}
+              onChange={(value) =>
+                setRange(value === "all" ? "all" : (Number(value) as Range))
+              }
+            />
           </div>
         </div>
 
@@ -1348,16 +1412,19 @@ export function ProgressPage() {
               <strong>{programTitle}</strong>
               <small>
                 {scope === "active"
-                  ? `${programTemplates.length || 4} workout rotation`
+                  ? `${rotationTemplates.length || 4} workout rotation`
                   : "Combined training history"}
               </small>
             </div>
           </div>
 
-          {scope === "active" && programTemplates.length ? (
-            <div className="pr-rotationRail">
-              {programTemplates.slice(0, 4).map((name) => (
-                <span key={name}>{name}</span>
+          {scope === "active" && rotationTemplates.length ? (
+            <div className="pr-rotationRail" aria-label="Current workout rotation">
+              {rotationTemplates.map((name, index) => (
+                <span key={`${name}-${index}`}>
+                  {name}
+                  {index < rotationTemplates.length - 1 ? <b aria-hidden>→</b> : null}
+                </span>
               ))}
             </div>
           ) : null}
@@ -1375,9 +1442,8 @@ export function ProgressPage() {
 
       <section className="pr-panel">
         <SectionHead
-          eyebrow="TRAINING"
+          eyebrow="OVERVIEW"
           title="Training Overview"
-          detail="The core workload and consistency signals for this analysis window."
         />
 
         <div className="pr-primaryMetrics">
@@ -1426,7 +1492,11 @@ export function ProgressPage() {
           </div>
           <div>
             <span>TOP PROGRESS</span>
-            <strong>{topProgressExercise?.name ?? "—"}</strong>
+            <strong>
+              {analytics.improvedExercises > 0
+                ? topProgressExercise?.name ?? "—"
+                : "No trend yet"}
+            </strong>
           </div>
         </div>
       </section>
@@ -1435,7 +1505,6 @@ export function ProgressPage() {
         <SectionHead
           eyebrow="PERFORMANCE"
           title="Strength & Workload"
-          detail="Real volume and strength output, not decorative totals."
         />
 
         <div className="pr-twoColumn">
@@ -1481,9 +1550,8 @@ export function ProgressPage() {
 
       <section className="pr-panel">
         <SectionHead
-          eyebrow="TRAINING QUALITY"
-          title="Execution Quality"
-          detail="How closely your logged sets and effort match the programmed stimulus."
+          eyebrow="QUALITY"
+          title="Training Quality"
         />
 
         <div className="pr-qualityGrid">
@@ -1521,7 +1589,7 @@ export function ProgressPage() {
             <span>SESSION FEEDBACK</span>
             <strong>{analytics.onTarget} ON TARGET</strong>
             <small>
-              {analytics.tooEasy} too easy • {analytics.tooHard} too hard
+              {analytics.tooEasy} too easy • {analytics.tooHard} too hard • {analytics.unrated} unrated
             </small>
           </div>
 
@@ -1536,8 +1604,7 @@ export function ProgressPage() {
       <section className="pr-panel">
         <SectionHead
           eyebrow="BODY & RECOVERY"
-          title="Recovery Support"
-          detail="Body weight, protein target and pain signals in one compact view."
+          title="Body & Recovery"
         />
 
         <div className="pr-bodyGrid">
@@ -1614,25 +1681,18 @@ export function ProgressPage() {
       <section className="pr-panel">
         <SectionHead
           eyebrow="EXERCISE PROGRESS"
-          title="Movement-Level Progression"
-          detail="Select an exercise to see real strength progression across logged sessions."
+          title="Exercise Progress"
           right={
-            <label className="pr-exerciseSelect">
-              <span>EXERCISE</span>
-              <div className="pr-selectShell">
-                <select
-                  value={selectedExercise?.id ?? ""}
-                  onChange={(event) => setSelectedExerciseId(event.target.value)}
-                >
-                  {exerciseProgress.map((exercise) => (
-                    <option key={exercise.id} value={exercise.id}>
-                      {exercise.name}
-                    </option>
-                  ))}
-                </select>
-                <SvgIcon name="chevron" size={16} />
-              </div>
-            </label>
+            <ProDropdown
+              label="EXERCISE"
+              className="pr-exerciseSelect"
+              value={selectedExercise?.id ?? ""}
+              options={exerciseProgress.map((exercise) => ({
+                value: exercise.id,
+                label: exercise.name,
+              }))}
+              onChange={setSelectedExerciseId}
+            />
           }
         />
 
@@ -1685,9 +1745,8 @@ export function ProgressPage() {
 
       <section className="pr-panel">
         <SectionHead
-          eyebrow="PROGRAM PERFORMANCE"
-          title="Workout Rotation"
-          detail="A compact comparison of the workouts inside the selected program scope."
+          eyebrow="PROGRAM"
+          title="Workout Performance"
         />
 
         <div className="pr-programGrid">
@@ -1737,7 +1796,7 @@ export function ProgressPage() {
               className="pr-dangerButton"
               onClick={() => setClearOpen(true)}
             >
-              CLEAR TEST LOGS
+              CLEAR LOGS
             </button>
           }
         />
@@ -1758,16 +1817,26 @@ export function ProgressPage() {
                       <span>COMPLETED WORKOUT</span>
                       <h3>{row.templateName}</h3>
                     </div>
-                    <time>{formatDateTime(row.completedAt)}</time>
+
+                    <div className="pr-historyTopRight">
+                      <time>{formatDateTime(row.completedAt)}</time>
+                      <button
+                        type="button"
+                        className="pr-historyView"
+                        onClick={() =>
+                          setExpandedHistoryId(expanded ? null : row.id)
+                        }
+                      >
+                        <span>{expanded ? "CLOSE" : "VIEW"}</span>
+                        <span aria-hidden>{expanded ? "×" : "›"}</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="pr-historyMetrics">
                     <div>
                       <span>TIME</span>
                       <strong>{formatDuration(row.sessionSeconds, true)}</strong>
-                      {!row.validDuration && row.sessionSeconds > 0 ? (
-                        <small>TEST / OUTLIER</small>
-                      ) : null}
                     </div>
                     <div>
                       <span>EXERCISES</span>
@@ -1796,17 +1865,6 @@ export function ProgressPage() {
                         : ""}
                     </p>
                   </div>
-
-                  <button
-                    type="button"
-                    className="pr-historyToggle"
-                    onClick={() =>
-                      setExpandedHistoryId(expanded ? null : row.id)
-                    }
-                  >
-                    <span>{expanded ? "HIDE SESSION" : "VIEW SESSION"}</span>
-                    <SvgIcon name="chevron" size={16} />
-                  </button>
 
                   {expanded ? (
                     <div className="pr-historyDetails">
@@ -1912,11 +1970,10 @@ export function ProgressPage() {
             aria-modal="true"
             aria-labelledby="pr-clear-title"
           >
-            <div className="pr-modalKicker">TEST DATA CONTROL</div>
-            <h2 id="pr-clear-title">Clear all training logs?</h2>
+            <div className="pr-modalKicker">WORKOUT HISTORY</div>
+            <h2 id="pr-clear-title">Clear all workout logs?</h2>
             <p>
-              This permanently deletes completed workout history. Type CLEAR to
-              confirm.
+              This permanently deletes your completed workout history. Type CLEAR to confirm.
             </p>
 
             <input
@@ -2090,40 +2147,6 @@ export function ProgressPage() {
           letter-spacing:.15em;
         }
 
-        .pr-selectShell{
-          position:relative;
-          min-width:150px;
-          display:flex;
-          align-items:center;
-          border:1px solid rgba(128,196,220,.15);
-          border-top-color:rgba(181,224,240,.21);
-          border-radius:10px;
-          background:linear-gradient(180deg,#13212a,#0a1218);
-          box-shadow:
-            0 2px 4px rgba(0,0,0,.28),
-            inset 0 1px 0 rgba(255,255,255,.035);
-        }
-
-        .pr-selectShell select{
-          width:100%;
-          min-height:39px;
-          padding:0 34px 0 11px;
-          appearance:none;
-          border:0;
-          outline:0;
-          color:#edf7fb;
-          background:transparent;
-          font-size:10px;
-          font-weight:950;
-          cursor:pointer;
-        }
-
-        .pr-selectShell .pr-svgIcon{
-          position:absolute;
-          right:10px;
-          pointer-events:none;
-          color:#56c9f1;
-        }
 
         .pr-svgIcon{
           fill:none;
@@ -2707,7 +2730,6 @@ export function ProgressPage() {
           box-shadow:0 0 9px rgba(255,159,28,.24);
         }
 
-        .pr-exerciseSelect .pr-selectShell{min-width:210px}
 
         .pr-exerciseDeck{
           display:grid;
@@ -3264,7 +3286,6 @@ export function ProgressPage() {
           .pr-controls label{
             flex:1 1 140px;
           }
-          .pr-selectShell{min-width:0}
           .pr-programDeck{
             grid-template-columns:1fr;
           }
@@ -3287,9 +3308,6 @@ export function ProgressPage() {
             justify-content:flex-start;
           }
           .pr-exerciseSelect,
-          .pr-exerciseSelect .pr-selectShell{
-            width:100%;
-          }
           .pr-primaryMetrics,
           .pr-secondaryStrip,
           .pr-qualityGrid{
@@ -3376,6 +3394,296 @@ export function ProgressPage() {
         @media(prefers-reduced-motion:reduce){
           .pr-page *{scroll-behavior:auto!important}
         }
+        /* STEP 9C — PRODUCTION CLARITY */
+        .pr-heroTop h1{
+          font-size:clamp(34px,4vw,46px)!important;
+          letter-spacing:-.05em!important;
+        }
+
+        .pr-heroTop p{
+          max-width:620px!important;
+          color:rgba(221,235,242,.72)!important;
+          font-size:11px!important;
+        }
+
+        .pr-controls{
+          align-items:flex-start!important;
+        }
+
+        /* Custom dropdowns replace native browser selects entirely */
+        .pr-proDropdown{
+          position:relative;
+          min-width:165px;
+          display:grid;
+          gap:6px;
+          z-index:50;
+        }
+
+        .pr-proDropdownLabel{
+          color:rgba(168,201,215,.68);
+          font-size:7px;
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:.16em;
+        }
+
+        .pr-proDropdownTrigger{
+          width:100%;
+          min-height:41px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          padding:0 11px 0 12px;
+          border:1px solid rgba(127,197,222,.18);
+          border-top-color:rgba(192,231,245,.26);
+          border-radius:10px;
+          color:#f3f9fc;
+          background:linear-gradient(180deg,#152630,#081016);
+          box-shadow:
+            0 2px 4px rgba(0,0,0,.36),
+            inset 0 1px 0 rgba(255,255,255,.045);
+          font-size:10px;
+          font-weight:950;
+          text-align:left;
+          cursor:pointer;
+        }
+
+        .pr-proDropdownTrigger:hover,
+        .pr-proDropdownTrigger.is-open{
+          border-color:rgba(66,201,245,.50);
+          background:linear-gradient(180deg,#18303d,#0a151c);
+        }
+
+        .pr-proDropdownTrigger .pr-svgIcon{
+          flex:0 0 auto;
+          color:#5bcff5;
+          transition:transform .14s ease;
+        }
+
+        .pr-proDropdownTrigger.is-open .pr-svgIcon{
+          transform:rotate(180deg);
+        }
+
+        .pr-proDropdownMenu{
+          position:absolute;
+          z-index:300;
+          top:calc(100% + 6px);
+          left:0;
+          right:0;
+          overflow:hidden;
+          padding:5px;
+          border:1px solid rgba(112,193,224,.28);
+          border-top-color:rgba(184,228,244,.34);
+          border-radius:11px;
+          background:#081119;
+          box-shadow:
+            0 18px 44px rgba(0,0,0,.62),
+            inset 0 1px 0 rgba(255,255,255,.04);
+        }
+
+        .pr-proDropdownOption{
+          width:100%;
+          min-height:38px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          padding:0 10px;
+          border:0;
+          border-radius:8px;
+          color:rgba(230,242,248,.80);
+          background:transparent;
+          font-size:10px;
+          font-weight:900;
+          text-align:left;
+          cursor:pointer;
+        }
+
+        .pr-proDropdownOption:hover{
+          color:#fff;
+          background:rgba(39,155,198,.16);
+        }
+
+        .pr-proDropdownOption.is-selected{
+          color:#fff;
+          background:linear-gradient(90deg,rgba(22,137,181,.26),rgba(13,70,94,.14));
+        }
+
+        .pr-proDropdownCheck{
+          color:#66d7fb;
+          font-size:12px;
+          font-weight:1000;
+        }
+
+        .pr-exerciseSelect{min-width:230px}
+
+        .pr-programDeck{
+          grid-template-columns:minmax(260px,1.05fr) minmax(300px,1.3fr) 150px!important;
+          padding-top:15px!important;
+        }
+
+        .pr-programIdentity strong{font-size:20px!important}
+
+        .pr-rotationRail{
+          justify-content:center!important;
+          gap:9px!important;
+          overflow:visible!important;
+        }
+
+        .pr-rotationRail span{
+          display:inline-flex!important;
+          align-items:center!important;
+          gap:9px!important;
+          padding:0!important;
+          color:#e9f5f9!important;
+          font-size:10px!important;
+          font-weight:1000!important;
+        }
+
+        .pr-rotationRail span+span{border-left:0!important}
+
+        .pr-rotationRail b{
+          color:rgba(77,202,244,.48);
+          font-size:12px;
+          font-weight:1000;
+        }
+
+        .pr-sectionHead{margin-bottom:13px!important}
+        .pr-sectionHead h2{font-size:24px!important}
+        .pr-eyebrow{font-size:9px!important}
+        .pr-sectionHead p{display:none!important}
+
+        .pr-secondaryStrip{margin-top:9px!important}
+
+        .pr-qualityGrid{
+          gap:0!important;
+          border-top:1px solid rgba(131,198,221,.10);
+          border-bottom:1px solid rgba(131,198,221,.08);
+        }
+
+        .pr-qualityMetric{
+          border-left:0!important;
+          background:none!important;
+          padding:14px!important;
+        }
+
+        .pr-qualityMetric+.pr-qualityMetric{
+          border-left:1px solid rgba(139,201,223,.11)!important;
+        }
+
+        .pr-dangerButton{
+          min-height:34px!important;
+          padding:0 12px!important;
+          border:1px solid rgba(255,107,107,.22)!important;
+          border-radius:8px!important;
+          color:rgba(255,190,190,.88)!important;
+          background:rgba(88,26,26,.10)!important;
+          box-shadow:none!important;
+          font-size:8px!important;
+        }
+
+        .pr-dangerButton:hover{
+          color:#ffd1d1!important;
+          border-color:rgba(255,107,107,.38)!important;
+          background:rgba(99,29,29,.16)!important;
+        }
+
+        .pr-historyList{gap:7px!important}
+
+        .pr-historyRow{
+          padding:11px 12px!important;
+          border-radius:11px!important;
+        }
+
+        .pr-historyTop{
+          align-items:center!important;
+        }
+
+        .pr-historyTop h3{font-size:16px!important}
+
+        .pr-historyTopRight{
+          display:flex;
+          align-items:center;
+          justify-content:flex-end;
+          gap:12px;
+        }
+
+        .pr-historyView{
+          min-width:70px;
+          min-height:30px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          gap:8px;
+          padding:0 10px;
+          border:1px solid rgba(0,170,255,.30);
+          border-radius:8px;
+          color:#eefaff;
+          background:rgba(0,170,255,.07);
+          font-size:8px;
+          font-weight:1000;
+          letter-spacing:.08em;
+          cursor:pointer;
+        }
+
+        .pr-historyView:hover{
+          border-color:rgba(0,170,255,.52);
+          background:rgba(0,170,255,.11);
+        }
+
+        .pr-historyMetrics{
+          margin-top:9px!important;
+          padding:8px 0!important;
+        }
+
+        .pr-historyMetrics strong{font-size:13px!important}
+        .pr-historyExerciseLine{margin-top:8px!important}
+
+        .pr-historyExerciseLine p{
+          font-size:8.5px!important;
+          line-height:1.35!important;
+        }
+
+        @media(max-width:980px){
+          .pr-programDeck{
+            grid-template-columns:1fr 160px!important;
+          }
+
+          .pr-rotationRail{
+            grid-column:1 / -1!important;
+            justify-content:flex-start!important;
+          }
+        }
+
+        @media(max-width:700px){
+          .pr-proDropdown{
+            min-width:0;
+            width:100%;
+          }
+
+          .pr-controls{
+            display:grid!important;
+            grid-template-columns:1fr 1fr;
+            width:100%;
+          }
+
+          .pr-programDeck{
+            grid-template-columns:1fr!important;
+          }
+
+          .pr-historyTopRight{
+            width:100%;
+            justify-content:space-between;
+          }
+        }
+
+        @media(max-width:520px){
+          .pr-controls{
+            grid-template-columns:1fr;
+          }
+        }
+
       `}</style>
     </div>
   );
