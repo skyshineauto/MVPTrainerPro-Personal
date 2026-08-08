@@ -41,7 +41,9 @@ type ItunesResponse = {
   results?: ItunesResult[];
 };
 
-const LOOKUP_CACHE = new Map<string, MusicMetadataCandidate[]>();
+type SearchAttribute = "songTerm" | "artistTerm" | null;
+
+const LOOKUP_CACHE = new Map<string, Omit<MusicMetadataCandidate, "confidence">[]>();
 
 function normalize(value: string) {
   return value
@@ -50,6 +52,7 @@ function normalize(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ")
     .replace(/\b(feat|featuring|ft)\.?\b.*$/i, "")
+    .replace(/\b(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version)\b/gi, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -59,8 +62,10 @@ function tokenScore(left: string, right: string) {
   const a = new Set(normalize(left).split(" ").filter(Boolean));
   const b = new Set(normalize(right).split(" ").filter(Boolean));
   if (!a.size || !b.size) return 0;
+
   let intersection = 0;
   for (const token of a) if (b.has(token)) intersection += 1;
+
   const union = new Set([...a, ...b]).size;
   return union ? intersection / union : 0;
 }
@@ -70,15 +75,29 @@ function textScore(left: string, right: string) {
   const b = normalize(right);
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.86;
+  if (a.includes(b) || b.includes(a)) return 0.88;
   return tokenScore(a, b);
 }
 
-export function cleanMusicLookupTitle(track: Pick<MusicTrack, "title" | "original_name">) {
+function durationScore(trackSeconds: number | null, candidateSeconds: number | null) {
+  if (!trackSeconds || !candidateSeconds) return 0.72;
+  const difference = Math.abs(trackSeconds - candidateSeconds);
+  if (difference <= 2) return 1;
+  if (difference <= 5) return 0.98;
+  if (difference <= 10) return 0.91;
+  if (difference <= 15) return 0.80;
+  if (difference <= 25) return 0.58;
+  return 0.18;
+}
+
+export function cleanMusicLookupTitle(
+  track: Pick<MusicTrack, "title" | "original_name">
+) {
   const originalStem = track.original_name
     .replace(/\.[^.]+$/, "")
     .replace(/[_]+/g, " ")
     .replace(/^\s*\d{1,3}\s*[.\-_ ]+\s*/, "")
+    .replace(/^\s*\d{1,3}\s*-\s*/, "")
     .replace(/\s+[\-_ ]*\(?copy\)?\s*$/i, "")
     .replace(/\s+\(\d+\)\s*$/, "")
     .replace(/\s+/g, " ")
@@ -92,8 +111,7 @@ export function cleanMusicLookupTitle(track: Pick<MusicTrack, "title" | "origina
 
   const currentLooksGeneric =
     !current ||
-    /^(track|audio|song|untitled)(\s*\d+)?$/i.test(current) ||
-    normalize(current) === normalize(track.original_name.replace(/\.[^.]+$/, ""));
+    /^(track|audio|song|untitled)(\s*\d+)?$/i.test(current);
 
   return (currentLooksGeneric ? originalStem : current) || originalStem || track.title;
 }
@@ -111,83 +129,210 @@ function yearFromDate(value?: string) {
   return match ? Number(match[0]) : null;
 }
 
-function scoreCandidate(track: MusicTrack, candidate: Omit<MusicMetadataCandidate, "confidence">) {
+function scoreCandidate(
+  track: MusicTrack,
+  candidate: Omit<MusicMetadataCandidate, "confidence">
+) {
   const lookupTitle = cleanMusicLookupTitle(track);
-  const title = textScore(lookupTitle, candidate.title);
-  const artistKnown = Boolean(track.artist && !/unknown artist/i.test(track.artist));
-  const artist = artistKnown ? textScore(track.artist || "", candidate.artist) : 0.72;
-  const albumKnown = Boolean(track.album);
-  const album = albumKnown ? textScore(track.album || "", candidate.album) : 0.66;
+  const titleExact = normalize(lookupTitle) === normalize(candidate.title);
+  const titleSimilarity = textScore(lookupTitle, candidate.title);
 
-  let duration = 0.7;
-  if (track.duration_seconds && candidate.durationSeconds) {
-    const difference = Math.abs(track.duration_seconds - candidate.durationSeconds);
-    duration = difference <= 2 ? 1 : difference <= 5 ? 0.94 : difference <= 10 ? 0.78 : difference <= 20 ? 0.55 : 0.2;
+  const artistKnown = Boolean(
+    track.artist && !/unknown artist/i.test(track.artist)
+  );
+  const artistExact =
+    artistKnown && normalize(track.artist || "") === normalize(candidate.artist);
+  const artistSimilarity = artistKnown
+    ? textScore(track.artist || "", candidate.artist)
+    : 0.74;
+
+  const albumKnown = Boolean(track.album);
+  const albumSimilarity = albumKnown
+    ? textScore(track.album || "", candidate.album)
+    : 0.68;
+
+  const duration = durationScore(
+    track.duration_seconds,
+    candidate.durationSeconds
+  );
+
+  // Exact title + exact artist is the dominant signal. This prevents popular
+  // songs by the same artist from crowding out the song the library already named.
+  if (titleExact && artistExact) {
+    return Math.min(1, 0.965 + duration * 0.035);
   }
 
-  let score = title * 0.57 + artist * 0.23 + duration * 0.14 + album * 0.06;
-  if (title === 1 && artist >= 0.9) score += 0.05;
-  return Math.max(0, Math.min(1, score));
+  // Exact title with a very strong artist match is still excellent.
+  if (titleExact && artistSimilarity >= 0.9) {
+    return Math.min(0.96, 0.89 + artistSimilarity * 0.045 + duration * 0.025);
+  }
+
+  // If the artist is unknown, an exact title plus close duration is useful,
+  // but stays below exact artist/title matches so review remains conservative.
+  if (titleExact && !artistKnown) {
+    return Math.min(0.93, 0.83 + duration * 0.10);
+  }
+
+  // Strong fuzzy title + exact artist.
+  if (artistExact && titleSimilarity >= 0.78) {
+    return Math.min(
+      0.89,
+      titleSimilarity * 0.68 + duration * 0.17 + albumSimilarity * 0.04
+    );
+  }
+
+  // General fallback. Same-artist / wrong-title results intentionally remain low.
+  let score =
+    titleSimilarity * 0.66 +
+    artistSimilarity * 0.19 +
+    duration * 0.10 +
+    albumSimilarity * 0.05;
+
+  if (artistExact && titleSimilarity < 0.45) score *= 0.72;
+  if (titleSimilarity < 0.25) score *= 0.72;
+
+  return Math.max(0, Math.min(0.84, score));
 }
 
-async function searchItunes(term: string) {
-  const key = normalize(term);
-  const cached = LOOKUP_CACHE.get(key);
+async function searchItunes(
+  term: string,
+  attribute: SearchAttribute = null,
+  limit = 50
+) {
+  const cacheKey = `${attribute || "all"}:${normalize(term)}:${limit}`;
+  const cached = LOOKUP_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const url = `https://itunes.apple.com/search?entity=song&limit=12&term=${encodeURIComponent(term)}`;
-  const response = await fetch(url, { mode: "cors", cache: "no-store" });
-  if (!response.ok) throw new Error(`Music lookup failed (${response.status}).`);
+  const params = new URLSearchParams({
+    entity: "song",
+    limit: String(limit),
+    term,
+  });
+  if (attribute) params.set("attribute", attribute);
+
+  const response = await fetch(
+    `https://itunes.apple.com/search?${params.toString()}`,
+    { mode: "cors", cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Music lookup failed (${response.status}).`);
+  }
+
   const payload = (await response.json()) as ItunesResponse;
 
-  const base = (payload.results || [])
+  const rows = (payload.results || [])
     .filter((item) => item.trackName && item.artistName)
     .map((item) => ({
-      sourceId: String(item.trackId || `${item.artistName}-${item.trackName}`),
+      sourceId: String(
+        item.trackId || `${item.artistName}-${item.trackName}-${item.collectionName || ""}`
+      ),
       title: item.trackName || "",
       artist: item.artistName || "",
       album: item.collectionName || "",
       releaseYear: yearFromDate(item.releaseDate),
       genre: item.primaryGenreName || null,
       artworkUrl: artwork600(item.artworkUrl100),
-      durationSeconds: item.trackTimeMillis ? Math.round(item.trackTimeMillis / 1000) : null,
+      durationSeconds: item.trackTimeMillis
+        ? Math.round(item.trackTimeMillis / 1000)
+        : null,
       source: "itunes" as const,
     }));
 
-  LOOKUP_CACHE.set(key, base.map((item) => ({ ...item, confidence: 0 })));
-  return base.map((item) => ({ ...item, confidence: 0 }));
+  LOOKUP_CACHE.set(cacheKey, rows);
+  return rows;
 }
 
 export async function findMusicMetadataCandidates(track: MusicTrack) {
   const title = cleanMusicLookupTitle(track);
-  const artistKnown = Boolean(track.artist && !/unknown artist/i.test(track.artist));
-  const searchTerms = [
-    artistKnown ? `${track.artist} ${title}` : title,
-    artistKnown ? title : "",
-  ].filter(Boolean);
+  const artistKnown = Boolean(
+    track.artist && !/unknown artist/i.test(track.artist)
+  );
+
+  // Search in tiers instead of stopping after the first handful of generic results.
+  // 1. Exact song-title field search
+  // 2. Artist + title broad search
+  // 3. Title broad search
+  // 4. Artist field fallback, only when artist is known
+  const searchPlan: Array<{
+    term: string;
+    attribute: SearchAttribute;
+    limit: number;
+  }> = [
+    { term: title, attribute: "songTerm", limit: 50 },
+    ...(artistKnown
+      ? [{ term: `${track.artist} ${title}`, attribute: null as SearchAttribute, limit: 50 }]
+      : []),
+    { term: title, attribute: null, limit: 50 },
+    ...(artistKnown
+      ? [{ term: track.artist || "", attribute: "artistTerm" as SearchAttribute, limit: 25 }]
+      : []),
+  ];
 
   const combined = new Map<string, MusicMetadataCandidate>();
-  for (const term of searchTerms) {
-    const rows = await searchItunes(term);
+
+  for (const request of searchPlan) {
+    if (!request.term.trim()) continue;
+
+    const rows = await searchItunes(
+      request.term,
+      request.attribute,
+      request.limit
+    );
+
     for (const row of rows) {
-      const scored = { ...row, confidence: scoreCandidate(track, row) };
+      const scored: MusicMetadataCandidate = {
+        ...row,
+        confidence: scoreCandidate(track, row),
+      };
       const previous = combined.get(scored.sourceId);
-      if (!previous || scored.confidence > previous.confidence) combined.set(scored.sourceId, scored);
+      if (!previous || scored.confidence > previous.confidence) {
+        combined.set(scored.sourceId, scored);
+      }
     }
-    if (combined.size >= 6) break;
   }
 
-  return [...combined.values()]
-    .sort((left, right) => right.confidence - left.confidence)
-    .slice(0, 6);
+  const ranked = [...combined.values()]
+    .sort((left, right) => {
+      const leftExact =
+        normalize(left.title) === normalize(title) &&
+        (!artistKnown ||
+          normalize(left.artist) === normalize(track.artist || ""));
+      const rightExact =
+        normalize(right.title) === normalize(title) &&
+        (!artistKnown ||
+          normalize(right.artist) === normalize(track.artist || ""));
+
+      if (leftExact !== rightExact) return leftExact ? -1 : 1;
+      if (right.confidence !== left.confidence) {
+        return right.confidence - left.confidence;
+      }
+
+      return (
+        Math.abs((track.duration_seconds || 0) - (left.durationSeconds || 0)) -
+        Math.abs((track.duration_seconds || 0) - (right.durationSeconds || 0))
+      );
+    })
+    .filter((candidate, index) => candidate.confidence >= 0.24 || index < 3);
+
+  return ranked.slice(0, 8);
+}
+
+export function musicMatchTier(confidence: number) {
+  if (confidence >= 0.95) return "EXACT MATCH";
+  if (confidence >= 0.85) return "STRONG MATCH";
+  if (confidence >= 0.60) return "POSSIBLE MATCH";
+  return "WEAK MATCH";
 }
 
 export function needsMusicMetadata(track: MusicTrack) {
   const missingArtist = !track.artist || /unknown artist/i.test(track.artist);
   const missingAlbum = !track.album;
-  const genericTitle = /^(track|audio|song|untitled)(\s*\d+)?$/i.test(track.title.trim());
-  const filenameTitle = normalize(track.title) === normalize(track.original_name.replace(/\.[^.]+$/, ""));
-  return missingArtist || missingAlbum || genericTitle || filenameTitle;
+  const genericTitle = /^(track|audio|song|untitled)(\s*\d+)?$/i.test(
+    track.title.trim()
+  );
+
+  return missingArtist || missingAlbum || genericTitle;
 }
 
 export function needsMusicArtwork(track: MusicTrack) {
@@ -214,6 +359,7 @@ export async function applyMusicMetadataCandidate(
   if (candidate.artworkUrl && needsMusicArtwork(updated)) {
     updated = await uploadRemoteMusicArtwork(updated, candidate.artworkUrl);
   }
+
   return updated;
 }
 
@@ -223,29 +369,62 @@ export async function enrichMusicTrack(
 ): Promise<MusicEnrichmentResult> {
   const candidates = await findMusicMetadataCandidates(track);
   const candidate = candidates[0] || null;
-  const threshold = options?.autoApplyThreshold ?? 0.84;
+
+  // Only very strong matches auto-apply. Everything else is kept for review.
+  const threshold = options?.autoApplyThreshold ?? 0.95;
 
   if (!candidate) {
-    return { track, status: "not_found", candidate: null, candidates: [], changed: false };
+    return {
+      track,
+      status: "not_found",
+      candidate: null,
+      candidates: [],
+      changed: false,
+    };
   }
 
   if (options?.artworkOnly) {
-    if (candidate.artworkUrl && candidate.confidence >= 0.72) {
-      const updated = await uploadRemoteMusicArtwork(track, candidate.artworkUrl);
+    if (candidate.artworkUrl && candidate.confidence >= 0.78) {
+      const updated = await uploadRemoteMusicArtwork(
+        track,
+        candidate.artworkUrl
+      );
+
       return {
         track: updated,
-        status: candidate.confidence >= threshold ? "matched" : "review",
+        status:
+          candidate.confidence >= threshold ? "matched" : "review",
         candidate,
         candidates,
-        changed: updated.artwork_path !== track.artwork_path || updated.external_artwork_url !== track.external_artwork_url,
+        changed:
+          updated.artwork_path !== track.artwork_path ||
+          updated.external_artwork_url !== track.external_artwork_url,
       };
     }
-    return { track, status: "review", candidate, candidates, changed: false };
+
+    return {
+      track,
+      status: "review",
+      candidate,
+      candidates,
+      changed: false,
+    };
   }
 
   if (candidate.confidence >= threshold) {
-    const updated = await applyMusicMetadataCandidate(track, candidate, "matched");
-    return { track: updated, status: "matched", candidate, candidates, changed: true };
+    const updated = await applyMusicMetadataCandidate(
+      track,
+      candidate,
+      "matched"
+    );
+
+    return {
+      track: updated,
+      status: "matched",
+      candidate,
+      candidates,
+      changed: true,
+    };
   }
 
   await updateMusicTrack(track.id, {
@@ -255,9 +434,17 @@ export async function enrichMusicTrack(
     metadata_updated_at: new Date().toISOString(),
   });
 
-  return { track, status: "review", candidate, candidates, changed: false };
+  return {
+    track,
+    status: "review",
+    candidate,
+    candidates,
+    changed: false,
+  };
 }
 
 export async function delayMusicLookup(milliseconds = 275) {
-  await new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+  await new Promise<void>((resolve) =>
+    window.setTimeout(resolve, milliseconds)
+  );
 }
