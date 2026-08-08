@@ -7,6 +7,8 @@ export const MAX_MUSIC_ARTWORK_BYTES = 8 * 1024 * 1024;
 
 export type MusicEnergyLevel = "low" | "medium" | "high";
 
+export type MusicMetadataStatus = "unknown" | "matched" | "review" | "manual";
+
 export type MusicTrack = {
   id: string;
   user_id: string;
@@ -14,25 +16,49 @@ export type MusicTrack = {
   title: string;
   artist: string | null;
   album: string | null;
+  release_year: number | null;
+  genre: string | null;
   artwork_path: string | null;
+  external_artwork_url: string | null;
   original_name: string;
   mime_type: string | null;
   file_size_bytes: number | null;
   duration_seconds: number | null;
   sort_order: number;
   favorite: boolean;
+  play_less: boolean;
   energy_level: MusicEnergyLevel;
   play_count: number;
   skip_count: number;
+  completed_play_count: number;
   last_played_at: string | null;
+  last_skipped_at: string | null;
+  last_completed_at: string | null;
+  metadata_status: MusicMetadataStatus;
+  metadata_confidence: number | null;
+  metadata_source: string | null;
+  metadata_updated_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-type MusicTrackUpdate = Partial<
+export type MusicTrackUpdate = Partial<
   Pick<
     MusicTrack,
-    "title" | "artist" | "album" | "sort_order" | "favorite" | "energy_level"
+    | "title"
+    | "artist"
+    | "album"
+    | "release_year"
+    | "genre"
+    | "external_artwork_url"
+    | "sort_order"
+    | "favorite"
+    | "play_less"
+    | "energy_level"
+    | "metadata_status"
+    | "metadata_confidence"
+    | "metadata_source"
+    | "metadata_updated_at"
   >
 >;
 
@@ -48,7 +74,7 @@ type EmbeddedArtwork = {
 };
 
 const TRACK_SELECT =
-  "id,user_id,storage_path,title,artist,album,artwork_path,original_name,mime_type,file_size_bytes,duration_seconds,sort_order,favorite,energy_level,play_count,skip_count,last_played_at,created_at,updated_at";
+  "id,user_id,storage_path,title,artist,album,release_year,genre,artwork_path,external_artwork_url,original_name,mime_type,file_size_bytes,duration_seconds,sort_order,favorite,play_less,energy_level,play_count,skip_count,completed_play_count,last_played_at,last_skipped_at,last_completed_at,metadata_status,metadata_confidence,metadata_source,metadata_updated_at,created_at,updated_at";
 
 const signedUrlCache = new Map<string, SignedUrlCacheEntry>();
 const artworkSignedUrlCache = new Map<string, SignedUrlCacheEntry>();
@@ -108,17 +134,34 @@ async function requireUserId() {
 }
 
 function normalizeTrack(row: MusicTrack): MusicTrack {
+  const metadataStatus: MusicMetadataStatus =
+    row.metadata_status === "matched" ||
+    row.metadata_status === "review" ||
+    row.metadata_status === "manual"
+      ? row.metadata_status
+      : "unknown";
+
   return {
     ...row,
     album: row.album || null,
+    release_year: row.release_year ? Number(row.release_year) : null,
+    genre: row.genre || null,
     artwork_path: row.artwork_path || null,
+    external_artwork_url: row.external_artwork_url || null,
     favorite: Boolean(row.favorite),
+    play_less: Boolean(row.play_less),
     energy_level:
       row.energy_level === "low" || row.energy_level === "high"
         ? row.energy_level
         : "medium",
     play_count: Math.max(0, Number(row.play_count || 0)),
     skip_count: Math.max(0, Number(row.skip_count || 0)),
+    completed_play_count: Math.max(0, Number(row.completed_play_count || 0)),
+    metadata_status: metadataStatus,
+    metadata_confidence:
+      row.metadata_confidence == null ? null : Number(row.metadata_confidence),
+    metadata_source: row.metadata_source || null,
+    metadata_updated_at: row.metadata_updated_at || null,
   };
 }
 
@@ -370,6 +413,131 @@ function extractM4aArtwork(bytes: Uint8Array): EmbeddedArtwork | null {
   return null;
 }
 
+
+export type EmbeddedMusicTags = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  releaseYear?: number;
+  genre?: string;
+};
+
+function decodeId3Text(bytes: Uint8Array, start: number, length: number) {
+  if (length <= 1) return "";
+  const encoding = bytes[start];
+  const payload = bytes.slice(start + 1, start + length);
+  try {
+    if (encoding === 1 || encoding === 2) {
+      const littleEndian = payload[0] === 0xff && payload[1] === 0xfe;
+      const clean = littleEndian || (payload[0] === 0xfe && payload[1] === 0xff)
+        ? payload.slice(2)
+        : payload;
+      const view = new DataView(clean.buffer, clean.byteOffset, clean.byteLength);
+      let value = "";
+      for (let offset = 0; offset + 1 < clean.byteLength; offset += 2) {
+        const code = view.getUint16(offset, littleEndian);
+        if (!code) continue;
+        value += String.fromCharCode(code);
+      }
+      return value.replace(/\0/g, "").trim();
+    }
+    return new TextDecoder(encoding === 3 ? "utf-8" : "iso-8859-1")
+      .decode(payload)
+      .replace(/\0/g, "")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function extractId3TextTags(bytes: Uint8Array): EmbeddedMusicTags {
+  if (bytes.length < 10 || String.fromCharCode(...bytes.slice(0, 3)) !== "ID3") return {};
+  const version = bytes[3];
+  const tagSize = syncSafeInt(bytes, 6);
+  const end = Math.min(bytes.length, 10 + tagSize);
+  const tags: EmbeddedMusicTags = {};
+  let offset = 10;
+
+  while (offset + 10 <= end) {
+    const frameId = String.fromCharCode(...bytes.slice(offset, offset + 4));
+    if (!frameId.trim() || /^\0+$/.test(frameId)) break;
+    const frameSize = version === 4 ? syncSafeInt(bytes, offset + 4) : uint32(bytes, offset + 4);
+    if (!frameSize || offset + 10 + frameSize > end) break;
+    const value = decodeId3Text(bytes, offset + 10, frameSize);
+    if (value) {
+      if (frameId === "TIT2") tags.title = value;
+      if (frameId === "TPE1") tags.artist = value;
+      if (frameId === "TALB") tags.album = value;
+      if (frameId === "TCON") tags.genre = value.replace(/^\(\d+\)\s*/, "");
+      if (frameId === "TDRC" || frameId === "TYER") {
+        const year = Number(value.match(/\b(19|20)\d{2}\b/)?.[0]);
+        if (Number.isFinite(year)) tags.releaseYear = year;
+      }
+    }
+    offset += 10 + frameSize;
+  }
+  return tags;
+}
+
+function extractM4aTextTag(bytes: Uint8Array, atomName: string) {
+  const nameBytes = new TextEncoder().encode(atomName);
+  for (let index = 4; index + nameBytes.length + 16 < bytes.length; index += 1) {
+    let match = true;
+    for (let part = 0; part < nameBytes.length; part += 1) {
+      if (bytes[index + part] !== nameBytes[part]) { match = false; break; }
+    }
+    if (!match) continue;
+    const atomStart = index - 4;
+    const atomSize = uint32(bytes, atomStart);
+    if (atomSize < 20 || atomStart + atomSize > bytes.length) continue;
+    const atomEnd = atomStart + atomSize;
+    for (let cursor = index + nameBytes.length; cursor + 16 <= atomEnd; cursor += 1) {
+      if (String.fromCharCode(...bytes.slice(cursor + 4, cursor + 8)) !== "data") continue;
+      const dataSize = uint32(bytes, cursor);
+      const payloadStart = cursor + 16;
+      const payloadEnd = Math.min(atomEnd, cursor + dataSize);
+      if (payloadEnd <= payloadStart) continue;
+      try {
+        return new TextDecoder("utf-8")
+          .decode(bytes.slice(payloadStart, payloadEnd))
+          .replace(/\0/g, "")
+          .trim();
+      } catch {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+function extractM4aTextTags(bytes: Uint8Array): EmbeddedMusicTags {
+  const title = extractM4aTextTag(bytes, "©nam");
+  const artist = extractM4aTextTag(bytes, "©ART") || extractM4aTextTag(bytes, "aART");
+  const album = extractM4aTextTag(bytes, "©alb");
+  const yearText = extractM4aTextTag(bytes, "©day");
+  const genre = extractM4aTextTag(bytes, "©gen");
+  const releaseYear = Number(yearText.match(/\b(19|20)\d{2}\b/)?.[0]);
+  return {
+    ...(title ? { title } : {}),
+    ...(artist ? { artist } : {}),
+    ...(album ? { album } : {}),
+    ...(genre ? { genre } : {}),
+    ...(Number.isFinite(releaseYear) ? { releaseYear } : {}),
+  };
+}
+
+export async function readEmbeddedMusicTags(file: File): Promise<EmbeddedMusicTags> {
+  try {
+    const maxScan = Math.min(file.size, 8 * 1024 * 1024);
+    const bytes = new Uint8Array(await file.slice(0, maxScan).arrayBuffer());
+    const id3 = extractId3TextTags(bytes);
+    const m4a = extractM4aTextTags(bytes);
+    return { ...m4a, ...id3 };
+  } catch {
+    return {};
+  }
+}
+
 export async function readEmbeddedMusicArtwork(
   file: File
 ): Promise<EmbeddedArtwork | null> {
@@ -405,6 +573,7 @@ async function uploadArtworkBlob(
     .from(MUSIC_TABLE)
     .update({
       artwork_path: artworkPath,
+      external_artwork_url: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", track.id)
@@ -436,13 +605,14 @@ export async function uploadMusicArtwork(track: MusicTrack, file: File) {
 }
 
 export async function removeMusicArtwork(track: MusicTrack) {
-  if (!track.artwork_path) return track;
+  if (!track.artwork_path && !track.external_artwork_url) return track;
   const userId = await requireUserId();
 
   const { data, error } = await supabase
     .from(MUSIC_TABLE)
     .update({
       artwork_path: null,
+      external_artwork_url: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", track.id)
@@ -452,10 +622,12 @@ export async function removeMusicArtwork(track: MusicTrack) {
 
   if (error) throw error;
 
-  await supabase.storage
-    .from(MUSIC_BUCKET)
-    .remove([track.artwork_path])
-    .catch(() => undefined);
+  if (track.artwork_path) {
+    await supabase.storage
+      .from(MUSIC_BUCKET)
+      .remove([track.artwork_path])
+      .catch(() => undefined);
+  }
 
   artworkSignedUrlCache.delete(track.id);
   return normalizeTrack(data as MusicTrack);
@@ -480,9 +652,10 @@ export async function uploadMusicTrack(
 ): Promise<MusicTrack> {
   const extension = validateMusicFile(file);
   const userId = await requireUserId();
-  const [durationSeconds, embeddedArtwork] = await Promise.all([
+  const [durationSeconds, embeddedArtwork, embeddedTags] = await Promise.all([
     readMusicDuration(file),
     readEmbeddedMusicArtwork(file),
+    readEmbeddedMusicTags(file),
   ]);
 
   const fileStem = safeFileName(file.name.replace(/\.[^.]+$/, ""));
@@ -503,19 +676,35 @@ export async function uploadMusicTrack(
   const row = {
     user_id: userId,
     storage_path: storagePath,
-    title: titleFromFileName(file.name),
-    artist: null,
-    album: null,
+    title: embeddedTags.title?.trim() || titleFromFileName(file.name),
+    artist: embeddedTags.artist?.trim() || null,
+    album: embeddedTags.album?.trim() || null,
+    release_year: embeddedTags.releaseYear || null,
+    genre: embeddedTags.genre?.trim() || null,
     artwork_path: null,
+    external_artwork_url: null,
     original_name: file.name,
     mime_type: mimeType,
     file_size_bytes: file.size,
     duration_seconds: durationSeconds,
     sort_order: Math.max(0, Math.floor(sortOrder)),
     favorite: false,
+    play_less: false,
     energy_level: "medium" as MusicEnergyLevel,
     play_count: 0,
     skip_count: 0,
+    completed_play_count: 0,
+    last_played_at: null,
+    last_skipped_at: null,
+    last_completed_at: null,
+    metadata_status:
+      embeddedTags.title || embeddedTags.artist || embeddedTags.album ? "manual" : "unknown",
+    metadata_confidence: embeddedTags.title || embeddedTags.artist ? 1 : null,
+    metadata_source: embeddedTags.title || embeddedTags.artist ? "embedded" : null,
+    metadata_updated_at:
+      embeddedTags.title || embeddedTags.artist || embeddedTags.album
+        ? new Date().toISOString()
+        : null,
     updated_at: new Date().toISOString(),
   };
 
@@ -556,6 +745,8 @@ export async function updateMusicTrack(
   const title = patch.title?.trim();
   const artist = patch.artist?.trim();
   const album = patch.album?.trim();
+  const genre = patch.genre?.trim();
+  const externalArtworkUrl = patch.external_artwork_url?.trim();
 
   const update: Record<string, string | number | boolean | null> = {
     updated_at: new Date().toISOString(),
@@ -567,11 +758,29 @@ export async function updateMusicTrack(
   }
   if (patch.artist !== undefined) update.artist = artist || null;
   if (patch.album !== undefined) update.album = album || null;
+  if (patch.release_year !== undefined) {
+    update.release_year = patch.release_year
+      ? Math.max(1900, Math.min(2100, Math.round(patch.release_year)))
+      : null;
+  }
+  if (patch.genre !== undefined) update.genre = genre || null;
+  if (patch.external_artwork_url !== undefined) {
+    update.external_artwork_url = externalArtworkUrl || null;
+  }
   if (patch.sort_order !== undefined) {
     update.sort_order = Math.max(0, Math.floor(patch.sort_order));
   }
   if (patch.favorite !== undefined) update.favorite = Boolean(patch.favorite);
+  if (patch.play_less !== undefined) update.play_less = Boolean(patch.play_less);
   if (patch.energy_level !== undefined) update.energy_level = patch.energy_level;
+  if (patch.metadata_status !== undefined) update.metadata_status = patch.metadata_status;
+  if (patch.metadata_confidence !== undefined) {
+    update.metadata_confidence = patch.metadata_confidence == null
+      ? null
+      : Math.max(0, Math.min(1, Number(patch.metadata_confidence)));
+  }
+  if (patch.metadata_source !== undefined) update.metadata_source = patch.metadata_source || null;
+  if (patch.metadata_updated_at !== undefined) update.metadata_updated_at = patch.metadata_updated_at;
 
   const { data, error } = await supabase
     .from(MUSIC_TABLE)
@@ -595,8 +804,8 @@ export async function saveMusicTrackOrder(tracks: MusicTrack[]) {
 
 async function incrementTrackCounter(
   trackId: string,
-  field: "play_count" | "skip_count",
-  alsoMarkPlayed: boolean
+  field: "play_count" | "skip_count" | "completed_play_count",
+  timestampField?: "last_played_at" | "last_skipped_at" | "last_completed_at"
 ) {
   const userId = await requireUserId();
   const { data, error: readError } = await supabase
@@ -609,33 +818,70 @@ async function incrementTrackCounter(
   if (readError) throw readError;
   if (!data) return;
 
-  const counterRow = data as Partial<
-    Record<"play_count" | "skip_count", number | null>
-  >;
-  const nextValue = Math.max(0, Number(counterRow[field] ?? 0)) + 1;
-
+  const current = Number((data as Record<string, number | null>)[field] ?? 0);
   const update: Record<string, string | number> = {
-    [field]: nextValue,
+    [field]: Math.max(0, current) + 1,
     updated_at: new Date().toISOString(),
   };
+  if (timestampField) update[timestampField] = new Date().toISOString();
 
-  if (alsoMarkPlayed) update.last_played_at = new Date().toISOString();
-
-  const { error: updateError } = await supabase
+  const { error } = await supabase
     .from(MUSIC_TABLE)
     .update(update)
     .eq("id", trackId)
     .eq("user_id", userId);
-
-  if (updateError) throw updateError;
+  if (error) throw error;
 }
 
 export async function recordMusicTrackPlayed(trackId: string) {
-  await incrementTrackCounter(trackId, "play_count", true);
+  await incrementTrackCounter(trackId, "play_count", "last_played_at");
 }
 
 export async function recordMusicTrackSkipped(trackId: string) {
-  await incrementTrackCounter(trackId, "skip_count", false);
+  await incrementTrackCounter(trackId, "skip_count", "last_skipped_at");
+}
+
+export async function recordMusicTrackCompleted(trackId: string) {
+  await incrementTrackCounter(trackId, "completed_play_count", "last_completed_at");
+}
+
+
+export async function setMusicTrackPreference(
+  trackId: string,
+  preference: "like" | "play_less" | "neutral"
+) {
+  return updateMusicTrack(trackId, {
+    favorite: preference === "like",
+    play_less: preference === "play_less",
+  });
+}
+
+function artworkExtensionFromMime(mime: string) {
+  if (mime.includes("png")) return "png" as const;
+  if (mime.includes("webp")) return "webp" as const;
+  return "jpg" as const;
+}
+
+export async function uploadRemoteMusicArtwork(
+  track: MusicTrack,
+  url: string
+): Promise<MusicTrack> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) return track;
+
+  try {
+    const response = await fetch(cleanUrl, { mode: "cors", cache: "force-cache" });
+    if (!response.ok) throw new Error(`Artwork request failed (${response.status}).`);
+    const blob = await response.blob();
+    const mime = blob.type || "image/jpeg";
+    if (!mime.startsWith("image/")) throw new Error("Artwork response was not an image.");
+    if (blob.size > MAX_MUSIC_ARTWORK_BYTES) throw new Error("Artwork image is too large.");
+    return await uploadArtworkBlob(track, blob, artworkExtensionFromMime(mime), mime);
+  } catch {
+    // Keep the external URL as a resilient visual fallback when the image host
+    // blocks cross-origin blob downloads. The library can still display it.
+    return updateMusicTrack(track.id, { external_artwork_url: cleanUrl });
+  }
 }
 
 export async function removeMusicTrack(trackId: string) {
@@ -695,7 +941,7 @@ export async function getMusicTrackSignedUrl(track: MusicTrack): Promise<string>
 export async function getMusicArtworkSignedUrl(
   track: MusicTrack
 ): Promise<string | null> {
-  if (!track.artwork_path) return null;
+  if (!track.artwork_path) return track.external_artwork_url || null;
 
   const cached = artworkSignedUrlCache.get(track.id);
   if (cached && cached.expiresAt > Date.now()) return cached.url;
