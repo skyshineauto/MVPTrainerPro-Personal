@@ -3,7 +3,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type CSSProperties,
 } from "react";
 import { getMusicArtworkSignedUrl } from "../../lib/musicStorage";
 import {
@@ -21,6 +20,8 @@ import {
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
   MUSIC_HEADPHONE_MODES,
+  MUSIC_RTA_FREQUENCIES,
+  getMusicRtaLevels,
   nextMusicTrack,
   pauseMusic,
   playMusic,
@@ -30,6 +31,9 @@ import {
   seekMusic,
   setMusicEqBand,
   setMusicEqEnabled,
+  setMusicDspBypass,
+  recoverMusicDsp,
+  setPlayerMusicPreference,
   setMusicHeadphoneBassImpact,
   setMusicHeadphoneCenter,
   setMusicHeadphoneCrossfeed,
@@ -56,6 +60,8 @@ type IconName =
   | "shuffle"
   | "repeat"
   | "equalizer"
+  | "like"
+  | "dislike"
   | "music";
 
 type SavedDspProfile = {
@@ -172,6 +178,20 @@ function PlayerIcon({ name }: { name: IconName }) {
       </svg>
     );
   }
+  if (name === "like") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden>
+        <path d="M9.2 21H5.5A2.5 2.5 0 0 1 3 18.5v-8A2.5 2.5 0 0 1 5.5 8H9l3.2-5.1A2 2 0 0 1 16 4v4h3.2a2.8 2.8 0 0 1 2.7 3.5l-1.8 7A3.4 3.4 0 0 1 16.8 21H9.2Zm-1.7-2V10H5.5a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h2Zm2 0h7.3a1.4 1.4 0 0 0 1.4-1.1l1.8-7a.8.8 0 0 0-.8-.9H14V4.8l-4.5 7.1V19Z" />
+      </svg>
+    );
+  }
+  if (name === "dislike") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden>
+        <path d="M14.8 3h3.7A2.5 2.5 0 0 1 21 5.5v8a2.5 2.5 0 0 1-2.5 2.5H15l-3.2 5.1A2 2 0 0 1 8 20v-4H4.8a2.8 2.8 0 0 1-2.7-3.5l1.8-7A3.4 3.4 0 0 1 7.2 3h7.6Zm1.7 2v9h2a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2Zm-2 0H7.2a1.4 1.4 0 0 0-1.4 1.1L4 13.1a.8.8 0 0 0 .8.9H10v5.2l4.5-7.1V5Z" />
+      </svg>
+    );
+  }
   if (name === "equalizer") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden>
@@ -186,66 +206,59 @@ function PlayerIcon({ name }: { name: IconName }) {
   );
 }
 
-function PlaybackSignal({
-  playing,
-  currentTime,
-  duration,
-  trackIndex,
-  trackCount,
-}: {
-  playing: boolean;
-  currentTime: number;
-  duration: number;
-  trackIndex: number;
-  trackCount: number;
-}) {
-  const progress =
-    duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+function TenBandRta({ playing }: { playing: boolean }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(true);
+  const [levels, setLevels] = useState<number[]>(() => Array(10).fill(0));
+  const [peaks, setPeaks] = useState<number[]>(() => Array(10).fill(0));
 
-  const bars = [0.48, 0.74, 0.56, 0.86, 0.62, 0.94, 0.68, 0.82, 0.52, 0.78, 0.58, 0.70];
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
+      { threshold: 0.05 }
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!playing || !visible) {
+      setLevels((current) => current.map((value) => value * 0.45));
+      setPeaks((current) => current.map((value) => value * 0.82));
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const next = getMusicRtaLevels();
+      setLevels(next);
+      setPeaks((current) => next.map((value, index) => Math.max(value, (current[index] || 0) * 0.93)));
+    }, 110);
+
+    return () => window.clearInterval(timer);
+  }, [playing, visible]);
 
   return (
-    <div
-      className={`tr-audioSignalPanel ${playing ? "is-live" : "is-idle"}`}
-      aria-label={playing ? "Music playback active" : "Music playback ready"}
-    >
-      <div className="tr-audioSignalHead">
-        <span>
-          <i />
-          {playing ? "PLAYBACK SIGNAL • ACTIVE" : "PLAYBACK SIGNAL • READY"}
-        </span>
-        <span>
-          {trackCount > 0 && trackIndex >= 0
-            ? `TRACK ${String(trackIndex + 1).padStart(2, "0")} / ${String(trackCount).padStart(2, "0")}`
-            : "MVP PERFORMANCE AUDIO"}
-        </span>
+    <div ref={hostRef} className="tr-rta10" aria-label="10 band real-time audio analyzer">
+      <div className="tr-rta10Head">
+        <span><i />10-BAND RTA</span>
+        <span>{playing ? "PROCESSED OUTPUT • LIVE" : "PROCESSED OUTPUT • READY"}</span>
       </div>
-
-      <div className="tr-audioSignalField" aria-hidden>
-        <div className="tr-audioSignalBaseline" />
-        <div className="tr-audioSignalBars">
-          {bars.map((height, index) => (
-            <span
-              key={index}
-              style={
-                {
-                  "--signal-height": String(height),
-                  "--signal-index": String(index),
-                } as CSSProperties
-              }
-            />
-          ))}
-        </div>
-        <div
-          className="tr-audioSignalProgress"
-          style={{ transform: `scaleX(${progress})` }}
-        />
-      </div>
-
-      <div className="tr-audioSignalFooter">
-        <span>{playing ? "STREAM LOCKED" : "STANDBY"}</span>
-        <span>31-BAND DSP PATH</span>
-        <span>LOW-POWER VISUAL MODE</span>
+      <div className="tr-rta10Grid" aria-hidden>
+        {MUSIC_RTA_FREQUENCIES.map((frequency, index) => {
+          const value = Math.max(0.02, Math.min(1, levels[index] || 0));
+          const peak = Math.max(value, Math.min(1, peaks[index] || 0));
+          return (
+            <div className="tr-rta10Band" key={frequency}>
+              <div className="tr-rta10Meter">
+                <span className="tr-rta10Fill" style={{ transform: `scaleY(${value})` }} />
+                <span className="tr-rta10Peak" style={{ bottom: `${Math.max(4, peak * 94)}%` }} />
+              </div>
+              <strong>{frequency >= 1000 ? `${frequency / 1000}K` : frequency}</strong>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -284,7 +297,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     let cancelled = false;
     const current = player.currentTrack;
     setArtworkUrl(null);
-    if (!current?.artwork_path) return () => { cancelled = true; };
+    if (!current?.artwork_path && !current?.external_artwork_url) return () => { cancelled = true; };
 
     void getMusicArtworkSignedUrl(current)
       .then((url) => {
@@ -295,7 +308,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       });
 
     return () => { cancelled = true; };
-  }, [player.currentTrack?.id, player.currentTrack?.artwork_path]);
+  }, [player.currentTrack?.id, player.currentTrack?.artwork_path, player.currentTrack?.external_artwork_url]);
 
   const run = (action: () => void | Promise<void>) => {
     try {
@@ -456,9 +469,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     Math.max(0, player.currentTime)
   );
   const queueLabel = player.activePlaylistName || "All Uploaded Songs";
-  const currentTrackIndex = track
-    ? player.tracks.findIndex((item) => item.id === track.id)
-    : -1;
 
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile
@@ -542,20 +552,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       <div className="tr-audioTelemetry">
         <span className={player.playing ? "is-live" : ""}>
-          <i /> {player.playing ? "SIGNAL ACTIVE" : "SIGNAL READY"}
+          <i /> {player.playing ? "RTA ACTIVE" : "RTA READY"}
         </span>
-        <span>EQ {player.eqEnabled ? "ACTIVE" : "BYPASSED"}</span>
-        <span>DSP {player.headphoneMode === "off" ? "STEREO" : "SPATIAL"}</span>
-        <span className="tr-audioOutputState is-safe">OUTPUT READY</span>
+        <span>EQ {player.dspBypass ? "BYPASS" : player.eqEnabled ? "ACTIVE" : "FLAT"}</span>
+        <span>DSP {player.dspStatus.toUpperCase()}</span>
+        <button
+          type="button"
+          className={`tr-dspHealth is-${player.dspStatus}`}
+          onClick={() => void recoverMusicDsp()}
+        >
+          {player.dspStatus === "active" ? "PROCESSING LOCKED" : player.dspStatus === "bypassed" ? "A/B BYPASS" : "RECOVER DSP"}
+        </button>
       </div>
 
-      <PlaybackSignal
-        playing={player.playing}
-        currentTime={currentTime}
-        duration={duration}
-        trackIndex={currentTrackIndex}
-        trackCount={player.tracks.length}
-      />
+      <TenBandRta playing={player.playing} />
 
       <div className="tr-audioTimeline">
         <span>{formatMusicTime(currentTime)}</span>
@@ -572,6 +582,56 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           aria-label="Music playback position"
         />
         <span>{formatMusicTime(duration)}</span>
+      </div>
+
+      <div className="tr-mainAudioTuning">
+        <label className="tr-mainPreamp">
+          <span>PREAMP</span>
+          <input
+            type="range"
+            min="-12"
+            max="12"
+            step="0.5"
+            value={player.preampDb}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setMusicPreamp(Number(event.target.value))
+            }
+            aria-label="Music preamp"
+          />
+          <strong>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</strong>
+        </label>
+
+        <div className="tr-trackPreference" aria-label="Track preference">
+          <button
+            type="button"
+            className={track?.play_less ? "is-disliked" : ""}
+            disabled={!track}
+            onClick={() => {
+              if (!track) return;
+              const next = track.play_less ? "neutral" : "play_less";
+              void setPlayerMusicPreference(track.id, next).then(() => {
+                if (next === "play_less") void nextMusicTrack();
+              });
+            }}
+            aria-label="Play this song less"
+          >
+            <PlayerIcon name="dislike" />
+            <span>PLAY LESS</span>
+          </button>
+          <button
+            type="button"
+            className={track?.favorite ? "is-liked" : ""}
+            disabled={!track}
+            onClick={() => {
+              if (!track) return;
+              void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
+            }}
+            aria-label="Like this song"
+          >
+            <PlayerIcon name="like" />
+            <span>{track?.favorite ? "LIKED" : "LIKE"}</span>
+          </button>
+        </div>
       </div>
 
       <div className="tr-audioControls">
@@ -665,16 +725,25 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span className="tr-audioEyebrow">PERFORMANCE DSP</span>
               <strong>31-band 1/3-octave EQ + headphone immersion</strong>
             </div>
-            <label className="tr-audioEqSwitch">
-              <input
-                type="checkbox"
-                checked={player.eqEnabled}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMusicEqEnabled(event.target.checked)
-                }
-              />
-              <span>{player.eqEnabled ? "ACTIVE" : "BYPASS"}</span>
-            </label>
+            <div className="tr-dspAbControls">
+              <label className="tr-audioEqSwitch">
+                <input
+                  type="checkbox"
+                  checked={player.eqEnabled}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setMusicEqEnabled(event.target.checked)
+                  }
+                />
+                <span>EQ {player.eqEnabled ? "ON" : "FLAT"}</span>
+              </label>
+              <button
+                type="button"
+                className={`tr-dspBypassButton ${player.dspBypass ? "is-active" : ""}`}
+                onClick={() => setMusicDspBypass(!player.dspBypass)}
+              >
+                A/B {player.dspBypass ? "BYPASSED" : "PROCESSED"}
+              </button>
+            </div>
             <label className="tr-audioEqPreset">
               <span>EQ PRESET</span>
               <select
@@ -748,7 +817,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <input
                 type="range"
                 min="-12"
-                max="6"
+                max="12"
                 step="0.5"
                 value={player.preampDb}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
@@ -955,6 +1024,26 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       {player.error ? <div className="tr-audioError">{player.error}</div> : null}
 
       <style>{`
+        .tr-audioDeck--pro7 .tr-rta10{
+          margin:8px 0 5px;border:1px solid rgba(91,187,222,.16);border-top-color:rgba(167,226,247,.28);
+          border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(4,17,25,.98),rgba(2,9,14,.99));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.22)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Head{height:27px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(80,177,214,.09);font-size:7px;font-weight:950;letter-spacing:.1em;color:rgba(181,212,224,.55)}
+        .tr-audioDeck--pro7 .tr-rta10Head span:first-child{display:inline-flex;align-items:center;gap:7px;color:#d8f5ff}.tr-audioDeck--pro7 .tr-rta10Head i{width:6px;height:6px;border-radius:50%;background:#52d7ff;box-shadow:0 0 10px rgba(82,215,255,.38)}
+        .tr-audioDeck--pro7 .tr-rta10Grid{height:112px;padding:12px 14px 9px;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;background:repeating-linear-gradient(0deg,transparent 0,transparent 22px,rgba(98,180,208,.045) 23px)}
+        .tr-audioDeck--pro7 .tr-rta10Band{min-width:0;display:grid;grid-template-rows:1fr 13px;gap:5px;align-items:end;text-align:center}
+        .tr-audioDeck--pro7 .tr-rta10Meter{height:78px;position:relative;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,rgba(62,102,118,.12),rgba(20,43,52,.18));box-shadow:inset 0 0 0 1px rgba(94,173,201,.07)}
+        .tr-audioDeck--pro7 .tr-rta10Fill{position:absolute;inset:0;transform-origin:bottom;background:linear-gradient(180deg,#77e2ff 0%,#37bfe9 58%,#ffae3d 100%);border-radius:4px;box-shadow:0 0 9px rgba(72,200,242,.18);transition:transform .10s linear}
+        .tr-audioDeck--pro7 .tr-rta10Peak{position:absolute;left:14%;right:14%;height:2px;background:#edfaff;box-shadow:0 0 5px rgba(214,248,255,.5);transition:bottom .12s linear}
+        .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:7px;letter-spacing:.04em;color:rgba(178,211,223,.62)}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;margin:3px 0 10px}
+        .tr-audioDeck--pro7 .tr-mainPreamp{min-width:0;display:grid;grid-template-columns:54px minmax(100px,1fr) 62px;gap:8px;align-items:center;padding:8px 11px;border:1px solid rgba(80,172,207,.12);border-radius:9px;background:rgba(5,16,23,.64)}
+        .tr-audioDeck--pro7 .tr-mainPreamp span{font-size:7px;font-weight:950;letter-spacing:.09em;color:#8da8b3}.tr-audioDeck--pro7 .tr-mainPreamp strong{text-align:right;font-size:9px;color:#f3fbff}.tr-audioDeck--pro7 .tr-mainPreamp input{width:100%;accent-color:#ff9e2d}
+        .tr-audioDeck--pro7 .tr-trackPreference{display:flex;gap:6px}.tr-audioDeck--pro7 .tr-trackPreference button{height:38px;min-width:74px;padding:0 10px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(107,164,186,.16);border-radius:9px;background:linear-gradient(180deg,#0b1720,#071017);color:#b9cbd3;font-size:7px;font-weight:950;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-trackPreference svg{width:14px;height:14px;fill:currentColor}.tr-audioDeck--pro7 .tr-trackPreference button.is-liked{color:#5ee3a7;border-color:rgba(69,219,153,.38);background:rgba(22,76,57,.22)}.tr-audioDeck--pro7 .tr-trackPreference button.is-disliked{color:#ff8585;border-color:rgba(255,105,105,.36);background:rgba(91,29,31,.20)}
+        .tr-audioDeck--pro7 .tr-dspHealth{border:0;background:transparent;font:inherit;color:#8fa8b1;cursor:pointer}.tr-audioDeck--pro7 .tr-dspHealth.is-active{color:#58dca5}.tr-audioDeck--pro7 .tr-dspHealth.is-unavailable{color:#ff7777}.tr-audioDeck--pro7 .tr-dspHealth.is-recovering{color:#ffb34d}
+        .tr-audioDeck--pro7 .tr-dspAbControls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.tr-audioDeck--pro7 .tr-dspBypassButton{height:34px;padding:0 12px;border:1px solid rgba(95,190,224,.22);border-radius:8px;background:#07131a;color:#b8d5df;font-size:8px;font-weight:900;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-dspBypassButton.is-active{border-color:rgba(255,176,73,.5);color:#ffb34d;background:rgba(91,54,12,.2)}
+        @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Grid{height:94px;padding:10px 8px 7px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Meter{height:62px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:6px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference{justify-content:stretch}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}}
         /* STEP 9 — LOW-POWER PLAYBACK SIGNAL
            Visual motion is CSS-only. No canvas, no spectrum analyser, no
            frequency polling. DSP/EQ/headphone processing remains untouched. */
