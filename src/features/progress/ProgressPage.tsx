@@ -9,16 +9,11 @@ import { supabase } from "../../lib/supabase";
 
 import icoSchedule from "../../assets/progress-icons/schedule.png";
 import icoChecked from "../../assets/progress-icons/checked.png";
-import icoRate from "../../assets/progress-icons/rate.png";
 import icoFlames from "../../assets/progress-icons/flames.png";
 import icoInProcess from "../../assets/progress-icons/in-process.png";
 import icoWorkout from "../../assets/progress-icons/workout.png";
 import icoReport from "../../assets/progress-icons/report.png";
-import icoFlag from "../../assets/progress-icons/flag.png";
-import icoPain from "../../assets/progress-icons/pain.png";
-import icoWarning from "../../assets/progress-icons/warning.png";
 import icoTarget from "../../assets/progress-icons/target.png";
-import icoScale from "../../assets/progress-icons/bathroom-scale.png";
 import icoProtein from "../../assets/progress-icons/protein-shake.png";
 
 type Scope = "active" | "all";
