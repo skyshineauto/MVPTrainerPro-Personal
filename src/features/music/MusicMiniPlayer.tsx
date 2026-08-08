@@ -215,50 +215,81 @@ function TenBandRta({ playing }: { playing: boolean }) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host || typeof IntersectionObserver === "undefined") return;
+
     const observer = new IntersectionObserver(
       (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
       { threshold: 0.05 }
     );
+
     observer.observe(host);
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
     if (!playing || !visible) {
-      setLevels((current) => current.map((value) => value * 0.45));
-      setPeaks((current) => current.map((value) => value * 0.82));
+      setLevels((current) => current.map((value) => value * 0.52));
+      setPeaks((current) => current.map((value) => value * 0.86));
       return;
     }
 
     const timer = window.setInterval(() => {
       const next = getMusicRtaLevels();
       setLevels(next);
-      setPeaks((current) => next.map((value, index) => Math.max(value, (current[index] || 0) * 0.93)));
+      setPeaks((current) =>
+        next.map((value, index) =>
+          Math.max(value, (current[index] || 0) * 0.955)
+        )
+      );
     }, 110);
 
     return () => window.clearInterval(timer);
   }, [playing, visible]);
 
   return (
-    <div ref={hostRef} className="tr-rta10" aria-label="10 band real-time audio analyzer">
+    <div
+      ref={hostRef}
+      className="tr-rta10"
+      aria-label="10 band real-time audio analyzer"
+    >
       <div className="tr-rta10Head">
-        <span><i />10-BAND RTA</span>
+        <span><i />10-BAND REAL-TIME ANALYZER</span>
         <span>{playing ? "PROCESSED OUTPUT • LIVE" : "PROCESSED OUTPUT • READY"}</span>
       </div>
-      <div className="tr-rta10Grid" aria-hidden>
-        {MUSIC_RTA_FREQUENCIES.map((frequency, index) => {
-          const value = Math.max(0.02, Math.min(1, levels[index] || 0));
-          const peak = Math.max(value, Math.min(1, peaks[index] || 0));
-          return (
-            <div className="tr-rta10Band" key={frequency}>
-              <div className="tr-rta10Meter">
-                <span className="tr-rta10Fill" style={{ transform: `scaleY(${value})` }} />
-                <span className="tr-rta10Peak" style={{ bottom: `${Math.max(4, peak * 94)}%` }} />
+
+      <div className="tr-rta10Body" aria-hidden>
+        <div className="tr-rta10Scale">
+          <span>0</span>
+          <span>-12</span>
+          <span>-24</span>
+          <span>-36</span>
+          <span>-48</span>
+          <span>-60</span>
+          <small>dB</small>
+        </div>
+
+        <div className="tr-rta10Grid">
+          {MUSIC_RTA_FREQUENCIES.map((frequency, bandIndex) => {
+            const value = Math.max(0.012, Math.min(1, levels[bandIndex] || 0));
+            const peak = Math.max(value, Math.min(1, peaks[bandIndex] || 0));
+
+            return (
+              <div className="tr-rta10Band" key={frequency}>
+                <div className="tr-rta10Meter">
+                  <span className="tr-rta10Inactive" />
+                  <span
+                    className="tr-rta10Fill"
+                    style={{ transform: `scaleY(${value})` }}
+                  />
+                  <span
+                    className="tr-rta10Peak"
+                    style={{ bottom: `${Math.max(2, peak * 96)}%` }}
+                  />
+                </div>
+                <strong>{frequency >= 1000 ? `${frequency / 1000}K` : frequency}</strong>
               </div>
-              <strong>{frequency >= 1000 ? `${frequency / 1000}K` : frequency}</strong>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1025,25 +1056,140 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       <style>{`
         .tr-audioDeck--pro7 .tr-rta10{
-          margin:8px 0 5px;border:1px solid rgba(91,187,222,.16);border-top-color:rgba(167,226,247,.28);
-          border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(4,17,25,.98),rgba(2,9,14,.99));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.22)
+          margin:8px 0 5px;
+          border:1px solid rgba(77,178,215,.18);
+          border-top-color:rgba(169,226,246,.31);
+          border-radius:10px;
+          overflow:hidden;
+          background:
+            linear-gradient(180deg,rgba(4,16,24,.99),rgba(2,8,13,.995));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.025),
+            inset 0 -1px 0 rgba(32,106,132,.08),
+            0 8px 22px rgba(0,0,0,.22)
         }
-        .tr-audioDeck--pro7 .tr-rta10Head{height:27px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(80,177,214,.09);font-size:7px;font-weight:950;letter-spacing:.1em;color:rgba(181,212,224,.55)}
-        .tr-audioDeck--pro7 .tr-rta10Head span:first-child{display:inline-flex;align-items:center;gap:7px;color:#d8f5ff}.tr-audioDeck--pro7 .tr-rta10Head i{width:6px;height:6px;border-radius:50%;background:#52d7ff;box-shadow:0 0 10px rgba(82,215,255,.38)}
-        .tr-audioDeck--pro7 .tr-rta10Grid{height:112px;padding:12px 14px 9px;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;background:repeating-linear-gradient(0deg,transparent 0,transparent 22px,rgba(98,180,208,.045) 23px)}
-        .tr-audioDeck--pro7 .tr-rta10Band{min-width:0;display:grid;grid-template-rows:1fr 13px;gap:5px;align-items:end;text-align:center}
-        .tr-audioDeck--pro7 .tr-rta10Meter{height:78px;position:relative;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,rgba(62,102,118,.12),rgba(20,43,52,.18));box-shadow:inset 0 0 0 1px rgba(94,173,201,.07)}
-        .tr-audioDeck--pro7 .tr-rta10Fill{position:absolute;inset:0;transform-origin:bottom;background:linear-gradient(180deg,#77e2ff 0%,#37bfe9 58%,#ffae3d 100%);border-radius:4px;box-shadow:0 0 9px rgba(72,200,242,.18);transition:transform .10s linear}
-        .tr-audioDeck--pro7 .tr-rta10Peak{position:absolute;left:14%;right:14%;height:2px;background:#edfaff;box-shadow:0 0 5px rgba(214,248,255,.5);transition:bottom .12s linear}
-        .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:7px;letter-spacing:.04em;color:rgba(178,211,223,.62)}
+        .tr-audioDeck--pro7 .tr-rta10Head{
+          height:29px;
+          padding:0 11px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:10px;
+          border-bottom:1px solid rgba(80,177,214,.09);
+          font-size:7px;
+          font-weight:950;
+          letter-spacing:.105em;
+          color:rgba(172,204,217,.5)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Head span:first-child{
+          display:inline-flex;
+          align-items:center;
+          gap:7px;
+          color:#d8f5ff
+        }
+        .tr-audioDeck--pro7 .tr-rta10Head i{
+          width:5px;
+          height:5px;
+          border-radius:50%;
+          background:#52d7ff;
+          box-shadow:0 0 8px rgba(82,215,255,.34)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Body{
+          display:grid;
+          grid-template-columns:34px minmax(0,1fr);
+          min-height:126px;
+          background:
+            repeating-linear-gradient(
+              0deg,
+              transparent 0,
+              transparent 20px,
+              rgba(92,174,205,.045) 20px,
+              rgba(92,174,205,.045) 21px
+            )
+        }
+        .tr-audioDeck--pro7 .tr-rta10Scale{
+          position:relative;
+          display:flex;
+          flex-direction:column;
+          justify-content:space-between;
+          align-items:flex-end;
+          padding:9px 6px 22px 0;
+          border-right:1px solid rgba(79,157,187,.08);
+          color:rgba(137,170,183,.46);
+          font-size:6px;
+          font-weight:850;
+          font-variant-numeric:tabular-nums
+        }
+        .tr-audioDeck--pro7 .tr-rta10Scale small{
+          position:absolute;
+          bottom:5px;
+          right:6px;
+          font-size:5px;
+          letter-spacing:.08em;
+          color:rgba(122,153,165,.38)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Grid{
+          min-width:0;
+          padding:9px 12px 7px;
+          display:grid;
+          grid-template-columns:repeat(10,minmax(0,1fr));
+          gap:7px
+        }
+        .tr-audioDeck--pro7 .tr-rta10Band{
+          min-width:0;
+          display:grid;
+          grid-template-rows:92px 13px;
+          gap:5px;
+          text-align:center
+        }
+        .tr-audioDeck--pro7 .tr-rta10Meter{
+          position:relative;
+          min-width:0;
+          overflow:hidden;
+          border-left:1px solid rgba(87,165,193,.045);
+          border-right:1px solid rgba(87,165,193,.045);
+          background:linear-gradient(180deg,rgba(6,20,28,.36),rgba(2,10,15,.12))
+        }
+        .tr-audioDeck--pro7 .tr-rta10Inactive,
+        .tr-audioDeck--pro7 .tr-rta10Fill{
+          position:absolute;
+          inset:3px 5px;
+          transform-origin:bottom;
+          -webkit-mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px);
+          mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Inactive{
+          background:rgba(80,124,141,.14)
+        }
+        .tr-audioDeck--pro7 .tr-rta10Fill{
+          background:linear-gradient(to top,#55cbe9 0 74%,#94d9c8 74% 90%,#dfa64b 90% 100%);
+          box-shadow:0 0 8px rgba(65,194,228,.16);
+          transition:transform .10s linear
+        }
+        .tr-audioDeck--pro7 .tr-rta10Peak{
+          position:absolute;
+          left:18%;
+          right:18%;
+          height:1px;
+          background:#eefbff;
+          box-shadow:0 0 5px rgba(213,248,255,.46);
+          transition:bottom .12s linear
+        }
+        .tr-audioDeck--pro7 .tr-rta10Band strong{
+          align-self:end;
+          color:rgba(171,204,216,.57);
+          font-size:6px;
+          font-weight:900;
+          letter-spacing:.035em;
+          font-variant-numeric:tabular-nums
+        }
         .tr-audioDeck--pro7 .tr-mainAudioTuning{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;margin:3px 0 10px}
         .tr-audioDeck--pro7 .tr-mainPreamp{min-width:0;display:grid;grid-template-columns:54px minmax(100px,1fr) 62px;gap:8px;align-items:center;padding:8px 11px;border:1px solid rgba(80,172,207,.12);border-radius:9px;background:rgba(5,16,23,.64)}
         .tr-audioDeck--pro7 .tr-mainPreamp span{font-size:7px;font-weight:950;letter-spacing:.09em;color:#8da8b3}.tr-audioDeck--pro7 .tr-mainPreamp strong{text-align:right;font-size:9px;color:#f3fbff}.tr-audioDeck--pro7 .tr-mainPreamp input{width:100%;accent-color:#ff9e2d}
         .tr-audioDeck--pro7 .tr-trackPreference{display:flex;gap:6px}.tr-audioDeck--pro7 .tr-trackPreference button{height:38px;min-width:74px;padding:0 10px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(107,164,186,.16);border-radius:9px;background:linear-gradient(180deg,#0b1720,#071017);color:#b9cbd3;font-size:7px;font-weight:950;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-trackPreference svg{width:14px;height:14px;fill:currentColor}.tr-audioDeck--pro7 .tr-trackPreference button.is-liked{color:#5ee3a7;border-color:rgba(69,219,153,.38);background:rgba(22,76,57,.22)}.tr-audioDeck--pro7 .tr-trackPreference button.is-disliked{color:#ff8585;border-color:rgba(255,105,105,.36);background:rgba(91,29,31,.20)}
         .tr-audioDeck--pro7 .tr-dspHealth{border:0;background:transparent;font:inherit;color:#8fa8b1;cursor:pointer}.tr-audioDeck--pro7 .tr-dspHealth.is-active{color:#58dca5}.tr-audioDeck--pro7 .tr-dspHealth.is-unavailable{color:#ff7777}.tr-audioDeck--pro7 .tr-dspHealth.is-recovering{color:#ffb34d}
         .tr-audioDeck--pro7 .tr-dspAbControls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.tr-audioDeck--pro7 .tr-dspBypassButton{height:34px;padding:0 12px;border:1px solid rgba(95,190,224,.22);border-radius:8px;background:#07131a;color:#b8d5df;font-size:8px;font-weight:900;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-dspBypassButton.is-active{border-color:rgba(255,176,73,.5);color:#ffb34d;background:rgba(91,54,12,.2)}
-        @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Grid{height:94px;padding:10px 8px 7px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Meter{height:62px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:6px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference{justify-content:stretch}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}}
+        @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr);min-height:110px}.tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 5px 6px;gap:3px}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:78px 12px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{inset:2px 2px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5px}.tr-audioDeck--pro7 .tr-rta10Scale{padding-right:4px;font-size:5px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference{justify-content:stretch}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}}
         /* STEP 9 — LOW-POWER PLAYBACK SIGNAL
            Visual motion is CSS-only. No canvas, no spectrum analyser, no
            frequency polling. DSP/EQ/headphone processing remains untouched. */
