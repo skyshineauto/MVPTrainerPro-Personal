@@ -184,6 +184,20 @@ function formatTimelineDate(date: Date | null) {
     .toUpperCase();
 }
 
+function formatEstimatedDuration(minutes: number | null | undefined) {
+  if (!minutes || !Number.isFinite(minutes)) return "—";
+
+  const total = Math.max(1, Math.round(minutes));
+  if (total < 60) return `~${total} MIN`;
+
+  const hours = Math.floor(total / 60);
+  const remainder = total % 60;
+  const hourLabel = hours === 1 ? "HR" : "HRS";
+
+  if (!remainder) return `~${hours} ${hourLabel}`;
+  return `~${hours} ${hourLabel} ${remainder} MIN`;
+}
+
 
 function startOfDay(date: Date) {
   const out = new Date(date);
@@ -943,8 +957,8 @@ export function TodayPage() {
                       <ClockMetricIcon />
                     </span>
                     <div className="tr-heroMetricCopy">
-                      <strong>
-                        {nextMeta?.estimatedMinutes ? `~${nextMeta.estimatedMinutes}` : "—"}
+                      <strong className="tr-durationValue">
+                        {formatEstimatedDuration(nextMeta?.estimatedMinutes)}
                       </strong>
                       <span>EST. TIME</span>
                     </div>
@@ -977,7 +991,6 @@ export function TodayPage() {
           <section className="tr-upcomingBoard">
             <div className="tr-upcomingHeader">
               <div className="tr-trainingSectionEyebrow">UPCOMING TRAINING</div>
-              <div className="tr-upcomingAdvisory">SUGGESTED DATES</div>
             </div>
 
             {loading ? (
@@ -1036,10 +1049,10 @@ export function TodayPage() {
                               <span className="tr-sessionMetaIcon" aria-hidden>
                                 <ClockMetricIcon />
                               </span>
-                              <strong>
-                                {meta?.estimatedMinutes ? `~${meta.estimatedMinutes}` : "—"}
+                              <strong className="tr-durationValue">
+                                {formatEstimatedDuration(meta?.estimatedMinutes)}
                               </strong>
-                              <span>MIN</span>
+                              <span>EST. TIME</span>
                             </div>
                           </div>
                         </div>
@@ -6152,6 +6165,372 @@ export function TodayPage() {
 
           .tr-sessionActions{
             grid-template-columns:minmax(0,1fr) 52px!important;
+          }
+        }
+
+
+
+        /* ==========================================================
+           STEP 6J FINAL POLISH
+           High-contrast type hierarchy, de-boxed schedule dates,
+           readable duration units, cleaner premium composition.
+           ========================================================== */
+
+        /* Page-level WORKOUTS heading */
+        .tr-trainingPageHead{
+          min-height:34px!important;
+          display:flex!important;
+          align-items:center!important;
+          margin:0 0 9px!important;
+          padding:0 2px!important;
+        }
+
+        .tr-trainingPageHead .tr-trainingSectionEyebrow{
+          position:relative!important;
+          display:flex!important;
+          align-items:center!important;
+          gap:10px!important;
+          color:#f4fbff!important;
+          font-size:15px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.105em!important;
+          text-shadow:
+            0 2px 3px rgba(0,0,0,.48),
+            0 0 14px rgba(53,197,244,.12)!important;
+        }
+
+        .tr-trainingPageHead .tr-trainingSectionEyebrow::before{
+          content:""!important;
+          width:4px!important;
+          height:20px!important;
+          flex:0 0 4px!important;
+          border-radius:4px!important;
+          background:linear-gradient(180deg,#94e9ff 0%,#19afe8 100%)!important;
+          box-shadow:0 0 11px rgba(25,175,232,.25)!important;
+        }
+
+        /* NEXT WORKOUT and UPCOMING TRAINING are real section titles */
+        .tr-nextHeroTopline .tr-trainingSectionEyebrow,
+        .tr-upcomingHeader .tr-trainingSectionEyebrow{
+          gap:10px!important;
+          color:#eefaff!important;
+          font-size:14px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.115em!important;
+          text-shadow:
+            0 2px 2px rgba(0,0,0,.50),
+            0 0 13px rgba(54,198,244,.14)!important;
+        }
+
+        .tr-nextHeroTopline .tr-trainingSectionEyebrow::before,
+        .tr-upcomingHeader .tr-trainingSectionEyebrow::before{
+          width:4px!important;
+          height:18px!important;
+          flex-basis:4px!important;
+          border-radius:4px!important;
+          background:linear-gradient(180deg,#89e7ff,#12aae4)!important;
+          box-shadow:0 0 10px rgba(18,170,228,.24)!important;
+        }
+
+        .tr-upcomingHeader{
+          justify-content:flex-start!important;
+        }
+
+        .tr-upcomingAdvisory{
+          display:none!important;
+        }
+
+        /* Hero title/subtitle readability */
+        .tr-nextHeroCopy h1{
+          color:#fff!important;
+          text-shadow:
+            0 2px 2px rgba(0,0,0,.48),
+            0 6px 15px rgba(0,0,0,.24)!important;
+        }
+
+        .tr-nextHeroProgram{
+          color:rgba(229,241,247,.76)!important;
+          font-size:12px!important;
+          font-weight:900!important;
+        }
+
+        /* Give the duration enough horizontal room for 1 HR 15 MIN */
+        .tr-nextHeroCompact{
+          grid-template-columns:minmax(0,1fr) 345px!important;
+          gap:30px!important;
+        }
+
+        .tr-nextHeroQuickStat{
+          grid-template-columns:31px minmax(0,1fr)!important;
+          padding-left:15px!important;
+          padding-right:15px!important;
+        }
+
+        .tr-heroMetricCopy strong{
+          font-size:31px!important;
+          overflow:visible!important;
+          text-overflow:clip!important;
+        }
+
+        .tr-heroMetricCopy strong.tr-durationValue{
+          font-size:24px!important;
+          line-height:.95!important;
+          letter-spacing:-.025em!important;
+          white-space:nowrap!important;
+        }
+
+        .tr-heroMetricCopy span{
+          color:rgba(241,248,251,.90)!important;
+          font-size:10.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.095em!important;
+        }
+
+        /* Upcoming cards: stronger title hierarchy */
+        .tr-sessionTitleRow h3{
+          color:#fff!important;
+          font-size:23px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:-.03em!important;
+          text-shadow:
+            0 2px 2px rgba(0,0,0,.46),
+            0 5px 12px rgba(0,0,0,.18)!important;
+        }
+
+        .tr-sessionTitleRow p{
+          color:rgba(226,239,245,.78)!important;
+          font-size:11px!important;
+          line-height:1.2!important;
+          font-weight:900!important;
+        }
+
+        /* Muscle text readability */
+        .tr-nextHero .tr-scheduleMuscle,
+        .tr-scheduleMuscles.is-compact .tr-scheduleMuscle{
+          color:rgba(239,247,250,.91)!important;
+          font-size:10px!important;
+          font-weight:1000!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.42)!important;
+        }
+
+        /* Upcoming exercise/time information: clearly readable */
+        .tr-sessionMeta{
+          margin-top:14px!important;
+        }
+
+        .tr-sessionMetaItem{
+          min-height:31px!important;
+          gap:8px!important;
+        }
+
+        .tr-sessionMetaIcon{
+          width:22px!important;
+          height:22px!important;
+        }
+
+        .tr-sessionMetaIcon svg{
+          width:18px!important;
+          height:18px!important;
+        }
+
+        .tr-sessionMetaItem strong{
+          color:#fff!important;
+          font-size:14px!important;
+          font-weight:1000!important;
+          white-space:nowrap!important;
+        }
+
+        .tr-sessionMetaItem strong.tr-durationValue{
+          color:var(--tr-orange-1)!important;
+          font-size:13px!important;
+          letter-spacing:-.01em!important;
+        }
+
+        .tr-sessionMetaItem > span:last-child{
+          color:rgba(237,246,250,.86)!important;
+          font-size:9.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.085em!important;
+          white-space:nowrap!important;
+        }
+
+        /* ----------------------------------------------------------
+           SCHEDULE DATES
+           No buttons, no filled pills, no bevels.
+           Same alignment width as the START / EDIT rail below.
+           ---------------------------------------------------------- */
+        .tr-sessionRight{
+          width:198px!important;
+          min-width:198px!important;
+          grid-template-rows:auto 1fr auto!important;
+          gap:10px!important;
+        }
+
+        .tr-sessionDate{
+          position:relative!important;
+          width:100%!important;
+          min-width:0!important;
+          min-height:34px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:8px!important;
+          padding:2px 6px 9px!important;
+          overflow:visible!important;
+          border:0!important;
+          border-radius:0!important;
+          color:#e8f5fa!important;
+          background:none!important;
+          box-shadow:none!important;
+        }
+
+        .tr-sessionDate::after{
+          content:""!important;
+          position:absolute!important;
+          left:8px!important;
+          right:8px!important;
+          bottom:0!important;
+          height:2px!important;
+          border-radius:2px!important;
+          background:linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(58,198,244,.18) 8%,
+            rgba(69,208,255,.84) 50%,
+            rgba(58,198,244,.18) 92%,
+            transparent 100%
+          )!important;
+          box-shadow:0 1px 8px rgba(42,185,237,.16)!important;
+        }
+
+        .tr-sessionDateIcon{
+          width:19px!important;
+          height:19px!important;
+          flex-basis:19px!important;
+          color:#54cff9!important;
+          filter:drop-shadow(0 0 5px rgba(42,190,241,.18))!important;
+        }
+
+        .tr-sessionDate strong{
+          color:#f1f9fc!important;
+          font-size:10.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.085em!important;
+          text-shadow:0 1px 2px rgba(0,0,0,.48)!important;
+        }
+
+        /* TOMORROW uses Play-button orange only as an accent */
+        .tr-sessionDate.is-immediate{
+          color:var(--tr-orange-1)!important;
+          border:0!important;
+          background:none!important;
+          box-shadow:none!important;
+        }
+
+        .tr-sessionDate.is-immediate::after{
+          background:linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(239,124,8,.18) 8%,
+            var(--tr-orange-1) 50%,
+            rgba(239,124,8,.18) 92%,
+            transparent 100%
+          )!important;
+          box-shadow:0 1px 9px rgba(239,124,8,.20)!important;
+        }
+
+        .tr-sessionDate.is-immediate .tr-sessionDateIcon{
+          color:var(--tr-orange-1)!important;
+          filter:drop-shadow(0 0 5px rgba(239,124,8,.22))!important;
+        }
+
+        .tr-sessionDate.is-immediate strong{
+          color:var(--tr-orange-1)!important;
+          text-shadow:
+            0 1px 2px rgba(0,0,0,.48),
+            0 0 8px rgba(239,124,8,.12)!important;
+        }
+
+        /* Upcoming START/EDIT remain exactly aligned beneath the date */
+        .tr-sessionActions{
+          width:100%!important;
+          align-self:end!important;
+        }
+
+        /* Slightly brighter cards without turning them into glowing boxes */
+        .tr-sessionCard{
+          background:
+            linear-gradient(180deg,#1a2d38 0%,#13232c 47%,#0e1920 100%)!important;
+          border-color:rgba(141,205,228,.19)!important;
+          border-top-color:rgba(210,238,248,.27)!important;
+          box-shadow:
+            0 1px 0 rgba(255,255,255,.045),
+            0 3px 4px rgba(0,0,0,.44),
+            0 11px 21px rgba(0,0,0,.28),
+            0 25px 42px rgba(0,0,0,.14),
+            inset 0 1px 0 rgba(255,255,255,.045),
+            inset 0 -2px 5px rgba(0,0,0,.26)!important;
+        }
+
+        @media(max-width:760px){
+          .tr-trainingPageHead .tr-trainingSectionEyebrow{
+            font-size:13px!important;
+          }
+
+          .tr-nextHeroTopline .tr-trainingSectionEyebrow,
+          .tr-upcomingHeader .tr-trainingSectionEyebrow{
+            font-size:12px!important;
+          }
+
+          .tr-nextHeroCompact{
+            grid-template-columns:1fr!important;
+          }
+
+          .tr-nextHeroQuickStats{
+            width:min(100%,410px)!important;
+          }
+
+          .tr-heroMetricCopy strong.tr-durationValue{
+            font-size:22px!important;
+          }
+
+          .tr-sessionTitleRow h3{
+            font-size:20px!important;
+          }
+
+          .tr-sessionMetaItem strong{
+            font-size:12px!important;
+          }
+
+          .tr-sessionMetaItem strong.tr-durationValue{
+            font-size:11.5px!important;
+          }
+        }
+
+        @media(max-width:560px){
+          .tr-trainingPageHead{
+            min-height:31px!important;
+          }
+
+          .tr-trainingPageHead .tr-trainingSectionEyebrow{
+            font-size:12px!important;
+          }
+
+          .tr-nextHeroTopline .tr-trainingSectionEyebrow,
+          .tr-upcomingHeader .tr-trainingSectionEyebrow{
+            font-size:11px!important;
+          }
+
+          .tr-sessionDate{
+            min-height:32px!important;
+            padding-bottom:8px!important;
+          }
+
+          .tr-sessionDate strong{
+            font-size:9.5px!important;
           }
         }
 
