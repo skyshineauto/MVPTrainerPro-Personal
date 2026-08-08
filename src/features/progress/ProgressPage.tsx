@@ -8,17 +8,10 @@ import {
 } from "react";
 import { supabase } from "../../lib/supabase";
 
-import icoSchedule from "../../assets/progress-icons/schedule.png";
-import icoChecked from "../../assets/progress-icons/checked.png";
-import icoFlames from "../../assets/progress-icons/flames.png";
-import icoInProcess from "../../assets/progress-icons/in-process.png";
-import icoWorkout from "../../assets/progress-icons/workout.png";
-import icoReport from "../../assets/progress-icons/report.png";
-import icoTarget from "../../assets/progress-icons/target.png";
-import icoProtein from "../../assets/progress-icons/protein-shake.png";
-
 type Scope = "active" | "all";
-type Range = 7 | 14 | 30 | 90 | "all";
+type Range = 7 | 14 | 30 | 90 | 365 | "all";
+type Tone = "green" | "amber" | "red" | "blue";
+type WorkoutTone = "upper1" | "upper2" | "lower1" | "lower2" | "other";
 
 type ProgramBlockRow = {
   id: string;
@@ -69,12 +62,16 @@ type WorkoutSetRow = {
 type ExerciseRow = {
   id: string;
   name: string;
+  primary_muscles?: string[] | null;
+  secondary_muscles?: string[] | null;
 };
 
 type ExerciseDetail = {
   workoutExerciseId: string;
   exerciseId: string;
   name: string;
+  primaryMuscles: string[];
+  secondaryMuscles: string[];
   orderIndex: number;
   prescription: any;
   pain: number | null;
@@ -86,7 +83,7 @@ type HistoryRow = {
   id: string;
   completedAt: string;
   templateName: string;
-  sessionSeconds: number;
+  workoutSeconds: number;
   validDuration: boolean;
   bodyweightLb: number | null;
   proteinTargetG: number | null;
@@ -99,80 +96,175 @@ type HistoryRow = {
   exercises: ExerciseDetail[];
 };
 
-type ExerciseProgressPoint = {
+type ExercisePoint = {
+  workoutId: string;
   date: string;
-  label: string;
+  workoutName: string;
   bestWeight: number;
+  bestReps: number;
   bestE1RM: number;
   volume: number;
+  avgRir: number | null;
+  pain: number | null;
 };
 
 type ExerciseProgress = {
   id: string;
   name: string;
-  sessions: number;
+  primaryMuscles: string[];
+  points: ExercisePoint[];
+};
+
+type ExerciseView = ExerciseProgress & {
   currentWeight: number;
-  bestWeight: number;
-  bestE1RM: number;
+  currentReps: number;
   currentE1RM: number;
-  changePct: number | null;
-  points: ExerciseProgressPoint[];
+  d7: number | null;
+  d14: number | null;
+  d30: number | null;
+  d365: number | null;
+  selectedChange: number | null;
 };
 
-type ProgramPerformance = {
+type PainView = {
+  id: string;
   name: string;
-  sessions: number;
-  avgDurationSeconds: number;
+  current: number | null;
+  d7: number | null;
+  d14: number | null;
+  d30: number | null;
+  d365: number | null;
+};
+
+type Recommendation = {
+  eyebrow: string;
+  title: string;
+  body: string;
+  action: string;
+  tone: Tone;
+};
+
+type Issue = {
+  title: string;
+  detail: string;
+  tone: Tone;
+};
+
+type WorkoutBreakdown = {
+  name: string;
+  tone: WorkoutTone;
+  workouts: number;
+  avgTime: number;
   volume: number;
+  volumeChange: number | null;
   avgPain: number;
+  painChange: number | null;
 };
 
-type TrendPoint = {
-  label: string;
-  value: number;
-};
+type DropdownOption = { value: string; label: string };
 
-const ANALYTICS_MIN_SESSION_SECONDS = 5 * 60;
-const ANALYTICS_MAX_SESSION_SECONDS = 4 * 60 * 60;
 const HISTORY_BATCH = 5;
+const MIN_WORKOUT_SECONDS = 5 * 60;
+const MAX_WORKOUT_SECONDS = 4 * 60 * 60;
+const STABLE_PCT = 2;
 
-function daysAgoISO(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString();
+function ms(value: string | null | undefined) {
+  if (!value) return NaN;
+  return new Date(value).getTime();
 }
 
-function dateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function rangeStartISO(range: Range) {
-  return range === "all" ? null : daysAgoISO(range);
+function daysForRange(range: Range) {
+  return range === "all" ? null : range;
 }
 
 function rangeLabel(range: Range) {
-  return range === "all" ? "ALL TIME" : `${range} DAY`;
+  if (range === "all") return "All Time";
+  if (range === 365) return "1 Year";
+  return `${range} Days`;
 }
 
-function formatDateTime(ts: string | null | undefined) {
-  if (!ts) return "—";
+function previousLabel(range: Range) {
+  if (range === "all") return "previous period";
+  if (range === 365) return "previous year";
+  return `previous ${range} days`;
+}
+
+function inWindow(date: string, days: number | null, offset = 0) {
+  if (days == null) return offset === 0;
+  const stamp = ms(date);
+  if (!Number.isFinite(stamp)) return false;
+  const end = Date.now() - offset * days * 86400000;
+  const start = end - days * 86400000;
+  return stamp >= start && stamp < end;
+}
+
+function filterWindow(rows: HistoryRow[], days: number | null, offset = 0) {
+  if (days == null) return offset === 0 ? rows : [];
+  return rows.filter((row) => inWindow(row.completedAt, days, offset));
+}
+
+function average(values: number[]) {
+  return values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : 0;
+}
+
+function unique(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function formatNumber(value: number, digits = 0) {
+  return Number.isFinite(value)
+    ? value.toLocaleString(undefined, {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      })
+    : "—";
+}
+
+function formatWeight(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "—";
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} LB`;
+}
+
+function formatVolume(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${Math.round(value).toLocaleString()} LB`;
+}
+
+function formatPct(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const clean = Math.abs(value) < 0.05 ? 0 : value;
+  return `${clean > 0 ? "+" : ""}${clean.toFixed(1)}%`;
+}
+
+function formatPainDelta(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const clean = Math.abs(value) < 0.05 ? 0 : value;
+  return `${clean > 0 ? "+" : ""}${clean.toFixed(1)}`;
+}
+
+function formatDuration(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  if (!total) return "—";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours) return minutes ? `${hours}H ${minutes}M` : `${hours}H`;
+  return `${minutes || 1} MIN`;
+}
+
+function formatDate(ts: string) {
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return "—";
-
   return `${date
-    .toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
+    .toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
     .toUpperCase()} • ${date.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
   })}`;
 }
 
-function formatShortDate(ts: string | null | undefined) {
-  if (!ts) return "—";
+function shortDate(ts: string) {
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return "—";
   return date
@@ -187,175 +279,166 @@ function titleCase(value: string | null | undefined) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function goalLabel(goal: string | null | undefined) {
-  const key = String(goal ?? "").toLowerCase();
+function goalLabel(value: string | null | undefined) {
+  const key = String(value ?? "").toLowerCase();
   if (["build_muscle", "bulk", "muscle_gain"].includes(key)) return "Muscle Gain";
   if (["lose_weight", "cut"].includes(key)) return "Cut";
   if (key === "strength") return "Strength";
   if (key === "fitness") return "Fitness";
-  return titleCase(goal) || "Training";
+  return titleCase(value) || "Training";
+}
+
+function prettyMuscle(value: string) {
+  const v = titleCase(value);
+  const alias: Record<string, string> = {
+    Lats: "Back",
+    "Upper Back": "Back",
+    "Middle Back": "Back",
+    Deltoids: "Shoulders",
+    "Rear Delts": "Shoulders",
+    "Side Delts": "Shoulders",
+    "Front Delts": "Shoulders",
+    Quadriceps: "Quads",
+    Abdominals: "Core",
+    Abs: "Core",
+    Pectorals: "Chest",
+  };
+  return alias[v] ?? v ?? "Other";
 }
 
 function proteinMultiplier(goal: string | null | undefined) {
   const key = String(goal ?? "").toLowerCase();
-  if (key === "cut" || key === "lose_weight") return 1.0;
-  return 0.9;
+  return key === "cut" || key === "lose_weight" ? 1 : 0.9;
 }
 
 function roundProtein(value: number) {
   return Math.round(value / 5) * 5;
 }
 
-function estimatedOneRepMax(weight: number, reps: number) {
+function e1rm(weight: number, reps: number) {
   if (!(weight > 0) || !(reps > 0)) return 0;
-  if (reps === 1) return weight;
-  return weight * (1 + reps / 30);
+  return reps === 1 ? weight : weight * (1 + reps / 30);
 }
 
-function workoutDurationSeconds(workout: WorkoutRow) {
-  const active = Number(workout.active_seconds ?? 0);
-  if (active > 0) return Math.round(active);
-
-  const started = workout.started_at ? new Date(workout.started_at).getTime() : NaN;
-  const ended = workout.ended_at
-    ? new Date(workout.ended_at).getTime()
-    : workout.completed_at
-      ? new Date(workout.completed_at).getTime()
-      : NaN;
-
-  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended <= started) return 0;
-  return Math.max(0, Math.round((ended - started) / 1000));
-}
-
-function isAnalyticsDuration(seconds: number) {
-  return (
-    seconds >= ANALYTICS_MIN_SESSION_SECONDS &&
-    seconds <= ANALYTICS_MAX_SESSION_SECONDS
-  );
-}
-
-function formatDuration(seconds: number, includeSeconds = false) {
-  const total = Math.max(0, Math.round(seconds));
-  if (!total) return "—";
-
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-
-  if (hours > 0) {
-    if (includeSeconds && minutes === 0) return `${hours}H ${secs}S`;
-    return minutes ? `${hours}H ${minutes}M` : `${hours}H`;
-  }
-
-  if (minutes > 0) {
-    return includeSeconds && secs ? `${minutes}M ${secs}S` : `${minutes} MIN`;
-  }
-
-  return `${secs} SEC`;
-}
-
-function formatNumber(value: number, digits = 0) {
-  if (!Number.isFinite(value)) return "—";
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
-
-function formatWeight(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return "—";
-  const rounded = Math.abs(value - Math.round(value)) < 0.01
-    ? String(Math.round(value))
-    : value.toFixed(1);
-  return `${rounded} LB`;
-}
-
-function formatVolume(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return `${Math.round(value).toLocaleString()} LB`;
-}
-
-function difficultyLabel(value: string | null | undefined) {
-  if (value === "too_easy") return "Too Easy";
-  if (value === "just_right") return "On Target";
-  if (value === "too_hard") return "Too Hard";
-  return "Not Rated";
-}
-
-function validSet(set: WorkoutSetRow) {
-  return Number(set.reps ?? 0) > 0 && Number(set.weight ?? 0) >= 0;
-}
-
-function calcSetVolume(set: WorkoutSetRow) {
+function setVolume(set: WorkoutSetRow) {
   const reps = Number(set.reps ?? 0);
   const weight = Number(set.weight ?? 0);
   return reps > 0 && weight > 0 ? reps * weight : 0;
+}
+
+function workoutSeconds(workout: WorkoutRow) {
+  const active = Number(workout.active_seconds ?? 0);
+  if (active > 0) return Math.round(active);
+  const start = workout.started_at ? ms(workout.started_at) : NaN;
+  const end = workout.ended_at ? ms(workout.ended_at) : ms(workout.completed_at);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round((end - start) / 1000);
+}
+
+function validWorkoutSeconds(seconds: number) {
+  return seconds >= MIN_WORKOUT_SECONDS && seconds <= MAX_WORKOUT_SECONDS;
+}
+
+function workoutTone(name: string): WorkoutTone {
+  const key = name.toLowerCase();
+  const one = /\b1\b|\ba\b/.test(key);
+  const two = /\b2\b|\bb\b/.test(key);
+  if (key.includes("upper") && one) return "upper1";
+  if (key.includes("upper") && two) return "upper2";
+  if (key.includes("lower") && one) return "lower1";
+  if (key.includes("lower") && two) return "lower2";
+  return "other";
+}
+
+function changeTone(value: number | null, reverse = false) {
+  if (value == null || Math.abs(value) < 0.05) return "neutral";
+  const up = value > 0;
+  if (reverse) return up ? "negative" : "positive";
+  return up ? "positive" : "negative";
+}
+
+function pointAtOrBefore(points: ExercisePoint[], target: number) {
+  return (
+    points
+      .filter((point) => ms(point.date) <= target)
+      .slice()
+      .sort((a, b) => ms(a.date) - ms(b.date))
+      .at(-1) ?? null
+  );
+}
+
+function exerciseChange(points: ExercisePoint[], days: number | null) {
+  const valid = points
+    .filter((point) => point.bestE1RM > 0)
+    .slice()
+    .sort((a, b) => ms(a.date) - ms(b.date));
+
+  if (valid.length < 2) return null;
+  const latest = valid.at(-1)!;
+
+  if (days == null) {
+    const first = valid[0];
+    return first.bestE1RM > 0
+      ? ((latest.bestE1RM - first.bestE1RM) / first.bestE1RM) * 100
+      : null;
+  }
+
+  const start = Date.now() - days * 86400000;
+  const before = pointAtOrBefore(valid, start);
+  const inside = valid.filter((point) => ms(point.date) >= start);
+  const baseline = before ?? (inside.length >= 2 ? inside[0] : null);
+  if (!baseline || baseline.workoutId === latest.workoutId) return null;
+  return baseline.bestE1RM > 0
+    ? ((latest.bestE1RM - baseline.bestE1RM) / baseline.bestE1RM) * 100
+    : null;
+}
+
+function painChange(points: { date: string; pain: number }[], days: number) {
+  const valid = points.slice().sort((a, b) => ms(a.date) - ms(b.date));
+  if (valid.length < 2) return null;
+  const latest = valid.at(-1)!;
+  const start = Date.now() - days * 86400000;
+  const before =
+    valid.filter((point) => ms(point.date) <= start).at(-1) ?? null;
+  const inside = valid.filter((point) => ms(point.date) >= start);
+  const baseline = before ?? (inside.length >= 2 ? inside[0] : null);
+  if (!baseline || baseline.date === latest.date) return null;
+  return latest.pain - baseline.pain;
 }
 
 function SvgIcon({
   name,
   size = 18,
 }: {
-  name:
-    | "calendar"
-    | "clock"
-    | "dumbbell"
-    | "chart"
-    | "target"
-    | "trend"
-    | "history"
-    | "chevron"
-    | "spark"
-    | "layers";
+  name: "chevron" | "coach" | "trend" | "trophy" | "weight";
   size?: number;
 }) {
   const paths: Record<string, ReactNode> = {
-    calendar: (
+    chevron: <path d="m8 10 4 4 4-4" />,
+    coach: (
       <>
-        <path d="M7 3v3M17 3v3M4.5 9h15M6.5 5h11a2 2 0 0 1 2 2v11.5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
-        <path d="M8 13h2M14 13h2M8 17h2M14 17h2" />
-      </>
-    ),
-    clock: (
-      <>
-        <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 7.5V12l3.2 2" />
-      </>
-    ),
-    dumbbell: (
-      <>
-        <path d="M7 8v8M17 8v8M4.5 10v4M19.5 10v4M7 12h10" />
-        <path d="M3 9.5h1.5v5H3zM19.5 9.5H21v5h-1.5z" />
-      </>
-    ),
-    chart: <path d="M4 18V9M10 18V5M16 18v-7M22 18V3" />,
-    target: (
-      <>
-        <circle cx="12" cy="12" r="8.5" />
-        <circle cx="12" cy="12" r="4.5" />
-        <circle cx="12" cy="12" r="1.3" />
+        <path d="M7 8a5 5 0 0 1 10 0v2" />
+        <path d="M5 10h2v5H5zM17 10h2v5h-2zM8 20h8M12 15v5" />
       </>
     ),
     trend: <path d="m4 17 5-5 4 3 7-8M16 7h4v4" />,
-    history: (
+    trophy: (
       <>
-        <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" />
-        <path d="M4 4v4.5h4.5M12 7.5V12l3 2" />
+        <path d="M8 4h8v5a4 4 0 0 1-8 0V4ZM10 13v4M14 13v4M8 20h8" />
+        <path d="M8 6H5v2a3 3 0 0 0 3 3M16 6h3v2a3 3 0 0 1-3 3" />
       </>
     ),
-    chevron: <path d="m8 10 4 4 4-4" />,
-    spark: <path d="m12 3 1.4 5.2L18 10l-4.6 1.8L12 17l-1.4-5.2L6 10l4.6-1.8L12 3Z" />,
-    layers: (
+    weight: (
       <>
-        <path d="m12 4 8 4-8 4-8-4 8-4Z" />
-        <path d="m4 12 8 4 8-4M4 16l8 4 8-4" />
+        <path d="M5 8h14l1 12H4L5 8Z" />
+        <path d="M8 8a4 4 0 0 1 8 0M12 8l2-2" />
       </>
     ),
   };
 
   return (
     <svg
-      className="pr-svgIcon"
+      className="pr-icon"
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -366,99 +449,74 @@ function SvgIcon({
   );
 }
 
-function AssetIcon({
-  src,
-  tone = "blue",
-}: {
-  src: string;
-  tone?: "blue" | "green" | "orange" | "red";
-}) {
-  return (
-    <span className={`pr-assetIcon tone-${tone}`} aria-hidden>
-      <img src={src} alt="" />
-    </span>
-  );
-}
-
-
-type DropdownOption = {
-  value: string;
-  label: string;
-};
-
 function ProDropdown({
-  label,
   value,
   options,
   onChange,
+  ariaLabel,
   className = "",
 }: {
-  label: string;
   value: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
+  ariaLabel: string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const root = useRef<HTMLDivElement | null>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
 
   useEffect(() => {
     if (!open) return;
-
-    const handlePointer = (event: MouseEvent | TouchEvent) => {
+    const outside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node | null;
-      if (target && !rootRef.current?.contains(target)) setOpen(false);
+      if (target && !root.current?.contains(target)) setOpen(false);
     };
-
-    const handleKey = (event: KeyboardEvent) => {
+    const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-
-    document.addEventListener("mousedown", handlePointer);
-    document.addEventListener("touchstart", handlePointer);
-    document.addEventListener("keydown", handleKey);
-
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("touchstart", outside);
+    document.addEventListener("keydown", escape);
     return () => {
-      document.removeEventListener("mousedown", handlePointer);
-      document.removeEventListener("touchstart", handlePointer);
-      document.removeEventListener("keydown", handleKey);
+      document.removeEventListener("mousedown", outside);
+      document.removeEventListener("touchstart", outside);
+      document.removeEventListener("keydown", escape);
     };
   }, [open]);
 
   return (
-    <div className={`pr-proDropdown ${className}`} ref={rootRef}>
-      <span className="pr-proDropdownLabel">{label}</span>
-
+    <div className={`pr-dropdown ${className}`} ref={root}>
       <button
         type="button"
-        className={`pr-proDropdownTrigger ${open ? "is-open" : ""}`}
+        className={`pr-dropdownTrigger ${open ? "is-open" : ""}`}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen((value) => !value)}
       >
         <span>{selected?.label ?? "Select"}</span>
         <SvgIcon name="chevron" size={16} />
       </button>
 
       {open ? (
-        <div className="pr-proDropdownMenu" role="listbox" aria-label={label}>
+        <div className="pr-dropdownMenu" role="listbox" aria-label={ariaLabel}>
           {options.map((option) => {
             const active = option.value === value;
             return (
               <button
-                key={option.value}
                 type="button"
+                key={option.value}
                 role="option"
                 aria-selected={active}
-                className={`pr-proDropdownOption ${active ? "is-selected" : ""}`}
+                className={`pr-dropdownOption ${active ? "is-selected" : ""}`}
                 onClick={() => {
                   onChange(option.value);
                   setOpen(false);
                 }}
               >
                 <span>{option.label}</span>
-                {active ? <span className="pr-proDropdownCheck">✓</span> : null}
+                {active ? <i aria-hidden /> : null}
               </button>
             );
           })}
@@ -468,25 +526,22 @@ function ProDropdown({
   );
 }
 
-function SectionHead({
-  eyebrow,
+function SectionTitle({
   title,
-  detail,
+  subtitle,
   right,
 }: {
-  eyebrow: string;
   title: string;
-  detail?: string;
+  subtitle?: string;
   right?: ReactNode;
 }) {
   return (
-    <div className="pr-sectionHead">
-      <div className="pr-sectionTitleGroup">
+    <div className="pr-sectionTitle">
+      <div className="pr-sectionTitleText">
         <span className="pr-sectionAccent" aria-hidden />
         <div>
-          <div className="pr-eyebrow">{eyebrow}</div>
           <h2>{title}</h2>
-          {detail ? <p>{detail}</p> : null}
+          {subtitle ? <p>{subtitle}</p> : null}
         </div>
       </div>
       {right ? <div className="pr-sectionRight">{right}</div> : null}
@@ -494,130 +549,58 @@ function SectionHead({
   );
 }
 
-function Metric({
-  icon,
-  label,
+function Delta({
   value,
-  detail,
-  tone = "blue",
+  reverse = false,
+  pain = false,
 }: {
-  icon: string;
-  label: string;
-  value: ReactNode;
-  detail?: ReactNode;
-  tone?: "blue" | "green" | "orange" | "red";
+  value: number | null;
+  reverse?: boolean;
+  pain?: boolean;
 }) {
   return (
-    <div className={`pr-metric tone-${tone}`}>
-      <div className="pr-metricTop">
-        <AssetIcon src={icon} tone={tone} />
-        <span>{label}</span>
-      </div>
-      <div className="pr-metricValue">{value}</div>
-      {detail != null ? <div className="pr-metricDetail">{detail}</div> : null}
-    </div>
+    <span className={`pr-delta is-${changeTone(value, reverse)}`}>
+      {pain ? formatPainDelta(value) : formatPct(value)}
+    </span>
   );
 }
 
-function Sparkline({
-  points,
-  tone = "blue",
-  height = 118,
-}: {
-  points: TrendPoint[];
-  tone?: "blue" | "orange" | "green";
-  height?: number;
-}) {
-  if (!points.length) {
-    return (
-      <div className="pr-chartEmpty" style={{ height }}>
-        Not enough logged data yet.
-      </div>
-    );
+function StatusDot({ tone }: { tone: Tone }) {
+  return <span className={`pr-statusDot is-${tone}`} aria-hidden />;
+}
+
+function WorkoutVolumeChart({ rows }: { rows: HistoryRow[] }) {
+  const data = rows
+    .slice()
+    .sort((a, b) => ms(a.completedAt) - ms(b.completedAt))
+    .slice(-10);
+  const max = Math.max(1, ...data.map((row) => row.volumeTotal));
+
+  if (!data.some((row) => row.volumeTotal > 0)) {
+    return <div className="pr-empty">Log weighted sets to build a workout-volume trend.</div>;
   }
 
-  const width = 640;
-  const padX = 18;
-  const padY = 16;
-  const values = points.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = Math.max(1, max - min);
-  const denom = Math.max(1, points.length - 1);
-
-  const coords = points.map((point, index) => {
-    const x = padX + ((width - padX * 2) * index) / denom;
-    const normalized = (point.value - min) / spread;
-    const y = height - padY - normalized * (height - padY * 2);
-    return { ...point, x, y };
-  });
-
-  const polyline = coords.map((point) => `${point.x},${point.y}`).join(" ");
-  const area = [
-    `${coords[0].x},${height - padY}`,
-    ...coords.map((point) => `${point.x},${point.y}`),
-    `${coords[coords.length - 1].x},${height - padY}`,
-  ].join(" ");
-
-  const color =
-    tone === "orange" ? "#ff9f1c" : tone === "green" ? "#4de59a" : "#42c9f5";
-  const gradientId = `pr-${tone}-${points.length}-${Math.round(max)}`;
-
   return (
-    <div className="pr-sparkWrap">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="pr-spark"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Progress trend"
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity=".24" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-
-        {[0.25, 0.5, 0.75].map((fraction) => (
-          <line
-            key={fraction}
-            x1={padX}
-            x2={width - padX}
-            y1={padY + (height - padY * 2) * fraction}
-            y2={padY + (height - padY * 2) * fraction}
-            className="pr-chartGrid"
-          />
-        ))}
-
-        <polygon points={area} fill={`url(#${gradientId})`} />
-        <polyline
-          points={polyline}
-          fill="none"
-          stroke={color}
-          strokeWidth="3"
-          vectorEffect="non-scaling-stroke"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {coords.map((point, index) => (
-          <circle
-            key={`${point.label}-${index}`}
-            cx={point.x}
-            cy={point.y}
-            r="3.2"
-            fill="#071017"
-            stroke={color}
-            strokeWidth="2"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
-
-      <div className="pr-chartAxis">
-        {points.slice(0, 6).map((point, index) => (
-          <span key={`${point.label}-${index}`}>{point.label}</span>
+    <div className="pr-volumeChart">
+      <div className="pr-volumeBars">
+        {data.map((row) => (
+          <div className="pr-volumeCol" key={row.id}>
+            <b>{row.volumeTotal ? formatNumber(row.volumeTotal) : "—"}</b>
+            <div className="pr-volumeTrack">
+              <span
+                className={`pr-volumeBar is-${workoutTone(row.templateName)}`}
+                style={{
+                  height: `${Math.max(8, (row.volumeTotal / max) * 100)}%`,
+                }}
+              />
+            </div>
+            <div>
+              <strong className={`is-${workoutTone(row.templateName)}`}>
+                {row.templateName}
+              </strong>
+              <small>{shortDate(row.completedAt)}</small>
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -627,23 +610,19 @@ function Sparkline({
 export function ProgressPage() {
   const [scope, setScope] = useState<Scope>("active");
   const [range, setRange] = useState<Range>(14);
-
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const [activeBlock, setActiveBlock] = useState<ProgramBlockRow | null>(null);
-  const [programTemplates, setProgramTemplates] = useState<string[]>([]);
+  const [rotation, setRotation] = useState<string[]>([]);
+  const [allWorkouts, setAllWorkouts] = useState<WorkoutRow[]>([]);
+  const [allHistory, setAllHistory] = useState<HistoryRow[]>([]);
 
-  const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
-  const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [exerciseProgress, setExerciseProgress] = useState<ExerciseProgress[]>([]);
-  const [programPerformance, setProgramPerformance] = useState<ProgramPerformance[]>([]);
-  const [weightSeries, setWeightSeries] = useState<TrendPoint[]>([]);
-
+  const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [historyVisible, setHistoryVisible] = useState(HISTORY_BATCH);
-  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string>("");
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const [clearOpen, setClearOpen] = useState(false);
   const [clearText, setClearText] = useState("");
@@ -676,61 +655,64 @@ export function ProgressPage() {
       const block = (blockData ?? null) as ProgramBlockRow | null;
       setActiveBlock(block);
 
-      let activeSessionIds: string[] | null = null;
-      let activeTemplateNames: string[] = [];
+      let activeWorkoutIds: string[] = [];
+      let activeRotation: string[] = [];
 
       if (block?.id) {
         const { data: scheduled, error: scheduledError } = await supabase
           .from("scheduled_sessions")
           .select("id,template_id,session_type,date,program_block_id")
           .eq("user_id", userId)
-          .eq("program_block_id", block.id);
+          .eq("program_block_id", block.id)
+          .order("date", { ascending: true });
 
         if (scheduledError) throw scheduledError;
 
-        activeSessionIds = (scheduled ?? [])
+        activeWorkoutIds = (scheduled ?? [])
           .map((row: any) => String(row.id ?? ""))
           .filter(Boolean);
 
-        const activeTemplateIds = Array.from(
-          new Set(
-            (scheduled ?? [])
-              .map((row: any) => String(row.template_id ?? ""))
-              .filter(Boolean)
-          )
+        const templateIds = unique(
+          (scheduled ?? [])
+            .map((row: any) => String(row.template_id ?? ""))
+            .filter(Boolean)
         );
 
-        if (activeTemplateIds.length) {
-          const { data: templateRows, error: templateError } = await supabase
+        const templateMap = new Map<string, string>();
+        if (templateIds.length) {
+          const { data: templates, error: templateError } = await supabase
             .from("workout_templates")
             .select("id,name")
-            .in("id", activeTemplateIds);
+            .in("id", templateIds);
 
           if (templateError) throw templateError;
-
-          const map = new Map<string, string>();
-          for (const row of templateRows ?? []) {
-            map.set(String((row as any).id), String((row as any).name ?? "Workout"));
+          for (const row of templates ?? []) {
+            templateMap.set(
+              String((row as any).id),
+              String((row as any).name ?? "Workout")
+            );
           }
-
-          activeTemplateNames = Array.from(
-            new Set(
-              (scheduled ?? [])
-                .map((row: any) => map.get(String(row.template_id ?? "")) ?? "")
-                .filter(Boolean)
-            )
-          ).slice(0, 6);
         }
+
+        activeRotation = unique(
+          (scheduled ?? [])
+            .map((row: any) => {
+              const templateId = String(row.template_id ?? "");
+              return (
+                templateMap.get(templateId) ||
+                titleCase(String(row.session_type ?? "")) ||
+                "Workout"
+              );
+            })
+            .filter(Boolean)
+        ).slice(0, 6);
       }
 
-      setProgramTemplates(activeTemplateNames);
+      setRotation(activeRotation);
 
-      if (scope === "active" && block?.id && activeSessionIds?.length === 0) {
-        setWorkouts([]);
-        setHistory([]);
-        setExerciseProgress([]);
-        setProgramPerformance([]);
-        setWeightSeries([]);
+      if (scope === "active" && (!block?.id || !activeWorkoutIds.length)) {
+        setAllWorkouts([]);
+        setAllHistory([]);
         return;
       }
 
@@ -743,80 +725,70 @@ export function ProgressPage() {
         .not("completed_at", "is", null)
         .order("completed_at", { ascending: false });
 
-      const startISO = rangeStartISO(range);
-      if (startISO) workoutQuery = workoutQuery.gte("completed_at", startISO);
-
-      if (scope === "active" && activeSessionIds?.length) {
-        workoutQuery = workoutQuery.in("scheduled_session_id", activeSessionIds);
+      if (scope === "active") {
+        workoutQuery = workoutQuery.in("scheduled_session_id", activeWorkoutIds);
       }
 
       const { data: workoutData, error: workoutError } = await workoutQuery;
       if (workoutError) throw workoutError;
 
-      const workoutRows = (workoutData ?? []) as WorkoutRow[];
-      setWorkouts(workoutRows);
+      const workouts = (workoutData ?? []) as WorkoutRow[];
+      setAllWorkouts(workouts);
 
-      const workoutIds = workoutRows.map((row) => row.id);
-
+      const workoutIds = workouts.map((row) => row.id);
       if (!workoutIds.length) {
-        setHistory([]);
-        setExerciseProgress([]);
-        setProgramPerformance([]);
-        setWeightSeries([]);
+        setAllHistory([]);
         return;
       }
 
-      const scheduledIds = Array.from(
-        new Set(
-          workoutRows
-            .map((row) => row.scheduled_session_id)
-            .filter((value): value is string => Boolean(value))
-        )
+      const scheduledIds = unique(
+        workouts
+          .map((row) => row.scheduled_session_id ?? "")
+          .filter(Boolean)
       );
 
-      const sessionTemplateMap = new Map<string, string>();
+      const workoutNameMap = new Map<string, string>();
+
       if (scheduledIds.length) {
-        const { data: sessions, error: sessionsError } = await supabase
+        const { data: scheduledRows, error: scheduledRowsError } = await supabase
           .from("scheduled_sessions")
           .select("id,template_id,session_type")
           .in("id", scheduledIds);
 
-        if (sessionsError) throw sessionsError;
+        if (scheduledRowsError) throw scheduledRowsError;
 
-        const templateIds = Array.from(
-          new Set(
-            (sessions ?? [])
-              .map((row: any) => String(row.template_id ?? ""))
-              .filter(Boolean)
-          )
+        const templateIds = unique(
+          (scheduledRows ?? [])
+            .map((row: any) => String(row.template_id ?? ""))
+            .filter(Boolean)
         );
 
-        const templateNameMap = new Map<string, string>();
+        const templateMap = new Map<string, string>();
+
         if (templateIds.length) {
-          const { data: templates, error: templatesError } = await supabase
+          const { data: templateRows, error: templateRowsError } = await supabase
             .from("workout_templates")
             .select("id,name")
             .in("id", templateIds);
 
-          if (templatesError) throw templatesError;
+          if (templateRowsError) throw templateRowsError;
 
-          for (const row of templates ?? []) {
-            templateNameMap.set(
+          for (const row of templateRows ?? []) {
+            templateMap.set(
               String((row as any).id),
               String((row as any).name ?? "Workout")
             );
           }
         }
 
-        for (const row of sessions ?? []) {
-          const sessionId = String((row as any).id ?? "");
+        for (const row of scheduledRows ?? []) {
+          const id = String((row as any).id ?? "");
           const templateId = String((row as any).template_id ?? "");
-          const sessionType = String((row as any).session_type ?? "");
           const name =
-            templateNameMap.get(templateId) ||
-            titleCase(sessionType) ||
+            templateMap.get(templateId) ||
+            titleCase(String((row as any).session_type ?? "")) ||
             "Workout";
-          if (sessionId) sessionTemplateMap.set(sessionId, name);
+          if (id) workoutNameMap.set(id, name);
         }
       }
 
@@ -831,27 +803,31 @@ export function ProgressPage() {
 
       if (workoutExerciseError) throw workoutExerciseError;
 
-      const workoutExerciseRows = (workoutExerciseData ?? []) as WorkoutExerciseRow[];
-      const workoutExerciseIds = workoutExerciseRows.map((row) => row.id);
-      const exerciseIds = Array.from(
-        new Set(workoutExerciseRows.map((row) => row.exercise_id).filter(Boolean))
+      const workoutExercises =
+        (workoutExerciseData ?? []) as WorkoutExerciseRow[];
+
+      const workoutExerciseIds = workoutExercises.map((row) => row.id);
+      const exerciseIds = unique(
+        workoutExercises.map((row) => row.exercise_id).filter(Boolean)
       );
 
-      const exerciseNameMap = new Map<string, string>();
+      const exerciseMap = new Map<string, ExerciseRow>();
+
       if (exerciseIds.length) {
-        const { data: exercises, error: exercisesError } = await supabase
+        const { data: exerciseData, error: exerciseError } = await supabase
           .from("exercises")
-          .select("id,name")
+          .select("id,name,primary_muscles,secondary_muscles")
           .in("id", exerciseIds);
 
-        if (exercisesError) throw exercisesError;
+        if (exerciseError) throw exerciseError;
 
-        for (const exercise of (exercises ?? []) as ExerciseRow[]) {
-          exerciseNameMap.set(exercise.id, exercise.name);
+        for (const row of (exerciseData ?? []) as ExerciseRow[]) {
+          exerciseMap.set(row.id, row);
         }
       }
 
-      const setsByWorkoutExercise = new Map<string, WorkoutSetRow[]>();
+      const setsByExercise = new Map<string, WorkoutSetRow[]>();
+
       if (workoutExerciseIds.length) {
         const { data: setData, error: setError } = await supabase
           .from("workout_sets")
@@ -872,57 +848,64 @@ export function ProgressPage() {
             form: (raw as any).form != null ? Number((raw as any).form) : null,
           };
 
-          const list = setsByWorkoutExercise.get(row.workout_exercise_id) ?? [];
+          const list = setsByExercise.get(row.workout_exercise_id) ?? [];
           list.push(row);
-          setsByWorkoutExercise.set(row.workout_exercise_id, list);
+          setsByExercise.set(row.workout_exercise_id, list);
         }
       }
 
-      const exerciseDetailsByWorkout = new Map<string, ExerciseDetail[]>();
-      for (const row of workoutExerciseRows) {
-        const list = exerciseDetailsByWorkout.get(row.workout_id) ?? [];
+      const detailsByWorkout = new Map<string, ExerciseDetail[]>();
+
+      for (const row of workoutExercises) {
+        const meta = exerciseMap.get(row.exercise_id);
+        const list = detailsByWorkout.get(row.workout_id) ?? [];
+
         list.push({
           workoutExerciseId: row.id,
           exerciseId: row.exercise_id,
-          name: exerciseNameMap.get(row.exercise_id) ?? "Exercise",
+          name: meta?.name ?? "Exercise",
+          primaryMuscles: Array.isArray(meta?.primary_muscles)
+            ? meta!.primary_muscles!.map(prettyMuscle)
+            : [],
+          secondaryMuscles: Array.isArray(meta?.secondary_muscles)
+            ? meta!.secondary_muscles!.map(prettyMuscle)
+            : [],
           orderIndex: Number(row.order_index ?? 0),
           prescription: row.prescription_snapshot ?? {},
           pain: row.pain != null ? Number(row.pain) : null,
           difficulty: row.difficulty,
-          sets: (setsByWorkoutExercise.get(row.id) ?? []).sort(
-            (left, right) => left.set_index - right.set_index
+          sets: (setsByExercise.get(row.id) ?? []).sort(
+            (a, b) => a.set_index - b.set_index
           ),
         });
-        exerciseDetailsByWorkout.set(row.workout_id, list);
+
+        detailsByWorkout.set(row.workout_id, list);
       }
 
-      for (const [workoutId, details] of exerciseDetailsByWorkout.entries()) {
-        exerciseDetailsByWorkout.set(
-          workoutId,
-          details.sort((left, right) => left.orderIndex - right.orderIndex)
+      const history: HistoryRow[] = workouts.map((workout) => {
+        const exercises = (detailsByWorkout.get(workout.id) ?? []).sort(
+          (a, b) => a.orderIndex - b.orderIndex
         );
-      }
 
-      const historyRows: HistoryRow[] = workoutRows.map((workout) => {
-        const exercises = exerciseDetailsByWorkout.get(workout.id) ?? [];
-        const sessionSeconds = workoutDurationSeconds(workout);
         const painValues = exercises
           .map((exercise) => exercise.pain)
           .filter((value): value is number => value != null && Number.isFinite(value));
 
-        const allSets = exercises.flatMap((exercise) =>
-          exercise.sets.filter(validSet)
+        const loggedSets = exercises.flatMap((exercise) =>
+          exercise.sets.filter((set) => Number(set.reps ?? 0) > 0)
         );
+
+        const seconds = workoutSeconds(workout);
 
         return {
           id: workout.id,
           completedAt: workout.completed_at,
           templateName:
             (workout.scheduled_session_id
-              ? sessionTemplateMap.get(workout.scheduled_session_id)
+              ? workoutNameMap.get(workout.scheduled_session_id)
               : null) ?? "Workout",
-          sessionSeconds,
-          validDuration: isAnalyticsDuration(sessionSeconds),
+          workoutSeconds: seconds,
+          validDuration: validWorkoutSeconds(seconds),
           bodyweightLb:
             workout.bodyweight_lb != null ? Number(workout.bodyweight_lb) : null,
           proteinTargetG:
@@ -930,174 +913,31 @@ export function ProgressPage() {
               ? Number(workout.protein_target_g)
               : null,
           painMax: painValues.length ? Math.max(...painValues) : 0,
-          painAvg: painValues.length
-            ? painValues.reduce((sum, value) => sum + value, 0) / painValues.length
-            : 0,
-          volumeTotal: allSets.reduce(
-            (sum, set) => sum + calcSetVolume(set),
-            0
-          ),
-          setsLogged: allSets.filter((set) => Number(set.reps ?? 0) > 0).length,
+          painAvg: painValues.length ? average(painValues) : 0,
+          volumeTotal: loggedSets.reduce((sum, set) => sum + setVolume(set), 0),
+          setsLogged: loggedSets.length,
           postDifficulty: workout.post_difficulty,
           notes: workout.post_notes || workout.notes || null,
           exercises,
         };
       });
 
-      setHistory(historyRows);
+      setAllHistory(history);
 
-      const weightPoints = workoutRows
-        .filter(
-          (row) =>
-            row.bodyweight_lb != null &&
-            Number.isFinite(Number(row.bodyweight_lb))
-        )
-        .slice()
-        .reverse()
-        .map((row) => ({
-          label: formatShortDate(row.completed_at),
-          value: Number(row.bodyweight_lb),
-        }));
-
-      setWeightSeries(weightPoints);
-
-      const completedTimeMap = new Map(
-        workoutRows.map((row) => [
-          row.id,
-          new Date(row.completed_at).getTime(),
-        ])
-      );
-
-      const workoutById = new Map(workoutRows.map((row) => [row.id, row]));
-      const workoutExerciseById = new Map(
-        workoutExerciseRows.map((row) => [row.id, row])
-      );
-
-      const progressMap = new Map<string, ExerciseProgressPoint[]>();
-
-      for (const detailRows of exerciseDetailsByWorkout.values()) {
-        for (const detail of detailRows) {
-          const source = workoutExerciseById.get(detail.workoutExerciseId);
-          const workout = source ? workoutById.get(source.workout_id) : null;
-          if (!workout) continue;
-
-          const sets = detail.sets.filter(
-            (set) => Number(set.reps ?? 0) > 0 && Number(set.weight ?? 0) > 0
-          );
-          if (!sets.length) continue;
-
-          const bestWeight = Math.max(...sets.map((set) => Number(set.weight)));
-          const bestE1RM = Math.max(
-            ...sets.map((set) =>
-              estimatedOneRepMax(Number(set.weight), Number(set.reps))
-            )
-          );
-          const volume = sets.reduce(
-            (sum, set) => sum + calcSetVolume(set),
-            0
-          );
-
-          const list = progressMap.get(detail.exerciseId) ?? [];
-          list.push({
-            date: workout.completed_at,
-            label: formatShortDate(workout.completed_at),
-            bestWeight,
-            bestE1RM,
-            volume,
-          });
-          progressMap.set(detail.exerciseId, list);
-        }
-      }
-
-      const progressRows: ExerciseProgress[] = [];
-      for (const [exerciseId, rawPoints] of progressMap.entries()) {
-        const points = rawPoints.sort(
-          (left, right) =>
-            new Date(left.date).getTime() - new Date(right.date).getTime()
+      const firstExercise = history
+        .flatMap((row) => row.exercises)
+        .find((exercise) =>
+          exercise.sets.some((set) => Number(set.reps ?? 0) > 0)
         );
-        const first = points[0];
-        const latest = points[points.length - 1];
-        const bestWeight = Math.max(...points.map((point) => point.bestWeight));
-        const bestE1RM = Math.max(...points.map((point) => point.bestE1RM));
-        const changePct =
-          first?.bestE1RM > 0
-            ? ((latest.bestE1RM - first.bestE1RM) / first.bestE1RM) * 100
-            : null;
 
-        progressRows.push({
-          id: exerciseId,
-          name: exerciseNameMap.get(exerciseId) ?? "Exercise",
-          sessions: points.length,
-          currentWeight: latest?.bestWeight ?? 0,
-          bestWeight,
-          bestE1RM,
-          currentE1RM: latest?.bestE1RM ?? 0,
-          changePct,
-          points,
-        });
-      }
-
-      progressRows.sort((left, right) => {
-        const leftChange = left.changePct ?? -999;
-        const rightChange = right.changePct ?? -999;
-        return rightChange - leftChange || right.sessions - left.sessions;
-      });
-
-      setExerciseProgress(progressRows);
-
-      const perfMap = new Map<
-        string,
-        { sessions: number; validSeconds: number[]; volume: number; pains: number[] }
-      >();
-
-      for (const item of historyRows) {
-        const current = perfMap.get(item.templateName) ?? {
-          sessions: 0,
-          validSeconds: [],
-          volume: 0,
-          pains: [],
-        };
-        current.sessions += 1;
-        if (item.validDuration) current.validSeconds.push(item.sessionSeconds);
-        current.volume += item.volumeTotal;
-        current.pains.push(item.painAvg);
-        perfMap.set(item.templateName, current);
-      }
-
-      const performanceRows: ProgramPerformance[] = Array.from(
-        perfMap.entries()
-      )
-        .map(([name, value]) => ({
-          name,
-          sessions: value.sessions,
-          avgDurationSeconds: value.validSeconds.length
-            ? Math.round(
-                value.validSeconds.reduce((sum, seconds) => sum + seconds, 0) /
-                  value.validSeconds.length
-              )
-            : 0,
-          volume: value.volume,
-          avgPain: value.pains.length
-            ? value.pains.reduce((sum, pain) => sum + pain, 0) / value.pains.length
-            : 0,
-        }))
-        .sort((left, right) => right.sessions - left.sessions)
-        .slice(0, 6);
-
-      setProgramPerformance(performanceRows);
-
-      if (!selectedExerciseId && progressRows.length) {
-        setSelectedExerciseId(progressRows[0].id);
-      } else if (
-        selectedExerciseId &&
-        !progressRows.some((row) => row.id === selectedExerciseId)
-      ) {
-        setSelectedExerciseId(progressRows[0]?.id ?? "");
-      }
-
-      // Invalid timer records remain in history but are silently excluded
-      // from aggregate time calculations.
-      void completedTimeMap;
+      setSelectedExerciseId((current) =>
+        current &&
+        history.some((row) =>
+          row.exercises.some((exercise) => exercise.exerciseId === current)
+        )
+          ? current
+          : firstExercise?.exerciseId ?? ""
+      );
     } catch (error: any) {
       setErr(error?.message ?? String(error));
     } finally {
@@ -1107,220 +947,737 @@ export function ProgressPage() {
 
   useEffect(() => {
     setHistoryVisible(HISTORY_BATCH);
-    setExpandedHistoryId(null);
+    setDetailId(null);
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, range]);
+  }, [scope]);
 
-  const analytics = useMemo(() => {
-    const validDurations = history
+  useEffect(() => {
+    setHistoryVisible(HISTORY_BATCH);
+    setDetailId(null);
+  }, [range]);
+
+  const selectedDays = daysForRange(range);
+
+  const currentHistory = useMemo(
+    () => filterWindow(allHistory, selectedDays, 0),
+    [allHistory, selectedDays]
+  );
+
+  const previousHistory = useMemo(
+    () => filterWindow(allHistory, selectedDays, 1),
+    [allHistory, selectedDays]
+  );
+
+  const currentWorkoutIds = useMemo(
+    () => new Set(currentHistory.map((row) => row.id)),
+    [currentHistory]
+  );
+
+  const currentWorkouts = useMemo(
+    () => allWorkouts.filter((row) => currentWorkoutIds.has(row.id)),
+    [allWorkouts, currentWorkoutIds]
+  );
+
+  const exerciseProgress = useMemo<ExerciseProgress[]>(() => {
+    const map = new Map<string, ExerciseProgress>();
+
+    for (const workout of allHistory.slice().reverse()) {
+      for (const exercise of workout.exercises) {
+        const logged = exercise.sets.filter(
+          (set) => Number(set.reps ?? 0) > 0
+        );
+        if (!logged.length) continue;
+
+        const weighted = logged.filter((set) => Number(set.weight ?? 0) > 0);
+        const bestSet =
+          weighted
+            .slice()
+            .sort(
+              (a, b) =>
+                e1rm(Number(b.weight), Number(b.reps)) -
+                e1rm(Number(a.weight), Number(a.reps))
+            )[0] ??
+          logged
+            .slice()
+            .sort((a, b) => Number(b.reps) - Number(a.reps))[0];
+
+        const rirValues = logged
+          .map((set) => set.rir)
+          .filter((value): value is number => value != null && Number.isFinite(value));
+
+        const row =
+          map.get(exercise.exerciseId) ??
+          ({
+            id: exercise.exerciseId,
+            name: exercise.name,
+            primaryMuscles: exercise.primaryMuscles,
+            points: [],
+          } satisfies ExerciseProgress);
+
+        row.points.push({
+          workoutId: workout.id,
+          date: workout.completedAt,
+          workoutName: workout.templateName,
+          bestWeight: bestSet ? Number(bestSet.weight ?? 0) : 0,
+          bestReps: bestSet ? Number(bestSet.reps ?? 0) : 0,
+          bestE1RM: bestSet
+            ? e1rm(Number(bestSet.weight ?? 0), Number(bestSet.reps ?? 0))
+            : 0,
+          volume: logged.reduce((sum, set) => sum + setVolume(set), 0),
+          avgRir: rirValues.length ? average(rirValues) : null,
+          pain: exercise.pain,
+        });
+
+        map.set(exercise.exerciseId, row);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allHistory]);
+
+  const exerciseViews = useMemo<ExerciseView[]>(
+    () =>
+      exerciseProgress.map((exercise) => {
+        const latest = exercise.points.at(-1);
+        return {
+          ...exercise,
+          currentWeight: latest?.bestWeight ?? 0,
+          currentReps: latest?.bestReps ?? 0,
+          currentE1RM: latest?.bestE1RM ?? 0,
+          d7: exerciseChange(exercise.points, 7),
+          d14: exerciseChange(exercise.points, 14),
+          d30: exerciseChange(exercise.points, 30),
+          d365: exerciseChange(exercise.points, 365),
+          selectedChange: exerciseChange(exercise.points, selectedDays),
+        };
+      }),
+    [exerciseProgress, selectedDays]
+  );
+
+  const selectedExercise = useMemo(
+    () =>
+      exerciseViews.find((row) => row.id === selectedExerciseId) ??
+      exerciseViews[0] ??
+      null,
+    [exerciseViews, selectedExerciseId]
+  );
+
+  const frequency = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const week = new Date(today);
+    week.setDate(week.getDate() - week.getDay());
+    const month = new Date(now.getFullYear(), now.getMonth(), 1);
+    const year = new Date(now.getFullYear(), 0, 1);
+
+    const count = (start: Date) =>
+      allHistory.filter((row) => {
+        const stamp = ms(row.completedAt);
+        return stamp >= start.getTime() && stamp <= now.getTime();
+      }).length;
+
+    const thisWeek = count(week);
+    const thisMonth = count(month);
+    const thisYear = count(year);
+
+    const daysIntoYear = Math.max(
+      1,
+      (now.getTime() - year.getTime()) / 86400000 + 1
+    );
+
+    const dateKeys = unique(
+      allHistory.map((row) => {
+        const date = new Date(row.completedAt);
+        if (Number.isNaN(date.getTime())) return "";
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(date.getDate()).padStart(2, "0")}`;
+      })
+    )
+      .filter(Boolean)
+      .map((key) => new Date(`${key}T12:00:00`).getTime())
+      .sort((a, b) => b - a);
+
+    let currentStreak = 0;
+    if (dateKeys.length) {
+      const latest = new Date(dateKeys[0]);
+      latest.setHours(0, 0, 0, 0);
+      const gap = Math.round(
+        (today.getTime() - latest.getTime()) / 86400000
+      );
+
+      if (gap <= 1) {
+        currentStreak = 1;
+        for (let i = 1; i < dateKeys.length; i += 1) {
+          const diff = Math.round((dateKeys[i - 1] - dateKeys[i]) / 86400000);
+          if (diff === 1) currentStreak += 1;
+          else break;
+        }
+      }
+    }
+
+    let longestStreak = 0;
+    let running = 0;
+    const ascending = dateKeys.slice().sort((a, b) => a - b);
+
+    ascending.forEach((value, index) => {
+      if (!index) running = 1;
+      else {
+        const diff = Math.round((value - ascending[index - 1]) / 86400000);
+        running = diff === 1 ? running + 1 : 1;
+      }
+      longestStreak = Math.max(longestStreak, running);
+    });
+
+    return {
+      thisWeek,
+      thisMonth,
+      thisYear,
+      avgPerWeek: thisYear / (daysIntoYear / 7),
+      currentStreak,
+      longestStreak,
+    };
+  }, [allHistory]);
+
+  const overview = useMemo(() => {
+    const durations = currentHistory
       .filter((row) => row.validDuration)
-      .map((row) => row.sessionSeconds);
+      .map((row) => row.workoutSeconds);
 
-    const totalTime = validDurations.reduce((sum, seconds) => sum + seconds, 0);
-    const avgDuration = validDurations.length
-      ? Math.round(totalTime / validDurations.length)
-      : 0;
+    const totalTime = durations.reduce((sum, value) => sum + value, 0);
+    const spanDays =
+      selectedDays ??
+      (() => {
+        const stamps = currentHistory
+          .map((row) => ms(row.completedAt))
+          .filter(Number.isFinite);
+        if (stamps.length < 2) return 7;
+        return Math.max(
+          7,
+          Math.ceil((Math.max(...stamps) - Math.min(...stamps)) / 86400000) + 1
+        );
+      })();
 
-    const allSets = history.flatMap((row) =>
-      row.exercises.flatMap((exercise) =>
-        exercise.sets.filter((set) => Number(set.reps ?? 0) > 0)
+    const exerciseIds = new Set(
+      currentHistory.flatMap((row) =>
+        row.exercises.map((exercise) => exercise.exerciseId)
       )
     );
 
-    const strengthSets = allSets.filter(
-      (set) => Number(set.reps ?? 0) > 0 && Number(set.weight ?? 0) > 0
+    return {
+      workouts: currentHistory.length,
+      totalTime,
+      avgTime: durations.length ? average(durations) : 0,
+      perWeek: currentHistory.length / Math.max(1, spanDays / 7),
+      sets: currentHistory.reduce((sum, row) => sum + row.setsLogged, 0),
+      exercises: exerciseIds.size,
+    };
+  }, [currentHistory, selectedDays]);
+
+  const performance = useMemo(() => {
+    const improving = exerciseViews.filter(
+      (row) => row.selectedChange != null && row.selectedChange > STABLE_PCT
+    );
+    const declining = exerciseViews.filter(
+      (row) => row.selectedChange != null && row.selectedChange < -STABLE_PCT
+    );
+    const stable = exerciseViews.filter(
+      (row) =>
+        row.selectedChange != null &&
+        Math.abs(row.selectedChange) <= STABLE_PCT
     );
 
-    const totalVolume = strengthSets.reduce(
-      (sum, set) => sum + calcSetVolume(set),
+    const volume = currentHistory.reduce((sum, row) => sum + row.volumeTotal, 0);
+    const previousVolume = previousHistory.reduce(
+      (sum, row) => sum + row.volumeTotal,
       0
     );
 
-    const heaviestSet = strengthSets.length
-      ? Math.max(...strengthSets.map((set) => Number(set.weight)))
-      : 0;
+    const volumeChange =
+      previousVolume > 0 ? ((volume - previousVolume) / previousVolume) * 100 : null;
 
-    const bestE1RM = strengthSets.length
-      ? Math.max(
-          ...strengthSets.map((set) =>
-            estimatedOneRepMax(Number(set.weight), Number(set.reps))
-          )
-        )
-      : 0;
+    const sets = currentHistory.reduce((sum, row) => sum + row.setsLogged, 0);
+    const previousSets = previousHistory.reduce((sum, row) => sum + row.setsLogged, 0);
 
-    const uniqueExercises = new Set(
-      history.flatMap((row) => row.exercises.map((exercise) => exercise.exerciseId))
-    ).size;
+    const setChange =
+      previousSets > 0 ? ((sets - previousSets) / previousSets) * 100 : null;
 
-    const painValues = history.flatMap((row) =>
-      row.exercises
-        .map((exercise) => exercise.pain)
-        .filter((value): value is number => value != null && Number.isFinite(value))
-    );
+    const periodStart =
+      selectedDays == null ? -Infinity : Date.now() - selectedDays * 86400000;
 
-    const avgPain = painValues.length
-      ? painValues.reduce((sum, pain) => sum + pain, 0) / painValues.length
-      : 0;
-    const maxPain = painValues.length ? Math.max(...painValues) : 0;
-    const painFlags = painValues.filter((pain) => pain >= 3).length;
+    const records = exerciseViews
+      .map((exercise) => {
+        const points = exercise.points
+          .filter((point) => point.bestWeight > 0)
+          .slice()
+          .sort((a, b) => ms(a.date) - ms(b.date));
 
-    const rirValues = allSets
-      .map((set) => set.rir)
-      .filter((value): value is number => value != null && Number.isFinite(value));
+        if (points.length < 2) return null;
 
-    const avgRir = rirValues.length
-      ? rirValues.reduce((sum, value) => sum + value, 0) / rirValues.length
-      : null;
+        const current =
+          selectedDays == null
+            ? [points.at(-1)!]
+            : points.filter((point) => ms(point.date) >= periodStart);
 
+        const before =
+          selectedDays == null
+            ? points.slice(0, -1)
+            : points.filter((point) => ms(point.date) < periodStart);
+
+        if (!current.length || !before.length) return null;
+
+        const previousBest = Math.max(...before.map((point) => point.bestWeight));
+        const currentBest = Math.max(...current.map((point) => point.bestWeight));
+
+        if (currentBest <= previousBest) return null;
+
+        return {
+          id: exercise.id,
+          name: exercise.name,
+          value: formatWeight(currentBest),
+        };
+      })
+      .filter(
+        (row): row is { id: string; name: string; value: string } => Boolean(row)
+      )
+      .slice(0, 4);
+
+    return {
+      improving,
+      declining,
+      stable,
+      records,
+      volume,
+      volumeChange,
+      sets,
+      setChange,
+      avgVolume: currentHistory.length ? volume / currentHistory.length : 0,
+    };
+  }, [currentHistory, exerciseViews, previousHistory, selectedDays]);
+
+  const quality = useMemo(() => {
     let targetSets = 0;
     let targetHits = 0;
+    const rir: number[] = [];
 
-    for (const workout of history) {
+    for (const workout of currentHistory) {
       for (const exercise of workout.exercises) {
         const min = Number(exercise.prescription?.rep_min ?? 0);
         const max = Number(exercise.prescription?.rep_max ?? min);
-        if (!(min > 0) || !(max >= min)) continue;
 
         for (const set of exercise.sets) {
           const reps = Number(set.reps ?? 0);
-          if (!(reps > 0)) continue;
+          if (set.rir != null && Number.isFinite(Number(set.rir))) {
+            rir.push(Number(set.rir));
+          }
+          if (!(reps > 0) || !(min > 0) || !(max >= min)) continue;
           targetSets += 1;
           if (reps >= min && reps <= max) targetHits += 1;
         }
       }
     }
 
-    const repTargetSuccess = targetSets
-      ? Math.round((targetHits / targetSets) * 100)
-      : null;
-
-    const tooEasy = workouts.filter(
+    const tooEasy = currentWorkouts.filter(
       (workout) => workout.post_difficulty === "too_easy"
     ).length;
-    const tooHard = workouts.filter(
-      (workout) => workout.post_difficulty === "too_hard"
-    ).length;
-    const onTarget = workouts.filter(
+    const onTarget = currentWorkouts.filter(
       (workout) => workout.post_difficulty === "just_right"
     ).length;
-    const unrated = Math.max(0, workouts.length - tooEasy - tooHard - onTarget);
+    const tooHard = currentWorkouts.filter(
+      (workout) => workout.post_difficulty === "too_hard"
+    ).length;
+    const unrated = Math.max(
+      0,
+      currentWorkouts.length - tooEasy - onTarget - tooHard
+    );
+    const avgRir = rir.length ? average(rir) : null;
 
-    const dates = Array.from(
-      new Set(
-        workouts
-          .map((workout) => dateOnly(new Date(workout.completed_at)))
-          .filter(Boolean)
-      )
-    )
-      .map((value) => new Date(`${value}T12:00:00`).getTime())
-      .sort((left, right) => right - left);
+    let status = "Not enough data";
+    let tone: Tone = "blue";
 
-    let streak = 0;
-    if (dates.length) {
-      streak = 1;
-      for (let index = 1; index < dates.length; index += 1) {
-        const differenceDays = Math.round(
-          (dates[index - 1] - dates[index]) / 86400000
-        );
-        if (differenceDays === 1) streak += 1;
-        else break;
+    if (currentWorkouts.length) {
+      if (tooHard > Math.max(1, currentWorkouts.length * 0.35)) {
+        status = "Intensity may be too high";
+        tone = "red";
+      } else if (
+        tooEasy > Math.max(1, currentWorkouts.length * 0.4) ||
+        (avgRir != null && avgRir >= 4)
+      ) {
+        status = "Intensity lighter than target";
+        tone = "amber";
+      } else {
+        status = "Training intensity on target";
+        tone = "green";
       }
     }
 
-    const completedTimes = workouts
-      .map((workout) => new Date(workout.completed_at).getTime())
-      .filter(Number.isFinite);
+    return {
+      repSuccess: targetSets ? (targetHits / targetSets) * 100 : null,
+      avgRir,
+      tooEasy,
+      onTarget,
+      tooHard,
+      unrated,
+      status,
+      tone,
+    };
+  }, [currentHistory, currentWorkouts]);
 
-    const spanDays =
-      range === "all"
-        ? completedTimes.length >= 2
-          ? Math.max(
-              7,
-              Math.ceil(
-                (Math.max(...completedTimes) - Math.min(...completedTimes)) /
-                  86400000
-              ) + 1
-            )
-          : 7
-        : range;
+  const painViews = useMemo<PainView[]>(() => {
+    const map = new Map<
+      string,
+      { name: string; points: { date: string; pain: number }[] }
+    >();
 
-    const workoutsPerWeek = workouts.length / Math.max(1, spanDays / 7);
+    for (const workout of allHistory.slice().reverse()) {
+      for (const exercise of workout.exercises) {
+        if (exercise.pain == null || !Number.isFinite(exercise.pain)) continue;
+        const row = map.get(exercise.exerciseId) ?? {
+          name: exercise.name,
+          points: [],
+        };
+        row.points.push({
+          date: workout.completedAt,
+          pain: Number(exercise.pain),
+        });
+        map.set(exercise.exerciseId, row);
+      }
+    }
 
-    const improvedExercises = exerciseProgress.filter(
-      (exercise) => (exercise.changePct ?? 0) > 1
-    ).length;
+    return Array.from(map.entries())
+      .map(([id, row]) => ({
+        id,
+        name: row.name,
+        current: row.points.at(-1)?.pain ?? null,
+        d7: painChange(row.points, 7),
+        d14: painChange(row.points, 14),
+        d30: painChange(row.points, 30),
+        d365: painChange(row.points, 365),
+      }))
+      .sort((a, b) => (b.current ?? -1) - (a.current ?? -1));
+  }, [allHistory]);
 
-    const latestWeight = weightSeries.length
-      ? weightSeries[weightSeries.length - 1].value
-      : null;
-    const firstWeight = weightSeries.length ? weightSeries[0].value : null;
+  const muscleViews = useMemo(() => {
+    const map = new Map<string, ExerciseView[]>();
+
+    for (const exercise of exerciseViews) {
+      const muscles = exercise.primaryMuscles.length
+        ? unique(exercise.primaryMuscles.map(prettyMuscle))
+        : ["Other"];
+
+      for (const muscle of muscles) {
+        const list = map.get(muscle) ?? [];
+        list.push(exercise);
+        map.set(muscle, list);
+      }
+    }
+
+    const avg = (rows: ExerciseView[], key: "d7" | "d14" | "d30" | "d365") => {
+      const values = rows
+        .map((row) => row[key])
+        .filter((value): value is number => value != null && Number.isFinite(value));
+      return values.length ? average(values) : null;
+    };
+
+    return Array.from(map.entries())
+      .map(([name, rows]) => ({
+        name,
+        count: rows.length,
+        d7: avg(rows, "d7"),
+        d14: avg(rows, "d14"),
+        d30: avg(rows, "d30"),
+        d365: avg(rows, "d365"),
+      }))
+      .sort((a, b) => (b.d30 ?? -999) - (a.d30 ?? -999));
+  }, [exerciseViews]);
+
+  const recovery = useMemo(() => {
+    const allWeights = allHistory
+      .filter((row) => row.bodyweightLb != null && Number.isFinite(row.bodyweightLb))
+      .slice()
+      .sort((a, b) => ms(a.completedAt) - ms(b.completedAt));
+
+    const currentWeights = currentHistory
+      .filter((row) => row.bodyweightLb != null && Number.isFinite(row.bodyweightLb))
+      .slice()
+      .sort((a, b) => ms(a.completedAt) - ms(b.completedAt));
+
+    const latestWeight = allWeights.at(-1)?.bodyweightLb ?? null;
+    const firstWeight = currentWeights[0]?.bodyweightLb ?? null;
     const weightChange =
       latestWeight != null && firstWeight != null ? latestWeight - firstWeight : null;
 
-    const proteinTarget =
-      latestWeight != null
-        ? roundProtein(latestWeight * proteinMultiplier(activeBlock?.goal))
-        : null;
+    const pain = currentHistory.flatMap((row) =>
+      row.exercises
+        .map((exercise) => exercise.pain)
+        .filter((value): value is number => value != null && Number.isFinite(value))
+    );
+
+    const avgPain = pain.length ? average(pain) : 0;
+    const peakPain = pain.length ? Math.max(...pain) : 0;
+    const painFlags = pain.filter((value) => value >= 3).length;
+
+    let status = "Recovery clear";
+    let tone: Tone = "green";
+    if (peakPain >= 5 || painFlags >= 3) {
+      status = "Recovery needs attention";
+      tone = "red";
+    } else if (peakPain >= 3 || painFlags) {
+      status = "Monitor recovery";
+      tone = "amber";
+    }
 
     return {
-      sessions: workouts.length,
-      totalTime,
-      avgDuration,
-      setsLogged: allSets.length,
-      totalVolume,
-      heaviestSet,
-      bestE1RM,
-      uniqueExercises,
-      avgPain,
-      maxPain,
-      painFlags,
-      avgRir,
-      repTargetSuccess,
-      tooEasy,
-      tooHard,
-      onTarget,
-      unrated,
-      streak,
-      workoutsPerWeek,
-      improvedExercises,
       latestWeight,
       weightChange,
-      proteinTarget,
+      avgPain,
+      peakPain,
+      painFlags,
+      protein:
+        latestWeight != null
+          ? roundProtein(latestWeight * proteinMultiplier(activeBlock?.goal))
+          : null,
+      status,
+      tone,
     };
-  }, [history, workouts, range, exerciseProgress, weightSeries, activeBlock]);
+  }, [activeBlock?.goal, allHistory, currentHistory]);
 
-  const selectedExercise = useMemo(
-    () =>
-      exerciseProgress.find((row) => row.id === selectedExerciseId) ??
-      exerciseProgress[0] ??
-      null,
-    [exerciseProgress, selectedExerciseId]
-  );
+  const breakdown = useMemo<WorkoutBreakdown[]>(() => {
+    const names = unique([
+      ...rotation,
+      ...currentHistory.map((row) => row.templateName),
+    ]);
 
-  const selectedExerciseChart = useMemo<TrendPoint[]>(
-    () =>
-      (selectedExercise?.points ?? []).map((point) => ({
-        label: point.label,
-        value: point.bestE1RM,
-      })),
-    [selectedExercise]
-  );
+    return names
+      .map((name) => {
+        const current = currentHistory.filter((row) => row.templateName === name);
+        const previous = previousHistory.filter((row) => row.templateName === name);
 
-  const volumeTrend = useMemo<TrendPoint[]>(
-    () =>
-      history
-        .slice()
-        .reverse()
-        .map((row) => ({
-          label: formatShortDate(row.completedAt),
-          value: row.volumeTotal,
-        }))
-        .filter((point) => point.value > 0),
-    [history]
-  );
+        const volume = current.reduce((sum, row) => sum + row.volumeTotal, 0);
+        const prevVolume = previous.reduce((sum, row) => sum + row.volumeTotal, 0);
+        const volumeChange =
+          prevVolume > 0 ? ((volume - prevVolume) / prevVolume) * 100 : null;
 
-  const topProgressExercise = exerciseProgress[0] ?? null;
+        const avgPain = current.length
+          ? average(current.map((row) => row.painAvg))
+          : 0;
+        const prevPain = previous.length
+          ? average(previous.map((row) => row.painAvg))
+          : null;
+
+        const times = current
+          .filter((row) => row.validDuration)
+          .map((row) => row.workoutSeconds);
+
+        return {
+          name,
+          tone: workoutTone(name),
+          workouts: current.length,
+          avgTime: times.length ? average(times) : 0,
+          volume,
+          volumeChange,
+          avgPain,
+          painChange: prevPain != null ? avgPain - prevPain : null,
+        };
+      })
+      .filter((row) => row.workouts > 0 || rotation.includes(row.name))
+      .slice(0, 6);
+  }, [currentHistory, previousHistory, rotation]);
+
+  const issues = useMemo<Issue[]>(() => {
+    const rows: Issue[] = [];
+
+    if (
+      quality.tooEasy > Math.max(1, currentWorkouts.length * 0.4) ||
+      (quality.avgRir != null && quality.avgRir >= 4)
+    ) {
+      rows.push({
+        title: "Training intensity looks light",
+        detail: `${quality.tooEasy} workout${quality.tooEasy === 1 ? "" : "s"} rated Too Easy in this range.`,
+        tone: "amber",
+      });
+    }
+
+    const risingPain = painViews
+      .filter((row) => row.d14 != null && row.d14 >= 1)
+      .sort((a, b) => (b.d14 ?? 0) - (a.d14 ?? 0))[0];
+
+    if (risingPain) {
+      rows.push({
+        title: `${risingPain.name} pain is increasing`,
+        detail: `Pain is up ${formatPainDelta(risingPain.d14)} over 14 days.`,
+        tone: "red",
+      });
+    }
+
+    const declining = performance.declining
+      .slice()
+      .sort((a, b) => (a.selectedChange ?? 0) - (b.selectedChange ?? 0))[0];
+
+    if (declining) {
+      rows.push({
+        title: `${declining.name} is trending down`,
+        detail: `${formatPct(declining.selectedChange)} estimated strength change.`,
+        tone: "red",
+      });
+    }
+
+    if (!rows.length) {
+      rows.push({
+        title: "No major issues detected",
+        detail: "Current workload, pain and performance signals are stable.",
+        tone: "green",
+      });
+    }
+
+    return rows.slice(0, 3);
+  }, [currentWorkouts.length, painViews, performance.declining, quality]);
+
+  const recommendations = useMemo<Recommendation[]>(() => {
+    const rows: Recommendation[] = [];
+
+    const risingPain = painViews
+      .filter((row) => row.d14 != null && row.d14 >= 1)
+      .sort((a, b) => (b.d14 ?? 0) - (a.d14 ?? 0))[0];
+
+    if (risingPain) {
+      rows.push({
+        eyebrow: "WATCH",
+        title: risingPain.name,
+        body: `Pain has increased ${formatPainDelta(risingPain.d14)} over 14 days.`,
+        action: "Hold load progression and reassess after the next workout.",
+        tone: "red",
+      });
+    }
+
+    const eligible = exerciseViews
+      .filter((exercise) => {
+        const latest = exercise.points.at(-1);
+        return (
+          exercise.points.length >= 2 &&
+          latest?.avgRir != null &&
+          latest.avgRir >= 3 &&
+          (latest.pain ?? 0) <= 1 &&
+          latest.bestWeight > 0
+        );
+      })
+      .sort(
+        (a, b) =>
+          (b.points.at(-1)?.avgRir ?? 0) - (a.points.at(-1)?.avgRir ?? 0)
+      )[0];
+
+    if (eligible) {
+      const latest = eligible.points.at(-1)!;
+      rows.push({
+        eyebrow: "PRIORITY",
+        title: eligible.name,
+        body: `${formatWeight(latest.bestWeight)} with ${latest.avgRir?.toFixed(1)} average RIR and controlled pain.`,
+        action: "If the programmed rep target is met, consider the next small load increase.",
+        tone: "green",
+      });
+    }
+
+    if (
+      quality.tooEasy > Math.max(1, currentWorkouts.length * 0.4) ||
+      (quality.avgRir != null && quality.avgRir >= 4)
+    ) {
+      rows.push({
+        eyebrow: "PROGRAM",
+        title: "Increase training stimulus",
+        body: `${quality.tooEasy} workout${quality.tooEasy === 1 ? "" : "s"} rated Too Easy.`,
+        action: "Progress eligible exercises instead of adding unnecessary extra work.",
+        tone: "amber",
+      });
+    }
+
+    const improver = performance.improving
+      .slice()
+      .sort((a, b) => (b.selectedChange ?? 0) - (a.selectedChange ?? 0))[0];
+
+    if (improver && rows.length < 3) {
+      rows.push({
+        eyebrow: "PROGRESS",
+        title: improver.name,
+        body: `${formatPct(improver.selectedChange)} estimated strength change.`,
+        action: "Keep the current progression pattern while reps and pain stay controlled.",
+        tone: "blue",
+      });
+    }
+
+    if (!rows.length) {
+      rows.push({
+        eyebrow: "COACH",
+        title: "Build the next trend",
+        body: "More repeated exercise data is needed for a confident progression call.",
+        action: "Keep logging weight, reps, RIR and pain on every workout.",
+        tone: "blue",
+      });
+    }
+
+    return rows.slice(0, 3);
+  }, [currentWorkouts.length, exerciseViews, painViews, performance.improving, quality]);
+
+  const selectedDetail = useMemo(() => {
+    if (!selectedExercise) return null;
+    const latest = selectedExercise.points.at(-1);
+    const d30 = selectedExercise.d30;
+
+    let status = "Baseline established";
+    let tone: Tone = "blue";
+    let detail = "Complete this exercise again to begin measuring progression.";
+
+    if (selectedExercise.points.length >= 2) {
+      if (d30 != null && d30 > STABLE_PCT) {
+        status = "Trending up";
+        tone = "green";
+        detail = `Estimated strength is ${formatPct(d30)} over 30 days.`;
+      } else if (d30 != null && d30 < -STABLE_PCT) {
+        status = "Trending down";
+        tone = "red";
+        detail = `Estimated strength is ${formatPct(d30)} over 30 days.`;
+      } else {
+        status = "Stable";
+        tone = "blue";
+        detail = "Strength is holding within a narrow range.";
+      }
+    }
+
+    let coach = "Keep logging this exercise to build a stronger trend.";
+    if ((latest?.pain ?? 0) >= 3) {
+      coach = "Hold load progression while pain is elevated.";
+    } else if (
+      selectedExercise.points.length >= 2 &&
+      latest?.avgRir != null &&
+      latest.avgRir >= 3 &&
+      (latest.pain ?? 0) <= 1
+    ) {
+      coach = "If the rep target is met, this exercise may be ready for the next small load increase.";
+    } else if (selectedExercise.points.length >= 2) {
+      coach = "Keep the current load until reps or estimated strength clearly improve.";
+    }
+
+    return { latest, status, tone, detail, coach };
+  }, [selectedExercise]);
+
+  const biggestMuscle =
+    muscleViews.find((row) => row.d30 != null && row.d30 > 0) ?? null;
+  const highestPain = painViews[0] ?? null;
+  const bestPain = painViews
+    .filter((row) => row.d30 != null)
+    .slice()
+    .sort((a, b) => (a.d30 ?? 0) - (b.d30 ?? 0))[0] ?? null;
+
+  const visibleHistory = currentHistory.slice(0, historyVisible);
+  const detailWorkout = allHistory.find((row) => row.id === detailId) ?? null;
+
+  const programTitle =
+    scope === "all"
+      ? "All Programs"
+      : activeBlock
+        ? `Foundation • ${goalLabel(activeBlock.goal)}`
+        : "No Active Program";
 
   async function clearLogs() {
     setClearBusy(true);
@@ -1356,650 +1713,827 @@ export function ProgressPage() {
     }
   }
 
-  const programTitle =
-    scope === "all"
-      ? "All Programs"
-      : `Foundation • ${goalLabel(activeBlock?.goal)}`;
-
-  const rotationTemplates = Array.from(new Set(programTemplates)).slice(0, 4);
-  const visibleHistory = history.slice(0, historyVisible);
+  const selectedStrengthChanges = exerciseViews
+    .map((row) => row.selectedChange)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const overallStrengthTrend = selectedStrengthChanges.length
+    ? average(selectedStrengthChanges)
+    : null;
+  const pain30Values = painViews
+    .map((row) => row.d30)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const overallPainTrend = pain30Values.length ? average(pain30Values) : null;
 
   return (
     <div className="pr-page">
-      <section className="pr-heroPanel">
-        <div className="pr-heroTop">
-          <div>
-            <div className="pr-pageEyebrow">TRAINING ANALYTICS</div>
-            <h1>Progress</h1>
-            <p>See what is improving, how much work you are doing, and how recovery is trending.</p>
-          </div>
-
-          <div className="pr-controls">
-            <ProDropdown
-              label="PROGRAM"
-              value={scope}
-              options={[
-                { value: "active", label: "Current Program" },
-                { value: "all", label: "All Programs" },
-              ]}
-              onChange={(value) => setScope(value as Scope)}
-            />
-
-            <ProDropdown
-              label="RANGE"
-              value={String(range)}
-              options={[
-                { value: "7", label: "7 Days" },
-                { value: "14", label: "14 Days" },
-                { value: "30", label: "30 Days" },
-                { value: "90", label: "90 Days" },
-                { value: "all", label: "All Time" },
-              ]}
-              onChange={(value) =>
-                setRange(value === "all" ? "all" : (Number(value) as Range))
-              }
-            />
-          </div>
-        </div>
-
-        <div className="pr-programDeck">
-          <div className="pr-programIdentity">
-            <div className="pr-programGlyph">
-              <SvgIcon name="layers" size={24} />
-            </div>
-            <div>
-              <span>{scope === "active" ? "ACTIVE PROGRAM" : "ANALYSIS SCOPE"}</span>
-              <strong>{programTitle}</strong>
-              <small>
-                {scope === "active"
-                  ? `${rotationTemplates.length || 4} workout rotation`
-                  : "Combined training history"}
-              </small>
-            </div>
-          </div>
-
-          {scope === "active" && rotationTemplates.length ? (
-            <div className="pr-rotationRail" aria-label="Current workout rotation">
-              {rotationTemplates.map((name, index) => (
+      <section className="pr-surface pr-hero">
+        <div>
+          <h1>Progress</h1>
+          <div className="pr-program">{programTitle}</div>
+          {scope === "active" && rotation.length ? (
+            <div className="pr-rotation">
+              {rotation.slice(0, 4).map((name, index) => (
                 <span key={`${name}-${index}`}>
-                  {name}
-                  {index < rotationTemplates.length - 1 ? <b aria-hidden>→</b> : null}
+                  <b className={`is-${workoutTone(name)}`}>{name}</b>
+                  {index < Math.min(rotation.length, 4) - 1 ? <i>→</i> : null}
                 </span>
               ))}
             </div>
           ) : null}
+        </div>
 
-          <div className="pr-analysisWindow">
-            <span>ANALYSIS WINDOW</span>
-            <strong>{rangeLabel(range)}</strong>
-            <small>{analytics.sessions} completed sessions</small>
-          </div>
+        <div className="pr-heroControls">
+          <ProDropdown
+            ariaLabel="Program"
+            value={scope}
+            options={[
+              { value: "active", label: "Current Program" },
+              { value: "all", label: "All Programs" },
+            ]}
+            onChange={(value) => setScope(value as Scope)}
+          />
+
+          <ProDropdown
+            ariaLabel="Range"
+            value={String(range)}
+            options={[
+              { value: "7", label: "7 Days" },
+              { value: "14", label: "14 Days" },
+              { value: "30", label: "30 Days" },
+              { value: "90", label: "90 Days" },
+              { value: "365", label: "1 Year" },
+              { value: "all", label: "All Time" },
+            ]}
+            onChange={(value) =>
+              setRange(value === "all" ? "all" : (Number(value) as Range))
+            }
+          />
         </div>
       </section>
 
       {toast ? <div className="pr-toast">{toast}</div> : null}
       {err ? <div className="pr-error">{err}</div> : null}
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="OVERVIEW"
-          title="Training Overview"
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Coach Recommendations"
+          subtitle="The most important actions from your current training data."
         />
-
-        <div className="pr-primaryMetrics">
-          <Metric
-            icon={icoChecked}
-            label="SESSIONS"
-            value={loading ? "—" : analytics.sessions}
-            detail="completed"
-          />
-          <Metric
-            icon={icoInProcess}
-            label="TRAINING TIME"
-            value={loading ? "—" : formatDuration(analytics.totalTime)}
-            detail="valid active time"
-            tone="blue"
-          />
-          <Metric
-            icon={icoSchedule}
-            label="AVG SESSION"
-            value={loading ? "—" : formatDuration(analytics.avgDuration)}
-            detail="valid sessions only"
-          />
-          <Metric
-            icon={icoFlames}
-            label="SESSIONS / WEEK"
-            value={
-              loading ? "—" : analytics.workoutsPerWeek.toFixed(1)
-            }
-            detail={`${analytics.streak} day training streak`}
-            tone={analytics.streak >= 3 ? "green" : "blue"}
-          />
+        <div className="pr-coachList">
+          {recommendations.map((item, index) => (
+            <article
+              className={`pr-coachRow is-${item.tone}`}
+              key={`${item.title}-${index}`}
+            >
+              <div className="pr-coachIcon">
+                <SvgIcon name="coach" size={22} />
+              </div>
+              <div className="pr-coachCopy">
+                <span>{item.eyebrow}</span>
+                <h3>{item.title}</h3>
+                <p>{item.body}</p>
+              </div>
+              <strong className="pr-coachAction">{item.action}</strong>
+            </article>
+          ))}
         </div>
+      </section>
 
-        <div className="pr-secondaryStrip">
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Training Frequency"
+          subtitle="Your workout consistency across the calendar."
+        />
+        <div className="pr-majorRail pr-three">
           <div>
-            <span>SETS LOGGED</span>
-            <strong>{loading ? "—" : analytics.setsLogged.toLocaleString()}</strong>
+            <span>This Week</span>
+            <strong>{loading ? "—" : frequency.thisWeek}</strong>
+            <small>Workouts</small>
           </div>
           <div>
-            <span>EXERCISES TRAINED</span>
-            <strong>{loading ? "—" : analytics.uniqueExercises}</strong>
+            <span>This Month</span>
+            <strong>{loading ? "—" : frequency.thisMonth}</strong>
+            <small>Workouts</small>
           </div>
           <div>
-            <span>EXERCISES IMPROVED</span>
-            <strong>{loading ? "—" : analytics.improvedExercises}</strong>
+            <span>This Year</span>
+            <strong>{loading ? "—" : frequency.thisYear}</strong>
+            <small>Workouts</small>
+          </div>
+        </div>
+        <div className="pr-minorRail pr-three">
+          <div>
+            <span>Avg / Week YTD</span>
+            <strong>{loading ? "—" : frequency.avgPerWeek.toFixed(1)}</strong>
           </div>
           <div>
-            <span>TOP PROGRESS</span>
-            <strong>
-              {analytics.improvedExercises > 0
-                ? topProgressExercise?.name ?? "—"
-                : "No trend yet"}
-            </strong>
+            <span>Current Streak</span>
+            <strong>{loading ? "—" : `${frequency.currentStreak} Days`}</strong>
+          </div>
+          <div>
+            <span>Longest Streak</span>
+            <strong>{loading ? "—" : `${frequency.longestStreak} Days`}</strong>
           </div>
         </div>
       </section>
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="PERFORMANCE"
-          title="Strength & Workload"
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Training Overview"
+          subtitle={`${rangeLabel(range)} at a glance.`}
+        />
+        <div className="pr-majorRail pr-four">
+          <div>
+            <span>Workouts</span>
+            <strong>{overview.workouts}</strong>
+          </div>
+          <div>
+            <span>Training Time</span>
+            <strong>{formatDuration(overview.totalTime)}</strong>
+          </div>
+          <div>
+            <span>Avg Workout</span>
+            <strong>{formatDuration(overview.avgTime)}</strong>
+          </div>
+          <div>
+            <span>Workouts / Week</span>
+            <strong>{overview.perWeek.toFixed(1)}</strong>
+          </div>
+        </div>
+        <div className="pr-minorRail pr-three">
+          <div>
+            <span>Sets Logged</span>
+            <strong>{overview.sets}</strong>
+          </div>
+          <div>
+            <span>Exercises Trained</span>
+            <strong>{overview.exercises}</strong>
+          </div>
+          <div>
+            <span>Current Streak</span>
+            <strong>{frequency.currentStreak} Days</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Performance"
+          subtitle="Whether strength and workload are actually moving forward."
         />
 
-        <div className="pr-twoColumn">
+        <div className="pr-majorRail pr-four pr-performanceStatus">
+          <div className="is-good">
+            <span>Exercises Improving</span>
+            <strong>{performance.improving.length}</strong>
+          </div>
+          <div>
+            <span>Stable</span>
+            <strong>{performance.stable.length}</strong>
+          </div>
+          <div className="is-bad">
+            <span>Trending Down</span>
+            <strong>{performance.declining.length}</strong>
+          </div>
+          <div className="is-info">
+            <span>Personal Records</span>
+            <strong>{performance.records.length}</strong>
+          </div>
+        </div>
+
+        <div className="pr-performanceGrid">
           <div className="pr-chartPanel">
             <div className="pr-chartHead">
               <div>
-                <span>TRAINING VOLUME</span>
-                <strong>{formatVolume(analytics.totalVolume)}</strong>
+                <span>Workout Volume</span>
+                <strong>{formatVolume(performance.volume)}</strong>
+                <small>Total weighted volume</small>
               </div>
-              <div className="pr-chartBadge">
-                <SvgIcon name="trend" size={16} />
-                {rangeLabel(range)}
+              <div className="pr-chartCompare">
+                <Delta value={performance.volumeChange} />
+                <small>vs {previousLabel(range)}</small>
               </div>
             </div>
-            <Sparkline points={volumeTrend} />
+
+            <WorkoutVolumeChart rows={currentHistory} />
+
+            <div className="pr-chartFooter pr-three">
+              <div>
+                <span>Avg Volume / Workout</span>
+                <strong>{formatVolume(performance.avgVolume)}</strong>
+              </div>
+              <div>
+                <span>Working Sets</span>
+                <strong>{performance.sets}</strong>
+              </div>
+              <div>
+                <span>Set Change</span>
+                <strong><Delta value={performance.setChange} /></strong>
+              </div>
+            </div>
           </div>
 
-          <div className="pr-performanceRail">
-            <Metric
-              icon={icoWorkout}
-              label="HEAVIEST SET"
-              value={formatWeight(analytics.heaviestSet)}
-              detail="highest load logged"
-              tone="blue"
-            />
-            <Metric
-              icon={icoTarget}
-              label="BEST EST. 1RM"
-              value={formatWeight(analytics.bestE1RM)}
-              detail="Epley estimate"
-              tone="green"
-            />
-            <Metric
-              icon={icoReport}
-              label="TOTAL VOLUME"
-              value={formatVolume(analytics.totalVolume)}
-              detail="reps × weight"
-              tone="orange"
-            />
+          <div className="pr-highlightStack">
+            <div className="pr-highlight">
+              <h3><SvgIcon name="trend" size={18} /> Top Progress</h3>
+              {performance.improving.length ? (
+                performance.improving
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      (b.selectedChange ?? 0) - (a.selectedChange ?? 0)
+                  )
+                  .slice(0, 3)
+                  .map((exercise) => (
+                    <div className="pr-highlightRow" key={exercise.id}>
+                      <div>
+                        <strong>{exercise.name}</strong>
+                        <span>{formatWeight(exercise.currentWeight)}</span>
+                      </div>
+                      <Delta value={exercise.selectedChange} />
+                    </div>
+                  ))
+              ) : (
+                <p>More repeated exercise data is needed to rank progress.</p>
+              )}
+            </div>
+
+            <div className="pr-highlight">
+              <h3><SvgIcon name="trophy" size={18} /> Personal Records</h3>
+              {performance.records.length ? (
+                performance.records.slice(0, 3).map((record) => (
+                  <div className="pr-highlightRow" key={record.id}>
+                    <div>
+                      <strong>{record.name}</strong>
+                      <span>Weight PR</span>
+                    </div>
+                    <b>{record.value}</b>
+                  </div>
+                ))
+              ) : (
+                <p>No new weight records in this range yet.</p>
+              )}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="QUALITY"
-          title="Training Quality"
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Progress Trends"
+          subtitle="The direction of your major training signals."
         />
-
-        <div className="pr-qualityGrid">
-          <div className="pr-qualityMetric">
-            <span>REP TARGET SUCCESS</span>
-            <strong>
-              {analytics.repTargetSuccess == null
-                ? "—"
-                : `${analytics.repTargetSuccess}%`}
-            </strong>
-            <small>sets inside programmed rep range</small>
-            <div className="pr-meter">
-              <span
-                style={{
-                  width: `${Math.max(
-                    0,
-                    Math.min(100, analytics.repTargetSuccess ?? 0)
-                  )}%`,
-                }}
-              />
+        <div className="pr-trendIssueGrid">
+          <div className="pr-trendGrid">
+            <div>
+              <span>Strength</span>
+              <strong>
+                {overallStrengthTrend == null
+                  ? "Building Trend"
+                  : overallStrengthTrend > STABLE_PCT
+                    ? "Improving"
+                    : overallStrengthTrend < -STABLE_PCT
+                      ? "Declining"
+                      : "Stable"}
+              </strong>
+              <Delta value={overallStrengthTrend} />
+            </div>
+            <div>
+              <span>Workload</span>
+              <strong>
+                {performance.volumeChange == null
+                  ? "Building Trend"
+                  : performance.volumeChange > 2
+                    ? "Increasing"
+                    : performance.volumeChange < -2
+                      ? "Decreasing"
+                      : "Stable"}
+              </strong>
+              <Delta value={performance.volumeChange} />
+            </div>
+            <div>
+              <span>Workout Frequency</span>
+              <strong>{frequency.avgPerWeek.toFixed(1)} / Week</strong>
+              <small>Year to date</small>
+            </div>
+            <div>
+              <span>Effort</span>
+              <strong>
+                {quality.avgRir == null
+                  ? "Building Trend"
+                  : quality.avgRir >= 4
+                    ? "Too Easy"
+                    : quality.avgRir <= 1
+                      ? "Very Hard"
+                      : "On Target"}
+              </strong>
+              <small>
+                {quality.avgRir == null ? "RIR not established" : `${quality.avgRir.toFixed(1)} avg RIR`}
+              </small>
+            </div>
+            <div>
+              <span>Pain</span>
+              <strong>
+                {overallPainTrend == null
+                  ? "Building Trend"
+                  : overallPainTrend < -0.2
+                    ? "Improving"
+                    : overallPainTrend > 0.2
+                      ? "Increasing"
+                      : "Stable"}
+              </strong>
+              <Delta value={overallPainTrend} reverse pain />
+            </div>
+            <div>
+              <span>Body Weight</span>
+              <strong>
+                {recovery.weightChange == null
+                  ? "No Change Data"
+                  : `${recovery.weightChange > 0 ? "+" : ""}${recovery.weightChange.toFixed(1)} LB`}
+              </strong>
+              <small>{rangeLabel(range)}</small>
             </div>
           </div>
 
-          <div className="pr-qualityMetric">
-            <span>AVERAGE EFFORT</span>
-            <strong>
-              {analytics.avgRir == null
-                ? "—"
-                : `${analytics.avgRir.toFixed(1)} RIR`}
-            </strong>
-            <small>average logged reps in reserve</small>
-          </div>
-
-          <div className="pr-qualityMetric">
-            <span>SESSION FEEDBACK</span>
-            <strong>{analytics.onTarget} ON TARGET</strong>
-            <small>
-              {analytics.tooEasy} too easy • {analytics.tooHard} too hard • {analytics.unrated} unrated
-            </small>
-          </div>
-
-          <div className="pr-qualityMetric">
-            <span>PROGRESSION</span>
-            <strong>{analytics.improvedExercises}</strong>
-            <small>exercises improved in this range</small>
+          <div className="pr-issues">
+            <h3>Needs Attention</h3>
+            {issues.map((issue, index) => (
+              <div className={`pr-issue is-${issue.tone}`} key={`${issue.title}-${index}`}>
+                <StatusDot tone={issue.tone} />
+                <div>
+                  <strong>{issue.title}</strong>
+                  <p>{issue.detail}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="BODY & RECOVERY"
-          title="Body & Recovery"
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Muscle Group Progress"
+          subtitle="Strength progress normalized across the exercises that train each muscle group."
         />
-
-        <div className="pr-bodyGrid">
-          <div className="pr-chartPanel pr-bodyChart">
-            <div className="pr-chartHead">
-              <div>
-                <span>BODY WEIGHT</span>
-                <strong>
-                  {analytics.latestWeight == null
-                    ? "—"
-                    : `${analytics.latestWeight.toFixed(1)} LB`}
-                </strong>
-              </div>
-              <div
-                className={`pr-delta ${
-                  (analytics.weightChange ?? 0) >= 0 ? "is-up" : "is-down"
-                }`}
-              >
-                {analytics.weightChange == null
-                  ? "NO RANGE CHANGE"
-                  : `${analytics.weightChange >= 0 ? "+" : ""}${analytics.weightChange.toFixed(
-                      1
-                    )} LB`}
-              </div>
+        {biggestMuscle ? (
+          <div className="pr-featureRow is-green">
+            <div>
+              <span>Biggest 30-Day Gain</span>
+              <strong>{biggestMuscle.name}</strong>
             </div>
-            <Sparkline points={weightSeries} tone="green" />
+            <Delta value={biggestMuscle.d30} />
           </div>
+        ) : null}
 
-          <div className="pr-recoveryPanel">
-            <div className="pr-recoveryMetric">
-              <AssetIcon src={icoProtein} tone="blue" />
-              <div>
-                <span>PROTEIN TARGET</span>
-                <strong>
-                  {analytics.proteinTarget != null
-                    ? `${analytics.proteinTarget} G`
-                    : "—"}
-                </strong>
-                <small>based on latest logged weight + goal</small>
-              </div>
-            </div>
-
-            <div className="pr-recoveryDivider" />
-
-            <div className="pr-recoveryNumbers">
-              <div>
-                <span>AVG PAIN</span>
-                <strong>{analytics.avgPain.toFixed(1)}</strong>
-              </div>
-              <div>
-                <span>PEAK PAIN</span>
-                <strong>{analytics.maxPain}</strong>
-              </div>
-              <div>
-                <span>PAIN FLAGS</span>
-                <strong>{analytics.painFlags}</strong>
-              </div>
-            </div>
-
-            <div
-              className={`pr-recoveryState ${
-                analytics.maxPain >= 4 ? "is-watch" : "is-clear"
-              }`}
-            >
-              <span aria-hidden />
-              {analytics.maxPain >= 4
-                ? "RECOVERY NEEDS ATTENTION"
-                : "RECOVERY SIGNALS CLEAR"}
-            </div>
-          </div>
+        <div className="pr-tableWrap">
+          <table className="pr-table">
+            <thead>
+              <tr>
+                <th>Muscle Group</th>
+                <th>Exercises</th>
+                <th>7D</th>
+                <th>14D</th>
+                <th>30D</th>
+                <th>1Y</th>
+              </tr>
+            </thead>
+            <tbody>
+              {muscleViews.length ? (
+                muscleViews.map((row) => (
+                  <tr key={row.name}>
+                    <td><strong>{row.name}</strong></td>
+                    <td>{row.count}</td>
+                    <td><Delta value={row.d7} /></td>
+                    <td><Delta value={row.d14} /></td>
+                    <td><Delta value={row.d30} /></td>
+                    <td><Delta value={row.d365} /></td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td colSpan={6} className="pr-emptyCell">More repeated exercise data is needed.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="EXERCISE PROGRESS"
+      <section className="pr-surface pr-section pr-exerciseSection">
+        <SectionTitle
           title="Exercise Progress"
+          subtitle="Current working weight and change across 7 days, 14 days, 30 days and 1 year."
           right={
-            <ProDropdown
-              label="EXERCISE"
-              className="pr-exerciseSelect"
-              value={selectedExercise?.id ?? ""}
-              options={exerciseProgress.map((exercise) => ({
-                value: exercise.id,
-                label: exercise.name,
-              }))}
-              onChange={setSelectedExerciseId}
-            />
+            exerciseViews.length ? (
+              <ProDropdown
+                ariaLabel="Choose exercise"
+                className="pr-exerciseDropdown"
+                value={selectedExercise?.id ?? ""}
+                options={exerciseViews.map((exercise) => ({
+                  value: exercise.id,
+                  label: exercise.name,
+                }))}
+                onChange={setSelectedExerciseId}
+              />
+            ) : null
           }
         />
 
-        {selectedExercise ? (
-          <div className="pr-exerciseDeck">
-            <div className="pr-exerciseStats">
+        <div className="pr-tableWrap pr-scrollTable">
+          <table className="pr-table pr-exerciseTable">
+            <thead>
+              <tr>
+                <th>Exercise</th>
+                <th>Current</th>
+                <th>7D</th>
+                <th>14D</th>
+                <th>30D</th>
+                <th>1Y</th>
+                <th>Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {exerciseViews.length ? (
+                exerciseViews.map((row) => {
+                  const trend =
+                    row.d30 == null
+                      ? "Baseline"
+                      : row.d30 > STABLE_PCT
+                        ? "Improving"
+                        : row.d30 < -STABLE_PCT
+                          ? "Declining"
+                          : "Stable";
+                  return (
+                    <tr
+                      key={row.id}
+                      className={row.id === selectedExercise?.id ? "is-selected" : ""}
+                      onClick={() => setSelectedExerciseId(row.id)}
+                    >
+                      <td>
+                        <strong>{row.name}</strong>
+                        <small>{row.primaryMuscles.slice(0, 2).join(" • ") || "General"}</small>
+                      </td>
+                      <td><b>{formatWeight(row.currentWeight)}</b></td>
+                      <td><Delta value={row.d7} /></td>
+                      <td><Delta value={row.d14} /></td>
+                      <td><Delta value={row.d30} /></td>
+                      <td><Delta value={row.d365} /></td>
+                      <td>
+                        <span className={`pr-trendWord is-${trend.toLowerCase()}`}>{trend}</span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr><td colSpan={7} className="pr-emptyCell">Exercise progress will appear after workouts are logged.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedExercise && selectedDetail ? (
+          <div className="pr-exerciseDetail">
+            <div className="pr-exerciseDetailHead">
               <div>
-                <span>CURRENT LOAD</span>
-                <strong>{formatWeight(selectedExercise.currentWeight)}</strong>
+                <span>{selectedExercise.primaryMuscles.join(" • ") || "Exercise"}</span>
+                <h3>{selectedExercise.name}</h3>
               </div>
-              <div>
-                <span>BEST LOAD</span>
-                <strong>{formatWeight(selectedExercise.bestWeight)}</strong>
-              </div>
-              <div>
-                <span>EST. 1RM</span>
-                <strong>{formatWeight(selectedExercise.currentE1RM)}</strong>
-              </div>
-              <div>
-                <span>CHANGE</span>
-                <strong
-                  className={
-                    (selectedExercise.changePct ?? 0) > 0 ? "is-positive" : ""
-                  }
-                >
-                  {selectedExercise.changePct == null
-                    ? "—"
-                    : `${selectedExercise.changePct >= 0 ? "+" : ""}${selectedExercise.changePct.toFixed(
-                        1
-                      )}%`}
-                </strong>
+              <div className={`pr-trendState is-${selectedDetail.tone}`}>
+                <StatusDot tone={selectedDetail.tone} />
+                <div>
+                  <strong>{selectedDetail.status}</strong>
+                  <span>{selectedDetail.detail}</span>
+                </div>
               </div>
             </div>
 
-            <div className="pr-exerciseChart">
-              <div className="pr-exerciseChartHead">
+            {selectedExercise.points.length < 2 ? (
+              <div className="pr-baseline">
                 <div>
-                  <span>ESTIMATED STRENGTH TREND</span>
-                  <strong>{selectedExercise.name}</strong>
+                  <span>Working Weight</span>
+                  <strong>{formatWeight(selectedDetail.latest?.bestWeight)}</strong>
                 </div>
-                <div>{selectedExercise.sessions} logged sessions</div>
+                <div>
+                  <span>Best Set</span>
+                  <strong>{selectedDetail.latest?.bestReps ? `${selectedDetail.latest.bestReps} Reps` : "—"}</strong>
+                </div>
+                <div>
+                  <span>Workouts Logged</span>
+                  <strong>{selectedExercise.points.length}</strong>
+                </div>
+                <p>Complete this exercise again to begin measuring progression.</p>
               </div>
-              <Sparkline points={selectedExerciseChart} />
+            ) : (
+              <>
+                <div className="pr-exerciseStats pr-six">
+                  <div><span>Current</span><strong>{formatWeight(selectedExercise.currentWeight)}</strong></div>
+                  <div><span>Est. Strength</span><strong>{formatWeight(selectedExercise.currentE1RM)}</strong></div>
+                  <div><span>7D</span><strong><Delta value={selectedExercise.d7} /></strong></div>
+                  <div><span>14D</span><strong><Delta value={selectedExercise.d14} /></strong></div>
+                  <div><span>30D</span><strong><Delta value={selectedExercise.d30} /></strong></div>
+                  <div><span>1Y</span><strong><Delta value={selectedExercise.d365} /></strong></div>
+                </div>
+
+                <div className="pr-strengthTimeline">
+                  {(() => {
+                    const points = selectedExercise.points
+                      .filter((point) => point.bestE1RM > 0)
+                      .slice(-10);
+                    const max = Math.max(1, ...points.map((point) => point.bestE1RM));
+                    return points.map((point) => (
+                      <div key={point.workoutId}>
+                        <b>{formatNumber(point.bestE1RM, 0)}</b>
+                        <span
+                          className={`is-${workoutTone(point.workoutName)}`}
+                          style={{ height: `${Math.max(10, (point.bestE1RM / max) * 100)}%` }}
+                        />
+                        <small>{shortDate(point.date)}</small>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </>
+            )}
+
+            <div className="pr-exerciseCoach">
+              <SvgIcon name="coach" size={19} />
+              <div>
+                <span>Coach</span>
+                <strong>{selectedDetail.coach}</strong>
+              </div>
             </div>
           </div>
-        ) : (
-          <div className="pr-empty">Log strength sets to build exercise progression.</div>
-        )}
+        ) : null}
       </section>
 
-      <section className="pr-panel">
-        <SectionHead
-          eyebrow="PROGRAM"
-          title="Workout Performance"
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Training Quality"
+          subtitle="Rep execution and workout effort relative to the program."
         />
-
-        <div className="pr-programGrid">
-          {programPerformance.length ? (
-            programPerformance.map((row) => (
-              <article key={row.name} className="pr-programCard">
-                <div>
-                  <span>WORKOUT</span>
-                  <h3>{row.name}</h3>
-                </div>
-                <div className="pr-programCardMetrics">
-                  <div>
-                    <span>SESSIONS</span>
-                    <strong>{row.sessions}</strong>
-                  </div>
-                  <div>
-                    <span>AVG TIME</span>
-                    <strong>{formatDuration(row.avgDurationSeconds)}</strong>
-                  </div>
-                  <div>
-                    <span>VOLUME</span>
-                    <strong>{formatNumber(row.volume)}</strong>
-                  </div>
-                  <div>
-                    <span>AVG PAIN</span>
-                    <strong>{row.avgPain.toFixed(1)}</strong>
-                  </div>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="pr-empty">No completed sessions in this range.</div>
-          )}
+        <div className="pr-qualityStatus">
+          <StatusDot tone={quality.tone} />
+          <strong>{quality.status}</strong>
+        </div>
+        <div className="pr-qualityGrid pr-six">
+          <div><span>Rep Range Success</span><strong>{quality.repSuccess == null ? "—" : `${Math.round(quality.repSuccess)}%`}</strong></div>
+          <div><span>Average Effort</span><strong>{quality.avgRir == null ? "—" : `${quality.avgRir.toFixed(1)} RIR`}</strong></div>
+          <div className="is-amber"><span>Too Easy</span><strong>{quality.tooEasy}</strong></div>
+          <div className="is-green"><span>On Target</span><strong>{quality.onTarget}</strong></div>
+          <div className="is-red"><span>Too Hard</span><strong>{quality.tooHard}</strong></div>
+          <div><span>Not Rated</span><strong>{quality.unrated}</strong></div>
         </div>
       </section>
 
-      <section className="pr-panel pr-historyPanel">
-        <SectionHead
-          eyebrow="HISTORY"
-          title="Recent Sessions"
-          detail={`Showing ${Math.min(historyVisible, history.length)} of ${
-            history.length
-          } sessions`}
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Pain & Recovery"
+          subtitle="Current recovery status plus pain changes by exercise."
+        />
+
+        <div className="pr-recoveryGrid">
+          <div className="pr-weightCard">
+            <SvgIcon name="weight" size={28} />
+            <div>
+              <span>Body Weight</span>
+              <strong>{recovery.latestWeight == null ? "—" : `${recovery.latestWeight.toFixed(1)} LB`}</strong>
+              <small>
+                {recovery.weightChange == null
+                  ? "No range comparison"
+                  : `${recovery.weightChange > 0 ? "+" : ""}${recovery.weightChange.toFixed(1)} LB • ${rangeLabel(range)}`}
+              </small>
+            </div>
+          </div>
+
+          <div className="pr-recoveryMetrics pr-four">
+            <div><span>Protein Target</span><strong>{recovery.protein == null ? "—" : `${recovery.protein} G`}</strong></div>
+            <div><span>Avg Pain</span><strong>{recovery.avgPain.toFixed(1)}</strong></div>
+            <div><span>Peak Pain</span><strong>{recovery.peakPain}</strong></div>
+            <div><span>Pain Flags</span><strong>{recovery.painFlags}</strong></div>
+          </div>
+
+          <div className={`pr-recoveryState is-${recovery.tone}`}>
+            <StatusDot tone={recovery.tone} />
+            <strong>{recovery.status}</strong>
+          </div>
+        </div>
+
+        <div className="pr-painHighlights pr-three">
+          <div>
+            <span>Highest Current Pain</span>
+            <strong>{highestPain?.name ?? "None"}</strong>
+            <b>{highestPain?.current == null ? "—" : highestPain.current.toFixed(1)}</b>
+          </div>
+          <div>
+            <span>Biggest 30-Day Improvement</span>
+            <strong>{bestPain?.name ?? "Not Enough Data"}</strong>
+            <b>{bestPain?.d30 == null ? "—" : <Delta value={bestPain.d30} reverse pain />}</b>
+          </div>
+          <div>
+            <span>Pain Trending Up</span>
+            <strong>{painViews.filter((row) => (row.d30 ?? 0) > 0.5).length} Exercises</strong>
+          </div>
+        </div>
+
+        <div className="pr-tableWrap pr-scrollTable">
+          <table className="pr-table">
+            <thead>
+              <tr>
+                <th>Exercise</th>
+                <th>Current</th>
+                <th>7D</th>
+                <th>14D</th>
+                <th>30D</th>
+                <th>1Y</th>
+              </tr>
+            </thead>
+            <tbody>
+              {painViews.length ? (
+                painViews.map((row) => (
+                  <tr key={row.id}>
+                    <td><strong>{row.name}</strong></td>
+                    <td>{row.current == null ? "—" : row.current.toFixed(1)}</td>
+                    <td><Delta value={row.d7} reverse pain /></td>
+                    <td><Delta value={row.d14} reverse pain /></td>
+                    <td><Delta value={row.d30} reverse pain /></td>
+                    <td><Delta value={row.d365} reverse pain /></td>
+                  </tr>
+                ))
+              ) : (
+                <tr><td colSpan={6} className="pr-emptyCell">Pain trends will appear after exercise pain is logged.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Workout Breakdown"
+          subtitle="Upper 1, Upper 2, Lower 1 and Lower 2 stay visually distinct."
           right={
             <button
               type="button"
-              className="pr-dangerButton"
-              onClick={() => setClearOpen(true)}
+              className="pr-breakdownButton"
+              onClick={() => setShowBreakdown((value) => !value)}
             >
-              CLEAR LOGS
+              {showBreakdown ? "Hide Breakdown" : "View Breakdown"}
+              <SvgIcon name="chevron" size={16} />
+            </button>
+          }
+        />
+
+        {showBreakdown ? (
+          <div className="pr-workoutGrid">
+            {breakdown.map((row) => (
+              <article className={`pr-workoutCard is-${row.tone}`} key={row.name}>
+                <div className="pr-workoutTitle">
+                  <i />
+                  <h3>{row.name}</h3>
+                </div>
+                <div className="pr-workoutStats pr-four">
+                  <div><span>Workouts</span><strong>{row.workouts}</strong></div>
+                  <div><span>Avg Time</span><strong>{formatDuration(row.avgTime)}</strong></div>
+                  <div><span>Volume</span><strong>{formatVolume(row.volume)}</strong><Delta value={row.volumeChange} /></div>
+                  <div><span>Avg Pain</span><strong>{row.avgPain.toFixed(1)}</strong><Delta value={row.painChange} reverse pain /></div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="pr-workoutPreview pr-four">
+            {breakdown.slice(0, 4).map((row) => (
+              <div className={`is-${row.tone}`} key={row.name}>
+                <i />
+                <strong>{row.name}</strong>
+                <small>{row.workouts} Workouts</small>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="pr-surface pr-section">
+        <SectionTitle
+          title="Recent Workouts"
+          subtitle={`Showing ${Math.min(historyVisible, currentHistory.length)} of ${currentHistory.length} workouts`}
+          right={
+            <button type="button" className="pr-clearButton" onClick={() => setClearOpen(true)}>
+              Clear Logs
             </button>
           }
         />
 
         <div className="pr-historyList">
           {visibleHistory.length ? (
-            visibleHistory.map((row) => {
-              const expanded = expandedHistoryId === row.id;
-              const exerciseNames = row.exercises.map((exercise) => exercise.name);
-
-              return (
-                <article
-                  key={row.id}
-                  className={`pr-historyRow ${expanded ? "is-expanded" : ""}`}
-                >
-                  <div className="pr-historyTop">
-                    <div>
-                      <span>COMPLETED WORKOUT</span>
-                      <h3>{row.templateName}</h3>
-                    </div>
-
-                    <div className="pr-historyTopRight">
-                      <time>{formatDateTime(row.completedAt)}</time>
-                      <button
-                        type="button"
-                        className="pr-historyView"
-                        onClick={() =>
-                          setExpandedHistoryId(expanded ? null : row.id)
-                        }
-                      >
-                        <span>{expanded ? "CLOSE" : "VIEW"}</span>
-                        <span aria-hidden>{expanded ? "×" : "›"}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="pr-historyMetrics">
-                    <div>
-                      <span>TIME</span>
-                      <strong>{formatDuration(row.sessionSeconds, true)}</strong>
-                    </div>
-                    <div>
-                      <span>EXERCISES</span>
-                      <strong>{row.exercises.length}</strong>
-                    </div>
-                    <div>
-                      <span>SETS</span>
-                      <strong>{row.setsLogged}</strong>
-                    </div>
-                    <div>
-                      <span>VOLUME</span>
-                      <strong>{formatVolume(row.volumeTotal)}</strong>
-                    </div>
-                    <div>
-                      <span>PAIN</span>
-                      <strong>{row.painMax}</strong>
-                    </div>
-                  </div>
-
-                  <div className="pr-historyExerciseLine">
-                    <span>EXERCISES</span>
-                    <p>
-                      {exerciseNames.slice(0, 7).join(" • ") || "No exercise names recorded"}
-                      {exerciseNames.length > 7
-                        ? ` • +${exerciseNames.length - 7} more`
-                        : ""}
-                    </p>
-                  </div>
-
-                  {expanded ? (
-                    <div className="pr-historyDetails">
-                      <div className="pr-historyDetailSummary">
-                        <div>
-                          <span>BODY WEIGHT</span>
-                          <strong>{formatWeight(row.bodyweightLb)}</strong>
-                        </div>
-                        <div>
-                          <span>PROTEIN TARGET</span>
-                          <strong>
-                            {row.proteinTargetG != null
-                              ? `${Math.round(row.proteinTargetG)} G`
-                              : "—"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>AVG PAIN</span>
-                          <strong>{row.painAvg.toFixed(1)}</strong>
-                        </div>
-                        <div>
-                          <span>SESSION FEEL</span>
-                          <strong>{difficultyLabel(row.postDifficulty)}</strong>
-                        </div>
-                      </div>
-
-                      <div className="pr-historyExerciseDetails">
-                        {row.exercises.map((exercise) => (
-                          <div
-                            className="pr-historyExercise"
-                            key={exercise.workoutExerciseId}
-                          >
-                            <div className="pr-historyExerciseHead">
-                              <strong>{exercise.name}</strong>
-                              <span>
-                                {exercise.pain != null
-                                  ? `Pain ${exercise.pain}`
-                                  : "Pain not logged"}
-                              </span>
-                            </div>
-
-                            {exercise.sets.length ? (
-                              <div className="pr-setRail">
-                                {exercise.sets.map((set) => (
-                                  <span key={set.set_index}>
-                                    <b>SET {set.set_index}</b>
-                                    {Number(set.weight || 0) > 0
-                                      ? `${formatNumber(Number(set.weight))} LB × ${set.reps}`
-                                      : `${set.reps} REPS`}
-                                    {set.rir != null ? ` • ${set.rir} RIR` : ""}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="pr-historyNoSets">
-                                No strength sets recorded.
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {row.notes ? (
-                        <div className="pr-historyNotes">
-                          <span>NOTES</span>
-                          <p>{row.notes}</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })
+            visibleHistory.map((row) => (
+              <article className={`pr-historyRow is-${workoutTone(row.templateName)}`} key={row.id}>
+                <i className="pr-historyAccent" />
+                <div className="pr-historyName">
+                  <h3>{row.templateName}</h3>
+                  <time>{formatDate(row.completedAt)}</time>
+                  <p>{row.exercises.slice(0, 6).map((exercise) => exercise.name).join(" • ") || "No exercises recorded"}</p>
+                </div>
+                <div className="pr-historyMetrics">
+                  <div><span>Time</span><strong>{formatDuration(row.workoutSeconds)}</strong></div>
+                  <div><span>Exercises</span><strong>{row.exercises.length}</strong></div>
+                  <div><span>Sets</span><strong>{row.setsLogged}</strong></div>
+                  <div><span>Volume</span><strong>{formatVolume(row.volumeTotal)}</strong></div>
+                  <div><span>Pain</span><strong>{row.painMax}</strong></div>
+                </div>
+                <button type="button" className="pr-viewButton" onClick={() => setDetailId(row.id)}>View ›</button>
+              </article>
+            ))
           ) : (
-            <div className="pr-empty">No completed sessions in this range.</div>
+            <div className="pr-empty">No completed workouts in this range.</div>
           )}
         </div>
 
-        {historyVisible < history.length ? (
-          <div className="pr-historyLoadMore">
-            <span>
-              Showing {Math.min(historyVisible, history.length)} of {history.length}
-            </span>
+        {historyVisible < currentHistory.length ? (
+          <div className="pr-loadMore">
+            <span>Showing {historyVisible} of {currentHistory.length}</span>
             <button
               type="button"
               onClick={() =>
                 setHistoryVisible((value) =>
-                  Math.min(history.length, value + HISTORY_BATCH)
+                  Math.min(currentHistory.length, value + HISTORY_BATCH)
                 )
               }
             >
-              LOAD 5 MORE
+              Load 5 More
             </button>
           </div>
         ) : null}
       </section>
 
-      {clearOpen ? (
-        <div className="pr-modalOverlay" role="presentation">
-          <section
-            className="pr-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pr-clear-title"
-          >
-            <div className="pr-modalKicker">WORKOUT HISTORY</div>
-            <h2 id="pr-clear-title">Clear all workout logs?</h2>
-            <p>
-              This permanently deletes your completed workout history. Type CLEAR to confirm.
-            </p>
+      {detailWorkout ? (
+        <div className="pr-overlay" onMouseDown={(event: any) => {
+          if (event.target === event.currentTarget) setDetailId(null);
+        }}>
+          <section className="pr-detailModal" role="dialog" aria-modal="true">
+            <div className="pr-modalHead">
+              <div>
+                <span>{formatDate(detailWorkout.completedAt)}</span>
+                <h2>{detailWorkout.templateName}</h2>
+              </div>
+              <button type="button" onClick={() => setDetailId(null)}>×</button>
+            </div>
 
+            <div className="pr-modalSummary pr-four">
+              <div><span>Time</span><strong>{formatDuration(detailWorkout.workoutSeconds)}</strong></div>
+              <div><span>Volume</span><strong>{formatVolume(detailWorkout.volumeTotal)}</strong></div>
+              <div><span>Body Weight</span><strong>{formatWeight(detailWorkout.bodyweightLb)}</strong></div>
+              <div><span>Peak Pain</span><strong>{detailWorkout.painMax}</strong></div>
+            </div>
+
+            <div className="pr-detailExercises">
+              {detailWorkout.exercises.map((exercise) => (
+                <div className="pr-detailExercise" key={exercise.workoutExerciseId}>
+                  <div>
+                    <strong>{exercise.name}</strong>
+                    <span>{exercise.primaryMuscles.join(" • ") || "Exercise"}</span>
+                  </div>
+                  <div className="pr-setList">
+                    {exercise.sets.length ? (
+                      exercise.sets.map((set) => (
+                        <span key={set.set_index}>
+                          <b>SET {set.set_index}</b>
+                          {Number(set.weight ?? 0) > 0 ? `${formatNumber(Number(set.weight))} LB × ${set.reps}` : `${set.reps} REPS`}
+                          {set.rir != null ? ` • ${set.rir} RIR` : ""}
+                        </span>
+                      ))
+                    ) : (
+                      <em>No sets recorded.</em>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {clearOpen ? (
+        <div className="pr-overlay">
+          <section className="pr-clearModal" role="dialog" aria-modal="true">
+            <h2>Clear all workout logs?</h2>
+            <p>This permanently deletes your completed workout history. Type CLEAR to confirm.</p>
             <input
               value={clearText}
-              onChange={(event) => setClearText(event.target.value)}
+              onChange={(event: any) => setClearText(event.target.value)}
               placeholder="Type CLEAR"
               autoFocus
             />
-
-            <div className="pr-modalActions">
-              <button
-                type="button"
-                onClick={() => {
-                  setClearOpen(false);
-                  setClearText("");
-                }}
-              >
-                CANCEL
-              </button>
+            <div>
+              <button type="button" onClick={() => {
+                setClearOpen(false);
+                setClearText("");
+              }}>Cancel</button>
               <button
                 type="button"
                 className="is-danger"
                 disabled={clearText.trim().toUpperCase() !== "CLEAR" || clearBusy}
                 onClick={() => void clearLogs()}
               >
-                {clearBusy ? "CLEARING…" : "CLEAR LOGS"}
+                {clearBusy ? "Clearing…" : "Clear Logs"}
               </button>
             </div>
           </section>
@@ -2008,1682 +2542,98 @@ export function ProgressPage() {
 
       <style>{`
         .pr-page{
-          --pr-bg:#05090d;
-          --pr-panel:#0b131a;
-          --pr-panel-hi:#101d26;
-          --pr-line:rgba(145,207,230,.14);
-          --pr-line-hi:rgba(198,235,248,.24);
-          --pr-blue:#42c9f5;
-          --pr-blue-deep:#0e789f;
-          --pr-orange:#ff9f1c;
-          --pr-green:#4de59a;
-          --pr-red:#ff6b6b;
+          --cyan:#52cef4;
+          --green:#55dfa2;
+          --red:#ff7474;
+          --amber:#efa94f;
+          --text:#f4f9fb;
+          --muted:rgba(202,220,229,.62);
           display:grid;
-          gap:14px;
-          padding:0 0 34px;
-          color:#f4f9fb;
+          gap:12px;
+          padding-bottom:34px;
+          color:var(--text);
         }
-
         .pr-page *{box-sizing:border-box}
-        .pr-page button,.pr-page select,.pr-page input{font:inherit}
-
-        .pr-heroPanel,
-        .pr-panel{
+        .pr-page button,.pr-page input{font:inherit}
+        .pr-surface{
           position:relative;
           isolation:isolate;
-          overflow:hidden;
-          border:1px solid var(--pr-line);
-          border-top-color:var(--pr-line-hi);
-          border-radius:18px;
-          background:
-            linear-gradient(180deg,#111e27 0%,#0b151c 54%,#070d12 100%);
-          box-shadow:
-            0 1px 0 rgba(255,255,255,.035),
-            0 3px 5px rgba(0,0,0,.42),
-            0 18px 42px rgba(0,0,0,.24),
-            inset 0 1px 0 rgba(255,255,255,.04),
-            inset 0 -1px 0 rgba(0,0,0,.62);
-        }
-
-        .pr-heroPanel::before,
-        .pr-panel::before{
-          content:"";
-          position:absolute;
-          z-index:0;
-          left:22px;
-          right:22px;
-          top:0;
-          height:1px;
-          pointer-events:none;
-          background:linear-gradient(
-            90deg,
-            transparent,
-            rgba(219,245,253,.30) 15%,
-            rgba(91,204,244,.10) 70%,
-            transparent
-          );
-        }
-
-        .pr-heroPanel::after,
-        .pr-panel::after{
-          content:"";
-          position:absolute;
-          z-index:0;
-          inset:0;
-          pointer-events:none;
-          opacity:.32;
-          background:
-            repeating-linear-gradient(
-              90deg,
-              rgba(255,255,255,.006) 0,
-              rgba(255,255,255,.006) 1px,
-              transparent 1px,
-              transparent 5px
-            );
-          mix-blend-mode:soft-light;
-        }
-
-        .pr-heroPanel>*,
-        .pr-panel>*{position:relative;z-index:1}
-
-        .pr-heroPanel{padding:21px}
-        .pr-panel{padding:18px}
-
-        .pr-heroTop{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:22px;
-        }
-
-        .pr-pageEyebrow,
-        .pr-eyebrow{
-          color:#83dcfa;
-          font-size:10px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:.17em;
-        }
-
-        .pr-heroTop h1{
-          margin:8px 0 5px;
-          color:#fff;
-          font-size:clamp(31px,4vw,48px);
-          line-height:.95;
-          font-weight:1000;
-          letter-spacing:-.045em;
-          text-shadow:0 3px 4px rgba(0,0,0,.42);
-        }
-
-        .pr-heroTop p{
-          max-width:690px;
-          margin:0;
-          color:rgba(216,232,240,.67);
-          font-size:12px;
-          line-height:1.5;
-          font-weight:750;
-        }
-
-        .pr-controls{
-          display:flex;
-          align-items:flex-end;
-          gap:9px;
-          flex-wrap:wrap;
-          justify-content:flex-end;
-        }
-
-        .pr-controls label,
-        .pr-exerciseSelect{
-          display:grid;
-          gap:5px;
-        }
-
-        .pr-controls label>span,
-        .pr-exerciseSelect>span{
-          color:rgba(170,200,213,.60);
-          font-size:7px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:.15em;
-        }
-
-
-        .pr-svgIcon{
-          fill:none;
-          stroke:currentColor;
-          stroke-width:1.8;
-          stroke-linecap:round;
-          stroke-linejoin:round;
-        }
-
-        .pr-programDeck{
-          display:grid;
-          grid-template-columns:minmax(240px,1fr) minmax(260px,1.2fr) 170px;
-          gap:12px;
-          align-items:center;
-          margin-top:18px;
-          padding-top:16px;
-          border-top:1px solid rgba(125,193,218,.10);
-        }
-
-        .pr-programIdentity{
-          display:flex;
-          align-items:center;
-          gap:12px;
-          min-width:0;
-        }
-
-        .pr-programGlyph{
-          width:47px;
-          height:47px;
-          flex:0 0 47px;
-          display:grid;
-          place-items:center;
-          color:#66d5f7;
-          border:1px solid rgba(91,196,233,.20);
-          border-top-color:rgba(160,225,248,.28);
-          border-radius:12px;
-          background:linear-gradient(180deg,#123548,#0a202c);
-          box-shadow:
-            0 2px 4px rgba(0,0,0,.35),
-            inset 0 1px 0 rgba(255,255,255,.055),
-            inset 0 -3px 5px rgba(0,0,0,.24);
-        }
-
-        .pr-programIdentity>div:last-child{
-          min-width:0;
-          display:grid;
-          gap:4px;
-        }
-
-        .pr-programIdentity span,
-        .pr-analysisWindow span{
-          color:rgba(154,190,206,.62);
-          font-size:7px;
-          font-weight:1000;
-          letter-spacing:.15em;
-        }
-
-        .pr-programIdentity strong{
-          overflow:hidden;
-          color:#fff;
-          font-size:18px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:-.02em;
-          white-space:nowrap;
-          text-overflow:ellipsis;
-        }
-
-        .pr-programIdentity small,
-        .pr-analysisWindow small{
-          color:rgba(190,211,221,.54);
-          font-size:9px;
-          font-weight:800;
-        }
-
-        .pr-rotationRail{
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          gap:0;
-          min-width:0;
-          overflow:hidden;
-        }
-
-        .pr-rotationRail span{
-          min-width:0;
-          padding:0 13px;
-          color:rgba(230,241,246,.78);
-          font-size:9px;
-          font-weight:950;
-          white-space:nowrap;
-        }
-
-        .pr-rotationRail span+span{
-          border-left:1px solid rgba(140,200,222,.16);
-        }
-
-        .pr-analysisWindow{
-          display:grid;
-          justify-items:end;
-          gap:4px;
-          text-align:right;
-        }
-
-        .pr-analysisWindow strong{
-          color:var(--pr-orange);
-          font-size:18px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:.02em;
-        }
-
-        .pr-toast,
-        .pr-error{
-          padding:11px 13px;
-          border-radius:10px;
-          font-size:10px;
-          font-weight:900;
-        }
-
-        .pr-toast{
-          color:#bff4d8;
-          border:1px solid rgba(77,229,154,.18);
-          background:rgba(29,105,70,.18);
-        }
-
-        .pr-error{
-          color:#ffd5d5;
-          border:1px solid rgba(255,107,107,.22);
-          background:rgba(113,31,31,.20);
-        }
-
-        .pr-sectionHead{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:18px;
-          margin-bottom:15px;
-        }
-
-        .pr-sectionTitleGroup{
-          display:flex;
-          align-items:flex-start;
-          gap:11px;
-          min-width:0;
-        }
-
-        .pr-sectionAccent{
-          width:3px;
-          height:34px;
-          flex:0 0 3px;
-          border-radius:3px;
-          background:linear-gradient(180deg,#8de8ff,#16a8e1);
-          box-shadow:0 0 10px rgba(39,180,230,.22);
-        }
-
-        .pr-sectionHead h2{
-          margin:5px 0 3px;
-          color:#fff;
-          font-size:22px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:-.03em;
-        }
-
-        .pr-sectionHead p{
-          margin:0;
-          color:rgba(195,215,224,.57);
-          font-size:10px;
-          line-height:1.45;
-          font-weight:760;
-        }
-
-        .pr-sectionRight{
-          display:flex;
-          align-items:center;
-          justify-content:flex-end;
-          min-width:0;
-        }
-
-        .pr-primaryMetrics{
-          display:grid;
-          grid-template-columns:repeat(4,minmax(0,1fr));
-          gap:0;
-          border-top:1px solid rgba(131,198,221,.10);
-          border-bottom:1px solid rgba(131,198,221,.08);
-        }
-
-        .pr-metric{
-          position:relative;
-          min-width:0;
-          padding:17px 15px 16px;
-        }
-
-        .pr-metric+.pr-metric{
-          border-left:1px solid rgba(139,201,223,.12);
-        }
-
-        .pr-metricTop{
-          display:flex;
-          align-items:center;
-          gap:8px;
-          min-width:0;
-        }
-
-        .pr-metricTop>span:last-child{
-          color:rgba(225,238,244,.79);
-          font-size:9px;
-          line-height:1.15;
-          font-weight:1000;
-          letter-spacing:.105em;
-        }
-
-        .pr-assetIcon{
-          width:27px;
-          height:27px;
-          flex:0 0 27px;
-          display:grid;
-          place-items:center;
-          border-radius:8px;
-          border:1px solid rgba(91,191,227,.16);
-          background:rgba(11,43,57,.58);
-        }
-
-        .pr-assetIcon img{
-          width:19px;
-          height:19px;
-          object-fit:contain;
-        }
-
-        .pr-assetIcon.tone-green{
-          border-color:rgba(77,229,154,.16);
-          background:rgba(22,74,52,.48);
-        }
-
-        .pr-assetIcon.tone-orange{
-          border-color:rgba(255,159,28,.16);
-          background:rgba(81,52,12,.48);
-        }
-
-        .pr-assetIcon.tone-red{
-          border-color:rgba(255,107,107,.18);
-          background:rgba(82,29,29,.46);
-        }
-
-        .pr-metricValue{
-          margin-top:13px;
-          color:#fff;
-          font-size:clamp(24px,3vw,36px);
-          line-height:.92;
-          font-weight:1000;
-          letter-spacing:-.045em;
-          font-variant-numeric:tabular-nums;
-          white-space:nowrap;
-          text-shadow:0 2px 3px rgba(0,0,0,.42);
-        }
-
-        .pr-metric.tone-orange .pr-metricValue{color:var(--pr-orange)}
-        .pr-metric.tone-green .pr-metricValue{color:#8cf0bb}
-        .pr-metric.tone-red .pr-metricValue{color:#ff9c9c}
-
-        .pr-metricDetail{
-          margin-top:7px;
-          color:rgba(180,205,216,.58);
-          font-size:9px;
-          line-height:1.25;
-          font-weight:780;
-        }
-
-        .pr-secondaryStrip{
-          display:grid;
-          grid-template-columns:repeat(4,minmax(0,1fr));
-          gap:8px;
-          margin-top:12px;
-        }
-
-        .pr-secondaryStrip>div{
-          min-width:0;
-          padding:10px 12px;
-          border-left:2px solid rgba(65,199,245,.32);
-          background:linear-gradient(90deg,rgba(29,78,97,.12),transparent 85%);
-        }
-
-        .pr-secondaryStrip span,
-        .pr-qualityMetric>span,
-        .pr-recoveryMetric span,
-        .pr-recoveryNumbers span,
-        .pr-exerciseStats span,
-        .pr-programCard>div:first-child>span,
-        .pr-programCardMetrics span,
-        .pr-historyMetrics span,
-        .pr-historyExerciseLine>span,
-        .pr-historyDetailSummary span,
-        .pr-historyNotes>span{
-          color:rgba(156,190,205,.64);
-          font-size:7px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:.13em;
-        }
-
-        .pr-secondaryStrip strong{
-          display:block;
-          overflow:hidden;
-          margin-top:5px;
-          color:#eff8fb;
-          font-size:14px;
-          font-weight:1000;
-          white-space:nowrap;
-          text-overflow:ellipsis;
-        }
-
-        .pr-twoColumn{
-          display:grid;
-          grid-template-columns:minmax(0,1.65fr) minmax(260px,.72fr);
-          gap:12px;
-        }
-
-        .pr-chartPanel,
-        .pr-recoveryPanel,
-        .pr-exerciseChart{
-          position:relative;
-          overflow:hidden;
-          border:1px solid rgba(121,191,217,.12);
-          border-top-color:rgba(179,224,240,.18);
-          border-radius:14px;
-          background:linear-gradient(180deg,#0d1921,#081016);
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.025),
-            inset 0 -1px 0 rgba(0,0,0,.58);
-        }
-
-        .pr-chartPanel{padding:14px}
-        .pr-chartHead{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-          margin-bottom:10px;
-        }
-
-        .pr-chartHead>div:first-child{
-          display:grid;
-          gap:5px;
-        }
-
-        .pr-chartHead span,
-        .pr-exerciseChartHead span{
-          color:rgba(159,192,206,.63);
-          font-size:7px;
-          font-weight:1000;
-          letter-spacing:.14em;
-        }
-
-        .pr-chartHead strong{
-          color:#fff;
-          font-size:23px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:-.03em;
-        }
-
-        .pr-chartBadge{
-          display:flex;
-          align-items:center;
-          gap:6px;
-          color:#9ae4fb;
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-        }
-
-        .pr-sparkWrap{min-width:0}
-        .pr-spark{
-          width:100%;
-          height:118px;
-          display:block;
           overflow:visible;
-        }
-
-        .pr-chartGrid{
-          stroke:rgba(131,189,211,.08);
-          stroke-width:1;
-          vector-effect:non-scaling-stroke;
-          stroke-dasharray:3 7;
-        }
-
-        .pr-chartAxis{
-          display:flex;
-          justify-content:space-between;
-          gap:6px;
-          margin-top:5px;
-          color:rgba(142,177,193,.42);
-          font-size:6px;
-          font-weight:900;
-          letter-spacing:.06em;
-        }
-
-        .pr-chartEmpty{
-          display:grid;
-          place-items:center;
-          color:rgba(174,200,212,.48);
-          font-size:9px;
-          font-weight:850;
-        }
-
-        .pr-performanceRail{
-          display:grid;
-          grid-template-columns:1fr;
-          align-content:stretch;
-          border-top:1px solid rgba(131,198,221,.09);
-          border-bottom:1px solid rgba(131,198,221,.07);
-        }
-
-        .pr-performanceRail .pr-metric{
-          padding:13px 14px;
-        }
-
-        .pr-performanceRail .pr-metric+.pr-metric{
-          border-left:0;
-          border-top:1px solid rgba(139,201,223,.10);
-        }
-
-        .pr-performanceRail .pr-metricValue{
-          font-size:24px;
-        }
-
-        .pr-qualityGrid{
-          display:grid;
-          grid-template-columns:1.25fr repeat(3,minmax(0,1fr));
-          gap:10px;
-        }
-
-        .pr-qualityMetric{
-          min-width:0;
-          padding:15px;
-          border-left:2px solid rgba(64,200,247,.32);
-          background:linear-gradient(90deg,rgba(28,78,98,.13),transparent 88%);
-        }
-
-        .pr-qualityMetric strong{
-          display:block;
-          margin-top:8px;
-          color:#fff;
-          font-size:23px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:-.03em;
-        }
-
-        .pr-qualityMetric small{
-          display:block;
-          margin-top:6px;
-          color:rgba(184,207,217,.55);
-          font-size:8px;
-          line-height:1.35;
-          font-weight:760;
-        }
-
-        .pr-meter{
-          height:3px;
-          margin-top:12px;
-          overflow:hidden;
-          border-radius:4px;
-          background:rgba(120,179,202,.10);
-        }
-
-        .pr-meter span{
-          display:block;
-          height:100%;
-          border-radius:inherit;
-          background:linear-gradient(90deg,#1baedf,#75defb);
-          box-shadow:0 0 8px rgba(57,198,244,.24);
-        }
-
-        .pr-bodyGrid{
-          display:grid;
-          grid-template-columns:minmax(0,1.45fr) minmax(300px,.8fr);
-          gap:12px;
-        }
-
-        .pr-bodyChart{min-height:190px}
-        .pr-delta{
-          color:rgba(204,222,231,.64);
-          font-size:9px;
-          font-weight:1000;
-          letter-spacing:.06em;
-        }
-        .pr-delta.is-up{color:#8defbb}
-        .pr-delta.is-down{color:#ffb66c}
-
-        .pr-recoveryPanel{
-          display:grid;
-          align-content:center;
-          gap:13px;
-          padding:15px;
-        }
-
-        .pr-recoveryMetric{
-          display:flex;
-          align-items:center;
-          gap:11px;
-        }
-
-        .pr-recoveryMetric>div:last-child{
-          display:grid;
-          gap:4px;
-        }
-
-        .pr-recoveryMetric strong{
-          color:#fff;
-          font-size:25px;
-          line-height:1;
-          font-weight:1000;
-        }
-
-        .pr-recoveryMetric small{
-          color:rgba(182,205,216,.55);
-          font-size:8px;
-          line-height:1.3;
-          font-weight:760;
-        }
-
-        .pr-recoveryDivider{
-          height:1px;
-          background:linear-gradient(
-            90deg,
-            transparent,
-            rgba(126,195,220,.15),
-            transparent
-          );
-        }
-
-        .pr-recoveryNumbers{
-          display:grid;
-          grid-template-columns:repeat(3,1fr);
-          gap:0;
-        }
-
-        .pr-recoveryNumbers>div{
-          min-width:0;
-          text-align:center;
-        }
-
-        .pr-recoveryNumbers>div+div{
-          border-left:1px solid rgba(133,196,219,.12);
-        }
-
-        .pr-recoveryNumbers strong{
-          display:block;
-          margin-top:5px;
-          color:#fff;
-          font-size:21px;
-          font-weight:1000;
-        }
-
-        .pr-recoveryState{
-          display:flex;
-          align-items:center;
-          gap:7px;
-          color:#91efbd;
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-        }
-
-        .pr-recoveryState>span{
-          width:7px;
-          height:7px;
-          border-radius:50%;
-          background:var(--pr-green);
-          box-shadow:0 0 9px rgba(77,229,154,.28);
-        }
-
-        .pr-recoveryState.is-watch{
-          color:#ffbe73;
-        }
-
-        .pr-recoveryState.is-watch>span{
-          background:var(--pr-orange);
-          box-shadow:0 0 9px rgba(255,159,28,.24);
-        }
-
-
-        .pr-exerciseDeck{
-          display:grid;
-          grid-template-columns:minmax(240px,.72fr) minmax(0,1.6fr);
-          gap:12px;
-        }
-
-        .pr-exerciseStats{
-          display:grid;
-          grid-template-columns:repeat(2,1fr);
-          gap:0;
-          border-top:1px solid rgba(132,197,220,.10);
-          border-bottom:1px solid rgba(132,197,220,.08);
-        }
-
-        .pr-exerciseStats>div{
-          min-width:0;
-          padding:16px;
-        }
-
-        .pr-exerciseStats>div:nth-child(even){
-          border-left:1px solid rgba(135,198,220,.11);
-        }
-
-        .pr-exerciseStats>div:nth-child(n+3){
-          border-top:1px solid rgba(135,198,220,.09);
-        }
-
-        .pr-exerciseStats strong{
-          display:block;
-          margin-top:7px;
-          color:#fff;
-          font-size:23px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:-.03em;
-        }
-
-        .pr-exerciseStats strong.is-positive{color:#83edb3}
-
-        .pr-exerciseChart{padding:14px}
-        .pr-exerciseChartHead{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-          margin-bottom:10px;
-        }
-
-        .pr-exerciseChartHead>div:first-child{
-          display:grid;
-          gap:5px;
-        }
-
-        .pr-exerciseChartHead strong{
-          color:#fff;
-          font-size:17px;
-          font-weight:1000;
-        }
-
-        .pr-exerciseChartHead>div:last-child{
-          color:rgba(180,206,217,.55);
-          font-size:8px;
-          font-weight:850;
-        }
-
-        .pr-programGrid{
-          display:grid;
-          grid-template-columns:repeat(2,minmax(0,1fr));
-          gap:10px;
-        }
-
-        .pr-programCard{
-          position:relative;
-          overflow:hidden;
-          padding:14px;
-          border:1px solid rgba(125,194,218,.11);
-          border-top-color:rgba(179,224,240,.17);
-          border-radius:13px;
-          background:linear-gradient(180deg,#101c24,#091117);
-          box-shadow:
-            0 2px 4px rgba(0,0,0,.26),
-            inset 0 1px 0 rgba(255,255,255,.025);
-        }
-
-        .pr-programCard::before{
-          content:"";
-          position:absolute;
-          left:0;
-          top:0;
-          bottom:0;
-          width:2px;
-          background:linear-gradient(180deg,#60d5f7,#176c8c);
-        }
-
-        .pr-programCard h3{
-          margin:6px 0 0;
-          color:#fff;
-          font-size:18px;
-          line-height:1;
-          font-weight:1000;
-        }
-
-        .pr-programCardMetrics{
-          display:grid;
-          grid-template-columns:repeat(4,minmax(0,1fr));
-          gap:0;
-          margin-top:14px;
-          padding-top:12px;
-          border-top:1px solid rgba(133,197,220,.09);
-        }
-
-        .pr-programCardMetrics>div{
-          min-width:0;
-          padding:0 8px;
-        }
-
-        .pr-programCardMetrics>div:first-child{padding-left:0}
-        .pr-programCardMetrics>div+div{
-          border-left:1px solid rgba(132,197,220,.10);
-        }
-
-        .pr-programCardMetrics strong{
-          display:block;
-          margin-top:6px;
-          overflow:hidden;
-          color:#eef8fb;
-          font-size:13px;
-          font-weight:1000;
-          white-space:nowrap;
-          text-overflow:ellipsis;
-        }
-
-        .pr-historyPanel{padding-bottom:16px}
-        .pr-dangerButton{
-          min-height:36px;
-          padding:0 13px;
-          border:1px solid rgba(255,107,107,.24);
-          border-radius:10px;
-          color:#ffc1c1;
-          background:rgba(91,30,30,.18);
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          cursor:pointer;
-        }
-
-        .pr-historyList{
-          display:grid;
-          gap:9px;
-        }
-
-        .pr-historyRow{
-          position:relative;
-          overflow:hidden;
-          padding:14px;
-          border:1px solid rgba(129,194,217,.11);
-          border-top-color:rgba(185,225,240,.16);
-          border-radius:13px;
-          background:linear-gradient(180deg,#111d25,#0a1218);
-          box-shadow:
-            0 2px 4px rgba(0,0,0,.27),
-            inset 0 1px 0 rgba(255,255,255,.025);
-        }
-
-        .pr-historyRow::before{
-          content:"";
-          position:absolute;
-          left:0;
-          top:0;
-          bottom:0;
-          width:2px;
-          background:linear-gradient(180deg,rgba(71,202,246,.72),rgba(21,94,121,.24));
-        }
-
-        .pr-historyTop{
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:14px;
-        }
-
-        .pr-historyTop>div{
-          display:grid;
-          gap:4px;
-        }
-
-        .pr-historyTop>div>span{
-          color:rgba(151,189,205,.58);
-          font-size:7px;
-          font-weight:1000;
-          letter-spacing:.14em;
-        }
-
-        .pr-historyTop h3{
-          margin:0;
-          color:#fff;
-          font-size:18px;
-          line-height:1;
-          font-weight:1000;
-        }
-
-        .pr-historyTop time{
-          color:rgba(215,232,240,.72);
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          white-space:nowrap;
-        }
-
-        .pr-historyMetrics{
-          display:grid;
-          grid-template-columns:1.15fr repeat(4,minmax(0,1fr));
-          gap:0;
-          margin-top:12px;
-          padding:10px 0;
-          border-top:1px solid rgba(129,193,216,.08);
-          border-bottom:1px solid rgba(129,193,216,.08);
-        }
-
-        .pr-historyMetrics>div{
-          min-width:0;
-          padding:0 11px;
-        }
-
-        .pr-historyMetrics>div:first-child{padding-left:0}
-        .pr-historyMetrics>div+div{
-          border-left:1px solid rgba(129,193,216,.10);
-        }
-
-        .pr-historyMetrics strong{
-          display:block;
-          margin-top:5px;
-          color:#fff;
-          font-size:14px;
-          font-weight:1000;
-          white-space:nowrap;
-        }
-
-        .pr-historyMetrics small{
-          display:block;
-          margin-top:4px;
-          color:#ffad64;
-          font-size:6px;
-          font-weight:1000;
-          letter-spacing:.08em;
-        }
-
-        .pr-historyExerciseLine{
-          display:grid;
-          gap:5px;
-          margin-top:10px;
-        }
-
-        .pr-historyExerciseLine p{
-          margin:0;
-          color:rgba(217,231,238,.70);
-          font-size:9px;
-          line-height:1.5;
-          font-weight:760;
-        }
-
-        .pr-historyToggle{
-          width:100%;
-          min-height:35px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          gap:7px;
-          margin-top:11px;
-          border:1px solid rgba(0,170,255,.32);
-          border-radius:9px;
-          color:#e9f8fd;
-          background:rgba(0,170,255,.07);
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          cursor:pointer;
-        }
-
-        .pr-historyRow.is-expanded .pr-historyToggle .pr-svgIcon{
-          transform:rotate(180deg);
-        }
-
-        .pr-historyDetails{
-          display:grid;
-          gap:11px;
-          margin-top:12px;
-          padding-top:12px;
-          border-top:1px solid rgba(129,193,216,.09);
-        }
-
-        .pr-historyDetailSummary{
-          display:grid;
-          grid-template-columns:repeat(4,minmax(0,1fr));
-          gap:0;
-        }
-
-        .pr-historyDetailSummary>div{
-          min-width:0;
-          padding:0 10px;
-        }
-
-        .pr-historyDetailSummary>div:first-child{padding-left:0}
-        .pr-historyDetailSummary>div+div{
-          border-left:1px solid rgba(129,193,216,.10);
-        }
-
-        .pr-historyDetailSummary strong{
-          display:block;
-          margin-top:5px;
-          color:#fff;
-          font-size:13px;
-          font-weight:1000;
-        }
-
-        .pr-historyExerciseDetails{
-          display:grid;
-          gap:7px;
-        }
-
-        .pr-historyExercise{
-          padding:10px 11px;
-          border-left:2px solid rgba(68,201,245,.28);
-          background:linear-gradient(90deg,rgba(27,78,98,.11),transparent 90%);
-        }
-
-        .pr-historyExerciseHead{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-        }
-
-        .pr-historyExerciseHead strong{
-          color:#f2f9fb;
-          font-size:11px;
-          font-weight:1000;
-        }
-
-        .pr-historyExerciseHead span{
-          color:rgba(187,210,220,.58);
-          font-size:8px;
-          font-weight:850;
-        }
-
-        .pr-setRail{
-          display:flex;
-          flex-wrap:wrap;
-          gap:8px 14px;
-          margin-top:7px;
-        }
-
-        .pr-setRail span{
-          color:rgba(218,233,239,.76);
-          font-size:9px;
-          font-weight:800;
-        }
-
-        .pr-setRail b{
-          margin-right:5px;
-          color:#66d3f5;
-          font-size:7px;
-          letter-spacing:.08em;
-        }
-
-        .pr-historyNoSets{
-          margin-top:7px;
-          color:rgba(180,204,214,.48);
-          font-size:8px;
-        }
-
-        .pr-historyNotes{
-          padding:10px 11px;
-          border-left:2px solid rgba(255,159,28,.30);
-          background:linear-gradient(90deg,rgba(92,56,10,.11),transparent 90%);
-        }
-
-        .pr-historyNotes p{
-          margin:6px 0 0;
-          color:rgba(226,236,241,.72);
-          font-size:9px;
-          line-height:1.45;
-        }
-
-        .pr-historyLoadMore{
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:12px;
-          margin-top:12px;
-          padding-top:12px;
-          border-top:1px solid rgba(129,193,216,.08);
-        }
-
-        .pr-historyLoadMore span{
-          color:rgba(182,205,216,.56);
-          font-size:8px;
-          font-weight:900;
-        }
-
-        .pr-historyLoadMore button{
-          min-height:37px;
-          padding:0 16px;
-          border:2px solid rgba(0,170,255,.62);
-          border-radius:11px;
-          color:#f4fbff;
-          background:rgba(0,170,255,.10);
-          box-shadow:
-            0 0 0 1px rgba(0,170,255,.14) inset,
-            0 8px 20px rgba(0,0,0,.35);
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          cursor:pointer;
-        }
-
-        .pr-empty{
-          padding:24px;
-          color:rgba(182,205,216,.55);
-          text-align:center;
-          font-size:10px;
-          font-weight:850;
-        }
-
-        .pr-modalOverlay{
-          position:fixed;
-          z-index:9999;
-          inset:0;
-          display:grid;
-          place-items:center;
-          padding:20px;
-          background:rgba(2,7,11,.80);
-          backdrop-filter:blur(7px);
-        }
-
-        .pr-modal{
-          width:min(470px,100%);
-          padding:18px;
-          border:1px solid rgba(255,107,107,.23);
-          border-top-color:rgba(255,175,175,.30);
+          border:1px solid rgba(133,199,222,.13);
+          border-top-color:rgba(197,234,247,.23);
           border-radius:16px;
-          background:linear-gradient(180deg,#161e24,#090f14);
-          box-shadow:0 28px 80px rgba(0,0,0,.60);
+          background:linear-gradient(180deg,#101d25,#091218 58%,#060c11);
+          box-shadow:0 1px 0 rgba(255,255,255,.035),0 5px 8px rgba(0,0,0,.30),0 18px 40px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.035);
         }
-
-        .pr-modalKicker{
-          color:#ff9d9d;
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.14em;
-        }
-
-        .pr-modal h2{
-          margin:7px 0 6px;
-          color:#fff;
-          font-size:22px;
-        }
-
-        .pr-modal p{
-          margin:0;
-          color:rgba(218,232,238,.66);
-          font-size:10px;
-          line-height:1.5;
-        }
-
-        .pr-modal input{
-          width:100%;
-          min-height:43px;
-          margin-top:14px;
-          padding:0 12px;
-          border:1px solid rgba(255,255,255,.12);
-          border-radius:10px;
-          outline:0;
-          color:#fff;
-          background:#070d11;
-          font-weight:900;
-        }
-
-        .pr-modalActions{
-          display:flex;
-          justify-content:flex-end;
-          gap:8px;
-          margin-top:14px;
-        }
-
-        .pr-modalActions button{
-          min-height:38px;
-          padding:0 14px;
-          border:1px solid rgba(145,192,210,.15);
-          border-radius:10px;
-          color:#e7f2f6;
-          background:#111a20;
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          cursor:pointer;
-        }
-
-        .pr-modalActions button.is-danger{
-          border-color:rgba(255,107,107,.30);
-          color:#ffe2e2;
-          background:#521d1d;
-        }
-
-        .pr-modalActions button:disabled{
-          opacity:.42;
-          cursor:not-allowed;
-        }
-
-        @media(max-width:980px){
-          .pr-programDeck{
-            grid-template-columns:1fr 1fr;
-          }
-          .pr-rotationRail{
-            grid-column:1 / -1;
-            grid-row:2;
-            justify-content:flex-start;
-          }
-          .pr-primaryMetrics{
-            grid-template-columns:repeat(2,minmax(0,1fr));
-          }
-          .pr-primaryMetrics .pr-metric:nth-child(3){
-            border-left:0;
-            border-top:1px solid rgba(139,201,223,.10);
-          }
-          .pr-primaryMetrics .pr-metric:nth-child(4){
-            border-top:1px solid rgba(139,201,223,.10);
-          }
-          .pr-secondaryStrip,
-          .pr-qualityGrid{
-            grid-template-columns:repeat(2,minmax(0,1fr));
-          }
-          .pr-twoColumn,
-          .pr-bodyGrid,
-          .pr-exerciseDeck{
-            grid-template-columns:1fr;
-          }
-        }
-
-        @media(max-width:700px){
-          .pr-page{gap:10px}
-          .pr-heroPanel,.pr-panel{
-            padding:13px;
-            border-radius:15px;
-          }
-          .pr-heroTop{
-            display:grid;
-            gap:14px;
-          }
-          .pr-controls{
-            justify-content:flex-start;
-          }
-          .pr-controls label{
-            flex:1 1 140px;
-          }
-          .pr-programDeck{
-            grid-template-columns:1fr;
-          }
-          .pr-analysisWindow{
-            justify-items:start;
-            text-align:left;
-          }
-          .pr-rotationRail{
-            grid-column:auto;
-            grid-row:auto;
-            overflow-x:auto;
-            justify-content:flex-start;
-            padding-bottom:4px;
-          }
-          .pr-sectionHead{
-            display:grid;
-            gap:12px;
-          }
-          .pr-sectionRight{
-            justify-content:flex-start;
-          }
-          .pr-exerciseSelect,
-          .pr-primaryMetrics,
-          .pr-secondaryStrip,
-          .pr-qualityGrid{
-            grid-template-columns:1fr 1fr;
-          }
-          .pr-metric{
-            padding:13px 10px;
-          }
-          .pr-metricValue{font-size:25px}
-          .pr-secondaryStrip>div{padding:9px 8px}
-          .pr-programGrid{grid-template-columns:1fr}
-          .pr-programCardMetrics{
-            grid-template-columns:repeat(2,1fr);
-            gap:10px 0;
-          }
-          .pr-programCardMetrics>div:nth-child(3){
-            border-left:0;
-          }
-          .pr-historyTop{
-            display:grid;
-            gap:7px;
-          }
-          .pr-historyMetrics{
-            grid-template-columns:repeat(3,1fr);
-            gap:9px 0;
-          }
-          .pr-historyMetrics>div{
-            padding:0 8px;
-          }
-          .pr-historyMetrics>div:nth-child(4){
-            border-left:0;
-          }
-          .pr-historyDetailSummary{
-            grid-template-columns:repeat(2,1fr);
-            gap:10px 0;
-          }
-          .pr-historyDetailSummary>div:nth-child(3){
-            border-left:0;
-          }
-          .pr-historyLoadMore{
-            align-items:stretch;
-            flex-direction:column;
-          }
-          .pr-historyLoadMore button{width:100%}
-        }
-
-        @media(max-width:480px){
-          .pr-primaryMetrics,
-          .pr-secondaryStrip,
-          .pr-qualityGrid{
-            grid-template-columns:1fr;
-          }
-          .pr-primaryMetrics .pr-metric+.pr-metric{
-            border-left:0;
-            border-top:1px solid rgba(139,201,223,.10);
-          }
-          .pr-recoveryNumbers{
-            grid-template-columns:1fr;
-            gap:9px;
-          }
-          .pr-recoveryNumbers>div+div{
-            border-left:0;
-            border-top:1px solid rgba(133,196,219,.10);
-            padding-top:9px;
-          }
-          .pr-exerciseStats{
-            grid-template-columns:1fr;
-          }
-          .pr-exerciseStats>div:nth-child(even){
-            border-left:0;
-          }
-          .pr-exerciseStats>div+div{
-            border-top:1px solid rgba(135,198,220,.09);
-          }
-          .pr-historyMetrics{
-            grid-template-columns:repeat(2,1fr);
-          }
-          .pr-historyMetrics>div:nth-child(3),
-          .pr-historyMetrics>div:nth-child(5){
-            border-left:0;
-          }
-        }
-
-        @media(prefers-reduced-motion:reduce){
-          .pr-page *{scroll-behavior:auto!important}
-        }
-        /* STEP 9C — PRODUCTION CLARITY */
-        .pr-heroTop h1{
-          font-size:clamp(34px,4vw,46px)!important;
-          letter-spacing:-.05em!important;
-        }
-
-        .pr-heroTop p{
-          max-width:620px!important;
-          color:rgba(221,235,242,.72)!important;
-          font-size:11px!important;
-        }
-
-        .pr-controls{
-          align-items:flex-start!important;
-        }
-
-        /* Custom dropdowns replace native browser selects entirely */
-        .pr-proDropdown{
-          position:relative;
-          min-width:165px;
-          display:grid;
-          gap:6px;
-          z-index:50;
-        }
-
-        .pr-proDropdownLabel{
-          color:rgba(168,201,215,.68);
-          font-size:7px;
-          line-height:1;
-          font-weight:1000;
-          letter-spacing:.16em;
-        }
-
-        .pr-proDropdownTrigger{
-          width:100%;
-          min-height:41px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:12px;
-          padding:0 11px 0 12px;
-          border:1px solid rgba(127,197,222,.18);
-          border-top-color:rgba(192,231,245,.26);
-          border-radius:10px;
-          color:#f3f9fc;
-          background:linear-gradient(180deg,#152630,#081016);
-          box-shadow:
-            0 2px 4px rgba(0,0,0,.36),
-            inset 0 1px 0 rgba(255,255,255,.045);
-          font-size:10px;
-          font-weight:950;
-          text-align:left;
-          cursor:pointer;
-        }
-
-        .pr-proDropdownTrigger:hover,
-        .pr-proDropdownTrigger.is-open{
-          border-color:rgba(66,201,245,.50);
-          background:linear-gradient(180deg,#18303d,#0a151c);
-        }
-
-        .pr-proDropdownTrigger .pr-svgIcon{
-          flex:0 0 auto;
-          color:#5bcff5;
-          transition:transform .14s ease;
-        }
-
-        .pr-proDropdownTrigger.is-open .pr-svgIcon{
-          transform:rotate(180deg);
-        }
-
-        .pr-proDropdownMenu{
-          position:absolute;
-          z-index:300;
-          top:calc(100% + 6px);
-          left:0;
-          right:0;
-          overflow:hidden;
-          padding:5px;
-          border:1px solid rgba(112,193,224,.28);
-          border-top-color:rgba(184,228,244,.34);
-          border-radius:11px;
-          background:#081119;
-          box-shadow:
-            0 18px 44px rgba(0,0,0,.62),
-            inset 0 1px 0 rgba(255,255,255,.04);
-        }
-
-        .pr-proDropdownOption{
-          width:100%;
-          min-height:38px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:12px;
-          padding:0 10px;
-          border:0;
-          border-radius:8px;
-          color:rgba(230,242,248,.80);
-          background:transparent;
-          font-size:10px;
-          font-weight:900;
-          text-align:left;
-          cursor:pointer;
-        }
-
-        .pr-proDropdownOption:hover{
-          color:#fff;
-          background:rgba(39,155,198,.16);
-        }
-
-        .pr-proDropdownOption.is-selected{
-          color:#fff;
-          background:linear-gradient(90deg,rgba(22,137,181,.26),rgba(13,70,94,.14));
-        }
-
-        .pr-proDropdownCheck{
-          color:#66d7fb;
-          font-size:12px;
-          font-weight:1000;
-        }
-
-        .pr-exerciseSelect{min-width:230px}
-
-        .pr-programDeck{
-          grid-template-columns:minmax(260px,1.05fr) minmax(300px,1.3fr) 150px!important;
-          padding-top:15px!important;
-        }
-
-        .pr-programIdentity strong{font-size:20px!important}
-
-        .pr-rotationRail{
-          justify-content:center!important;
-          gap:9px!important;
-          overflow:visible!important;
-        }
-
-        .pr-rotationRail span{
-          display:inline-flex!important;
-          align-items:center!important;
-          gap:9px!important;
-          padding:0!important;
-          color:#e9f5f9!important;
-          font-size:10px!important;
-          font-weight:1000!important;
-        }
-
-        .pr-rotationRail span+span{border-left:0!important}
-
-        .pr-rotationRail b{
-          color:rgba(77,202,244,.48);
-          font-size:12px;
-          font-weight:1000;
-        }
-
-        .pr-sectionHead{margin-bottom:13px!important}
-        .pr-sectionHead h2{font-size:24px!important}
-        .pr-eyebrow{font-size:9px!important}
-        .pr-sectionHead p{display:none!important}
-
-        .pr-secondaryStrip{margin-top:9px!important}
-
-        .pr-qualityGrid{
-          gap:0!important;
-          border-top:1px solid rgba(131,198,221,.10);
-          border-bottom:1px solid rgba(131,198,221,.08);
-        }
-
-        .pr-qualityMetric{
-          border-left:0!important;
-          background:none!important;
-          padding:14px!important;
-        }
-
-        .pr-qualityMetric+.pr-qualityMetric{
-          border-left:1px solid rgba(139,201,223,.11)!important;
-        }
-
-        .pr-dangerButton{
-          min-height:34px!important;
-          padding:0 12px!important;
-          border:1px solid rgba(255,107,107,.22)!important;
-          border-radius:8px!important;
-          color:rgba(255,190,190,.88)!important;
-          background:rgba(88,26,26,.10)!important;
-          box-shadow:none!important;
-          font-size:8px!important;
-        }
-
-        .pr-dangerButton:hover{
-          color:#ffd1d1!important;
-          border-color:rgba(255,107,107,.38)!important;
-          background:rgba(99,29,29,.16)!important;
-        }
-
-        .pr-historyList{gap:7px!important}
-
-        .pr-historyRow{
-          padding:11px 12px!important;
-          border-radius:11px!important;
-        }
-
-        .pr-historyTop{
-          align-items:center!important;
-        }
-
-        .pr-historyTop h3{font-size:16px!important}
-
-        .pr-historyTopRight{
-          display:flex;
-          align-items:center;
-          justify-content:flex-end;
-          gap:12px;
-        }
-
-        .pr-historyView{
-          min-width:70px;
-          min-height:30px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          gap:8px;
-          padding:0 10px;
-          border:1px solid rgba(0,170,255,.30);
-          border-radius:8px;
-          color:#eefaff;
-          background:rgba(0,170,255,.07);
-          font-size:8px;
-          font-weight:1000;
-          letter-spacing:.08em;
-          cursor:pointer;
-        }
-
-        .pr-historyView:hover{
-          border-color:rgba(0,170,255,.52);
-          background:rgba(0,170,255,.11);
-        }
-
-        .pr-historyMetrics{
-          margin-top:9px!important;
-          padding:8px 0!important;
-        }
-
-        .pr-historyMetrics strong{font-size:13px!important}
-        .pr-historyExerciseLine{margin-top:8px!important}
-
-        .pr-historyExerciseLine p{
-          font-size:8.5px!important;
-          line-height:1.35!important;
-        }
-
-        @media(max-width:980px){
-          .pr-programDeck{
-            grid-template-columns:1fr 160px!important;
-          }
-
-          .pr-rotationRail{
-            grid-column:1 / -1!important;
-            justify-content:flex-start!important;
-          }
-        }
-
-        @media(max-width:700px){
-          .pr-proDropdown{
-            min-width:0;
-            width:100%;
-          }
-
-          .pr-controls{
-            display:grid!important;
-            grid-template-columns:1fr 1fr;
-            width:100%;
-          }
-
-          .pr-programDeck{
-            grid-template-columns:1fr!important;
-          }
-
-          .pr-historyTopRight{
-            width:100%;
-            justify-content:space-between;
-          }
-        }
-
-        @media(max-width:520px){
-          .pr-controls{
-            grid-template-columns:1fr;
-          }
-        }
-
+        .pr-surface:has(.pr-dropdownTrigger.is-open){z-index:300}
+        .pr-hero{z-index:40;padding:20px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+        .pr-hero h1{margin:0;color:#fff;font-size:clamp(40px,5vw,56px);line-height:.9;font-weight:1000;letter-spacing:-.055em}
+        .pr-program{margin-top:10px;color:#edf8fb;font-size:18px;font-weight:1000}
+        .pr-rotation{display:flex;flex-wrap:wrap;gap:7px 10px;margin-top:8px;font-size:10px;font-weight:1000}
+        .pr-rotation span{display:inline-flex;align-items:center;gap:10px}
+        .pr-rotation i{color:rgba(79,198,239,.40);font-style:normal}
+        .is-upper1{color:#78a7ff!important}.is-upper2{color:#6ae5e9!important}.is-lower1{color:#74e4ad!important}.is-lower2{color:#f0bd77!important}
+        .pr-heroControls{display:flex;gap:9px}
+        .pr-dropdown{position:relative;z-index:50;min-width:165px}
+        .pr-dropdownTrigger{width:100%;min-height:43px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;border:1px solid rgba(127,198,222,.20);border-top-color:rgba(190,230,244,.28);border-radius:9px;color:#f4fafc;background:linear-gradient(180deg,#172731,#091116);box-shadow:0 2px 4px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04);font-size:11px;font-weight:950;cursor:pointer}
+        .pr-dropdownTrigger:hover,.pr-dropdownTrigger.is-open{border-color:rgba(82,206,244,.55)}
+        .pr-dropdownTrigger .pr-icon{color:var(--cyan);transition:transform .14s ease}.pr-dropdownTrigger.is-open .pr-icon{transform:rotate(180deg)}
+        .pr-dropdownMenu{position:absolute;z-index:9999;top:calc(100% + 7px);left:0;right:0;max-height:310px;overflow:auto;padding:5px;border:1px solid rgba(110,191,222,.31);border-top-color:rgba(190,231,246,.40);border-radius:11px;background:#071017;box-shadow:0 22px 58px rgba(0,0,0,.76)}
+        .pr-dropdownOption{width:100%;min-height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border:0;border-radius:7px;color:rgba(231,242,248,.80);background:transparent;font-size:10px;font-weight:900;text-align:left;cursor:pointer}
+        .pr-dropdownOption:hover{color:#fff;background:rgba(48,166,207,.13)}
+        .pr-dropdownOption.is-selected{color:#fff;background:linear-gradient(90deg,rgba(30,145,187,.18),rgba(14,64,85,.06))}
+        .pr-dropdownOption i{width:3px;height:18px;border-radius:3px;background:var(--cyan)}
+        .pr-icon{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        .pr-section{padding:17px}
+        .pr-sectionTitle{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+        .pr-sectionTitleText{display:flex;gap:10px}.pr-sectionAccent{width:3px;height:36px;border-radius:3px;background:linear-gradient(180deg,#88e5ff,#159fda);box-shadow:0 0 9px rgba(53,190,238,.18)}
+        .pr-sectionTitle h2{margin:0;color:#fff;font-size:24px;line-height:1;font-weight:1000;letter-spacing:-.035em}
+        .pr-sectionTitle p{margin:5px 0 0;color:var(--muted);font-size:9px;line-height:1.4;font-weight:760}
+        .pr-toast,.pr-error{padding:10px 12px;border-radius:9px;font-size:10px;font-weight:900}.pr-toast{color:#c7f3d9;border:1px solid rgba(85,223,162,.17);background:rgba(30,94,64,.13)}.pr-error{color:#ffd0d0;border:1px solid rgba(255,116,116,.20);background:rgba(110,33,33,.16)}
+        .pr-majorRail,.pr-minorRail,.pr-chartFooter,.pr-qualityGrid,.pr-recoveryMetrics,.pr-painHighlights,.pr-workoutPreview,.pr-workoutStats,.pr-modalSummary,.pr-exerciseStats{display:grid}
+        .pr-three{grid-template-columns:repeat(3,minmax(0,1fr))}.pr-four{grid-template-columns:repeat(4,minmax(0,1fr))}.pr-six{grid-template-columns:repeat(6,minmax(0,1fr))}
+        .pr-majorRail{border-top:1px solid rgba(130,194,217,.10);border-bottom:1px solid rgba(130,194,217,.08)}
+        .pr-majorRail>div{padding:15px;min-width:0}.pr-majorRail>div+div{border-left:1px solid rgba(132,195,218,.10)}
+        .pr-majorRail span,.pr-minorRail span,.pr-chartHead span,.pr-chartFooter span,.pr-trendGrid span,.pr-qualityGrid span,.pr-recoveryMetrics span,.pr-weightCard span,.pr-painHighlights span,.pr-exerciseStats span,.pr-baseline span,.pr-modalSummary span{display:block;color:rgba(179,207,219,.62);font-size:8px;line-height:1;font-weight:1000;text-transform:uppercase;letter-spacing:.075em}
+        .pr-majorRail strong{display:block;margin-top:8px;color:#fff;font-size:clamp(28px,3vw,38px);line-height:.92;font-weight:1000;letter-spacing:-.045em}
+        .pr-majorRail small{display:block;margin-top:6px;color:rgba(187,210,220,.54);font-size:8px;font-weight:850}
+        .pr-performanceStatus .is-good strong{color:#7be9b4}.pr-performanceStatus .is-bad strong{color:#ff9999}.pr-performanceStatus .is-info strong{color:#82def9}
+        .pr-minorRail{margin-top:10px}.pr-minorRail>div{padding:9px 12px;border-left:2px solid rgba(72,193,235,.27);background:linear-gradient(90deg,rgba(31,84,104,.10),transparent 88%)}.pr-minorRail strong{display:block;margin-top:5px;color:#eff8fb;font-size:14px;font-weight:1000}
+        .pr-coachList{display:grid;gap:7px}.pr-coachRow{display:grid;grid-template-columns:40px minmax(0,1fr) minmax(220px,.75fr);align-items:center;gap:13px;padding:12px 13px;border-left:2px solid rgba(82,206,244,.4);background:linear-gradient(90deg,rgba(34,92,114,.10),transparent 84%)}.pr-coachRow.is-green{border-left-color:var(--green)}.pr-coachRow.is-amber{border-left-color:var(--amber)}.pr-coachRow.is-red{border-left-color:var(--red)}
+        .pr-coachIcon{width:38px;height:38px;display:grid;place-items:center;border:1px solid rgba(82,199,240,.16);border-radius:10px;color:#79daf8;background:#0b1a22}.pr-coachCopy span{color:#80d9f6;font-size:7px;font-weight:1000;letter-spacing:.12em}.pr-coachCopy h3{margin:5px 0 4px;color:#fff;font-size:15px;font-weight:1000}.pr-coachCopy p{margin:0;color:rgba(208,224,232,.64);font-size:9px;line-height:1.4}.pr-coachAction{color:#eef8fb;font-size:10px;line-height:1.4}
+        .pr-delta{display:inline-flex;color:rgba(204,219,226,.62);font-size:11px;font-weight:1000}.pr-delta.is-positive{color:#63e4a4}.pr-delta.is-negative{color:#ff8787}
+        .pr-performanceGrid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.75fr);gap:11px;margin-top:11px}
+        .pr-chartPanel,.pr-exerciseDetail,.pr-issues{padding:14px;border:1px solid rgba(126,192,216,.11);border-top-color:rgba(181,225,240,.17);border-radius:13px;background:linear-gradient(180deg,#0d1921,#071016)}
+        .pr-chartHead{display:flex;justify-content:space-between;gap:14px}.pr-chartHead strong{display:block;margin-top:6px;color:#fff;font-size:27px;font-weight:1000}.pr-chartHead small,.pr-chartCompare small{display:block;margin-top:5px;color:rgba(184,207,217,.54);font-size:8px}.pr-chartCompare{text-align:right}
+        .pr-volumeChart{margin-top:14px;overflow-x:auto}.pr-volumeBars{min-width:560px;height:185px;display:flex;align-items:flex-end;gap:9px}.pr-volumeCol{min-width:58px;flex:1;align-self:stretch;display:grid;grid-template-rows:18px 1fr 34px;gap:5px;align-items:end;text-align:center}.pr-volumeCol>b{color:rgba(224,237,243,.70);font-size:7px}.pr-volumeTrack{height:100%;display:flex;align-items:flex-end;justify-content:center;border-bottom:1px solid rgba(134,196,219,.11);background:repeating-linear-gradient(180deg,transparent 0,transparent 27px,rgba(127,188,211,.06) 28px)}.pr-volumeBar{width:58%;min-height:6px;border-radius:4px 4px 1px 1px}.pr-volumeBar.is-upper1{background:linear-gradient(#6ca2ff,#2c65c7)}.pr-volumeBar.is-upper2{background:linear-gradient(#64e7ec,#218f97)}.pr-volumeBar.is-lower1{background:linear-gradient(#73eab2,#28855d)}.pr-volumeBar.is-lower2{background:linear-gradient(#f1bf78,#a96b25)}.pr-volumeBar.is-other{background:linear-gradient(#72d7f6,#27799a)}.pr-volumeCol strong{display:block;overflow:hidden;font-size:7px;white-space:nowrap;text-overflow:ellipsis}.pr-volumeCol small{display:block;margin-top:3px;color:rgba(164,191,203,.46);font-size:6px}
+        .pr-chartFooter{margin-top:11px;padding-top:10px;border-top:1px solid rgba(128,191,215,.09)}.pr-chartFooter>div{padding:0 10px}.pr-chartFooter>div+div{border-left:1px solid rgba(130,194,216,.09)}.pr-chartFooter strong{display:block;margin-top:6px;color:#f0f8fb;font-size:13px;font-weight:1000}
+        .pr-highlightStack{display:grid;gap:10px}.pr-highlight{padding:13px;border-left:2px solid rgba(72,193,235,.28);background:linear-gradient(90deg,rgba(27,75,94,.10),transparent 90%)}.pr-highlight h3{display:flex;align-items:center;gap:7px;margin:0;color:#84dcf8;font-size:10px;text-transform:uppercase}.pr-highlightRow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px}.pr-highlightRow>div{min-width:0}.pr-highlightRow strong{display:block;overflow:hidden;color:#f1f8fb;font-size:10px;white-space:nowrap;text-overflow:ellipsis}.pr-highlightRow span:not(.pr-delta){display:block;margin-top:3px;color:rgba(182,207,217,.52);font-size:8px}.pr-highlightRow>b{color:#89def8;font-size:10px}.pr-highlight p{margin:10px 0 0;color:rgba(185,207,217,.50);font-size:9px;line-height:1.4}
+        .pr-trendIssueGrid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr);gap:11px}.pr-trendGrid{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(129,193,216,.10);border-bottom:1px solid rgba(129,193,216,.08)}.pr-trendGrid>div{padding:14px}.pr-trendGrid>div:nth-child(2),.pr-trendGrid>div:nth-child(3),.pr-trendGrid>div:nth-child(5),.pr-trendGrid>div:nth-child(6){border-left:1px solid rgba(131,194,216,.09)}.pr-trendGrid>div:nth-child(n+4){border-top:1px solid rgba(131,194,216,.09)}.pr-trendGrid strong{display:block;margin-top:7px;color:#fff;font-size:16px;font-weight:1000}.pr-trendGrid small{display:block;margin-top:5px;color:rgba(182,205,216,.52);font-size:8px}.pr-trendGrid .pr-delta{margin-top:6px}
+        .pr-issues h3{margin:0 0 10px;color:#fff;font-size:14px}.pr-issue{display:flex;gap:9px;padding:9px 0}.pr-issue+.pr-issue{border-top:1px solid rgba(127,190,214,.08)}.pr-statusDot{width:8px;height:8px;flex:0 0 8px;margin-top:3px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px rgba(82,206,244,.2)}.pr-statusDot.is-green{background:var(--green)}.pr-statusDot.is-amber{background:var(--amber)}.pr-statusDot.is-red{background:var(--red)}.pr-issue strong{color:#eef8fb;font-size:10px}.pr-issue p{margin:4px 0 0;color:rgba(188,210,220,.56);font-size:8px;line-height:1.4}
+        .pr-featureRow{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:11px 13px;border-left:3px solid var(--green);background:linear-gradient(90deg,rgba(42,118,81,.14),transparent 78%)}.pr-featureRow span{display:block;color:rgba(179,208,219,.59);font-size:8px;text-transform:uppercase;font-weight:1000}.pr-featureRow strong{display:block;margin-top:4px;color:#fff;font-size:19px}.pr-featureRow .pr-delta{font-size:21px}
+        .pr-tableWrap{width:100%;overflow:auto;border-top:1px solid rgba(128,193,217,.09);border-bottom:1px solid rgba(128,193,217,.07)}.pr-scrollTable{max-height:420px}.pr-table{width:100%;min-width:650px;border-collapse:collapse}.pr-table th{position:sticky;top:0;z-index:2;padding:10px 11px;color:rgba(174,204,217,.62);background:#0b151c;border-bottom:1px solid rgba(130,193,216,.10);font-size:8px;text-align:right;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}.pr-table th:first-child{text-align:left}.pr-table td{padding:10px 11px;border-bottom:1px solid rgba(130,193,216,.065);color:rgba(220,234,240,.78);font-size:10px;text-align:right;white-space:nowrap}.pr-table td:first-child{text-align:left}.pr-table tbody tr:hover{background:rgba(42,136,171,.065)}.pr-table td strong{color:#f1f8fb;font-size:10px}.pr-table td small{display:block;margin-top:3px;color:rgba(173,202,214,.47);font-size:7px}.pr-emptyCell{padding:22px!important;text-align:center!important;color:rgba(183,207,217,.52)!important}
+        .pr-exerciseTable tr{cursor:pointer}.pr-exerciseTable tr.is-selected{background:linear-gradient(90deg,rgba(31,138,178,.14),rgba(20,74,96,.04));box-shadow:inset 3px 0 0 #4ac9f2}.pr-trendWord{font-size:9px;font-weight:1000}.pr-trendWord.is-improving{color:#69e4aa}.pr-trendWord.is-declining{color:#ff8787}.pr-trendWord.is-stable,.pr-trendWord.is-baseline{color:rgba(207,221,228,.62)}
+        .pr-exerciseDropdown{min-width:220px}.pr-exerciseDetail{margin-top:12px}.pr-exerciseDetailHead{display:flex;justify-content:space-between;gap:16px}.pr-exerciseDetailHead>div:first-child>span{color:rgba(168,199,212,.55);font-size:8px}.pr-exerciseDetailHead h3{margin:5px 0 0;color:#fff;font-size:21px}.pr-trendState{display:flex;gap:8px;max-width:310px}.pr-trendState>div{display:grid;gap:3px}.pr-trendState strong{color:#fff;font-size:10px;text-transform:uppercase}.pr-trendState span{color:rgba(188,211,220,.57);font-size:8px;line-height:1.35}
+        .pr-baseline,.pr-exerciseStats{display:grid;margin-top:13px;border-top:1px solid rgba(129,193,216,.09);border-bottom:1px solid rgba(129,193,216,.07)}.pr-baseline{grid-template-columns:repeat(3,1fr)}.pr-baseline>div,.pr-exerciseStats>div{padding:13px 12px}.pr-baseline>div+div,.pr-exerciseStats>div+div{border-left:1px solid rgba(130,193,216,.09)}.pr-baseline strong,.pr-exerciseStats strong{display:block;margin-top:6px;color:#fff;font-size:17px}.pr-baseline p{grid-column:1/-1;margin:0;padding:11px 12px;border-top:1px solid rgba(130,193,216,.08);color:rgba(197,216,224,.62);font-size:9px}
+        .pr-strengthTimeline{height:150px;display:flex;align-items:flex-end;gap:8px;margin-top:13px;padding-top:8px;border-bottom:1px solid rgba(129,193,216,.09);overflow-x:auto}.pr-strengthTimeline>div{min-width:42px;flex:1;align-self:stretch;display:grid;grid-template-rows:16px 1fr 18px;align-items:end;text-align:center}.pr-strengthTimeline b{color:rgba(222,236,242,.66);font-size:7px}.pr-strengthTimeline>div>span{width:52%;justify-self:center;min-height:7px;border-radius:4px 4px 0 0;background:#52cef4}.pr-strengthTimeline>div>span.is-upper1{background:#4a8cff}.pr-strengthTimeline>div>span.is-upper2{background:#35d2dc}.pr-strengthTimeline>div>span.is-lower1{background:#4ed79b}.pr-strengthTimeline>div>span.is-lower2{background:#e9a54b}.pr-strengthTimeline small{color:rgba(160,189,201,.45);font-size:6px}
+        .pr-exerciseCoach{display:flex;gap:9px;margin-top:12px;padding:10px 12px;border-left:2px solid rgba(82,206,244,.42);color:#75d8f7;background:linear-gradient(90deg,rgba(35,105,132,.11),transparent 87%)}.pr-exerciseCoach>div{display:grid;gap:4px}.pr-exerciseCoach span{color:#7bdaf8;font-size:8px;text-transform:uppercase;font-weight:1000}.pr-exerciseCoach strong{color:#eef8fb;font-size:10px;line-height:1.4}
+        .pr-qualityStatus{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:#eef8fb;font-size:10px;text-transform:uppercase;font-weight:1000}.pr-qualityGrid{border-top:1px solid rgba(129,193,216,.10);border-bottom:1px solid rgba(129,193,216,.08)}.pr-qualityGrid>div{padding:14px 11px}.pr-qualityGrid>div+div{border-left:1px solid rgba(131,194,216,.09)}.pr-qualityGrid strong{display:block;margin-top:7px;color:#fff;font-size:19px}.pr-qualityGrid .is-amber strong{color:#f3bc79}.pr-qualityGrid .is-green strong{color:#7be7b3}.pr-qualityGrid .is-red strong{color:#ff9696}
+        .pr-recoveryGrid{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(0,1.35fr) minmax(180px,.55fr);gap:10px}.pr-weightCard{display:flex;align-items:center;gap:12px;padding:14px;border-left:2px solid rgba(82,206,244,.34);background:linear-gradient(90deg,rgba(33,92,113,.10),transparent 90%);color:#66d3f6}.pr-weightCard>div{display:grid;gap:5px}.pr-weightCard strong{color:#fff;font-size:24px}.pr-weightCard small{color:rgba(189,211,221,.56);font-size:8px}
+        .pr-recoveryMetrics{border-top:1px solid rgba(129,193,216,.09);border-bottom:1px solid rgba(129,193,216,.07)}.pr-recoveryMetrics>div{padding:13px 11px}.pr-recoveryMetrics>div+div{border-left:1px solid rgba(130,193,216,.09)}.pr-recoveryMetrics strong{display:block;margin-top:6px;color:#fff;font-size:18px}.pr-recoveryState{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:1px solid rgba(85,223,162,.13);border-radius:10px;background:rgba(36,104,73,.08);text-align:center}.pr-recoveryState.is-amber{border-color:rgba(239,169,79,.15);background:rgba(107,69,23,.08)}.pr-recoveryState.is-red{border-color:rgba(255,116,116,.15);background:rgba(104,35,35,.08)}.pr-recoveryState strong{color:#eef8f2;font-size:9px;text-transform:uppercase}
+        .pr-painHighlights{gap:8px;margin:11px 0}.pr-painHighlights>div{padding:10px 12px;border-left:2px solid rgba(82,206,244,.26);background:linear-gradient(90deg,rgba(31,83,102,.09),transparent 90%)}.pr-painHighlights strong{display:block;margin-top:5px;overflow:hidden;color:#edf7fa;font-size:11px;white-space:nowrap;text-overflow:ellipsis}.pr-painHighlights b{display:block;margin-top:5px;color:#fff;font-size:14px}
+        .pr-breakdownButton,.pr-clearButton{min-height:35px;display:flex;align-items:center;gap:7px;padding:0 12px;border:1px solid rgba(91,196,233,.18);border-radius:8px;color:#eaf6fa;background:rgba(14,54,70,.18);font-size:9px;font-weight:950;cursor:pointer}.pr-clearButton{border-color:rgba(255,116,116,.22);color:#ffc2c2;background:rgba(92,28,28,.10)}
+        .pr-workoutPreview{gap:8px}.pr-workoutPreview>div{position:relative;padding:11px 12px 11px 16px;border:1px solid rgba(127,192,216,.09);border-radius:10px;background:#091218;overflow:hidden}.pr-workoutPreview i,.pr-workoutTitle i,.pr-historyAccent{position:absolute;left:0;top:0;bottom:0;width:3px;background:#52cef4}.pr-workoutPreview .is-upper1 i,.pr-workoutCard.is-upper1 i,.pr-historyRow.is-upper1 .pr-historyAccent{background:#4a8cff}.pr-workoutPreview .is-upper2 i,.pr-workoutCard.is-upper2 i,.pr-historyRow.is-upper2 .pr-historyAccent{background:#35d2dc}.pr-workoutPreview .is-lower1 i,.pr-workoutCard.is-lower1 i,.pr-historyRow.is-lower1 .pr-historyAccent{background:#4ed79b}.pr-workoutPreview .is-lower2 i,.pr-workoutCard.is-lower2 i,.pr-historyRow.is-lower2 .pr-historyAccent{background:#e9a54b}.pr-workoutPreview strong{display:block;color:#f1f8fb;font-size:11px}.pr-workoutPreview small{display:block;margin-top:4px;color:rgba(181,205,216,.52);font-size:8px}
+        .pr-workoutGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.pr-workoutCard{position:relative;overflow:hidden;padding:13px;border:1px solid rgba(129,193,216,.10);border-radius:12px;background:#091218}.pr-workoutCard.is-upper1{background:linear-gradient(115deg,rgba(37,77,139,.16),#091218 37%)}.pr-workoutCard.is-upper2{background:linear-gradient(115deg,rgba(27,108,113,.15),#091218 37%)}.pr-workoutCard.is-lower1{background:linear-gradient(115deg,rgba(31,112,76,.14),#091218 37%)}.pr-workoutCard.is-lower2{background:linear-gradient(115deg,rgba(131,83,25,.14),#091218 37%)}.pr-workoutTitle{position:relative;padding-left:10px}.pr-workoutTitle h3{margin:0;color:#fff;font-size:17px}.pr-workoutStats{margin-top:12px;padding-top:11px;border-top:1px solid rgba(130,193,216,.08)}.pr-workoutStats>div{padding:0 8px}.pr-workoutStats>div+div{border-left:1px solid rgba(130,193,216,.09)}.pr-workoutStats span{display:block;color:rgba(176,204,216,.56);font-size:7px;text-transform:uppercase}.pr-workoutStats strong{display:block;margin-top:5px;color:#fff;font-size:12px}.pr-workoutStats .pr-delta{display:block;margin-top:5px;font-size:9px}
+        .pr-historyList{display:grid;gap:7px}.pr-historyRow{position:relative;display:grid;grid-template-columns:3px minmax(210px,1.25fr) minmax(390px,1.6fr) 68px;align-items:center;gap:12px;padding:10px 12px 10px 0;border:1px solid rgba(127,192,216,.09);border-radius:11px;background:#091218;overflow:hidden}.pr-historyAccent{position:static;align-self:stretch;width:3px}.pr-historyName h3{margin:0;color:#fff;font-size:15px}.pr-historyName time{display:block;margin-top:5px;color:rgba(195,214,223,.60);font-size:8px}.pr-historyName p{margin:5px 0 0;overflow:hidden;color:rgba(188,209,219,.50);font-size:8px;white-space:nowrap;text-overflow:ellipsis}.pr-historyMetrics{display:grid;grid-template-columns:1.15fr repeat(4,1fr)}.pr-historyMetrics>div{padding:0 8px}.pr-historyMetrics>div+div{border-left:1px solid rgba(130,193,216,.08)}.pr-historyMetrics span{display:block;color:rgba(171,201,214,.52);font-size:7px;text-transform:uppercase}.pr-historyMetrics strong{display:block;margin-top:5px;color:#f0f8fb;font-size:11px;white-space:nowrap}.pr-viewButton{min-height:32px;border:1px solid rgba(74,190,231,.21);border-radius:8px;color:#eaf7fb;background:rgba(20,78,98,.12);font-size:8px;font-weight:1000;cursor:pointer}
+        .pr-loadMore{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:11px;padding-top:11px;border-top:1px solid rgba(127,191,215,.08)}.pr-loadMore span{color:rgba(183,206,216,.52);font-size:8px}.pr-loadMore button{min-height:36px;padding:0 14px;border:1px solid rgba(64,185,228,.30);border-radius:9px;color:#f0f9fc;background:rgba(20,82,104,.15);font-size:8px;font-weight:1000;cursor:pointer}
+        .pr-empty{display:grid;place-items:center;min-height:100px;padding:18px;color:rgba(184,207,217,.51);font-size:9px;text-align:center}
+        .pr-overlay{position:fixed;z-index:9999;inset:0;display:grid;place-items:center;padding:18px;background:rgba(2,6,9,.84);backdrop-filter:blur(8px)}.pr-detailModal,.pr-clearModal{width:min(760px,100%);max-height:86vh;overflow:auto;padding:17px;border:1px solid rgba(126,196,221,.18);border-radius:15px;background:linear-gradient(180deg,#111d24,#071016);box-shadow:0 28px 90px rgba(0,0,0,.64)}.pr-modalHead{display:flex;justify-content:space-between}.pr-modalHead span{color:rgba(185,209,219,.55);font-size:8px}.pr-modalHead h2{margin:5px 0 0;color:#fff;font-size:24px}.pr-modalHead button{width:34px;height:34px;border:1px solid rgba(125,191,216,.12);border-radius:9px;color:#eaf6fa;background:#0c161c;font-size:20px}.pr-modalSummary{margin-top:13px;border-top:1px solid rgba(128,191,215,.09);border-bottom:1px solid rgba(128,191,215,.07)}.pr-modalSummary>div{padding:12px}.pr-modalSummary>div+div{border-left:1px solid rgba(128,191,215,.08)}.pr-modalSummary strong{display:block;margin-top:6px;color:#fff;font-size:14px}
+        .pr-detailExercises{display:grid;gap:8px;margin-top:12px}.pr-detailExercise{padding:11px 12px;border-left:2px solid rgba(78,200,241,.30);background:linear-gradient(90deg,rgba(30,84,105,.10),transparent 90%)}.pr-detailExercise>div:first-child strong{display:block;color:#fff;font-size:11px}.pr-detailExercise>div:first-child span{display:block;margin-top:3px;color:rgba(182,205,216,.50);font-size:8px}.pr-setList{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:8px}.pr-setList span{color:rgba(215,231,238,.72);font-size:9px}.pr-setList b{margin-right:5px;color:#65d2f4;font-size:7px}
+        .pr-clearModal{width:min(460px,100%)}.pr-clearModal h2{margin:0;color:#fff;font-size:22px}.pr-clearModal p{margin:7px 0 0;color:rgba(209,226,234,.64);font-size:10px;line-height:1.5}.pr-clearModal input{width:100%;min-height:43px;margin-top:14px;padding:0 12px;border:1px solid rgba(255,255,255,.11);border-radius:9px;color:#fff;background:#060d12;outline:0}.pr-clearModal>div{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}.pr-clearModal button{min-height:37px;padding:0 13px;border:1px solid rgba(128,191,215,.13);border-radius:9px;color:#eaf4f8;background:#0f181e;font-size:9px;font-weight:950}.pr-clearModal button.is-danger{border-color:rgba(255,116,116,.26);color:#ffd1d1;background:rgba(110,32,32,.34)}.pr-clearModal button:disabled{opacity:.42}
+        @media(max-width:1050px){.pr-performanceGrid,.pr-trendIssueGrid{grid-template-columns:1fr}.pr-recoveryGrid{grid-template-columns:1fr 1.4fr}.pr-recoveryState{grid-column:1/-1}.pr-qualityGrid.pr-six,.pr-exerciseStats.pr-six{grid-template-columns:repeat(3,1fr)}.pr-historyRow{grid-template-columns:3px minmax(190px,1fr) minmax(340px,1.4fr) 64px}}
+        @media(max-width:780px){.pr-hero{display:grid;padding:13px}.pr-section{padding:13px}.pr-heroControls{display:grid;grid-template-columns:1fr 1fr}.pr-dropdown{min-width:0}.pr-sectionTitle{display:grid}.pr-coachRow{grid-template-columns:36px 1fr}.pr-coachAction{grid-column:2}.pr-majorRail.pr-four{grid-template-columns:repeat(2,1fr)}.pr-majorRail.pr-four>div:nth-child(3){border-left:0;border-top:1px solid rgba(132,195,218,.10)}.pr-majorRail.pr-four>div:nth-child(4){border-top:1px solid rgba(132,195,218,.10)}.pr-trendGrid{grid-template-columns:repeat(2,1fr)}.pr-recoveryGrid{grid-template-columns:1fr}.pr-recoveryState{grid-column:auto}.pr-recoveryMetrics.pr-four{grid-template-columns:repeat(2,1fr)}.pr-painHighlights.pr-three{grid-template-columns:1fr}.pr-workoutGrid,.pr-workoutPreview.pr-four{grid-template-columns:repeat(2,1fr)}.pr-historyRow{grid-template-columns:3px 1fr 62px}.pr-historyMetrics{grid-column:2/-1;grid-row:2;padding-top:8px;border-top:1px solid rgba(130,193,216,.08)}.pr-viewButton{grid-column:3;grid-row:1}.pr-modalSummary.pr-four{grid-template-columns:repeat(2,1fr)}}
+        @media(max-width:520px){.pr-heroControls{grid-template-columns:1fr}.pr-majorRail.pr-three,.pr-majorRail.pr-four,.pr-minorRail.pr-three,.pr-qualityGrid.pr-six{grid-template-columns:1fr}.pr-majorRail>div+div,.pr-qualityGrid>div+div{border-left:0;border-top:1px solid rgba(132,195,218,.10)}.pr-trendGrid{grid-template-columns:1fr}.pr-trendGrid>div+div{border-left:0!important;border-top:1px solid rgba(131,194,216,.09)}.pr-workoutGrid,.pr-workoutPreview.pr-four{grid-template-columns:1fr}.pr-loadMore{align-items:stretch;flex-direction:column}.pr-loadMore button{width:100%}}
+        @media(prefers-reduced-motion:reduce){.pr-page *{transition:none!important}}
       `}</style>
     </div>
   );
