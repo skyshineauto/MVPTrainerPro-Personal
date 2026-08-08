@@ -512,6 +512,35 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
   }
 
   const ranked = [...combined.values()]
+    // Keep the review list focused on the actual song. Artist-only searches are
+    // useful as a last resort, but they must never flood the panel with unrelated
+    // songs from the same artist.
+    .filter((candidate) => {
+      const titleSimilarity = bestTextScore(
+        signals.titleVariants,
+        candidate.title
+      );
+      const titleExact = exactAgainst(
+        signals.titleVariants,
+        candidate.title
+      );
+
+      if (titleExact) return true;
+
+      if (signals.artistVariants.length) {
+        const artistSimilarity = bestTextScore(
+          signals.artistVariants,
+          candidate.artist
+        );
+
+        return (
+          titleSimilarity >= 0.62 ||
+          (titleSimilarity >= 0.52 && artistSimilarity >= 0.92)
+        );
+      }
+
+      return titleSimilarity >= 0.58;
+    })
     .sort((left, right) => {
       const leftTitleExact = exactAgainst(
         signals.titleVariants,
@@ -547,10 +576,9 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
         trackDuration - (right.durationSeconds || trackDuration)
       );
       return leftDifference - rightDifference;
-    })
-    .filter((candidate, index) => candidate.confidence >= 0.2 || index < 5);
+    });
 
-  // Twelve review choices is still compact in the new scrollable result panel,
+  // Twelve review choices is still compact in the scrollable result panel,
   // but gives obscure/older recordings a much better chance of appearing.
   return ranked.slice(0, 12);
 }
@@ -609,9 +637,21 @@ export async function enrichMusicTrack(
     autoApplyThreshold?: number;
   }
 ): Promise<MusicEnrichmentResult> {
+  // Existing artwork is locked during automatic enrichment. The only code path
+  // allowed to replace it is the explicit artwork action in the song editor.
+  if (options?.artworkOnly && !needsMusicArtwork(track)) {
+    return {
+      track,
+      status: "matched",
+      candidate: null,
+      candidates: [],
+      changed: false,
+    };
+  }
+
   const candidates = await findMusicMetadataCandidates(track);
   const candidate = candidates[0] || null;
-  const threshold = options?.autoApplyThreshold ?? 0.955;
+  const threshold = options?.autoApplyThreshold ?? 0.98;
 
   if (!candidate) {
     return {
@@ -625,8 +665,9 @@ export async function enrichMusicTrack(
 
   if (options?.artworkOnly) {
     if (
+      needsMusicArtwork(track) &&
       candidate.artworkUrl &&
-      candidate.confidence >= 0.76
+      candidate.confidence >= threshold
     ) {
       const updated = await uploadRemoteMusicArtwork(
         track,
