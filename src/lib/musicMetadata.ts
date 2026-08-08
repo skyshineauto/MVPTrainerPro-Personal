@@ -43,7 +43,17 @@ type ItunesResponse = {
 
 type SearchAttribute = "songTerm" | "artistTerm" | null;
 
-const LOOKUP_CACHE = new Map<string, Omit<MusicMetadataCandidate, "confidence">[]>();
+type LookupSignals = {
+  primaryTitle: string;
+  titleVariants: string[];
+  artistVariants: string[];
+  knownArtist: string | null;
+};
+
+const LOOKUP_CACHE = new Map<
+  string,
+  Omit<MusicMetadataCandidate, "confidence">[]
+>();
 
 function normalize(value: string) {
   return value
@@ -52,10 +62,86 @@ function normalize(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ")
     .replace(/\b(feat|featuring|ft)\.?\b.*$/i, "")
-    .replace(/\b(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version)\b/gi, " ")
+    .replace(
+      /\b(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version|album version)\b/gi,
+      " "
+    )
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function uniqueUseful(values: Array<string | null | undefined>) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of values) {
+    const value = (raw || "").replace(/\s+/g, " ").trim();
+    const key = normalize(value);
+    if (!value || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result;
+}
+
+function filenameStem(value: string) {
+  return value
+    .replace(/\.[^.]+$/, "")
+    .replace(/_/g, " ")
+    .replace(/^\s*\d{1,3}\s*[.\-_ ]+\s*/, "")
+    .replace(/^\s*\d{1,3}\s*-\s*/, "")
+    .replace(/\s+[\-_ ]*\(?copy\)?\s*$/i, "")
+    .replace(/\s+\(\d+\)\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function removeLookupNoise(value: string) {
+  return value
+    .replace(/^\s*\d{1,3}\s*[.\-_ ]+\s*/, "")
+    .replace(
+      /\s*[\[(]\s*(official\s+)?(music\s+)?video\s*[\])]\s*/gi,
+      " "
+    )
+    .replace(/\s*[\[(]\s*(official\s+)?audio\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*lyrics?\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*lyric\s+video\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*visuali[sz]er\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*audio\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*hd\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*4k\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*explicit\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*clean\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*remaster(?:ed)?(?:\s+\d{4})?\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*\d{4}\s+remaster(?:ed)?\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*radio\s+edit\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*single\s+version\s*[\])]\s*/gi, " ")
+    .replace(/\s*[\[(]\s*album\s+version\s*[\])]\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksGeneric(value: string) {
+  return /^(track|audio|song|untitled)(\s*\d+)?$/i.test(value.trim());
+}
+
+function splitArtistTitle(value: string) {
+  const cleaned = removeLookupNoise(value);
+  const separators = [" - ", " – ", " — ", " | "];
+
+  for (const separator of separators) {
+    const index = cleaned.indexOf(separator);
+    if (index <= 0) continue;
+
+    const left = cleaned.slice(0, index).trim();
+    const right = cleaned.slice(index + separator.length).trim();
+
+    if (left && right) return { left, right };
+  }
+
+  return null;
 }
 
 function tokenScore(left: string, right: string) {
@@ -64,7 +150,9 @@ function tokenScore(left: string, right: string) {
   if (!a.size || !b.size) return 0;
 
   let intersection = 0;
-  for (const token of a) if (b.has(token)) intersection += 1;
+  for (const token of a) {
+    if (b.has(token)) intersection += 1;
+  }
 
   const union = new Set([...a, ...b]).size;
   return union ? intersection / union : 0;
@@ -75,45 +163,126 @@ function textScore(left: string, right: string) {
   const b = normalize(right);
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.88;
-  return tokenScore(a, b);
+
+  const token = tokenScore(a, b);
+  const contains = a.includes(b) || b.includes(a);
+
+  if (contains && token >= 0.75) return 0.94;
+  if (contains) return Math.max(0.84, token);
+  return token;
 }
 
-function durationScore(trackSeconds: number | null, candidateSeconds: number | null) {
-  if (!trackSeconds || !candidateSeconds) return 0.72;
+function durationScore(
+  trackSeconds: number | null,
+  candidateSeconds: number | null
+) {
+  if (!trackSeconds || !candidateSeconds) return 0.7;
+
   const difference = Math.abs(trackSeconds - candidateSeconds);
   if (difference <= 2) return 1;
   if (difference <= 5) return 0.98;
-  if (difference <= 10) return 0.91;
-  if (difference <= 15) return 0.80;
-  if (difference <= 25) return 0.58;
-  return 0.18;
+  if (difference <= 8) return 0.94;
+  if (difference <= 12) return 0.86;
+  if (difference <= 18) return 0.72;
+  if (difference <= 25) return 0.54;
+  if (difference <= 40) return 0.28;
+  return 0.08;
 }
 
 export function cleanMusicLookupTitle(
   track: Pick<MusicTrack, "title" | "original_name">
 ) {
-  const originalStem = track.original_name
-    .replace(/\.[^.]+$/, "")
-    .replace(/[_]+/g, " ")
-    .replace(/^\s*\d{1,3}\s*[.\-_ ]+\s*/, "")
-    .replace(/^\s*\d{1,3}\s*-\s*/, "")
-    .replace(/\s+[\-_ ]*\(?copy\)?\s*$/i, "")
-    .replace(/\s+\(\d+\)\s*$/, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const originalStem = removeLookupNoise(filenameStem(track.original_name || ""));
+  const current = removeLookupNoise(track.title || "");
 
-  const current = track.title
-    .replace(/^\s*\d{1,3}\s*[.\-_ ]+\s*/, "")
-    .replace(/\s+\(\d+\)\s*$/, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  if (!current || looksGeneric(current)) {
+    const split = splitArtistTitle(originalStem);
+    return split?.right || originalStem || current || track.title;
+  }
 
-  const currentLooksGeneric =
-    !current ||
-    /^(track|audio|song|untitled)(\s*\d+)?$/i.test(current);
+  const splitCurrent = splitArtistTitle(current);
+  if (splitCurrent) return splitCurrent.right;
 
-  return (currentLooksGeneric ? originalStem : current) || originalStem || track.title;
+  return current || originalStem || track.title;
+}
+
+function buildLookupSignals(track: MusicTrack): LookupSignals {
+  const rawTitle = removeLookupNoise(track.title || "");
+  const stem = removeLookupNoise(filenameStem(track.original_name || ""));
+  const knownArtist =
+    track.artist && !/unknown artist/i.test(track.artist)
+      ? removeLookupNoise(track.artist)
+      : null;
+
+  const titleVariants: string[] = [];
+  const artistVariants: string[] = [];
+
+  if (rawTitle && !looksGeneric(rawTitle)) titleVariants.push(rawTitle);
+  if (stem && !looksGeneric(stem)) titleVariants.push(stem);
+  if (knownArtist) artistVariants.push(knownArtist);
+
+  const titleSplit = splitArtistTitle(rawTitle);
+  const fileSplit = splitArtistTitle(stem);
+
+  const addSplit = (split: { left: string; right: string } | null) => {
+    if (!split) return;
+
+    if (knownArtist) {
+      const leftArtistScore = textScore(split.left, knownArtist);
+      const rightArtistScore = textScore(split.right, knownArtist);
+
+      if (leftArtistScore >= rightArtistScore && leftArtistScore >= 0.62) {
+        titleVariants.push(split.right);
+        artistVariants.push(split.left);
+        return;
+      }
+
+      if (rightArtistScore > leftArtistScore && rightArtistScore >= 0.62) {
+        titleVariants.push(split.left);
+        artistVariants.push(split.right);
+        return;
+      }
+    }
+
+    // With no reliable artist tag, "Artist - Title" is the most common import
+    // filename pattern. Search both directions, but prefer the right side as title.
+    titleVariants.push(split.right, split.left);
+    artistVariants.push(split.left);
+  };
+
+  addSplit(titleSplit);
+  addSplit(fileSplit);
+
+  if (knownArtist) {
+    for (const title of [...titleVariants]) {
+      const artistPrefix = new RegExp(
+        `^${knownArtist.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[-–—|:]\\s*`,
+        "i"
+      );
+      titleVariants.push(title.replace(artistPrefix, "").trim());
+    }
+  }
+
+  const titles = uniqueUseful(titleVariants)
+    .map(removeLookupNoise)
+    .filter((value) => value.length >= 2);
+
+  const artists = uniqueUseful(artistVariants)
+    .map(removeLookupNoise)
+    .filter((value) => value.length >= 2);
+
+  const primaryTitle =
+    titles.find((value) => !splitArtistTitle(value)) ||
+    cleanMusicLookupTitle(track) ||
+    titles[0] ||
+    track.title;
+
+  return {
+    primaryTitle,
+    titleVariants: uniqueUseful([primaryTitle, ...titles]).slice(0, 6),
+    artistVariants: uniqueUseful(artists).slice(0, 4),
+    knownArtist,
+  };
 }
 
 function artwork600(url?: string) {
@@ -129,69 +298,81 @@ function yearFromDate(value?: string) {
   return match ? Number(match[0]) : null;
 }
 
+function bestTextScore(values: string[], candidate: string) {
+  if (!values.length) return 0;
+  return Math.max(...values.map((value) => textScore(value, candidate)));
+}
+
+function exactAgainst(values: string[], candidate: string) {
+  const target = normalize(candidate);
+  return values.some((value) => normalize(value) === target);
+}
+
 function scoreCandidate(
   track: MusicTrack,
+  signals: LookupSignals,
   candidate: Omit<MusicMetadataCandidate, "confidence">
 ) {
-  const lookupTitle = cleanMusicLookupTitle(track);
-  const titleExact = normalize(lookupTitle) === normalize(candidate.title);
-  const titleSimilarity = textScore(lookupTitle, candidate.title);
+  const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
+  const titleExact = exactAgainst(signals.titleVariants, candidate.title);
 
-  const artistKnown = Boolean(
-    track.artist && !/unknown artist/i.test(track.artist)
-  );
-  const artistExact =
-    artistKnown && normalize(track.artist || "") === normalize(candidate.artist);
-  const artistSimilarity = artistKnown
-    ? textScore(track.artist || "", candidate.artist)
-    : 0.74;
+  const artistKnown = Boolean(signals.knownArtist);
+  const artistSimilarity = signals.artistVariants.length
+    ? bestTextScore(signals.artistVariants, candidate.artist)
+    : 0.72;
+  const artistExact = signals.artistVariants.length
+    ? exactAgainst(signals.artistVariants, candidate.artist)
+    : false;
 
-  const albumKnown = Boolean(track.album);
-  const albumSimilarity = albumKnown
-    ? textScore(track.album || "", candidate.album)
-    : 0.68;
+  const albumSimilarity = track.album
+    ? textScore(track.album, candidate.album)
+    : 0.66;
 
   const duration = durationScore(
     track.duration_seconds,
     candidate.durationSeconds
   );
 
-  // Exact title + exact artist is the dominant signal. This prevents popular
-  // songs by the same artist from crowding out the song the library already named.
   if (titleExact && artistExact) {
-    return Math.min(1, 0.965 + duration * 0.035);
+    return Math.min(1, 0.972 + duration * 0.028);
   }
 
-  // Exact title with a very strong artist match is still excellent.
-  if (titleExact && artistSimilarity >= 0.9) {
-    return Math.min(0.96, 0.89 + artistSimilarity * 0.045 + duration * 0.025);
+  if (titleExact && artistKnown && artistSimilarity >= 0.9) {
+    return Math.min(0.972, 0.91 + artistSimilarity * 0.035 + duration * 0.027);
   }
 
-  // If the artist is unknown, an exact title plus close duration is useful,
-  // but stays below exact artist/title matches so review remains conservative.
   if (titleExact && !artistKnown) {
-    return Math.min(0.93, 0.83 + duration * 0.10);
+    // Exact title is meaningful, but without a verified artist it remains
+    // conservative unless duration also agrees.
+    return Math.min(0.944, 0.835 + duration * 0.105);
   }
 
-  // Strong fuzzy title + exact artist.
-  if (artistExact && titleSimilarity >= 0.78) {
+  if (artistExact && titleSimilarity >= 0.82) {
     return Math.min(
-      0.89,
-      titleSimilarity * 0.68 + duration * 0.17 + albumSimilarity * 0.04
+      0.92,
+      titleSimilarity * 0.7 + duration * 0.16 + albumSimilarity * 0.04
     );
   }
 
-  // General fallback. Same-artist / wrong-title results intentionally remain low.
   let score =
-    titleSimilarity * 0.66 +
-    artistSimilarity * 0.19 +
-    duration * 0.10 +
-    albumSimilarity * 0.05;
+    titleSimilarity * 0.7 +
+    artistSimilarity * 0.17 +
+    duration * 0.09 +
+    albumSimilarity * 0.04;
 
-  if (artistExact && titleSimilarity < 0.45) score *= 0.72;
-  if (titleSimilarity < 0.25) score *= 0.72;
+  // Strongly punish "same artist, wrong song". This was the most damaging
+  // failure mode in the previous matcher.
+  if (artistExact && titleSimilarity < 0.5) score *= 0.56;
+  if (titleSimilarity < 0.4) score *= 0.55;
+  if (titleSimilarity < 0.25) score *= 0.55;
 
-  return Math.max(0, Math.min(0.84, score));
+  // If a filename/title split produced a very strong title match, keep it
+  // competitive even when the imported artist field was blank.
+  if (!artistKnown && titleSimilarity >= 0.9 && duration >= 0.72) {
+    score = Math.max(score, 0.82 + duration * 0.08);
+  }
+
+  return Math.max(0, Math.min(0.9, score));
 }
 
 async function searchItunes(
@@ -199,15 +380,17 @@ async function searchItunes(
   attribute: SearchAttribute = null,
   limit = 50
 ) {
-  const cacheKey = `${attribute || "all"}:${normalize(term)}:${limit}`;
+  const cleanTerm = term.replace(/\s+/g, " ").trim();
+  const cacheKey = `${attribute || "all"}:${normalize(cleanTerm)}:${limit}`;
   const cached = LOOKUP_CACHE.get(cacheKey);
   if (cached) return cached;
 
   const params = new URLSearchParams({
     entity: "song",
     limit: String(limit),
-    term,
+    term: cleanTerm,
   });
+
   if (attribute) params.set("attribute", attribute);
 
   const response = await fetch(
@@ -225,7 +408,8 @@ async function searchItunes(
     .filter((item) => item.trackName && item.artistName)
     .map((item) => ({
       sourceId: String(
-        item.trackId || `${item.artistName}-${item.trackName}-${item.collectionName || ""}`
+        item.trackId ||
+          `${item.artistName}-${item.trackName}-${item.collectionName || ""}`
       ),
       title: item.trackName || "",
       artist: item.artistName || "",
@@ -244,36 +428,66 @@ async function searchItunes(
 }
 
 export async function findMusicMetadataCandidates(track: MusicTrack) {
-  const title = cleanMusicLookupTitle(track);
-  const artistKnown = Boolean(
-    track.artist && !/unknown artist/i.test(track.artist)
-  );
+  const signals = buildLookupSignals(track);
 
-  // Search in tiers instead of stopping after the first handful of generic results.
-  // 1. Exact song-title field search
-  // 2. Artist + title broad search
-  // 3. Title broad search
-  // 4. Artist field fallback, only when artist is known
   const searchPlan: Array<{
     term: string;
     attribute: SearchAttribute;
     limit: number;
-  }> = [
-    { term: title, attribute: "songTerm", limit: 50 },
-    ...(artistKnown
-      ? [{ term: `${track.artist} ${title}`, attribute: null as SearchAttribute, limit: 50 }]
-      : []),
-    { term: title, attribute: null, limit: 50 },
-    ...(artistKnown
-      ? [{ term: track.artist || "", attribute: "artistTerm" as SearchAttribute, limit: 25 }]
-      : []),
-  ];
+  }> = [];
+
+  const addSearch = (
+    term: string,
+    attribute: SearchAttribute = null,
+    limit = 50
+  ) => {
+    const clean = term.replace(/\s+/g, " ").trim();
+    if (!clean) return;
+
+    const key = `${attribute || "all"}:${normalize(clean)}`;
+    if (
+      searchPlan.some(
+        (item) =>
+          `${item.attribute || "all"}:${normalize(item.term)}` === key
+      )
+    ) {
+      return;
+    }
+
+    searchPlan.push({ term: clean, attribute, limit });
+  };
+
+  // Search title as a song first. iTunes' songTerm index is far less likely
+  // to return a popular but unrelated song by the same artist.
+  for (const title of signals.titleVariants.slice(0, 4)) {
+    addSearch(title, "songTerm", 60);
+  }
+
+  // Artist + title is excellent when either embedded tags or filename parsing
+  // supplied an artist.
+  for (const artist of signals.artistVariants.slice(0, 2)) {
+    for (const title of signals.titleVariants.slice(0, 3)) {
+      addSearch(`${artist} ${title}`, null, 60);
+    }
+  }
+
+  // Broad title search catches punctuation, catalog naming, and alternate
+  // release formatting that songTerm occasionally misses.
+  for (const title of signals.titleVariants.slice(0, 3)) {
+    addSearch(title, null, 60);
+  }
+
+  // Last-resort artist query is intentionally last because artist-only results
+  // used to crowd out the correct title.
+  if (signals.knownArtist) {
+    addSearch(signals.knownArtist, "artistTerm", 35);
+  }
 
   const combined = new Map<string, MusicMetadataCandidate>();
 
-  for (const request of searchPlan) {
-    if (!request.term.trim()) continue;
-
+  // Keep the request count bounded even when a messy filename generated many
+  // useful variants.
+  for (const request of searchPlan.slice(0, 10)) {
     const rows = await searchItunes(
       request.term,
       request.attribute,
@@ -283,55 +497,76 @@ export async function findMusicMetadataCandidates(track: MusicTrack) {
     for (const row of rows) {
       const scored: MusicMetadataCandidate = {
         ...row,
-        confidence: scoreCandidate(track, row),
+        confidence: scoreCandidate(track, signals, row),
       };
-      const previous = combined.get(scored.sourceId);
+
+      const dedupeKey = row.sourceId
+        ? `id:${row.sourceId}`
+        : `${normalize(row.artist)}|${normalize(row.title)}|${normalize(row.album)}`;
+
+      const previous = combined.get(dedupeKey);
       if (!previous || scored.confidence > previous.confidence) {
-        combined.set(scored.sourceId, scored);
+        combined.set(dedupeKey, scored);
       }
     }
   }
 
   const ranked = [...combined.values()]
     .sort((left, right) => {
-      const leftExact =
-        normalize(left.title) === normalize(title) &&
-        (!artistKnown ||
-          normalize(left.artist) === normalize(track.artist || ""));
-      const rightExact =
-        normalize(right.title) === normalize(title) &&
-        (!artistKnown ||
-          normalize(right.artist) === normalize(track.artist || ""));
+      const leftTitleExact = exactAgainst(
+        signals.titleVariants,
+        left.title
+      );
+      const rightTitleExact = exactAgainst(
+        signals.titleVariants,
+        right.title
+      );
 
-      if (leftExact !== rightExact) return leftExact ? -1 : 1;
+      const leftArtistExact = signals.artistVariants.length
+        ? exactAgainst(signals.artistVariants, left.artist)
+        : false;
+      const rightArtistExact = signals.artistVariants.length
+        ? exactAgainst(signals.artistVariants, right.artist)
+        : false;
+
+      const leftPerfect = leftTitleExact && leftArtistExact;
+      const rightPerfect = rightTitleExact && rightArtistExact;
+
+      if (leftPerfect !== rightPerfect) return leftPerfect ? -1 : 1;
+      if (leftTitleExact !== rightTitleExact) return leftTitleExact ? -1 : 1;
+
       if (right.confidence !== left.confidence) {
         return right.confidence - left.confidence;
       }
 
-      return (
-        Math.abs((track.duration_seconds || 0) - (left.durationSeconds || 0)) -
-        Math.abs((track.duration_seconds || 0) - (right.durationSeconds || 0))
+      const trackDuration = track.duration_seconds || 0;
+      const leftDifference = Math.abs(
+        trackDuration - (left.durationSeconds || trackDuration)
       );
+      const rightDifference = Math.abs(
+        trackDuration - (right.durationSeconds || trackDuration)
+      );
+      return leftDifference - rightDifference;
     })
-    .filter((candidate, index) => candidate.confidence >= 0.24 || index < 3);
+    .filter((candidate, index) => candidate.confidence >= 0.2 || index < 5);
 
-  return ranked.slice(0, 8);
+  // Twelve review choices is still compact in the new scrollable result panel,
+  // but gives obscure/older recordings a much better chance of appearing.
+  return ranked.slice(0, 12);
 }
 
 export function musicMatchTier(confidence: number) {
   if (confidence >= 0.95) return "EXACT MATCH";
-  if (confidence >= 0.85) return "STRONG MATCH";
-  if (confidence >= 0.60) return "POSSIBLE MATCH";
+  if (confidence >= 0.84) return "STRONG MATCH";
+  if (confidence >= 0.62) return "POSSIBLE MATCH";
   return "WEAK MATCH";
 }
 
 export function needsMusicMetadata(track: MusicTrack) {
-  const missingArtist = !track.artist || /unknown artist/i.test(track.artist);
+  const missingArtist =
+    !track.artist || /unknown artist/i.test(track.artist);
   const missingAlbum = !track.album;
-  const genericTitle = /^(track|audio|song|untitled)(\s*\d+)?$/i.test(
-    track.title.trim()
-  );
-
+  const genericTitle = looksGeneric(track.title);
   return missingArtist || missingAlbum || genericTitle;
 }
 
@@ -351,13 +586,17 @@ export async function applyMusicMetadataCandidate(
     release_year: candidate.releaseYear,
     genre: candidate.genre,
     metadata_status: status,
-    metadata_confidence: status === "manual" ? 1 : candidate.confidence,
+    metadata_confidence:
+      status === "manual" ? 1 : candidate.confidence,
     metadata_source: candidate.source,
     metadata_updated_at: new Date().toISOString(),
   });
 
   if (candidate.artworkUrl && needsMusicArtwork(updated)) {
-    updated = await uploadRemoteMusicArtwork(updated, candidate.artworkUrl);
+    updated = await uploadRemoteMusicArtwork(
+      updated,
+      candidate.artworkUrl
+    );
   }
 
   return updated;
@@ -365,13 +604,14 @@ export async function applyMusicMetadataCandidate(
 
 export async function enrichMusicTrack(
   track: MusicTrack,
-  options?: { artworkOnly?: boolean; autoApplyThreshold?: number }
+  options?: {
+    artworkOnly?: boolean;
+    autoApplyThreshold?: number;
+  }
 ): Promise<MusicEnrichmentResult> {
   const candidates = await findMusicMetadataCandidates(track);
   const candidate = candidates[0] || null;
-
-  // Only very strong matches auto-apply. Everything else is kept for review.
-  const threshold = options?.autoApplyThreshold ?? 0.95;
+  const threshold = options?.autoApplyThreshold ?? 0.955;
 
   if (!candidate) {
     return {
@@ -384,7 +624,10 @@ export async function enrichMusicTrack(
   }
 
   if (options?.artworkOnly) {
-    if (candidate.artworkUrl && candidate.confidence >= 0.78) {
+    if (
+      candidate.artworkUrl &&
+      candidate.confidence >= 0.76
+    ) {
       const updated = await uploadRemoteMusicArtwork(
         track,
         candidate.artworkUrl
@@ -393,12 +636,15 @@ export async function enrichMusicTrack(
       return {
         track: updated,
         status:
-          candidate.confidence >= threshold ? "matched" : "review",
+          candidate.confidence >= threshold
+            ? "matched"
+            : "review",
         candidate,
         candidates,
         changed:
           updated.artwork_path !== track.artwork_path ||
-          updated.external_artwork_url !== track.external_artwork_url,
+          updated.external_artwork_url !==
+            track.external_artwork_url,
       };
     }
 
@@ -443,7 +689,7 @@ export async function enrichMusicTrack(
   };
 }
 
-export async function delayMusicLookup(milliseconds = 275) {
+export async function delayMusicLookup(milliseconds = 225) {
   await new Promise<void>((resolve) =>
     window.setTimeout(resolve, milliseconds)
   );
