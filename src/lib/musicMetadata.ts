@@ -65,8 +65,8 @@ const LOOKUP_CACHE = new Map<
   Omit<MusicMetadataCandidate, "confidence">[]
 >();
 
-const LOOKUP_MIN_GAP_MS = 700;
-const LOOKUP_RETRY_DELAYS_MS = [1400, 2800, 4800];
+const LOOKUP_MIN_GAP_MS = 3300;
+const LOOKUP_RETRY_DELAYS_MS = [5000, 8000, 12000];
 let lastLookupRequestAt = 0;
 let lookupGate: Promise<void> = Promise.resolve();
 
@@ -395,9 +395,9 @@ function scoreCandidate(
 
   // Strongly punish "same artist, wrong song". This was the most damaging
   // failure mode in the previous matcher.
-  if (artistExact && titleSimilarity < 0.5) score *= 0.56;
-  if (titleSimilarity < 0.4) score *= 0.55;
-  if (titleSimilarity < 0.25) score *= 0.55;
+  if (artistExact && titleSimilarity < 0.72) score *= 0.18;
+  if (titleSimilarity < 0.5) score *= 0.32;
+  if (titleSimilarity < 0.3) score *= 0.22;
 
   // If a filename/title split produced a very strong title match, keep it
   // competitive even when the imported artist field was blank.
@@ -411,7 +411,7 @@ function scoreCandidate(
 async function searchItunes(
   term: string,
   attribute: SearchAttribute = null,
-  limit = 40,
+  limit = 25,
   options?: LookupOptions
 ) {
   const cleanTerm = term.replace(/\s+/g, " ").trim();
@@ -524,7 +524,7 @@ export async function findMusicMetadataCandidates(
     limit: number;
   }> = [];
 
-  const addSearch = (term: string, attribute: SearchAttribute = null, limit = 40) => {
+  const addSearch = (term: string, attribute: SearchAttribute = null, limit = 25) => {
     const clean = term.replace(/\s+/g, " ").trim();
     if (!clean) return;
     const key = `${attribute || "all"}:${normalize(clean)}`;
@@ -536,13 +536,13 @@ export async function findMusicMetadataCandidates(
   // artist + title query is first, followed by the song-title index. One broad
   // fallback is used only if needed. This prevents library scans from creating
   // the request burst that previously triggered 403 responses.
-  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 40);
-  addSearch(primaryTitle, "songTerm", 40);
+  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 25);
+  addSearch(primaryTitle, "songTerm", 25);
   if (secondaryTitle) {
-    if (bestArtist) addSearch(`${bestArtist} ${secondaryTitle}`, null, 30);
-    else addSearch(secondaryTitle, "songTerm", 30);
+    if (bestArtist) addSearch(`${bestArtist} ${secondaryTitle}`, null, 20);
+    else addSearch(secondaryTitle, "songTerm", 20);
   } else {
-    addSearch(primaryTitle, null, 30);
+    addSearch(primaryTitle, null, 20);
   }
 
   const addRows = (rows: Omit<MusicMetadataCandidate, "confidence">[]) => {
@@ -577,7 +577,7 @@ export async function findMusicMetadataCandidates(
       exactAgainst(signals.titleVariants, candidate.title) &&
       signals.artistVariants.length > 0 &&
       exactAgainst(signals.artistVariants, candidate.artist) &&
-      candidate.confidence >= 0.985
+      candidate.confidence >= 0.95
     );
 
     if (perfect) break;
@@ -586,14 +586,22 @@ export async function findMusicMetadataCandidates(
   let filtered = [...combined.values()].filter((candidate) => {
     const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
     const titleExact = exactAgainst(signals.titleVariants, candidate.title);
-    if (titleExact) return true;
 
     if (signals.artistVariants.length) {
       const artistSimilarity = bestTextScore(signals.artistVariants, candidate.artist);
-      return (titleSimilarity >= 0.72 && artistSimilarity >= 0.78) || titleSimilarity >= 0.88;
+      const artistExact = exactAgainst(signals.artistVariants, candidate.artist);
+
+      // Known artist: a wrong title is never allowed to float to the top merely
+      // because the artist matches. Exact titles may tolerate minor artist-credit
+      // differences (feat., punctuation, etc.), while fuzzy titles require both
+      // sides to be very strong.
+      if (titleExact) return artistExact || artistSimilarity >= 0.82;
+      return titleSimilarity >= 0.86 && artistSimilarity >= 0.86;
     }
 
-    return titleSimilarity >= 0.72;
+    // Unknown artist: the title and duration have to do the heavy lifting.
+    // Loose partial-title catalog results are intentionally discarded.
+    return titleExact || titleSimilarity >= 0.86;
   });
 
   // Once the catalog contains the exact requested title, do not clutter the
@@ -700,7 +708,7 @@ export async function enrichMusicTrack(
     onRetry: options?.onLookupRetry,
   });
   const candidate = candidates[0] || null;
-  const threshold = options?.autoApplyThreshold ?? 0.98;
+  const threshold = options?.autoApplyThreshold ?? 0.985;
 
   if (!candidate) {
     return {
