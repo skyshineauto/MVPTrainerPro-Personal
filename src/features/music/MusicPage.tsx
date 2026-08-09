@@ -696,7 +696,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <header><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr10-analysisCounter"><strong>{enrichment.current}</strong><span>OF {enrichment.total}</span></div></header>
         <div className="tr10-analysisProgress"><i style={{ transform: `scaleX(${enrichment.total ? enrichment.current / enrichment.total : 0})` }} /></div>
         <div className="tr10-analysisStats"><div><span>MATCHED</span><strong>{enrichment.matched}</strong></div><div><span>REVIEW</span><strong>{enrichment.review}</strong></div><div><span>NOT FOUND</span><strong>{enrichment.notFound}</strong></div></div>
-        <div className="tr10-analysisSweep"><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        <div className="tr10-analysisCurrent"><span>CURRENT TRACK</span><strong>{enrichment.label.replace(/^(ANALYZING|FINDING ART)\s*•\s*/i, "")}</strong><small>{enrichment.serviceMessage}</small></div>
         <footer><span>EXISTING ARTWORK PROTECTED</span><small>Exact title, artist, filename and duration are checked before anything is saved.</small></footer>
       </section></div> : null}
 
@@ -752,6 +752,477 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-analysisBack{z-index:7600}.tr10-analysisModal{width:min(610px,100%);overflow:hidden;border:1px solid rgba(72,202,245,.38);border-radius:16px;background:linear-gradient(180deg,#0b202a,#050d12);box-shadow:0 30px 90px rgba(0,0,0,.72),inset 0 1px rgba(255,255,255,.025)}.tr10-analysisModal>header{padding:17px 18px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:15px;border-bottom:1px solid rgba(82,157,184,.12);background:linear-gradient(180deg,rgba(11,39,51,.96),rgba(7,23,31,.96))}.tr10-analysisModal>header span{color:#59d5f7;font-size:7px;font-weight:1000;letter-spacing:.14em}.tr10-analysisModal>header h2{margin:5px 0 3px;font-size:20px}.tr10-analysisModal>header p{margin:0;color:#79919b;font-size:8px}.tr10-analysisCounter{min-width:72px;padding:8px 10px;display:grid;justify-items:center;border:1px solid rgba(75,190,229,.16);border-radius:9px;background:rgba(0,0,0,.18)}.tr10-analysisCounter strong{font-size:21px;line-height:1;color:#e7f8fd;font-variant-numeric:tabular-nums}.tr10-analysisCounter span{margin-top:3px;color:#66828d!important;font-size:6px!important}.tr10-analysisProgress{height:4px;background:rgba(75,158,188,.08);overflow:hidden}.tr10-analysisProgress i{display:block;width:100%;height:100%;transform-origin:left;background:linear-gradient(90deg,#2db8df,#6fe5ff);box-shadow:0 0 9px rgba(65,210,249,.3);transition:transform .25s ease}.tr10-analysisStats{padding:13px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tr10-analysisStats>div{min-height:59px;display:grid;place-content:center;text-align:center;border:1px solid rgba(76,151,178,.11);border-radius:8px;background:rgba(4,13,18,.7)}.tr10-analysisStats span{color:#627d88;font-size:6px;font-weight:1000;letter-spacing:.1em}.tr10-analysisStats strong{margin-top:3px;color:#d9edf4;font-size:18px;font-variant-numeric:tabular-nums}.tr10-analysisStats>div:nth-child(1) strong{color:#72e0aa}.tr10-analysisStats>div:nth-child(2) strong{color:#76dbf4}.tr10-analysisStats>div:nth-child(3) strong{color:#e9b16a}.tr10-analysisSweep{height:66px;padding:10px 18px 11px;display:grid;grid-template-columns:repeat(10,1fr);gap:5px;align-items:end;border-top:1px solid rgba(75,145,170,.07);border-bottom:1px solid rgba(75,145,170,.07);background:repeating-linear-gradient(0deg,transparent 0,transparent 9px,rgba(78,158,187,.035) 10px)}.tr10-analysisSweep i{height:54%;border-radius:2px 2px 0 0;background:linear-gradient(180deg,#70e2ff,#29afd4);opacity:.35;animation:tr10Analyze 1.05s ease-in-out infinite alternate}.tr10-analysisSweep i:nth-child(2){animation-delay:.08s;height:78%}.tr10-analysisSweep i:nth-child(3){animation-delay:.16s;height:62%}.tr10-analysisSweep i:nth-child(4){animation-delay:.24s;height:88%}.tr10-analysisSweep i:nth-child(5){animation-delay:.32s;height:70%}.tr10-analysisSweep i:nth-child(6){animation-delay:.4s;height:82%}.tr10-analysisSweep i:nth-child(7){animation-delay:.48s;height:58%}.tr10-analysisSweep i:nth-child(8){animation-delay:.56s;height:72%}.tr10-analysisSweep i:nth-child(9){animation-delay:.64s;height:48%}.tr10-analysisSweep i:nth-child(10){animation-delay:.72s;height:63%}@keyframes tr10Analyze{from{transform:scaleY(.32);opacity:.25}to{transform:scaleY(1);opacity:.82}}.tr10-analysisModal>footer{padding:12px 16px 14px;display:grid;gap:3px}.tr10-analysisModal>footer span{color:#75dca9;font-size:7px;font-weight:1000;letter-spacing:.11em}.tr10-analysisModal>footer small{color:#69818b;font-size:7px}.tr10-reviewModal{width:min(850px,100%);display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto}.tr10-reviewHeader h2{margin:4px 0 2px}.tr10-reviewHeader p{margin:0;color:#738a94;font-size:8px}.tr10-reviewProgress{position:relative;padding:10px 13px;border-bottom:1px solid rgba(80,151,177,.1);overflow:hidden}.tr10-reviewProgress>div{display:flex;justify-content:space-between;gap:12px;color:#7d99a3;font-size:7px}.tr10-reviewProgress strong{color:#d8edf4}.tr10-reviewProgress>i{position:absolute;left:0;right:0;bottom:0;height:2px;transform-origin:left;background:#4dd7f8}.tr10-reviewInstruction{padding:10px 13px;border-bottom:1px solid rgba(80,151,177,.08);background:#061219}.tr10-reviewInstruction span{font-size:7px;font-weight:1000;color:#6edbf7}.tr10-reviewInstruction p{margin:4px 0 0;color:#7b929c;font-size:8px}.tr10-reviewModal .tr10-candidates{max-height:none;min-height:0}.tr10-picker{width:min(520px,100%)}.tr10-picker>div{max-height:330px;overflow:auto;padding:9px}.tr10-picker>div>label{min-height:52px;display:grid;grid-template-columns:28px 1fr;align-items:center;padding:8px;border-bottom:1px solid rgba(80,145,169,.08)}.tr10-picker>div strong{display:block;font-size:9px}.tr10-picker>div small{font-size:7px;color:#677f89}.tr10-newRoute{display:grid;gap:5px;padding:10px 13px}.tr10-newRoute span{font-size:6px;font-weight:1000;color:#617b85}.tr10-newRoute input{height:38px;padding:0 10px;border:1px solid rgba(75,151,178,.15);border-radius:8px;background:#06131a;color:#e8f5f9}
         @media(max-width:900px){.tr10-stats{grid-template-columns:repeat(3,1fr)}.tr10-tableHead,.tr10-row{grid-template-columns:28px minmax(0,1fr) 55px 100px}.tr10-tableHead span:last-child{display:none}.tr10-actions{grid-column:2/-1;justify-content:flex-start}.tr10-toolbar{grid-template-columns:1fr 1fr}.tr10-toolbar label:first-child{grid-column:1/-1}.tr10-playlistLayout{grid-template-columns:200px 1fr}.tr10-smart{grid-template-columns:1fr}}
         @media(max-width:650px){.tr10-page{width:calc(100% - 14px)}.tr10-hero{padding:18px;display:block}.tr10-hero h1{font-size:30px}.tr10-hero>button{margin-top:12px}.tr10-stats{grid-template-columns:1fr 1fr}.tr10-sectionHead{display:block}.tr10-headActions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr}.tr10-healthRail{grid-template-columns:repeat(5,minmax(112px,1fr));overflow-x:auto;padding-bottom:2px}.tr10-tabs{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.tr10-statusPanelHead small{display:none}.tr10-toolbar{grid-template-columns:1fr}.tr10-toolbar label:first-child{grid-column:auto}.tr10-bulk{display:block}.tr10-bulk>div{margin-top:8px;display:grid;grid-template-columns:1fr 1fr}.tr10-tableHead{display:none}.tr10-row{grid-template-columns:26px minmax(0,1fr);gap:8px;padding:10px 9px}.tr10-row>.tr10-duration,.tr10-row>.tr10-energy{grid-column:2}.tr10-actions{grid-column:2;display:grid;grid-template-columns:40px 40px repeat(4,1fr)}.tr10-trackCell{grid-template-columns:auto auto minmax(0,1fr)}.tr10-healthBadge{grid-column:3;justify-self:start}.tr10-energy{width:150px}.tr10-order{display:none!important}.tr10-cardGrid{grid-template-columns:1fr;padding:9px}.tr10-playlistLayout{grid-template-columns:1fr}.tr10-playlistLayout>aside{border-right:0;border-bottom:1px solid rgba(78,143,166,.1);display:flex;overflow-x:auto}.tr10-createPlaylist{min-width:190px}.tr10-playlistLayout>aside>button{min-width:145px}.tr10-playlistSongs article{grid-template-columns:23px auto minmax(0,1fr) auto}.tr10-playlistSongs article>button:nth-of-type(n+2){display:none}.tr10-inspector{height:calc(100dvh - 16px)}.tr10-modalBack{padding:8px}.tr10-inspectGrid{grid-template-columns:1fr;padding:10px}.tr10-meta{grid-template-columns:1fr 1fr;padding:0 10px 10px}.tr10-inspectCommands{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer .tr10-saveButton{grid-column:1/-1;grid-row:1}.tr10-detailLookupHead{display:block}.tr10-detailLookupHead>button{margin-bottom:8px}.tr10-detailCandidates>button,.tr10-candidates>button{grid-template-columns:52px minmax(0,1fr) 26px}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:52px;height:52px}.tr10-matchTier{grid-column:2;justify-self:start;text-align:left}.tr10-selectMark{grid-column:3;grid-row:1/3}.tr10-detailLookupFooter{display:grid;grid-template-columns:1fr 1fr}.tr10-detailLookupFooter>div{grid-column:1/-1}.tr10-reviewProgress>div{display:grid}.tr10-reviewDock{right:9px;bottom:80px}.tr10-smartBuild{padding:18px}}
+
+        /* FINAL PRO LIBRARY + RESPONSIVE PASS: preserve all current features */
+        .tr10-page{
+          padding-bottom:calc(92px + env(safe-area-inset-bottom,0px));
+        }
+
+        /* Library status is a dashboard filter rail, not a duplicate tab bar. */
+        .tr10-statusPanel{
+          padding:11px 12px 12px!important;
+          border-top:1px solid rgba(103,188,218,.08)!important;
+          border-bottom:1px solid rgba(103,188,218,.18)!important;
+          background:linear-gradient(180deg,#08151c,#050c10)!important;
+        }
+        .tr10-statusPanelHead{
+          margin:0 1px 8px!important;
+        }
+        .tr10-statusPanelHead span{
+          color:#9dc3d0!important;
+          font-size:7px!important;
+          font-weight:1000!important;
+          letter-spacing:.16em!important;
+        }
+        .tr10-statusPanelHead small{
+          color:#617d88!important;
+          font-size:6px!important;
+          letter-spacing:.1em!important;
+        }
+        .tr10-healthRail{
+          gap:7px!important;
+        }
+        .tr10-healthRail button{
+          height:38px!important;
+          padding:0 10px!important;
+          border-radius:7px!important;
+          border-color:rgba(99,175,202,.16)!important;
+          background:linear-gradient(180deg,#0a1921,#050d12)!important;
+          color:#9bb0b9!important;
+          font-size:7.5px!important;
+          letter-spacing:.07em!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.025)!important;
+        }
+        .tr10-healthRail button b{
+          min-width:25px!important;
+          height:22px!important;
+          border-radius:5px!important;
+          color:#d8e9ef!important;
+          font-size:7.5px!important;
+        }
+        .tr10-healthRail button.is-active{
+          border-color:rgba(72,207,247,.52)!important;
+          color:#f0fbff!important;
+          background:linear-gradient(180deg,#0b3444,#071c25)!important;
+          box-shadow:inset 0 -2px #44d1f7,inset 0 1px rgba(255,255,255,.04)!important;
+        }
+        .tr10-healthRail button.is-needs{
+          border-color:rgba(255,78,88,.30)!important;
+          color:#f1a9ae!important;
+        }
+        .tr10-healthRail button.is-needs.is-active{
+          border-color:rgba(255,78,88,.64)!important;
+          color:#ffe6e8!important;
+          background:linear-gradient(180deg,#5b171d,#2c0b0f)!important;
+          box-shadow:inset 0 -2px #ff5c66!important;
+        }
+
+        /* Main navigation reads as a separate premium navigation deck. */
+        .tr10-tabs{
+          gap:1px!important;
+          padding:5px!important;
+          border-top:1px solid rgba(255,255,255,.018)!important;
+          border-bottom:1px solid rgba(95,173,202,.14)!important;
+          background:#03090d!important;
+        }
+        .tr10-tabs button{
+          height:40px!important;
+          border:1px solid transparent!important;
+          border-radius:6px!important;
+          background:linear-gradient(180deg,rgba(10,22,29,.6),rgba(4,11,15,.55))!important;
+          color:#8199a3!important;
+          font-size:8.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.095em!important;
+          text-shadow:0 1px rgba(0,0,0,.9)!important;
+        }
+        .tr10-tabs button:hover{
+          color:#c5e1e9!important;
+          border-color:rgba(84,168,199,.12)!important;
+        }
+        .tr10-tabs button.is-active{
+          border-color:rgba(70,201,242,.28)!important;
+          color:#effbff!important;
+          background:linear-gradient(180deg,#0a2a36,#071821)!important;
+          box-shadow:inset 0 -2px #46d2f7,inset 0 1px rgba(255,255,255,.035)!important;
+        }
+
+        /* Hard geometry boundaries stop artwork from ever intruding into text. */
+        .tr10-tableHead,.tr10-row{
+          grid-template-columns:30px minmax(260px,1fr) 58px 94px minmax(330px,390px)!important;
+          gap:9px!important;
+        }
+        .tr10-trackCell{
+          position:relative!important;
+          min-width:0!important;
+          display:grid!important;
+          grid-template-columns:34px 36px minmax(0,1fr)!important;
+          grid-template-rows:auto auto!important;
+          column-gap:9px!important;
+          row-gap:3px!important;
+          align-items:center!important;
+          overflow:hidden!important;
+        }
+        .tr10-trackCell>.tr10-play{
+          grid-column:1!important;
+          grid-row:1/3!important;
+          width:34px!important;
+          height:34px!important;
+          min-width:34px!important;
+          align-self:center!important;
+        }
+        .tr10-trackCell>.tr10-art{
+          grid-column:2!important;
+          grid-row:1/3!important;
+          align-self:center!important;
+        }
+        .tr10-trackText{
+          position:relative!important;
+          z-index:1!important;
+          grid-column:3!important;
+          grid-row:1!important;
+          width:100%!important;
+          min-width:0!important;
+          overflow:hidden!important;
+        }
+        .tr10-trackText strong,.tr10-trackText span,.tr10-trackText small{
+          width:100%!important;
+          max-width:100%!important;
+          overflow:hidden!important;
+          text-overflow:ellipsis!important;
+          white-space:nowrap!important;
+        }
+        .tr10-art--row{
+          position:relative!important;
+          width:36px!important;
+          min-width:36px!important;
+          max-width:36px!important;
+          height:36px!important;
+          min-height:36px!important;
+          max-height:36px!important;
+          contain:paint!important;
+          isolation:isolate!important;
+        }
+        .tr10-art--row img{
+          position:absolute!important;
+          inset:0!important;
+          display:block!important;
+          width:100%!important;
+          height:100%!important;
+          max-width:100%!important;
+          max-height:100%!important;
+          object-fit:cover!important;
+        }
+        .tr10-trackCell>.tr10-healthBadge{
+          grid-column:3!important;
+          grid-row:2!important;
+          justify-self:start!important;
+          margin:0!important;
+          max-width:100%!important;
+        }
+
+        /* Compact premium hardware-style energy selector. */
+        .tr10-energy{
+          justify-self:start!important;
+          width:88px!important;
+          min-width:88px!important;
+          max-width:88px!important;
+          height:28px!important;
+          padding:0 6px!important;
+          grid-template-columns:7px minmax(0,1fr) 18px!important;
+          gap:6px!important;
+          border-radius:5px!important;
+          font-size:7px!important;
+          letter-spacing:.105em!important;
+          text-shadow:none!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.035),inset 0 -1px rgba(0,0,0,.8)!important;
+        }
+        .tr10-energy:after{left:6px!important;right:6px!important;top:3px!important}
+        .tr10-energy>.tr10-energyLed{
+          width:5px!important;
+          height:5px!important;
+          box-shadow:0 0 5px currentColor!important;
+        }
+        .tr10-energySegments{
+          width:18px!important;
+          height:12px!important;
+          padding:2px 3px!important;
+          gap:1px!important;
+          border-radius:3px!important;
+        }
+        .tr10-energySegments i{width:2px!important;box-shadow:none!important}
+        .tr10-energySegments i:nth-child(1){height:3px!important}
+        .tr10-energySegments i:nth-child(2){height:6px!important}
+        .tr10-energySegments i:nth-child(3){height:9px!important}
+
+        /* Real progress UI: no decorative analyzer/graph while scanning. */
+        .tr10-analysisModal{
+          width:min(620px,100%)!important;
+        }
+        .tr10-analysisProgress{
+          height:8px!important;
+          margin:0!important;
+          border-top:1px solid rgba(74,174,209,.08)!important;
+          border-bottom:1px solid rgba(0,0,0,.4)!important;
+          background:#031017!important;
+        }
+        .tr10-analysisProgress i{
+          background:linear-gradient(90deg,#29bce5,#73e5ff)!important;
+          box-shadow:0 0 12px rgba(68,208,247,.28)!important;
+        }
+        .tr10-analysisCurrent{
+          margin:0 16px 14px!important;
+          padding:13px 14px!important;
+          display:grid!important;
+          gap:3px!important;
+          border:1px solid rgba(86,171,201,.15)!important;
+          border-radius:9px!important;
+          background:linear-gradient(180deg,#07151c,#040c11)!important;
+        }
+        .tr10-analysisCurrent span{
+          color:#5ed6f5!important;
+          font-size:6.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.13em!important;
+        }
+        .tr10-analysisCurrent strong{
+          min-width:0!important;
+          overflow:hidden!important;
+          text-overflow:ellipsis!important;
+          white-space:nowrap!important;
+          color:#e7f6fb!important;
+          font-size:12px!important;
+        }
+        .tr10-analysisCurrent small{
+          min-width:0!important;
+          overflow:hidden!important;
+          text-overflow:ellipsis!important;
+          white-space:nowrap!important;
+          color:#718a94!important;
+          font-size:8px!important;
+        }
+        .tr10-analysisSweep{display:none!important}
+
+        /* Review results stay clean and foregrounded. */
+        .tr10-reviewModal{
+          max-height:calc(100dvh - 30px)!important;
+        }
+        .tr10-candidates{
+          min-height:0!important;
+          overflow:auto!important;
+          overscroll-behavior:contain!important;
+        }
+
+        @media(max-width:900px){
+          .tr10-tableHead,.tr10-row{
+            grid-template-columns:28px minmax(0,1fr) 54px 90px!important;
+          }
+          .tr10-actions{
+            grid-column:2/-1!important;
+          }
+        }
+
+        @media(max-width:650px){
+          .tr10-page{
+            width:calc(100% - 12px)!important;
+            margin-left:auto!important;
+            margin-right:auto!important;
+            padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))!important;
+          }
+          .tr10-hero{padding:15px!important}
+          .tr10-hero h1{font-size:27px!important}
+          .tr10-stats{gap:6px!important}
+          .tr10-stats>div{min-height:62px!important}
+
+          .tr10-statusPanel{padding:10px!important}
+          .tr10-statusPanelHead{margin-bottom:8px!important}
+          .tr10-statusPanelHead small{display:block!important;font-size:5.5px!important}
+          .tr10-healthRail{
+            grid-template-columns:1fr 1fr!important;
+            overflow:visible!important;
+            gap:6px!important;
+          }
+          .tr10-healthRail button{
+            width:100%!important;
+            min-width:0!important;
+            height:39px!important;
+            font-size:7.5px!important;
+          }
+          .tr10-healthRail button:first-child{
+            grid-column:1/-1!important;
+          }
+
+          .tr10-tabs{
+            display:flex!important;
+            gap:5px!important;
+            padding:6px!important;
+            overflow-x:auto!important;
+            overscroll-behavior-x:contain!important;
+            scroll-snap-type:x proximity!important;
+            scrollbar-width:none!important;
+          }
+          .tr10-tabs::-webkit-scrollbar{display:none!important}
+          .tr10-tabs button{
+            flex:0 0 116px!important;
+            min-width:116px!important;
+            height:42px!important;
+            font-size:8.5px!important;
+            scroll-snap-align:start!important;
+          }
+
+          .tr10-toolbar{
+            gap:7px!important;
+            padding:9px!important;
+          }
+          .tr10-toolbar input,.tr10-toolbar select{
+            height:42px!important;
+            font-size:9px!important;
+          }
+
+          /* Three compact mobile rows: song, time/energy, actions. */
+          .tr10-row{
+            min-height:0!important;
+            padding:10px 8px!important;
+            display:grid!important;
+            grid-template-columns:22px minmax(0,1fr)!important;
+            grid-template-rows:auto 30px 34px!important;
+            column-gap:8px!important;
+            row-gap:7px!important;
+            align-items:center!important;
+          }
+          .tr10-check{
+            grid-column:1!important;
+            grid-row:1/4!important;
+            align-self:start!important;
+            padding-top:10px!important;
+          }
+          .tr10-trackCell{
+            grid-column:2!important;
+            grid-row:1!important;
+            grid-template-columns:36px 38px minmax(0,1fr)!important;
+            grid-template-rows:auto auto!important;
+            gap:4px 8px!important;
+            overflow:hidden!important;
+          }
+          .tr10-trackCell>.tr10-play{
+            width:36px!important;
+            height:36px!important;
+            min-width:36px!important;
+          }
+          .tr10-art--row{
+            width:38px!important;
+            min-width:38px!important;
+            max-width:38px!important;
+            height:38px!important;
+            min-height:38px!important;
+            max-height:38px!important;
+          }
+          .tr10-trackText strong{font-size:11px!important}
+          .tr10-trackText span{font-size:7.5px!important}
+          .tr10-trackText small{font-size:6px!important}
+          .tr10-trackCell>.tr10-healthBadge{
+            padding:4px 7px!important;
+            font-size:5.5px!important;
+          }
+          .tr10-duration{
+            grid-column:2!important;
+            grid-row:2!important;
+            justify-self:start!important;
+            align-self:center!important;
+            margin:0!important;
+            font-size:8px!important;
+          }
+          .tr10-energy{
+            grid-column:2!important;
+            grid-row:2!important;
+            justify-self:end!important;
+            align-self:center!important;
+            width:82px!important;
+            min-width:82px!important;
+            max-width:82px!important;
+            height:26px!important;
+            font-size:6.5px!important;
+          }
+          .tr10-actions{
+            grid-column:2!important;
+            grid-row:3!important;
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:32px 32px repeat(4,minmax(0,1fr))!important;
+            gap:5px!important;
+            justify-content:stretch!important;
+          }
+          .tr10-actions button{
+            width:100%!important;
+            min-width:0!important;
+            height:32px!important;
+            padding:0 4px!important;
+            border-radius:6px!important;
+            font-size:5.7px!important;
+            line-height:1.05!important;
+            white-space:normal!important;
+          }
+          .tr10-actions button:nth-child(1),.tr10-actions button:nth-child(2){font-size:10px!important}
+          .tr10-order{display:none!important}
+
+          .tr10-analysisBack,.tr10-reviewBack{
+            padding:8px!important;
+            align-items:center!important;
+          }
+          .tr10-analysisModal,.tr10-reviewModal{
+            width:100%!important;
+            max-height:calc(100dvh - 16px)!important;
+            border-radius:13px!important;
+          }
+          .tr10-analysisModal>header{
+            padding:13px!important;
+            gap:9px!important;
+          }
+          .tr10-analysisModal>header h2{font-size:16px!important}
+          .tr10-analysisModal>header p{font-size:7px!important}
+          .tr10-analysisCounter{min-width:62px!important;padding:7px!important}
+          .tr10-analysisCounter strong{font-size:18px!important}
+          .tr10-analysisStats{padding:10px!important;gap:6px!important}
+          .tr10-analysisStats>div{min-height:52px!important}
+          .tr10-analysisCurrent{margin:0 10px 10px!important;padding:10px!important}
+          .tr10-analysisCurrent strong{font-size:10px!important}
+          .tr10-analysisModal>footer{padding:10px!important}
+
+          .tr10-reviewModal{
+            display:grid!important;
+            grid-template-rows:auto auto auto minmax(0,1fr) auto!important;
+          }
+          .tr10-reviewModal .tr10-candidates{
+            overflow:auto!important;
+            padding:7px!important;
+          }
+          .tr10-reviewModal>footer{
+            display:grid!important;
+            grid-template-columns:1fr 1fr!important;
+            gap:6px!important;
+            padding:9px!important;
+          }
+          .tr10-reviewModal>footer .is-primary{
+            grid-column:1/-1!important;
+          }
+          .tr10-detailCandidates>button,.tr10-candidates>button{
+            padding:8px!important;
+          }
+          .tr10-reviewDock{
+            right:8px!important;
+            left:8px!important;
+            bottom:calc(82px + env(safe-area-inset-bottom,0px))!important;
+            width:auto!important;
+            text-align:center!important;
+          }
+        }
+
+        @media(max-width:390px){
+          .tr10-actions{grid-template-columns:30px 30px repeat(2,minmax(0,1fr))!important;grid-auto-rows:31px!important}
+          .tr10-row{grid-template-rows:auto 28px auto!important}
+          .tr10-energy{width:78px!important;min-width:78px!important;max-width:78px!important}
+          .tr10-statusPanelHead small{display:none!important}
+        }
       `}</style>
     </main>
   );
