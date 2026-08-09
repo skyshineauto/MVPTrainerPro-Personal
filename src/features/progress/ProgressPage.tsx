@@ -870,6 +870,15 @@ export function ProgressPage() {
     [scopedHistory]
   );
   const volumeMax = Math.max(1, ...volumeRows.map((row) => row.volumeTotal));
+  const volumeSummary = useMemo(() => {
+    const rows = volumeRows.filter((row) => row.volumeTotal > 0);
+    const total = rows.reduce((sum, row) => sum + row.volumeTotal, 0);
+    const averageValue = rows.length ? total / rows.length : 0;
+    const latest = rows.at(-1)?.volumeTotal ?? 0;
+    const previous = rows.at(-2)?.volumeTotal ?? 0;
+    const change = previous > 0 ? ((latest - previous) / previous) * 100 : null;
+    return { total, average: averageValue, change };
+  }, [volumeRows]);
 
   async function deleteSession() {
     if (!deleting || deleteBusy) return;
@@ -999,9 +1008,10 @@ export function ProgressPage() {
 
       <section className="prx-panel">
         <header className="prx-sectionHead"><div><span>PROGRAM LOAD</span><h2>Workout Volume</h2></div><small>LAST {volumeRows.length || 0} IN THIS VIEW</small></header>
-        {loading ? <div className="prx-empty">Loading training data…</div> : volumeRows.some((row) => row.volumeTotal > 0) ? <div className="prx-volumeChart">
-          {volumeRows.map((row) => <div className="prx-volumeCol" key={row.id}><b>{row.volumeTotal ? formatNumber(row.volumeTotal) : "—"}</b><div><i style={{ height: `${Math.max(5, row.volumeTotal / volumeMax * 100)}%` }} /></div><strong>{row.templateName}</strong><small>{shortDate(row.completedAt)}</small></div>)}
-        </div> : <div className="prx-empty">Log weighted sets to build the volume trend for this program.</div>}
+        {loading ? <div className="prx-empty">Loading training data…</div> : volumeRows.some((row) => row.volumeTotal > 0) ? <>
+          <div className="prx-volumeSummary"><div><span>TOTAL VOLUME</span><strong>{formatNumber(volumeSummary.total)} LB</strong></div><div><span>AVG / SESSION</span><strong>{formatNumber(volumeSummary.average)} LB</strong></div><div><span>VS PREVIOUS</span><strong className={volumeSummary.change != null && volumeSummary.change > 0 ? "is-up" : volumeSummary.change != null && volumeSummary.change < 0 ? "is-down" : ""}>{volumeSummary.change == null ? "—" : `${volumeSummary.change > 0 ? "+" : ""}${volumeSummary.change.toFixed(1)}%`}</strong></div></div>
+          <div className="prx-volumeChart">{volumeRows.map((row) => <div className="prx-volumeCol" key={row.id}><b>{row.volumeTotal > 0 ? `${formatNumber(row.volumeTotal)} LB` : "NO DATA"}</b><div><i style={{ height: `${row.volumeTotal > 0 ? Math.max(5, row.volumeTotal / volumeMax * 100) : 0}%` }} /></div><strong>{row.templateName}</strong><small>{shortDate(row.completedAt)}</small></div>)}</div>
+        </> : <div className="prx-empty">NO VOLUME DATA for this program and range.</div>}
       </section>
 
       <section className="prx-panel">
@@ -1164,6 +1174,11 @@ export function ProgressPage() {
         }
 
         .prx-programBadge{min-width:0!important;flex-wrap:wrap!important}.prx-programBadge span,.prx-programBadge strong{white-space:normal!important;overflow-wrap:anywhere!important}
+
+        /* AUG 9 PROGRESS VOLUME + NO-CLIP */
+        .prx-controls,.prx-controls label,.prx-controls select,.prx-programDeck,.prx-programIdentity,.prx-programIdentity>div{min-width:0!important;max-width:100%!important}.prx-controls select{width:100%!important;white-space:normal!important;text-overflow:clip!important}.prx-programIdentity strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important;line-height:1.25!important;padding-bottom:2px!important}
+        .prx-volumeSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:12px 14px 2px}.prx-volumeSummary>div{display:grid;gap:4px;padding:10px 12px;border:1px solid rgba(94,173,201,.13);border-radius:10px;background:#061118}.prx-volumeSummary span{font-size:9px;font-weight:1000;letter-spacing:.08em;color:#88a7b3}.prx-volumeSummary strong{font-size:17px;color:#fff}.prx-volumeSummary strong.is-up{color:#76e6ad}.prx-volumeSummary strong.is-down{color:#ff888f}.prx-volumeCol>b{font-size:9px!important;color:#f3f8fa!important;white-space:nowrap!important}.prx-volumeCol strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.15!important}
+        @media(max-width:650px){.prx-controls{width:100%!important}.prx-controls label{width:100%!important}.prx-controls select{font-size:13px!important;line-height:1.2!important}.prx-volumeSummary{grid-template-columns:1fr!important;padding:9px 9px 0!important}.prx-volumeSummary>div{grid-template-columns:1fr auto;align-items:center;padding:9px 10px!important}.prx-volumeSummary span{font-size:9px!important}.prx-volumeSummary strong{font-size:14px!important}.prx-volumeChart{overflow-x:auto!important;scroll-snap-type:x proximity}.prx-volumeCol{min-width:76px!important;scroll-snap-align:end}.prx-volumeCol>b{font-size:8px!important}.prx-historyGroupHead,.prx-historyTop{min-width:0!important;flex-wrap:wrap!important}.prx-historyMain,.prx-historyMain>*{max-width:100%!important;min-width:0!important;overflow:visible!important;white-space:normal!important;word-break:break-word!important}}
       `}</style>
     </main>
   );
