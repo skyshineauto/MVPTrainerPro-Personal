@@ -197,6 +197,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [pageSize, setPageSize] = useState<PageSize>(24);
   const [page, setPage] = useState(1);
   const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
+  const [resolvedArtworkIds, setResolvedArtworkIds] = useState<Set<string>>(new Set());
+  const [reorderMode, setReorderMode] = useState(false);
+  const [reorderDraft, setReorderDraft] = useState<MusicTrack[]>([]);
+  const [reorderSaving, setReorderSaving] = useState(false);
   const [detailTrackId, setDetailTrackId] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<DetailMode>("edit");
   const [detailCandidates, setDetailCandidates] = useState<MusicMetadataCandidate[]>([]);
@@ -225,9 +229,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const totalDuration = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.duration_seconds || 0), 0), [tracks]);
   const artistCount = useMemo(() => new Set(tracks.map((track) => artistLabel(track).toLowerCase()).filter((value) => value !== "unknown artist")).size, [tracks]);
   const albumCount = useMemo(() => new Set(tracks.map((track) => `${artistLabel(track)}|${albumLabel(track)}`.toLowerCase()).filter((value) => !value.endsWith("|unknown album"))).size, [tracks]);
+  const trackNeedsArtwork = (track: MusicTrack) => needsMusicArtwork(track) && !resolvedArtworkIds.has(track.id);
   const likedCount = useMemo(() => tracks.filter((track) => track.favorite).length, [tracks]);
   const needsInfoCount = useMemo(() => tracks.filter(needsMusicMetadata).length, [tracks]);
-  const missingArtCount = useMemo(() => tracks.filter(needsMusicArtwork).length, [tracks]);
+  const missingArtCount = useMemo(() => tracks.filter((track) => needsMusicArtwork(track) && !resolvedArtworkIds.has(track.id)).length, [tracks, resolvedArtworkIds]);
   const reviewCount = useMemo(() => tracks.filter((track) => track.metadata_status === "review").length, [tracks]);
 
   const detailTrack = useMemo(() => tracks.find((track) => track.id === detailTrackId) || null, [tracks, detailTrackId]);
@@ -263,7 +268,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       if (!matchesSearch) return false;
       if (energyFilter !== "all" && track.energy_level !== energyFilter) return false;
       if (healthFilter === "needs_info" && !needsMusicMetadata(track)) return false;
-      if (healthFilter === "missing_art" && !needsMusicArtwork(track)) return false;
+      if (healthFilter === "missing_art" && !trackNeedsArtwork(track)) return false;
       if (healthFilter === "liked" && !track.favorite) return false;
       if (healthFilter === "review" && track.metadata_status !== "review" && !reviewItems.some((item) => item.trackId === track.id)) return false;
       return true;
@@ -286,19 +291,36 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       if (songSort === "energy_low") return energyRank(a.energy_level) - energyRank(b.energy_level);
       return a.sort_order - b.sort_order;
     });
-  }, [tracks, songSearch, songSort, energyFilter, healthFilter, reviewItems]);
+  }, [tracks, songSearch, songSort, energyFilter, healthFilter, reviewItems, resolvedArtworkIds]);
 
-  const pageCount = Math.max(1, Math.ceil(filteredTracks.length / pageSize));
-  const safePage = Math.min(page, pageCount);
-  const pagedTracks = filteredTracks.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageCount = reorderMode ? 1 : Math.max(1, Math.ceil(filteredTracks.length / pageSize));
+  const safePage = reorderMode ? 1 : Math.min(page, pageCount);
+  const pagedTracks = reorderMode ? reorderDraft : filteredTracks.slice((safePage - 1) * pageSize, safePage * pageSize);
   const selectedCount = selectedSongIds.size;
   const allVisibleSelected = Boolean(pagedTracks.length && pagedTracks.every((track) => selectedSongIds.has(track.id)));
 
   useEffect(() => { setPage(1); }, [songSearch, songSort, energyFilter, healthFilter, pageSize]);
 
+  async function hydrateArtworkPresence(rows: MusicTrack[]) {
+    const candidates = rows.filter(needsMusicArtwork);
+    const found = new Set<string>();
+    for (let start = 0; start < candidates.length; start += 8) {
+      const chunk = candidates.slice(start, start + 8);
+      const results = await Promise.allSettled(chunk.map(async (track) => ({
+        id: track.id,
+        url: await getMusicArtworkSignedUrl(track),
+      })));
+      results.forEach((result) => {
+        if (result.status === "fulfilled" && result.value.url) found.add(result.value.id);
+      });
+    }
+    setResolvedArtworkIds(found);
+  }
+
   async function refreshTracks() {
     const rows = await listMusicTracks();
     setTracks(rows); setDrafts(buildDraftMap(rows)); replaceMusicLibrary(rows);
+    void hydrateArtworkPresence(rows);
     return rows;
   }
   async function refreshPlaylists(preferredId?: string | null) {
@@ -342,11 +364,53 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try { replaceTrackLocally(await updateMusicTrack(track.id, { energy_level: energy })); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update energy."); }
   }
-  async function moveTrack(trackId: string, direction: -1 | 1) {
-    const index = tracks.findIndex((track) => track.id === trackId); const target = index + direction;
-    if (index < 0 || target < 0 || target >= tracks.length) return;
-    const next = [...tracks]; [next[index], next[target]] = [next[target], next[index]]; setTracks(next); replaceMusicLibrary(next);
-    try { await saveMusicTrackOrder(next); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save song order."); await refreshTracks(); }
+  function beginReorder() {
+    const ordered = [...tracks].sort((a, b) => a.sort_order - b.sort_order);
+    setReorderDraft(ordered);
+    setReorderMode(true);
+    setSongSort("library");
+    setSongSearch("");
+    setEnergyFilter("all");
+    setHealthFilter("all");
+    setSelectedSongIds(new Set());
+    setMessage("REORDER MODE • Move songs locally, then press SAVE ORDER once.");
+    setError("");
+  }
+
+  function moveTrackLocal(trackId: string, direction: -1 | 1) {
+    setReorderDraft((current) => {
+      const index = current.findIndex((track) => track.id === trackId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function cancelReorder() {
+    setReorderMode(false);
+    setReorderDraft([]);
+    setMessage("");
+  }
+
+  async function saveReorder() {
+    if (!reorderDraft.length || reorderSaving) return;
+    setReorderSaving(true);
+    setError("");
+    setMessage("Saving library order…");
+    try {
+      await saveMusicTrackOrder(reorderDraft);
+      await refreshTracks();
+      setReorderMode(false);
+      setReorderDraft([]);
+      setMessage("✓ ORDER SAVED");
+      window.setTimeout(() => setMessage((current) => current === "✓ ORDER SAVED" ? "" : current), 1800);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save song order.");
+    } finally {
+      setReorderSaving(false);
+    }
   }
 
   function openDetail(track: MusicTrack) {
@@ -413,7 +477,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }
 
   async function enrichTracks(targets: MusicTrack[], artworkOnly = false) {
-    const work = artworkOnly ? targets.filter(needsMusicArtwork) : targets;
+    const work = artworkOnly ? targets.filter(trackNeedsArtwork) : targets;
     if (!work.length) {
       setMessage(artworkOnly ? "Selected songs already have artwork. Existing artwork is protected." : "No songs were selected for identification.");
       return;
@@ -616,7 +680,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div><span>PRIVATE AUDIO LIBRARY</span><h2>Song Library</h2><p>{formatFileSize(totalSize)} stored • {tracks.length} songs</p></div>
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/*" onChange={(event) => void uploadFiles(event.target.files)} />
-            <button type="button" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || needsMusicArtwork(track)))}>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</button>
+            <button type="button" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || trackNeedsArtwork(track)))}>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</button>
             <button type="button" className="is-orange" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
           </div>
         </header>
@@ -641,10 +705,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "songs" ? <>
           <div className="tr10-toolbar">
-            <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
-            <label><span>ENERGY</span><select value={energyFilter} onChange={(event) => setEnergyFilter(event.target.value as EnergyFilter)}><option value="all">All energy</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-            <label><span>SORT</span><select value={songSort} onChange={(event) => setSongSort(event.target.value as SongSort)}>{(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => <option key={sort} value={sort}>{songSortLabel(sort)}</option>)}</select></label>
-            <label><span>SHOW</span><select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}><option value={12}>12</option><option value={24}>24</option><option value={48}>48</option></select></label>
+            <label><span>SEARCH</span><input disabled={reorderMode} value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
+            <label><span>ENERGY</span><select disabled={reorderMode} value={energyFilter} onChange={(event) => setEnergyFilter(event.target.value as EnergyFilter)}><option value="all">All energy</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+            <label><span>SORT</span><select disabled={reorderMode} value={songSort} onChange={(event) => setSongSort(event.target.value as SongSort)}>{(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => <option key={sort} value={sort}>{songSortLabel(sort)}</option>)}</select></label>
+            <label><span>SHOW</span><select disabled={reorderMode} value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}><option value={12}>12</option><option value={24}>24</option><option value={48}>48</option></select></label>
+          </div>
+
+          <div className={`tr10-reorderConsole ${reorderMode ? "is-active" : ""}`}>
+            <div><span>LIBRARY ORDER</span><strong>{reorderMode ? "REORDER MODE ACTIVE" : "Custom song order"}</strong><small>{reorderMode ? "Move tracks here. Nothing is written until SAVE ORDER." : "Use a dedicated reorder mode instead of tiny row arrows."}</small></div>
+            <div>{reorderMode ? <><button type="button" onClick={cancelReorder}>CANCEL</button><button type="button" className="is-primary" disabled={reorderSaving} onClick={() => void saveReorder()}>{reorderSaving ? "SAVING…" : "SAVE ORDER"}</button></> : <button type="button" className="is-primary" onClick={beginReorder}>REORDER SONGS</button>}</div>
           </div>
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
@@ -656,7 +725,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             {pagedTracks.map((track) => {
               const current = player.currentTrack?.id === track.id;
               const needsInfo = needsMusicMetadata(track);
-              const missingArt = needsMusicArtwork(track);
+              const missingArt = trackNeedsArtwork(track);
               return <article className={`tr10-row ${current ? "is-current" : ""}`} key={track.id}>
                 <label className="tr10-check"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label>
                 <div className="tr10-trackCell">
@@ -667,17 +736,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span><b className="tr10-energySegments" aria-hidden><i /><i /><i /></b></button>
-                <div className="tr10-actions">
-                  <button className={track.favorite ? "is-liked" : ""} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title="Like">👍</button>
-                  <button className={track.play_less ? "is-down" : ""} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎</button>
-                  <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ LIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
+                <div className={`tr10-actions ${reorderMode ? "is-reorder" : ""}`}>
+                  {reorderMode ? <>
+                    <button className="tr10-reorderMove" disabled={reorderDraft.findIndex((item) => item.id === track.id) === 0} onClick={() => moveTrackLocal(track.id,-1)}>↑ MOVE UP</button>
+                    <button className="tr10-reorderMove" disabled={reorderDraft.findIndex((item) => item.id === track.id) === reorderDraft.length - 1} onClick={() => moveTrackLocal(track.id,1)}>↓ MOVE DOWN</button>
+                  </> : <>
+                    <button className={track.favorite ? "is-liked" : ""} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title="Like">👍</button>
+                    <button className={track.play_less ? "is-down" : ""} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎</button>
+                    <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ LIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
+                  </>}
                 </div>
-                <div className="tr10-order"><button disabled={tracks.findIndex((item) => item.id === track.id) === 0} onClick={() => void moveTrack(track.id,-1)}>↑</button><button disabled={tracks.findIndex((item) => item.id === track.id) === tracks.length - 1} onClick={() => void moveTrack(track.id,1)}>↓</button></div>
               </article>;
             })}
           </div>
 
-          <div className="tr10-pager"><span>{filteredTracks.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredTracks.length)} OF ${filteredTracks.length}` : "0 SONGS"}</span><div><button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1,value-1))}>PREV</button><b>{safePage} / {pageCount}</b><button disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount,value+1))}>NEXT</button></div></div>
+          <div className="tr10-pager"><span>{reorderMode ? `${reorderDraft.length} SONGS • UNSAVED ORDER` : filteredTracks.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredTracks.length)} OF ${filteredTracks.length}` : "0 SONGS"}</span>{!reorderMode ? <div><button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1,value-1))}>PREV</button><b>{safePage} / {pageCount}</b><button disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount,value+1))}>NEXT</button></div> : <strong>PRESS SAVE ORDER WHEN FINISHED</strong>}</div>
         </> : null}
 
         {tab === "artists" ? <div className="tr10-cardGrid">{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div><button onClick={() => void playMusicAdHocQueue(artist,songs)}>▶ PLAY</button></article>)}</div> : null}
@@ -1223,6 +1296,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-energy{width:78px!important;min-width:78px!important;max-width:78px!important}
           .tr10-statusPanelHead small{display:none!important}
         }
+
+        /* PRO FINAL PASS: dedicated reorder, compact energy, high contrast controls */
+        .tr10-reorderConsole{margin:0 11px 10px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(83,171,203,.14);border-radius:9px;background:#061218}.tr10-reorderConsole>div:first-child{display:grid;gap:2px}.tr10-reorderConsole span{color:#68daf9;font-size:6px;font-weight:1000;letter-spacing:.14em}.tr10-reorderConsole strong{color:#f3fbff;font-size:10px}.tr10-reorderConsole small{color:#9bb4be;font-size:7px}.tr10-reorderConsole>div:last-child{display:flex;gap:7px}.tr10-reorderConsole button{min-height:34px;padding:0 12px;border:1px solid rgba(97,179,209,.24);border-radius:7px;background:#0a1c25;color:#f5fbfe!important;font-size:7px;font-weight:1000;letter-spacing:.06em}.tr10-reorderConsole button.is-primary{border-color:rgba(64,208,250,.54);background:linear-gradient(180deg,#0d4051,#082530);color:#fff!important}.tr10-reorderConsole.is-active{border-color:rgba(68,209,249,.34);box-shadow:inset 3px 0 #45d0f5}.tr10-actions.is-reorder{display:grid!important;grid-template-columns:1fr 1fr!important}.tr10-reorderMove{color:#fff!important;border-color:rgba(67,202,244,.30)!important;background:linear-gradient(180deg,#0a2e3d,#071b24)!important}.tr10-order{display:none!important}.tr10-energy{width:76px!important;min-width:76px!important;max-width:76px!important;height:27px!important;padding:0 6px!important;border-radius:5px!important;font-size:6.4px!important;letter-spacing:.055em!important}.tr10-energySegments{gap:2px!important}.tr10-energySegments i{width:3px!important;height:8px!important;border-radius:1px!important}.tr10-energyLed{width:5px!important;height:5px!important}.tr10-actions button,.tr10-headActions button,.tr10-bulk button,.tr10-pager button,.tr10-inspectCommands button,.tr10-inspector>footer button,.tr10-reviewModal button,.tr10-picker button,.tr10-tabs button,.tr10-healthRail button{color:#f4fbfe!important;text-shadow:0 1px 0 rgba(0,0,0,.82)!important}.tr10-actions button:disabled,.tr10-reorderConsole button:disabled{color:rgba(225,239,245,.42)!important}.tr10-healthRail button.is-needs{color:#ffd9dc!important}.tr10-healthBadge.is-needs{color:#fff!important;background:#8b1f2a!important;border-color:#ff6974!important}.tr10-trackCell{overflow:hidden!important}.tr10-trackText{min-width:0!important;overflow:hidden!important}.tr10-trackText strong,.tr10-trackText span,.tr10-trackText small{max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}.tr10-analysisProgress{height:8px!important;background:#02090d!important}.tr10-analysisProgress i{display:block!important;height:100%!important;transform-origin:left center!important}.tr10-detailCandidates img,.tr10-candidates img{object-fit:cover;background:#09131a}.tr10-matchTier{color:#fff!important}.tr10-empty{color:#c8dce4!important}
+        @media(max-width:650px){.tr10-reorderConsole{margin:0 8px 9px;display:grid;gap:8px}.tr10-reorderConsole>div:last-child{display:grid;grid-template-columns:1fr 1fr}.tr10-reorderConsole>div:last-child>button:only-child{grid-column:1/-1}.tr10-actions.is-reorder{grid-template-columns:1fr 1fr!important;grid-auto-rows:34px!important}.tr10-reorderMove{font-size:6.4px!important}.tr10-energy{width:70px!important;min-width:70px!important;max-width:70px!important;height:26px!important}.tr10-actions button{color:#fff!important;font-size:6.2px!important}.tr10-trackText strong{color:#fff!important}.tr10-trackText span{color:#bcd0d8!important}.tr10-trackText small{color:#8097a1!important}}
       `}</style>
     </main>
   );
