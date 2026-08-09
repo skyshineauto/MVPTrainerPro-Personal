@@ -6,11 +6,11 @@ import {
   type MouseEvent,
 } from "react";
 import {
+  clearMusicUrlCache,
   getMusicArtworkSignedUrl,
   listMusicTracks,
   removeMusicArtwork,
   removeMusicTrack,
-  saveMusicTrackOrder,
   setMusicTrackPreference,
   updateMusicTrack,
   uploadMusicArtwork,
@@ -198,9 +198,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [page, setPage] = useState(1);
   const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
   const [resolvedArtworkIds, setResolvedArtworkIds] = useState<Set<string>>(new Set());
-  const [reorderMode, setReorderMode] = useState(false);
-  const [reorderDraft, setReorderDraft] = useState<MusicTrack[]>([]);
-  const [reorderSaving, setReorderSaving] = useState(false);
+  const orderSaveTimerRef = useRef<number | null>(null);
+  const orderSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingOrderRef = useRef<MusicTrack[]>([]);
+  const [playbackErrors, setPlaybackErrors] = useState<Record<string, string>>({});
   const [detailTrackId, setDetailTrackId] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<DetailMode>("edit");
   const [detailCandidates, setDetailCandidates] = useState<MusicMetadataCandidate[]>([]);
@@ -227,13 +228,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
   const totalDuration = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.duration_seconds || 0), 0), [tracks]);
-  const artistCount = useMemo(() => new Set(tracks.map((track) => artistLabel(track).toLowerCase()).filter((value) => value !== "unknown artist")).size, [tracks]);
-  const albumCount = useMemo(() => new Set(tracks.map((track) => `${artistLabel(track)}|${albumLabel(track)}`.toLowerCase()).filter((value) => !value.endsWith("|unknown album"))).size, [tracks]);
   const trackNeedsArtwork = (track: MusicTrack) => needsMusicArtwork(track) && !resolvedArtworkIds.has(track.id);
   const likedCount = useMemo(() => tracks.filter((track) => track.favorite).length, [tracks]);
   const needsInfoCount = useMemo(() => tracks.filter(needsMusicMetadata).length, [tracks]);
   const missingArtCount = useMemo(() => tracks.filter((track) => needsMusicArtwork(track) && !resolvedArtworkIds.has(track.id)).length, [tracks, resolvedArtworkIds]);
   const reviewCount = useMemo(() => tracks.filter((track) => track.metadata_status === "review").length, [tracks]);
+  const libraryOrderedTracks = useMemo(() => [...tracks].sort((a, b) => a.sort_order - b.sort_order), [tracks]);
+  const libraryOrderIndex = useMemo(() => new Map(libraryOrderedTracks.map((track, index) => [track.id, index] as const)), [libraryOrderedTracks]);
 
   const detailTrack = useMemo(() => tracks.find((track) => track.id === detailTrackId) || null, [tracks, detailTrackId]);
   const detailDraft = detailTrack ? drafts[detailTrack.id] : null;
@@ -293,9 +294,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     });
   }, [tracks, songSearch, songSort, energyFilter, healthFilter, reviewItems, resolvedArtworkIds]);
 
-  const pageCount = reorderMode ? 1 : Math.max(1, Math.ceil(filteredTracks.length / pageSize));
-  const safePage = reorderMode ? 1 : Math.min(page, pageCount);
-  const pagedTracks = reorderMode ? reorderDraft : filteredTracks.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageCount = Math.max(1, Math.ceil(filteredTracks.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const pagedTracks = filteredTracks.slice((safePage - 1) * pageSize, safePage * pageSize);
   const selectedCount = selectedSongIds.size;
   const allVisibleSelected = Boolean(pagedTracks.length && pagedTracks.every((track) => selectedSongIds.has(track.id)));
 
@@ -343,17 +344,47 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setUploading(true); setMessage(""); setError("");
     try {
       let order = tracks.length;
-      for (const file of Array.from(files)) { setMessage(`Uploading ${file.name}…`); await uploadMusicTrack(file, order++); }
-      await refreshTracks(); setMessage(`${files.length} song${files.length === 1 ? "" : "s"} uploaded.`);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Music upload failed."); }
-    finally { setUploading(false); if (inputRef.current) inputRef.current.value = ""; }
+      for (const file of Array.from(files)) {
+        setMessage(`Uploading ${file.name}…`);
+        await uploadMusicTrack(file, order++);
+      }
+      await refreshTracks();
+      await loadMusicLibrary(true);
+      setMessage(`${files.length} song${files.length === 1 ? "" : "s"} uploaded.`);
+    } catch (caught) {
+      const raw = caught instanceof Error ? caught.message : "Music upload failed.";
+      setError(/unsupported|audio type|file type/i.test(raw) ? "THIS AUDIO FORMAT IS NOT SUPPORTED FOR UPLOAD" : raw);
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  async function playTrackOnce(track: MusicTrack) {
+    const current = player.currentTrack?.id === track.id;
+    if (current && player.playing) { pauseMusic(); return; }
+    if (current) { await playMusic(); return; }
+    activateAllMusicTracks();
+    await playMusicTrack(track.id, 0);
   }
 
   async function toggleTrackPlayback(track: MusicTrack) {
+    setPlaybackErrors((current) => { const next = { ...current }; delete next[track.id]; return next; });
     try {
-      const current = player.currentTrack?.id === track.id;
-      if (current && player.playing) pauseMusic(); else if (current) await playMusic(); else { activateAllMusicTracks(); await playMusicTrack(track.id, 0); }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not play this song."); }
+      await playTrackOnce(track);
+    } catch {
+      // Refresh the library/storage source and retry once. This repairs newly
+      // uploaded tracks whose first signed/source URL was stale or incomplete.
+      try {
+        clearMusicUrlCache(track.id);
+        await refreshTracks();
+        await loadMusicLibrary(true);
+        activateAllMusicTracks();
+        await playMusicTrack(track.id, 0);
+      } catch {
+        setPlaybackErrors((current) => ({ ...current, [track.id]: "COULDN’T PLAY THIS TRACK • RETRY" }));
+      }
+    }
   }
   async function changePreference(track: MusicTrack, preference: "like" | "play_less" | "neutral") {
     try {
@@ -364,54 +395,44 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try { replaceTrackLocally(await updateMusicTrack(track.id, { energy_level: energy })); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update energy."); }
   }
-  function beginReorder() {
-    const ordered = [...tracks].sort((a, b) => a.sort_order - b.sort_order);
-    setReorderDraft(ordered);
-    setReorderMode(true);
-    setSongSort("library");
-    setSongSearch("");
-    setEnergyFilter("all");
-    setHealthFilter("all");
-    setSelectedSongIds(new Set());
-    setMessage("REORDER MODE • Move songs locally, then press SAVE ORDER once.");
-    setError("");
+  function queueLibraryOrderSave(nextTracks: MusicTrack[]) {
+    pendingOrderRef.current = nextTracks;
+    if (orderSaveTimerRef.current != null) window.clearTimeout(orderSaveTimerRef.current);
+    orderSaveTimerRef.current = window.setTimeout(() => {
+      const snapshot = pendingOrderRef.current;
+      orderSaveTimerRef.current = null;
+      orderSaveChainRef.current = orderSaveChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            for (let index = 0; index < snapshot.length; index += 1) {
+              await updateMusicTrack(snapshot[index].id, { sort_order: index });
+            }
+          } catch {
+            setError("COULD NOT SAVE ORDER • RETRY");
+          }
+        });
+    }, 420);
   }
 
-  function moveTrackLocal(trackId: string, direction: -1 | 1) {
-    setReorderDraft((current) => {
-      const index = current.findIndex((track) => track.id === trackId);
+  function moveTrack(trackId: string, direction: -1 | 1) {
+    setSongSort("library");
+    setTracks((current) => {
+      const ordered = [...current].sort((a, b) => a.sort_order - b.sort_order);
+      const index = ordered.findIndex((track) => track.id === trackId);
       const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
+      if (index < 0 || target < 0 || target >= ordered.length) return current;
+      [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+      const next = ordered.map((track, position) => ({ ...track, sort_order: position }));
+      replaceMusicLibrary(next);
+      queueLibraryOrderSave(next);
       return next;
     });
   }
 
-  function cancelReorder() {
-    setReorderMode(false);
-    setReorderDraft([]);
-    setMessage("");
-  }
-
-  async function saveReorder() {
-    if (!reorderDraft.length || reorderSaving) return;
-    setReorderSaving(true);
-    setError("");
-    setMessage("Saving library order…");
-    try {
-      await saveMusicTrackOrder(reorderDraft);
-      await refreshTracks();
-      setReorderMode(false);
-      setReorderDraft([]);
-      setMessage("✓ ORDER SAVED");
-      window.setTimeout(() => setMessage((current) => current === "✓ ORDER SAVED" ? "" : current), 1800);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save song order.");
-    } finally {
-      setReorderSaving(false);
-    }
-  }
+  useEffect(() => () => {
+    if (orderSaveTimerRef.current != null) window.clearTimeout(orderSaveTimerRef.current);
+  }, []);
 
   function openDetail(track: MusicTrack) {
     setDetailTrackId(track.id); setDetailMode("edit"); setDetailCandidates([]); setDetailSelectedCandidateId(null); setDetailPendingCandidate(null); setDetailSaveState("idle"); setDetailStatusText("");
@@ -667,26 +688,26 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   return (
     <main className="tr10-page">
       <section className="tr10-hero">
-        <div><span>MVP TRAINER • PRIVATE MUSIC</span><h1>My Music</h1><p>Your uploaded workout library, playlists, Smart Mix, likes, play-less preferences, metadata and artwork.</p></div>
+        <div><h1>My Music</h1></div>
         <button type="button" onClick={goBack}>BACK TO TRAINER</button>
       </section>
 
       <section className="tr10-stats">
-        <div><strong>{tracks.length}</strong><span>SONGS</span></div><div><strong>{artistCount}</strong><span>ARTISTS</span></div><div><strong>{albumCount}</strong><span>ALBUMS</span></div><div><strong>{formatLongDuration(totalDuration)}</strong><span>PLAY TIME</span></div><div><strong>{likedCount}</strong><span>LIKED</span></div>
+        <div><strong>{tracks.length}</strong><span>SONGS</span></div><div><strong>{formatLongDuration(totalDuration)}</strong><span>PLAY TIME</span></div><div><strong>{formatFileSize(totalSize) || "0 MB"}</strong><span>LIBRARY SIZE</span></div><div><strong>{likedCount}</strong><span>LIKED</span></div>
       </section>
 
       <section className="tr10-console">
         <header className="tr10-sectionHead">
-          <div><span>PRIVATE AUDIO LIBRARY</span><h2>Song Library</h2><p>{formatFileSize(totalSize)} stored • {tracks.length} songs</p></div>
+          <div><h2>Song Library</h2></div>
           <div className="tr10-headActions">
-            <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/*" onChange={(event) => void uploadFiles(event.target.files)} />
+            <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
             <button type="button" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || trackNeedsArtwork(track)))}>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</button>
             <button type="button" className="is-orange" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
           </div>
         </header>
 
         <section className="tr10-statusPanel" aria-label="Library status filters">
-          <div className="tr10-statusPanelHead"><span>LIBRARY STATUS</span><small>FILTER SONGS BY CONDITION</small></div>
+          <div className="tr10-statusPanelHead"><span>LIBRARY STATUS</span></div>
           <div className="tr10-healthRail">
             <button className={healthFilter === "all" ? "is-active" : ""} onClick={() => setHealthFilter("all")}><span>ALL SONGS</span><b>{tracks.length}</b></button>
             <button className={`${healthFilter === "needs_info" ? "is-active " : ""}is-needs`} onClick={() => setHealthFilter("needs_info")}><span>NEEDS INFO</span><b>{needsInfoCount}</b></button>
@@ -705,52 +726,51 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "songs" ? <>
           <div className="tr10-toolbar">
-            <label><span>SEARCH</span><input disabled={reorderMode} value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
-            <label><span>ENERGY</span><select disabled={reorderMode} value={energyFilter} onChange={(event) => setEnergyFilter(event.target.value as EnergyFilter)}><option value="all">All energy</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-            <label><span>SORT</span><select disabled={reorderMode} value={songSort} onChange={(event) => setSongSort(event.target.value as SongSort)}>{(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => <option key={sort} value={sort}>{songSortLabel(sort)}</option>)}</select></label>
-            <label><span>SHOW</span><select disabled={reorderMode} value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}><option value={12}>12</option><option value={24}>24</option><option value={48}>48</option></select></label>
-          </div>
-
-          <div className={`tr10-reorderConsole ${reorderMode ? "is-active" : ""}`}>
-            <div><span>LIBRARY ORDER</span><strong>{reorderMode ? "REORDER MODE ACTIVE" : "Custom song order"}</strong><small>{reorderMode ? "Move tracks here. Nothing is written until SAVE ORDER." : "Use a dedicated reorder mode instead of tiny row arrows."}</small></div>
-            <div>{reorderMode ? <><button type="button" onClick={cancelReorder}>CANCEL</button><button type="button" className="is-primary" disabled={reorderSaving} onClick={() => void saveReorder()}>{reorderSaving ? "SAVING…" : "SAVE ORDER"}</button></> : <button type="button" className="is-primary" onClick={beginReorder}>REORDER SONGS</button>}</div>
+            <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
+            <label><span>ENERGY</span><select value={energyFilter} onChange={(event) => setEnergyFilter(event.target.value as EnergyFilter)}><option value="all">All energy</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+            <label><span>SORT</span><select value={songSort} onChange={(event) => setSongSort(event.target.value as SongSort)}>{(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => <option key={sort} value={sort}>{songSortLabel(sort)}</option>)}</select></label>
+            <label><span>SHOW</span><select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}><option value={12}>12</option><option value={24}>24</option><option value={48}>48</option></select></label>
           </div>
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
           <div className="tr10-table">
-            <div className="tr10-tableHead"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label><span>TRACK</span><span>TIME</span><span>ENERGY</span><span>ACTIONS</span></div>
+            <div className="tr10-tableHead">
+              <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
+              <span>TRACK</span><span>TIME</span><span>ENERGY</span><span>ACTIONS</span>
+            </div>
             {loading ? <div className="tr10-empty">Loading your music…</div> : null}
             {!loading && !pagedTracks.length ? <div className="tr10-empty">No songs match this view.</div> : null}
             {pagedTracks.map((track) => {
               const current = player.currentTrack?.id === track.id;
               const needsInfo = needsMusicMetadata(track);
               const missingArt = trackNeedsArtwork(track);
+              const reorderIndex = libraryOrderIndex.get(track.id) ?? -1;
               return <article className={`tr10-row ${current ? "is-current" : ""}`} key={track.id}>
+                <div className="tr10-orderCell" aria-label={`Order position ${reorderIndex + 1}`}>
+                  <button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}>↑</button>
+                  <b>{String(reorderIndex + 1).padStart(2,"0")}</b>
+                  <button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}>↓</button>
+                </div>
                 <label className="tr10-check"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label>
                 <div className="tr10-trackCell">
                   <button className={`tr10-play ${current && player.playing ? "is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)}>{current && player.playing ? "Ⅱ" : "▶"}</button>
                   <TrackArtwork track={track} />
-                  <div className="tr10-trackText"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span><small>{track.original_name}</small></div>
+                  <div className="tr10-trackText"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span><small>{track.original_name}</small>{playbackErrors[track.id] ? <em className="tr10-playbackError">{playbackErrors[track.id]}</em> : null}</div>
                   {needsInfo ? <em className="tr10-healthBadge is-needs">NEEDS INFO</em> : missingArt ? <em className="tr10-healthBadge is-art">MISSING ART</em> : null}
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span><b className="tr10-energySegments" aria-hidden><i /><i /><i /></b></button>
-                <div className={`tr10-actions ${reorderMode ? "is-reorder" : ""}`}>
-                  {reorderMode ? <>
-                    <button className="tr10-reorderMove" disabled={reorderDraft.findIndex((item) => item.id === track.id) === 0} onClick={() => moveTrackLocal(track.id,-1)}>↑ MOVE UP</button>
-                    <button className="tr10-reorderMove" disabled={reorderDraft.findIndex((item) => item.id === track.id) === reorderDraft.length - 1} onClick={() => moveTrackLocal(track.id,1)}>↓ MOVE DOWN</button>
-                  </> : <>
-                    <button className={track.favorite ? "is-liked" : ""} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title="Like">👍</button>
-                    <button className={track.play_less ? "is-down" : ""} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎</button>
-                    <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ LIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
-                  </>}
+                <div className="tr10-actions">
+                  <button className={track.favorite ? "is-liked" : ""} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title="Like">👍</button>
+                  <button className={track.play_less ? "is-down" : ""} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎</button>
+                  <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ LIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
                 </div>
               </article>;
             })}
           </div>
 
-          <div className="tr10-pager"><span>{reorderMode ? `${reorderDraft.length} SONGS • UNSAVED ORDER` : filteredTracks.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredTracks.length)} OF ${filteredTracks.length}` : "0 SONGS"}</span>{!reorderMode ? <div><button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1,value-1))}>PREV</button><b>{safePage} / {pageCount}</b><button disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount,value+1))}>NEXT</button></div> : <strong>PRESS SAVE ORDER WHEN FINISHED</strong>}</div>
+          <div className="tr10-pager"><span>{filteredTracks.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredTracks.length)} OF ${filteredTracks.length}` : "0 SONGS"}</span><div><button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1,value-1))}>PREV</button><b>{safePage} / {pageCount}</b><button disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount,value+1))}>NEXT</button></div></div>
         </> : null}
 
         {tab === "artists" ? <div className="tr10-cardGrid">{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div><button onClick={() => void playMusicAdHocQueue(artist,songs)}>▶ PLAY</button></article>)}</div> : null}
@@ -1300,6 +1320,112 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         /* PRO FINAL PASS: dedicated reorder, compact energy, high contrast controls */
         .tr10-reorderConsole{margin:0 11px 10px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(83,171,203,.14);border-radius:9px;background:#061218}.tr10-reorderConsole>div:first-child{display:grid;gap:2px}.tr10-reorderConsole span{color:#68daf9;font-size:6px;font-weight:1000;letter-spacing:.14em}.tr10-reorderConsole strong{color:#f3fbff;font-size:10px}.tr10-reorderConsole small{color:#9bb4be;font-size:7px}.tr10-reorderConsole>div:last-child{display:flex;gap:7px}.tr10-reorderConsole button{min-height:34px;padding:0 12px;border:1px solid rgba(97,179,209,.24);border-radius:7px;background:#0a1c25;color:#f5fbfe!important;font-size:7px;font-weight:1000;letter-spacing:.06em}.tr10-reorderConsole button.is-primary{border-color:rgba(64,208,250,.54);background:linear-gradient(180deg,#0d4051,#082530);color:#fff!important}.tr10-reorderConsole.is-active{border-color:rgba(68,209,249,.34);box-shadow:inset 3px 0 #45d0f5}.tr10-actions.is-reorder{display:grid!important;grid-template-columns:1fr 1fr!important}.tr10-reorderMove{color:#fff!important;border-color:rgba(67,202,244,.30)!important;background:linear-gradient(180deg,#0a2e3d,#071b24)!important}.tr10-order{display:none!important}.tr10-energy{width:76px!important;min-width:76px!important;max-width:76px!important;height:27px!important;padding:0 6px!important;border-radius:5px!important;font-size:6.4px!important;letter-spacing:.055em!important}.tr10-energySegments{gap:2px!important}.tr10-energySegments i{width:3px!important;height:8px!important;border-radius:1px!important}.tr10-energyLed{width:5px!important;height:5px!important}.tr10-actions button,.tr10-headActions button,.tr10-bulk button,.tr10-pager button,.tr10-inspectCommands button,.tr10-inspector>footer button,.tr10-reviewModal button,.tr10-picker button,.tr10-tabs button,.tr10-healthRail button{color:#f4fbfe!important;text-shadow:0 1px 0 rgba(0,0,0,.82)!important}.tr10-actions button:disabled,.tr10-reorderConsole button:disabled{color:rgba(225,239,245,.42)!important}.tr10-healthRail button.is-needs{color:#ffd9dc!important}.tr10-healthBadge.is-needs{color:#fff!important;background:#8b1f2a!important;border-color:#ff6974!important}.tr10-trackCell{overflow:hidden!important}.tr10-trackText{min-width:0!important;overflow:hidden!important}.tr10-trackText strong,.tr10-trackText span,.tr10-trackText small{max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}.tr10-analysisProgress{height:8px!important;background:#02090d!important}.tr10-analysisProgress i{display:block!important;height:100%!important;transform-origin:left center!important}.tr10-detailCandidates img,.tr10-candidates img{object-fit:cover;background:#09131a}.tr10-matchTier{color:#fff!important}.tr10-empty{color:#c8dce4!important}
         @media(max-width:650px){.tr10-reorderConsole{margin:0 8px 9px;display:grid;gap:8px}.tr10-reorderConsole>div:last-child{display:grid;grid-template-columns:1fr 1fr}.tr10-reorderConsole>div:last-child>button:only-child{grid-column:1/-1}.tr10-actions.is-reorder{grid-template-columns:1fr 1fr!important;grid-auto-rows:34px!important}.tr10-reorderMove{font-size:6.4px!important}.tr10-energy{width:70px!important;min-width:70px!important;max-width:70px!important;height:26px!important}.tr10-actions button{color:#fff!important;font-size:6.2px!important}.tr10-trackText strong{color:#fff!important}.tr10-trackText span{color:#bcd0d8!important}.tr10-trackText small{color:#8097a1!important}}
+        /* AUG 9 LIBRARY CLARITY + DEDICATED ORDER COLUMN */
+        .tr10-statusPanel{padding:11px 13px 13px!important;background:linear-gradient(180deg,#081821,#050d12)!important;border-bottom:1px solid rgba(108,190,219,.22)!important;box-shadow:inset 0 -1px rgba(0,0,0,.45)!important}
+        .tr10-statusPanelHead{margin:0 1px 9px!important}
+        .tr10-statusPanelHead span{color:#b8d7e2!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.15em!important}
+        .tr10-statusPanelHead small{color:#718f9b!important;font-size:7px!important;font-weight:900!important}
+        .tr10-healthRail{gap:7px!important}
+        .tr10-healthRail button{height:37px!important;padding:0 10px!important;border-radius:7px!important;color:#c5d7de!important;font-size:8.5px!important;letter-spacing:.055em!important;background:linear-gradient(180deg,#0a1b23,#061118)!important;border-color:rgba(112,183,208,.18)!important;text-shadow:none!important}
+        .tr10-healthRail button b{min-width:25px!important;height:22px!important;color:#eef9fc!important;font-size:8.5px!important}
+        .tr10-healthRail button.is-active{color:#fff!important;border-color:rgba(70,210,251,.58)!important;background:linear-gradient(180deg,#0b4052,#072531)!important;box-shadow:inset 0 -2px #43cef4!important}
+        .tr10-healthRail button.is-needs{color:#ffdce0!important;border-color:rgba(255,87,98,.35)!important}
+        .tr10-tabs{display:grid!important;grid-template-columns:repeat(5,1fr)!important;gap:5px!important;padding:6px 8px!important;background:#030a0f!important;border-top:1px solid rgba(255,255,255,.02)!important;border-bottom:1px solid rgba(112,183,208,.18)!important}
+        .tr10-tabs button{height:43px!important;border:1px solid rgba(106,177,203,.14)!important;border-radius:7px!important;background:linear-gradient(180deg,#08171e,#050d12)!important;color:#c0d2d9!important;font-size:9.5px!important;font-weight:1000!important;letter-spacing:.07em!important;text-shadow:none!important}
+        .tr10-tabs button:hover{color:#fff!important;border-color:rgba(86,211,250,.38)!important;background:#0a222c!important}
+        .tr10-tabs button.is-active{color:#fff!important;border-color:rgba(72,210,250,.54)!important;background:linear-gradient(180deg,#0c3d4d,#08232d)!important;box-shadow:inset 0 -3px #46d0f6!important}
+        .tr10-toolbar label>span{color:#9bb3bc!important;font-size:8px!important}
+        .tr10-toolbar input,.tr10-toolbar select{color:#fff!important;font-size:9.5px!important}
+        .tr10-reorderConsole{margin:0 12px 11px!important;padding:11px 13px!important;border-color:rgba(88,195,231,.23)!important;background:linear-gradient(180deg,#091b24,#061118)!important}
+        .tr10-reorderConsole span{font-size:7.5px!important;color:#8fe5fb!important}.tr10-reorderConsole strong{font-size:11px!important}.tr10-reorderConsole small{font-size:8px!important;color:#abc0c8!important}
+        .tr10-reorderConsole button{min-height:36px!important;color:#fff!important;font-size:8px!important}
+        .tr10-table.is-reorder .tr10-tableHead,.tr10-table.is-reorder .tr10-row{grid-template-columns:70px minmax(0,1fr) 58px 72px minmax(300px,auto)!important}
+        .tr10-orderHead{display:grid!important;place-items:center!important;color:#a9c7d1!important;font-size:7.5px!important;letter-spacing:.12em!important}
+        .tr10-orderCell{align-self:stretch;display:grid!important;grid-template-columns:1fr!important;grid-template-rows:28px 22px 28px!important;gap:3px!important;place-items:center!important;padding:4px 7px!important;border-right:1px solid rgba(93,170,197,.12)!important;background:linear-gradient(180deg,rgba(9,35,45,.72),rgba(5,18,24,.86))!important}
+        .tr10-orderCell b{display:grid;place-items:center;width:100%;height:22px;color:#effbff!important;font-size:9px!important;font-variant-numeric:tabular-nums;border:1px solid rgba(94,184,216,.17);border-radius:5px;background:#06141b}
+        .tr10-orderCell button{width:100%!important;height:28px!important;padding:0!important;border:1px solid rgba(72,203,245,.28)!important;border-radius:6px!important;background:linear-gradient(180deg,#0b3544,#071d27)!important;color:#fff!important;font-size:15px!important;line-height:1!important;font-weight:1000!important;box-shadow:inset 0 1px rgba(255,255,255,.04)!important}
+        .tr10-orderCell button:hover:not(:disabled){border-color:rgba(76,218,255,.68)!important;background:#0d4558!important}
+        .tr10-orderCell button:disabled{opacity:.26!important}
+        .tr10-row{min-height:72px!important;overflow:hidden!important}
+        .tr10-art--row,.tr10-art--row img{overflow:hidden!important;object-fit:cover!important;object-position:center!important}
+        .tr10-trackText strong{color:#fff!important;font-size:11px!important;line-height:1.2!important}.tr10-trackText span{color:#bfd2d9!important;font-size:8px!important}.tr10-trackText small{color:#8299a2!important;font-size:7px!important}
+        .tr10-duration{color:#c1d2d9!important;font-size:8px!important}
+        .tr10-energy{width:66px!important;min-width:66px!important;max-width:66px!important;height:24px!important;padding:0 5px!important;border-radius:4px!important;background:linear-gradient(180deg,#0c151a,#05090c)!important;border-color:rgba(166,200,211,.19)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),inset 0 -1px rgba(0,0,0,.55)!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.045em!important;text-shadow:none!important}
+        .tr10-energyLed{width:4px!important;height:4px!important}.tr10-energySegments{gap:1px!important}.tr10-energySegments i{width:2px!important;height:7px!important;border-radius:0!important;opacity:.78!important}
+        .tr10-actions{gap:6px!important}.tr10-actions button{min-height:32px!important;height:32px!important;padding:0 9px!important;border-radius:6px!important;color:#fff!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.035em!important;border-color:rgba(116,184,208,.21)!important;background:linear-gradient(180deg,#0a1921,#061017)!important;text-shadow:none!important}
+        .tr10-actions button:hover{border-color:rgba(76,210,251,.45)!important;background:#0b2732!important}
+        .tr10-actions .is-edit{color:#fff!important;background:linear-gradient(180deg,#0b3a4a,#07212b)!important;border-color:rgba(70,205,247,.38)!important}
+        .tr10-analysisProgress{height:7px!important;margin:12px 0!important;overflow:hidden!important;border:1px solid rgba(99,182,211,.18)!important;border-radius:999px!important;background:#02080c!important;box-shadow:inset 0 1px 3px rgba(0,0,0,.75)!important}
+        .tr10-analysisProgress i{display:block!important;width:100%!important;height:100%!important;border-radius:999px!important;background:linear-gradient(90deg,#249cc4,#4ad7f8)!important;box-shadow:0 0 10px rgba(74,215,248,.20)!important;transform-origin:left center!important;transition:transform .18s ease!important}
+
+        @media(max-width:650px){
+          .tr10-page{width:calc(100% - 10px)!important}
+          .tr10-statusPanel{padding:10px 8px!important}
+          .tr10-statusPanelHead span{font-size:8.5px!important}.tr10-statusPanelHead small{display:none!important}
+          .tr10-healthRail{grid-template-columns:repeat(5,minmax(106px,1fr))!important;gap:6px!important;overflow-x:auto!important;padding-bottom:3px!important;scrollbar-width:none!important}
+          .tr10-healthRail::-webkit-scrollbar{display:none!important}
+          .tr10-healthRail button{height:38px!important;font-size:8.5px!important}
+          .tr10-tabs{display:flex!important;gap:6px!important;padding:7px!important;overflow-x:auto!important;scrollbar-width:none!important}
+          .tr10-tabs::-webkit-scrollbar{display:none!important}
+          .tr10-tabs button{flex:0 0 112px!important;min-width:112px!important;height:43px!important;font-size:9.2px!important}
+          .tr10-reorderConsole{margin:0 7px 9px!important;padding:10px!important}.tr10-reorderConsole strong{font-size:11px!important}.tr10-reorderConsole small{font-size:8px!important;line-height:1.35!important}
+          .tr10-table.is-reorder .tr10-tableHead{display:none!important}
+          .tr10-row,.tr10-row.is-reorder{grid-template-columns:58px minmax(0,1fr)!important;grid-template-rows:auto 28px auto!important;gap:7px!important;padding:9px 7px!important;align-items:center!important}
+          .tr10-row:not(.is-reorder){grid-template-columns:24px minmax(0,1fr)!important}
+          .tr10-orderCell{grid-column:1!important;grid-row:1/4!important;align-self:stretch!important;grid-template-rows:34px 24px 34px!important;padding:3px 5px!important;border:1px solid rgba(73,199,239,.20)!important;border-radius:7px!important}
+          .tr10-orderCell button{height:34px!important;font-size:17px!important}.tr10-orderCell b{height:24px!important;font-size:9px!important}
+          .tr10-row.is-reorder .tr10-trackCell{grid-column:2!important;grid-row:1!important}
+          .tr10-row.is-reorder>.tr10-duration{grid-column:2!important;grid-row:2!important;justify-self:start!important}
+          .tr10-row.is-reorder>.tr10-energy{grid-column:2!important;grid-row:2!important;justify-self:end!important}
+          .tr10-row.is-reorder>.tr10-actions{grid-column:2!important;grid-row:3!important}
+          .tr10-trackCell{grid-template-columns:36px 40px minmax(0,1fr)!important;gap:7px!important}
+          .tr10-art--row{width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important}
+          .tr10-trackText strong{font-size:11.5px!important}.tr10-trackText span{font-size:8.2px!important}.tr10-trackText small{font-size:6.8px!important}
+          .tr10-energy{width:62px!important;min-width:62px!important;max-width:62px!important;height:24px!important;font-size:6.8px!important}
+          .tr10-actions{display:grid!important;grid-template-columns:34px 34px repeat(4,minmax(0,1fr))!important;gap:5px!important;width:100%!important}
+          .tr10-actions button{min-width:0!important;height:34px!important;min-height:34px!important;padding:0 4px!important;font-size:7px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+          .tr10-pager{font-size:8px!important}
+        }
+        @media(max-width:410px){
+          .tr10-actions{grid-template-columns:34px 34px repeat(2,minmax(0,1fr))!important;grid-auto-rows:34px!important}
+          .tr10-actions button:nth-child(n+5){grid-column:auto!important}
+          .tr10-row,.tr10-row.is-reorder{padding-left:6px!important;padding-right:6px!important}
+        }
+
+        /* AUG 9 FINAL LIBRARY ORDER + READABILITY */
+        .tr10-stats{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+        .tr10-stats strong{font-size:25px!important;color:#ffd27c!important}.tr10-stats span{font-size:10px!important;color:#b5cbd4!important}
+        .tr10-hero{align-items:center!important;padding:18px 22px!important}.tr10-hero h1{margin:0!important;font-size:34px!important}.tr10-hero>button{font-size:10px!important;color:#fff!important}
+        .tr10-sectionHead h2{font-size:23px!important;color:#fff!important}
+        .tr10-tableHead,.tr10-row{grid-template-columns:60px 28px minmax(0,1fr) 62px 82px minmax(350px,auto)!important}
+        .tr10-tableHead{font-size:9px!important;color:#a4bac3!important}.tr10-tableHead label{display:grid!important;place-items:center!important}
+        .tr10-orderCell{align-self:stretch;display:grid!important;grid-template-columns:1fr!important;grid-template-rows:26px 18px 26px!important;gap:2px!important;place-items:center!important;padding:2px 6px!important;border-right:1px solid rgba(93,170,197,.12)!important;background:linear-gradient(180deg,rgba(9,35,45,.72),rgba(5,18,24,.86))!important}
+        .tr10-orderCell b{display:grid!important;place-items:center!important;width:100%!important;height:18px!important;color:#effbff!important;font-size:9px!important;font-variant-numeric:tabular-nums!important}
+        .tr10-orderCell button{width:100%!important;height:26px!important;padding:0!important;border:1px solid rgba(72,203,245,.28)!important;border-radius:6px!important;background:linear-gradient(180deg,#0b3544,#071d27)!important;color:#fff!important;font-size:16px!important;line-height:1!important;font-weight:1000!important}
+        .tr10-orderCell button:hover:not(:disabled){border-color:rgba(76,218,255,.68)!important;background:#0d4558!important}.tr10-orderCell button:disabled{opacity:.28!important}
+        .tr10-trackText strong{font-size:13px!important;color:#fff!important}.tr10-trackText span{font-size:10px!important;color:#c1d4dc!important}.tr10-trackText small{font-size:9px!important;color:#8ca4ae!important}
+        .tr10-playbackError{display:block!important;margin-top:4px!important;color:#ffb0b5!important;font-size:9px!important;font-style:normal!important;font-weight:950!important;letter-spacing:.025em!important;white-space:normal!important}
+        .tr10-duration{font-size:10px!important;color:#dce9ee!important}.tr10-energy{font-size:9px!important;color:#fff!important}
+        .tr10-actions button{font-size:9px!important;color:#fff!important;min-height:34px!important}
+        .tr10-healthRail button,.tr10-tabs button,.tr10-toolbar label>span,.tr10-toolbar input,.tr10-toolbar select,.tr10-headActions button,.tr10-pager{font-size:10px!important}
+        @media(max-width:900px){
+          .tr10-tableHead,.tr10-row{grid-template-columns:56px 26px minmax(0,1fr) 56px 78px!important}
+          .tr10-tableHead span:last-child{display:none!important}.tr10-actions{grid-column:3/-1!important}
+        }
+        @media(max-width:650px){
+          .tr10-stats{grid-template-columns:1fr 1fr!important;gap:7px!important}.tr10-stats>div{min-height:72px!important}.tr10-stats strong{font-size:22px!important}.tr10-stats span{font-size:9px!important}
+          .tr10-hero{padding:14px 15px!important}.tr10-hero h1{font-size:29px!important}
+          .tr10-row{grid-template-columns:50px 24px minmax(0,1fr)!important;grid-template-rows:auto 30px auto!important;gap:7px!important;padding:8px!important}
+          .tr10-orderCell{grid-column:1!important;grid-row:1/4!important;grid-template-rows:34px 22px 34px!important;padding:3px 5px!important;border:1px solid rgba(73,199,239,.20)!important;border-radius:7px!important}
+          .tr10-orderCell button{height:34px!important;font-size:18px!important}.tr10-orderCell b{height:22px!important;font-size:10px!important}
+          .tr10-check{grid-column:2!important;grid-row:1!important;align-self:start!important;margin-top:10px!important}.tr10-check input{width:18px!important;height:18px!important}
+          .tr10-trackCell{grid-column:3!important;grid-row:1!important;grid-template-columns:36px 42px minmax(0,1fr)!important;gap:7px!important}
+          .tr10-trackText strong{font-size:13px!important}.tr10-trackText span{font-size:10px!important}.tr10-trackText small{font-size:8.5px!important}
+          .tr10-row>.tr10-duration{grid-column:3!important;grid-row:2!important;font-size:10px!important}.tr10-row>.tr10-energy{grid-column:3!important;grid-row:2!important;justify-self:end!important}
+          .tr10-actions{grid-column:3!important;grid-row:3!important;display:grid!important;grid-template-columns:36px 36px repeat(2,minmax(0,1fr))!important;grid-auto-rows:36px!important;gap:5px!important;width:100%!important}
+          .tr10-actions button{min-width:0!important;height:36px!important;min-height:36px!important;padding:0 5px!important;font-size:8.5px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+          .tr10-healthRail button,.tr10-tabs button{font-size:9.5px!important}.tr10-toolbar input,.tr10-toolbar select{font-size:12px!important}
+        }
       `}</style>
     </main>
   );
