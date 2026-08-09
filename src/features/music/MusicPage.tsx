@@ -837,7 +837,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "discover" ? <section className="tr10-discover">
           <header className="tr10-discoverHead"><div><span>DISCOVER</span><h2>Music saved for later</h2><p>Press Discover More in the player. Recommendations collect here without interrupting playback.</p></div><b>{discoverySeeds.reduce((sum,seed)=>sum+seed.recommendations.filter((item)=>!item.dismissed).length,0)} IDEAS</b></header>
-          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press DISCOVER MORE in the player.</div> : discoverySeeds.map((seed) => <section className="tr10-discoverSeed" key={seed.id}><header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}</p></div><button onClick={() => removeDiscoverySeed(seed.id)}>REMOVE</button></header><div className="tr10-discoverGrid">{seed.recommendations.filter((item)=>!item.dismissed).map((item)=><article key={item.id} className={item.inLibrary ? "is-owned" : ""}>{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}<div><small>{item.kind.toUpperCase()}</small><strong>{item.title}</strong><span>{item.artist}{item.album && item.album!==item.title ? ` • ${item.album}` : ""}</span><p>{item.reason}</p></div><footer>{item.inLibrary ? <b>✓ IN YOUR LIBRARY</b> : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}<button onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{dismissed:true})}>NOT INTERESTED</button></footer></article>)}</div></section>)}
+          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press DISCOVER MORE in the player.</div> : discoverySeeds.map((seed) => <section className="tr10-discoverSeed" key={seed.id}><header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}</p></div><button onClick={() => removeDiscoverySeed(seed.id)}>REMOVE</button></header><div className="tr10-discoverGrid">{seed.recommendations.filter((item)=>!item.dismissed).length ? seed.recommendations.filter((item)=>!item.dismissed).map((item)=><article key={item.id} className={item.inLibrary ? "is-owned" : ""}>{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}<div><small>TRACK</small><strong>{item.title}</strong><span>{item.artist}{item.album && item.album!==item.title ? ` • ${item.album}` : ""}</span><p>{item.reason}</p></div><footer>{item.inLibrary ? <b>✓ IN YOUR LIBRARY</b> : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}<button onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{dismissed:true})}>NOT INTERESTED</button></footer></article>) : <div className="tr10-discoverConfidence">No confident related tracks were found for this seed yet. Press DISCOVER MORE again later to refresh.</div>}</div></section>)}
         </section> : null}
       </section>
 
@@ -1567,6 +1567,92 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-discover{padding:15px;display:grid;gap:14px}.tr10-discoverHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.tr10-discoverHead span,.tr10-discoverSeed header small{font-size:8px;font-weight:1000;letter-spacing:.14em;color:#6ed9fa}.tr10-discoverHead h2{margin:4px 0;font-size:22px}.tr10-discoverHead p,.tr10-discoverSeed header p{margin:0;color:#8da5af;font-size:10px}.tr10-discoverHead>b{padding:7px 10px;border:1px solid rgba(255,193,81,.25);border-radius:999px;color:#ffd383;background:#171106;font-size:8px}.tr10-discoverSeed{border-top:1px solid rgba(98,177,205,.12);padding-top:13px}.tr10-discoverSeed>header{display:flex;justify-content:space-between;gap:12px;align-items:center}.tr10-discoverSeed h3{margin:3px 0;font-size:18px}.tr10-discoverSeed>header button{min-height:30px;padding:0 9px;border:1px solid rgba(255,95,105,.22);border-radius:8px;background:#1a090b;color:#ff9298;font-size:7px;font-weight:1000}.tr10-discoverGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}.tr10-discoverGrid article{display:grid;grid-template-columns:68px minmax(0,1fr);gap:10px;padding:10px;border:1px solid rgba(91,169,197,.15);border-radius:11px;background:#061118;min-width:0}.tr10-discoverGrid article>img,.tr10-discoverArt{width:68px;height:68px;object-fit:cover;border-radius:8px;background:#0b1a21;display:grid;place-items:center}.tr10-discoverGrid article>div{min-width:0;display:grid;align-content:start;gap:2px}.tr10-discoverGrid article strong{font-size:12px;color:#fff;line-height:1.25;white-space:normal;word-break:break-word}.tr10-discoverGrid article span{font-size:9px;color:#b6cdd6;white-space:normal;word-break:break-word}.tr10-discoverGrid article p{margin:3px 0 0;font-size:8px;color:#7895a0}.tr10-discoverGrid article footer{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}.tr10-discoverGrid article footer button,.tr10-discoverGrid article footer b{min-height:30px;padding:0 9px;display:inline-flex;align-items:center;border:1px solid rgba(96,175,203,.17);border-radius:8px;background:#08151b;color:#e8f6fa;font-size:7px;font-weight:1000}.tr10-discoverGrid article footer button.is-toAdd{border-color:rgba(255,191,77,.44);color:#ffd37f;background:#241705}.tr10-discoverGrid article footer b{border-color:rgba(68,211,149,.35);color:#8ee9b7;background:#092319}
         @media(max-width:650px){
           .tr10-page{width:calc(100% - 12px)!important;margin-bottom:112px!important}.tr10-hero{padding:13px 12px!important}.tr10-hero h1{font-size:28px!important}.tr10-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}.tr10-stats>div{min-height:62px!important}.tr10-stats strong{font-size:19px!important}.tr10-tabs{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}.tr10-tabs button{font-size:8px!important;min-height:42px!important;padding:7px 4px!important;overflow:visible!important}.tr10-healthRail{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tr10-healthRail button{height:38px!important;font-size:7px!important}.tr10-healthRail button span{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.1!important}.tr10-healthRail button:first-child{grid-column:1/-1!important}.tr10-toolbar{grid-template-columns:1fr 1fr!important}.tr10-toolbar label:first-child{grid-column:1/-1!important}.tr10-tableHead{display:none!important}.tr10-row{display:grid!important;grid-template-columns:30px 24px minmax(0,1fr)!important;grid-template-areas:"order check track" "order . duration" "energy energy energy" "actions actions actions"!important;gap:7px 8px!important;padding:11px 9px!important;align-items:start!important}.tr10-orderCell{grid-area:order!important;align-self:start!important;width:26px!important;min-width:26px!important;gap:4px!important}.tr10-orderCell button{width:24px!important;height:23px!important}.tr10-check{grid-area:check!important;padding-top:6px!important}.tr10-trackCell{grid-area:track!important;grid-template-columns:36px 48px minmax(0,1fr)!important;gap:7px!important;min-width:0!important}.tr10-trackText strong{font-size:12px!important;line-height:1.25!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important}.tr10-trackText span,.tr10-trackText small{font-size:8px!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important}.tr10-duration{grid-area:duration!important;justify-self:start!important;margin-left:91px!important;font-size:9px!important}.tr10-energy{grid-area:energy!important;justify-self:start!important;width:auto!important;min-width:98px!important;min-height:32px!important}.tr10-actions{grid-area:actions!important;display:flex!important;flex-wrap:wrap!important;gap:5px!important;min-width:0!important}.tr10-actions button{min-height:34px!important;padding:0 8px!important;font-size:7px!important;white-space:nowrap!important}.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{min-width:82px!important}.tr10-headActions{flex-wrap:wrap!important;justify-content:flex-end!important}.tr10-headActions button{min-height:36px!important}.tr10-smart{grid-template-columns:1fr!important}.tr10-savedMixes article{align-items:flex-start!important;flex-direction:column!important}.tr10-discover{padding:10px!important}.tr10-discoverHead{flex-direction:column!important}.tr10-discoverGrid{grid-template-columns:1fr!important}.tr10-playlistLayout{grid-template-columns:1fr!important}.tr10-playlistLayout aside{max-height:none!important}.tr10-playlistSongs article{grid-template-columns:34px 42px minmax(0,1fr) repeat(2,34px)!important}.tr10-playlistSongs article>.is-danger{grid-column:3/-1!important;justify-self:start!important}.tr10-picker,.tr10-inspector,.tr10-reviewModal,.tr10-analysisModal{max-height:calc(100dvh - 18px)!important;width:calc(100% - 12px)!important;overflow:auto!important}
+        }
+
+
+        /* AUG 9 FINAL LIBRARY POLISH: compact desktop rows + deliberate mobile cards */
+        .tr10-page{min-width:0!important;overflow-x:hidden!important}
+        .tr10-table{border-radius:12px!important;overflow:hidden!important}
+        .tr10-tableHead,.tr10-row{grid-template-columns:42px 26px minmax(240px,1fr) 54px 76px minmax(390px,auto)!important}
+        .tr10-tableHead{min-height:34px!important;padding:0 9px!important;font-size:8px!important;letter-spacing:.09em!important}
+        .tr10-row{min-height:62px!important;padding:6px 9px!important;gap:7px!important;border-top:1px solid rgba(99,160,182,.085)!important;background:linear-gradient(180deg,rgba(8,21,28,.92),rgba(4,11,15,.96))!important;overflow:visible!important}
+        .tr10-row:hover{background:linear-gradient(180deg,rgba(10,31,40,.96),rgba(5,15,20,.98))!important}
+        .tr10-row.is-current{box-shadow:inset 3px 0 #48d7fa!important;background:linear-gradient(90deg,rgba(21,104,132,.18),rgba(5,15,20,.97) 24%)!important}
+        .tr10-orderCell{width:32px!important;min-width:32px!important;display:grid!important;grid-template-columns:1fr!important;gap:2px!important;align-content:center!important}
+        .tr10-orderCell button{width:28px!important;height:23px!important;min-height:23px!important;padding:0!important;border-radius:6px!important;font-size:12px!important;background:#07161d!important;border-color:rgba(100,177,202,.17)!important}
+        .tr10-trackCell{grid-template-columns:32px 48px minmax(0,1fr)!important;gap:8px!important;align-items:center!important}
+        .tr10-art--row,.tr10-artwork{width:48px!important;height:48px!important;min-width:48px!important;min-height:48px!important;max-width:48px!important;max-height:48px!important;border-radius:7px!important}
+        .tr10-play{width:30px!important;height:30px!important;min-width:30px!important;min-height:30px!important}
+        .tr10-trackText{min-width:0!important;gap:2px!important}
+        .tr10-trackText strong{font-size:12px!important;line-height:1.2!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;color:#f7fbfd!important}
+        .tr10-trackText span{font-size:9px!important;line-height:1.25!important;color:#aac1ca!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        .tr10-trackText small{font-size:7.5px!important;line-height:1.2!important;color:#607b86!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        .tr10-duration{font-size:9px!important;color:#b7cbd2!important}
+        .tr10-energy{height:29px!important;min-height:29px!important;min-width:72px!important;width:72px!important;padding:0 7px!important;font-size:8px!important;border-radius:7px!important}
+        .tr10-energySegments{display:none!important}
+        .tr10-actions{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:4px!important;flex-wrap:nowrap!important;min-width:0!important}
+        .tr10-actions button{height:29px!important;min-height:29px!important;min-width:0!important;padding:0 7px!important;border-radius:6px!important;font-size:7.5px!important;white-space:nowrap!important;line-height:1!important;overflow:visible!important;text-overflow:clip!important}
+        .tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{min-width:60px!important;color:#eef7fa!important;border-color:rgba(116,184,208,.20)!important;background:linear-gradient(180deg,#0a1921,#061017)!important}
+        .tr10-actions .tr10-likeAction.is-liked{color:#fff!important;border-color:#45e394!important;background:linear-gradient(180deg,#13945c,#087044)!important}
+        .tr10-actions .tr10-lessAction.is-down{color:#fff!important;border-color:#ff5360!important;background:linear-gradient(180deg,#c42d39,#8c1520)!important}
+        .tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:7px!important}
+        .tr10-discoverConfidence{grid-column:1/-1;padding:20px 14px;border:1px solid rgba(102,177,201,.12);border-radius:10px;background:#061118;color:#9db5be;font-size:11px;line-height:1.5;text-align:center}
+        .tr10-discoverGrid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important}
+        .tr10-discoverGrid article{grid-template-columns:58px minmax(0,1fr)!important;gap:8px!important;padding:8px!important;border-radius:10px!important}
+        .tr10-discoverGrid article>img,.tr10-discoverArt{width:58px!important;height:58px!important;border-radius:7px!important}
+        .tr10-discoverGrid article strong{font-size:11px!important}.tr10-discoverGrid article span{font-size:8.5px!important}.tr10-discoverGrid article p{font-size:7.5px!important;line-height:1.35!important}
+        .tr10-discoverGrid article footer{gap:4px!important}.tr10-discoverGrid article footer button,.tr10-discoverGrid article footer b{min-height:28px!important;padding:0 7px!important;font-size:6.8px!important}
+
+        @media(max-width:1100px){
+          .tr10-tableHead,.tr10-row{grid-template-columns:38px 24px minmax(210px,1fr) 48px 70px!important}
+          .tr10-tableHead span:last-child{display:none!important}
+          .tr10-actions{grid-column:3/-1!important;justify-content:flex-start!important;flex-wrap:wrap!important;padding-top:4px!important}
+          .tr10-row{grid-template-rows:auto auto!important}
+        }
+        @media(max-width:650px){
+          .tr10-page{width:calc(100% - 8px)!important}
+          .tr10-row{display:grid!important;grid-template-columns:30px 22px 42px minmax(0,1fr)!important;grid-template-areas:"order check art copy" "order . meta meta" "actions actions actions actions"!important;grid-template-rows:auto auto auto!important;gap:6px!important;padding:8px 7px!important;min-height:0!important;border-radius:0!important;overflow:visible!important}
+          .tr10-orderCell{grid-area:order!important;width:28px!important;min-width:28px!important;align-self:start!important;padding-top:1px!important}
+          .tr10-orderCell button{width:27px!important;height:24px!important}
+          .tr10-check{grid-area:check!important;padding-top:10px!important}
+          .tr10-trackCell{grid-column:3/5!important;grid-row:1!important;display:grid!important;grid-template-columns:42px minmax(0,1fr)!important;grid-template-areas:"art copy"!important;gap:7px!important;align-items:center!important}
+          .tr10-trackCell>.tr10-play{position:absolute!important;margin-left:5px!important;margin-top:5px!important;z-index:2!important;width:32px!important;height:32px!important;background:rgba(2,8,12,.80)!important;backdrop-filter:blur(3px)!important}
+          .tr10-trackCell>.tr10-artwork,.tr10-trackCell>.tr10-art--row{grid-area:art!important;width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;max-width:42px!important;max-height:42px!important}
+          .tr10-trackText{grid-area:copy!important;min-width:0!important}
+          .tr10-trackText strong{font-size:13px!important;line-height:1.2!important;white-space:normal!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;overflow:hidden!important}
+          .tr10-trackText span{font-size:9.5px!important;white-space:normal!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:1!important;overflow:hidden!important}
+          .tr10-trackText small{display:none!important}
+          .tr10-healthBadge{display:none!important}
+          .tr10-row>.tr10-duration{grid-column:3!important;grid-row:2!important;justify-self:start!important;margin:0!important;font-size:9px!important;align-self:center!important}
+          .tr10-row>.tr10-energy{grid-column:4!important;grid-row:2!important;justify-self:end!important;width:78px!important;min-width:78px!important;height:29px!important}
+          .tr10-actions{grid-area:actions!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:4px!important;width:100%!important;padding:1px 0 0!important}
+          .tr10-actions button,.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{width:100%!important;min-width:0!important;height:34px!important;min-height:34px!important;padding:0 4px!important;font-size:7.5px!important;white-space:normal!important;line-height:1.05!important;overflow:visible!important;text-overflow:clip!important}
+          .tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:6.8px!important}
+          .tr10-discoverGrid{grid-template-columns:1fr!important}
+          .tr10-discoverGrid article{grid-template-columns:54px minmax(0,1fr)!important;padding:8px!important}
+          .tr10-discoverGrid article>img,.tr10-discoverArt{width:54px!important;height:54px!important}
+          .tr10-tabs button{font-size:9px!important;line-height:1.15!important;min-height:44px!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+          .tr10-healthRail button span{font-size:8px!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+        }
+        @media(max-width:380px){
+          .tr10-row{grid-template-columns:28px 20px 40px minmax(0,1fr)!important;padding:7px 5px!important;gap:5px!important}
+          .tr10-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .tr10-tabs{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+        }
+
+        /* FINAL NO-CUTOFF / READABLE LIBRARY DENSITY */
+        .tr10-row{height:auto!important}
+        .tr10-trackText strong,.tr10-trackText span{display:block!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;-webkit-line-clamp:unset!important;-webkit-box-orient:initial!important;overflow-wrap:anywhere!important}
+        .tr10-trackText strong{font-size:13px!important;line-height:1.22!important}
+        .tr10-trackText span{font-size:10px!important;line-height:1.28!important}
+        .tr10-trackText small{display:none!important}
+        .tr10-actions button{font-size:8.5px!important;font-weight:950!important}
+        @media(max-width:650px){
+          .tr10-trackText strong{font-size:14px!important;line-height:1.22!important}
+          .tr10-trackText span{font-size:10.5px!important;line-height:1.3!important}
+          .tr10-actions button,.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{font-size:9.5px!important;line-height:1.12!important;min-height:37px!important}
+          .tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:8.5px!important}
+          .tr10-duration{font-size:10px!important}.tr10-energy{font-size:9px!important}
         }
       `}</style>
     </main>
