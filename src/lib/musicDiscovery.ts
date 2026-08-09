@@ -35,6 +35,27 @@ export type MusicDiscoverySeed = {
   recommendations: MusicDiscoveryRecommendation[];
 };
 
+export type MusicDiscoverySavedSong = {
+  id: string;
+  recommendationId: string;
+  seedId: string;
+  seedTrackTitle: string;
+  seedTrackArtist: string;
+  savedAt: number;
+  title: string;
+  artist: string;
+  album: string;
+  artworkUrl: string | null;
+  genre: string | null;
+  year: number | null;
+  category: MusicDiscoveryCategory;
+  reason: string;
+  discoveryType: MusicDiscoveryType;
+  previewUrl: string | null;
+  storeUrl: string | null;
+  inLibrary: boolean;
+};
+
 type DiscoveryPreferenceSignal = {
   trackId: string;
   title: string;
@@ -61,6 +82,26 @@ type CloudDiscoverResponse = {
   warning?: string | null;
 };
 
+type CloudSavedSongRow = {
+  saved_id: string;
+  recommendation_id: string;
+  seed_id: string;
+  seed_track_title: string;
+  seed_track_artist: string;
+  saved_at: string;
+  title: string;
+  artist: string;
+  album: string;
+  artwork_url: string | null;
+  genre: string | null;
+  year: number | null;
+  category: MusicDiscoveryCategory;
+  reason: string;
+  discovery_type: MusicDiscoveryType;
+  preview_url: string | null;
+  store_url: string | null;
+};
+
 type LibraryTrackPayload = {
   id: string;
   title: string;
@@ -76,16 +117,21 @@ const STORAGE_KEY = "mvp_music_discovery_v2";
 const LEGACY_STORAGE_KEY = "mvp_music_discovery_v1";
 const PREFERENCE_STORAGE_KEY = "mvp_music_discovery_preferences_v1";
 const DELETED_STORAGE_KEY = "mvp_music_discovery_deleted_v1";
+const SAVED_SONGS_STORAGE_KEY = "mvp_music_discovery_saved_songs_v1";
+const SAVED_SONGS_DELETED_KEY = "mvp_music_discovery_saved_songs_deleted_v1";
 const DELETED_TTL_MS = 30 * 86400000;
 const EVENT = "mvp:music-discovery-changed";
 const CLOUD_TABLE = "music_discovery_seeds";
 const HISTORY_TABLE = "music_discovery_history";
+const SAVED_SONGS_TABLE = "music_discovery_saved_songs";
 const CLOUD_LIMIT = 500;
 const MAX_MEMORY_SEEDS = 500;
 const MAX_OFFLINE_SEEDS = 40;
 
 let cloudHydrationPromise: Promise<void> | null = null;
+let savedSongsHydrationPromise: Promise<void> | null = null;
 let memorySeeds: MusicDiscoverySeed[] | null = null;
+let memorySavedSongs: MusicDiscoverySavedSong[] | null = null;
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -187,6 +233,37 @@ function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
   };
 }
 
+function sanitizeSavedSong(value: unknown): MusicDiscoverySavedSong | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<MusicDiscoverySavedSong>;
+  const title = clean(row.title);
+  const artist = clean(row.artist);
+  const recommendationId = clean(row.recommendationId);
+  const id = clean(row.id) || recommendationId;
+  if (!id || !recommendationId || !title || !artist) return null;
+  const category = safeCategory(row.category);
+  return {
+    id,
+    recommendationId,
+    seedId: clean(row.seedId),
+    seedTrackTitle: clean(row.seedTrackTitle) || "Rediscover",
+    seedTrackArtist: clean(row.seedTrackArtist) || "Unknown Artist",
+    savedAt: Number(row.savedAt) || Date.now(),
+    title,
+    artist,
+    album: clean(row.album),
+    artworkUrl: clean(row.artworkUrl) || null,
+    genre: clean(row.genre) || null,
+    year: Number(row.year) >= 1900 ? Number(row.year) : null,
+    category,
+    reason: clean(row.reason) || "Saved from Rediscover",
+    discoveryType: safeDiscoveryType(row.discoveryType, category),
+    previewUrl: clean(row.previewUrl) || null,
+    storeUrl: clean(row.storeUrl) || null,
+    inLibrary: Boolean(row.inLibrary),
+  };
+}
+
 type DeletedSeedTombstone = { seedId: string; deletedAt: number };
 
 function readDeletedSeedTombstones(): DeletedSeedTombstone[] {
@@ -230,6 +307,51 @@ function clearSeedDeleted(seedId: string) {
 
 function locallyDeletedSeedIds() {
   return new Set(readDeletedSeedTombstones().map((row) => row.seedId));
+}
+
+type DeletedSavedSongTombstone = { savedId: string; deletedAt: number };
+
+function readDeletedSavedSongTombstones(): DeletedSavedSongTombstone[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(SAVED_SONGS_DELETED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const cutoff = Date.now() - DELETED_TTL_MS;
+    return parsed
+      .map((row) => ({ savedId: clean(row?.savedId), deletedAt: Number(row?.deletedAt) || 0 }))
+      .filter((row) => row.savedId && row.deletedAt >= cutoff);
+  } catch {
+    return [];
+  }
+}
+
+function writeDeletedSavedSongTombstones(rows: DeletedSavedSongTombstone[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const cutoff = Date.now() - DELETED_TTL_MS;
+    const deduped = new Map<string, DeletedSavedSongTombstone>();
+    for (const row of rows) {
+      if (!row.savedId || row.deletedAt < cutoff) continue;
+      const current = deduped.get(row.savedId);
+      if (!current || row.deletedAt > current.deletedAt) deduped.set(row.savedId, row);
+    }
+    window.localStorage.setItem(SAVED_SONGS_DELETED_KEY, JSON.stringify([...deduped.values()]));
+  } catch {
+    // Saved-song cloud state remains usable when localStorage is unavailable.
+  }
+}
+
+function markSavedSongDeleted(savedId: string) {
+  writeDeletedSavedSongTombstones([{ savedId, deletedAt: Date.now() }, ...readDeletedSavedSongTombstones()]);
+}
+
+function clearSavedSongDeleted(savedId: string) {
+  writeDeletedSavedSongTombstones(readDeletedSavedSongTombstones().filter((row) => row.savedId !== savedId));
+}
+
+function locallyDeletedSavedSongIds() {
+  return new Set(readDeletedSavedSongTombstones().map((row) => row.savedId));
 }
 
 function parseLocalStorageKey(key: string): MusicDiscoverySeed[] {
@@ -282,6 +404,37 @@ function replaceLocalSeed(seed: MusicDiscoverySeed) {
   clearSeedDeleted(seed.id);
   const existing = safeParse();
   saveLocal([seed, ...existing.filter((item) => item.id !== seed.id)]);
+}
+
+function safeSavedSongsParse(): MusicDiscoverySavedSong[] {
+  const deleted = locallyDeletedSavedSongIds();
+  if (memorySavedSongs) return memorySavedSongs.filter((song) => !deleted.has(song.id));
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(SAVED_SONGS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    memorySavedSongs = parsed
+      .map(sanitizeSavedSong)
+      .filter((song): song is MusicDiscoverySavedSong => Boolean(song) && !deleted.has(song.id))
+      .sort((a, b) => b.savedAt - a.savedAt);
+    return memorySavedSongs;
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedSongsLocal(songs: MusicDiscoverySavedSong[]) {
+  const deleted = locallyDeletedSavedSongIds();
+  const deduped = new Map<string, MusicDiscoverySavedSong>();
+  for (const song of [...songs].sort((a, b) => b.savedAt - a.savedAt)) {
+    if (!deleted.has(song.id) && !deduped.has(song.id)) deduped.set(song.id, song);
+  }
+  memorySavedSongs = [...deduped.values()];
+  if (typeof window !== "undefined") {
+    try { window.localStorage.setItem(SAVED_SONGS_STORAGE_KEY, JSON.stringify(memorySavedSongs)); } catch { /* Cloud remains authoritative. */ }
+    window.dispatchEvent(new Event(EVENT));
+  }
 }
 
 function readPreferenceSignals(): DiscoveryPreferenceSignal[] {
@@ -353,6 +506,29 @@ function cloudRowToSeed(row: CloudSeedRow): MusicDiscoverySeed | null {
   });
 }
 
+function cloudRowToSavedSong(row: CloudSavedSongRow): MusicDiscoverySavedSong | null {
+  return sanitizeSavedSong({
+    id: row.saved_id,
+    recommendationId: row.recommendation_id,
+    seedId: row.seed_id,
+    seedTrackTitle: row.seed_track_title,
+    seedTrackArtist: row.seed_track_artist,
+    savedAt: new Date(row.saved_at).getTime(),
+    title: row.title,
+    artist: row.artist,
+    album: row.album,
+    artworkUrl: row.artwork_url,
+    genre: row.genre,
+    year: row.year,
+    category: row.category,
+    reason: row.reason,
+    discoveryType: row.discovery_type,
+    previewUrl: row.preview_url,
+    storeUrl: row.store_url,
+    inLibrary: false,
+  });
+}
+
 async function currentUserId() {
   const { data, error } = await supabase.auth.getUser();
   if (error) return null;
@@ -412,6 +588,33 @@ export async function hydrateMusicDiscoveryFromCloud() {
   return cloudHydrationPromise;
 }
 
+export async function hydrateMusicDiscoverySavedSongsFromCloud() {
+  if (savedSongsHydrationPromise) return savedSongsHydrationPromise;
+  savedSongsHydrationPromise = (async () => {
+    try {
+      const userId = await currentUserId();
+      if (!userId) return;
+      const { data, error } = await supabase
+        .from(SAVED_SONGS_TABLE)
+        .select("saved_id,recommendation_id,seed_id,seed_track_title,seed_track_artist,saved_at,title,artist,album,artwork_url,genre,year,category,reason,discovery_type,preview_url,store_url")
+        .eq("user_id", userId)
+        .order("saved_at", { ascending: false })
+        .limit(1000);
+      if (error || !Array.isArray(data)) return;
+      const deleted = locallyDeletedSavedSongIds();
+      const cloudSongs = (data as CloudSavedSongRow[])
+        .map(cloudRowToSavedSong)
+        .filter((song): song is MusicDiscoverySavedSong => song !== null && !deleted.has(song.id));
+      saveSavedSongsLocal(cloudSongs);
+    } catch {
+      // Keep the recent local Saved Songs list available while offline.
+    } finally {
+      savedSongsHydrationPromise = null;
+    }
+  })();
+  return savedSongsHydrationPromise;
+}
+
 export function getDiscoverPreferenceBoost(track: MusicTrack) {
   const signals = readPreferenceSignals();
   if (!signals.length) return 0;
@@ -432,10 +635,15 @@ export function listMusicDiscoverySeeds() {
   return safeParse().sort((a, b) => b.refreshedAt - a.refreshedAt);
 }
 
+export function listMusicDiscoverySavedSongs() {
+  return safeSavedSongsParse().sort((a, b) => b.savedAt - a.savedAt);
+}
+
 export function subscribeMusicDiscovery(listener: () => void) {
   if (typeof window === "undefined") return () => undefined;
   window.addEventListener(EVENT, listener);
   void hydrateMusicDiscoveryFromCloud();
+  void hydrateMusicDiscoverySavedSongsFromCloud();
   return () => window.removeEventListener(EVENT, listener);
 }
 
@@ -556,6 +764,100 @@ export function setDiscoveryRecommendationState(
   }
 }
 
+export async function saveMusicDiscoveryRecommendation(
+  seed: MusicDiscoverySeed,
+  item: MusicDiscoveryRecommendation
+) {
+  const saved: MusicDiscoverySavedSong = {
+    id: item.id,
+    recommendationId: item.id,
+    seedId: seed.id,
+    seedTrackTitle: seed.trackTitle,
+    seedTrackArtist: seed.trackArtist,
+    savedAt: Date.now(),
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
+    artworkUrl: item.artworkUrl,
+    genre: item.genre,
+    year: item.year,
+    category: item.category,
+    reason: item.reason,
+    discoveryType: item.discoveryType,
+    previewUrl: item.previewUrl,
+    storeUrl: item.storeUrl,
+    inLibrary: item.inLibrary,
+  };
+
+  clearSavedSongDeleted(saved.id);
+  saveSavedSongsLocal([saved, ...safeSavedSongsParse().filter((song) => song.id !== saved.id)]);
+  setDiscoveryRecommendationState(seed.id, item.id, { toAdd: true });
+
+  try {
+    const userId = await currentUserId();
+    if (!userId) return saved;
+    const { error } = await supabase.from(SAVED_SONGS_TABLE).upsert({
+      user_id: userId,
+      saved_id: saved.id,
+      recommendation_id: saved.recommendationId,
+      seed_id: saved.seedId,
+      seed_track_title: saved.seedTrackTitle,
+      seed_track_artist: saved.seedTrackArtist,
+      saved_at: new Date(saved.savedAt).toISOString(),
+      title: saved.title,
+      artist: saved.artist,
+      album: saved.album,
+      artwork_url: saved.artworkUrl,
+      genre: saved.genre,
+      year: saved.year,
+      category: saved.category,
+      reason: saved.reason,
+      discovery_type: saved.discoveryType,
+      preview_url: saved.previewUrl,
+      store_url: saved.storeUrl,
+    }, { onConflict: "user_id,saved_id" });
+    if (error) throw error;
+  } catch {
+    // The local saved copy stays visible and can sync on a later save.
+  }
+
+  return saved;
+}
+
+export async function removeMusicDiscoverySavedSong(savedId: string) {
+  const previous = safeSavedSongsParse();
+  markSavedSongDeleted(savedId);
+  saveSavedSongsLocal(previous.filter((song) => song.id !== savedId));
+
+  const affectedSeeds = safeParse()
+    .filter((seed) => seed.recommendations.some((item) => item.id === savedId && item.toAdd))
+    .map((seed) => ({
+      ...seed,
+      recommendations: seed.recommendations.map((item) => item.id === savedId ? { ...item, toAdd: false } : item),
+    }));
+  if (affectedSeeds.length) {
+    const unaffected = safeParse().filter((seed) => !affectedSeeds.some((changed) => changed.id === seed.id));
+    saveLocal([...affectedSeeds, ...unaffected]);
+    affectedSeeds.forEach((seed) => void persistSeedToCloud(seed));
+  }
+
+  try {
+    const userId = await currentUserId();
+    if (!userId) return true;
+    const { error } = await supabase
+      .from(SAVED_SONGS_TABLE)
+      .delete()
+      .eq("user_id", userId)
+      .eq("saved_id", savedId);
+    if (error) throw error;
+    return true;
+  } catch {
+    // Keep the local tombstone so a stale cloud refresh does not immediately resurrect the song.
+    // A later explicit save clears the tombstone and re-adds the song.
+    return false;
+  }
+}
+
 export async function removeDiscoverySeed(seedId: string) {
   markSeedDeleted(seedId);
   saveLocal(safeParse().filter((seed) => seed.id !== seedId));
@@ -598,9 +900,14 @@ export function refreshDiscoveryLibraryFlags(libraryTracks: MusicTrack[]) {
         ...item,
         category: safeCategory(item.category),
         inLibrary,
-        toAdd: inLibrary ? false : item.toAdd,
       };
     }),
   }));
   saveLocal(seeds);
+
+  const savedSongs = safeSavedSongsParse().map((song) => ({
+    ...song,
+    inLibrary: library.has(`${normalized(song.artist)}|${canonicalTitle(song.title)}`),
+  }));
+  saveSavedSongsLocal(savedSongs);
 }
