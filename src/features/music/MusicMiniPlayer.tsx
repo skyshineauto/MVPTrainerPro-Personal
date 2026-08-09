@@ -210,19 +210,25 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       ctx.fillRect(0, 0, width, height);
 
       const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
+      const framePeak = raw.reduce((peak, value) => Math.max(peak, Math.max(0, Math.min(1, Number(value) || 0))), 0);
       for (let index = 0; index < 10; index += 1) {
         const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
-        const opened = source < 0.018 ? 0 : Math.min(1, (source - 0.018) / 0.94);
-        const shaped = Math.pow(opened, 0.88);
+        const opened = source < 0.012 ? 0 : Math.min(1, (source - 0.012) / 0.84);
+        // Absolute level keeps the meter honest. A small frame-relative component increases
+        // visible separation between neighboring bands without inventing motion or random data.
+        const absoluteShape = Math.pow(opened, 1.18);
+        const relative = framePeak > 0.05 ? Math.min(1, source / framePeak) : 0;
+        const relativeShape = Math.pow(relative, 2.1) * Math.min(1, framePeak * 1.55);
+        const shaped = Math.min(1, absoluteShape * 0.86 + relativeShape * 0.14);
         const previous = displayed[index];
-        const attack = 0.88;
-        const release = playing ? 0.22 : 0.48;
+        const attack = 0.95;
+        const release = playing ? 0.145 : 0.48;
         displayed[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
-        if (displayed[index] >= peaks[index] - 0.006) {
+        if (displayed[index] >= peaks[index] - 0.004) {
           peaks[index] = displayed[index];
-          peakHoldUntil[index] = now + 430;
+          peakHoldUntil[index] = now + 520;
         } else if (now > peakHoldUntil[index]) {
-          peaks[index] = Math.max(displayed[index], peaks[index] - 0.032);
+          peaks[index] = Math.max(displayed[index], peaks[index] - 0.021);
         }
       }
 
@@ -250,16 +256,16 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
         });
       }
 
-      const gap = Math.max(compact ? 4 : 7, Math.min(compact ? 7 : 12, plotWidth * 0.0105));
+      const gap = Math.max(compact ? 3 : 6, Math.min(compact ? 6 : 10, plotWidth * 0.009));
       const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
-      const barWidth = Math.max(7, slotWidth * (compact ? 0.70 : 0.68));
+      const barWidth = Math.max(6, slotWidth * (compact ? 0.58 : 0.56));
       const insetX = (slotWidth - barWidth) / 2;
 
       const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
-      wellGradient.addColorStop(0, "rgba(34,23,14,.27)");
-      wellGradient.addColorStop(0.20, "rgba(26,34,19,.22)");
-      wellGradient.addColorStop(0.55, "rgba(8,34,38,.35)");
-      wellGradient.addColorStop(1, "rgba(3,18,25,.76)");
+      wellGradient.addColorStop(0, "rgba(36,23,12,.20)");
+      wellGradient.addColorStop(0.18, "rgba(22,30,18,.16)");
+      wellGradient.addColorStop(0.52, "rgba(5,29,35,.28)");
+      wellGradient.addColorStop(1, "rgba(1,11,17,.86)");
 
       const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
       meterGradient.addColorStop(0, "#057f9d");
@@ -325,6 +331,12 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
           ctx.restore();
         }
       }
+
+      const floorGlow = ctx.createLinearGradient(0, plotTop + plotHeight * 0.72, 0, plotTop + plotHeight);
+      floorGlow.addColorStop(0, "rgba(13,123,151,0)");
+      floorGlow.addColorStop(1, playing && framePeak > 0.08 ? "rgba(14,142,166,.075)" : "rgba(14,142,166,.02)");
+      ctx.fillStyle = floorGlow;
+      ctx.fillRect(plotLeft, plotTop + plotHeight * 0.68, plotWidth, plotHeight * 0.32);
 
       const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.55);
       glass.addColorStop(0, "rgba(255,255,255,.035)");
