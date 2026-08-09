@@ -14,7 +14,7 @@ export type MusicMetadataCandidate = {
   artworkUrl: string | null;
   durationSeconds: number | null;
   confidence: number;
-  source: "itunes";
+  source: "itunes" | "musicbrainz";
 };
 
 export type MusicEnrichmentResult = {
@@ -41,6 +41,32 @@ type ItunesResponse = {
   results?: ItunesResult[];
 };
 
+type MusicBrainzArtistCredit = {
+  name?: string;
+  joinphrase?: string;
+  artist?: { name?: string };
+};
+
+type MusicBrainzRelease = {
+  id?: string;
+  title?: string;
+  date?: string;
+};
+
+type MusicBrainzRecording = {
+  id?: string;
+  title?: string;
+  length?: number;
+  "first-release-date"?: string;
+  "artist-credit"?: MusicBrainzArtistCredit[];
+  releases?: MusicBrainzRelease[];
+};
+
+type MusicBrainzResponse = {
+  recordings?: MusicBrainzRecording[];
+};
+
+
 type SearchAttribute = "songTerm" | "artistTerm" | null;
 
 export type MusicLookupRetryInfo = {
@@ -66,9 +92,12 @@ const LOOKUP_CACHE = new Map<
 >();
 
 const LOOKUP_MIN_GAP_MS = 3300;
+const MUSICBRAINZ_MIN_GAP_MS = 1150;
 const LOOKUP_RETRY_DELAYS_MS = [5000, 8000, 12000];
 let lastLookupRequestAt = 0;
 let lookupGate: Promise<void> = Promise.resolve();
+let lastMusicBrainzRequestAt = 0;
+let musicBrainzGate: Promise<void> = Promise.resolve();
 
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
@@ -85,6 +114,17 @@ async function enterLookupGate() {
     await wait(LOOKUP_MIN_GAP_MS - elapsed);
   }
   lastLookupRequestAt = Date.now();
+  release();
+}
+
+async function enterMusicBrainzGate() {
+  const previousGate = musicBrainzGate;
+  let release!: () => void;
+  musicBrainzGate = new Promise<void>((resolve) => { release = resolve; });
+  await previousGate;
+  const elapsed = Date.now() - lastMusicBrainzRequestAt;
+  if (elapsed < MUSICBRAINZ_MIN_GAP_MS) await wait(MUSICBRAINZ_MIN_GAP_MS - elapsed);
+  lastMusicBrainzRequestAt = Date.now();
   release();
 }
 
@@ -505,6 +545,83 @@ async function searchItunes(
   );
 }
 
+function musicBrainzArtist(credit?: MusicBrainzArtistCredit[]) {
+  if (!Array.isArray(credit)) return "";
+  return credit
+    .map((row) => `${row.name || row.artist?.name || ""}${row.joinphrase || ""}`)
+    .join("")
+    .trim();
+}
+
+async function searchMusicBrainz(
+  title: string,
+  artist: string | null,
+  limit = 25,
+  options?: LookupOptions
+): Promise<Omit<MusicMetadataCandidate, "confidence">[]> {
+  const cleanTitle = title.replace(/\s+/g, " ").trim();
+  const cleanArtist = artist?.replace(/\s+/g, " ").trim() || null;
+  if (!cleanTitle) return [];
+  const cacheKey = `musicbrainz:${normalize(cleanArtist || "")}:${normalize(cleanTitle)}:${limit}`;
+  const cached = LOOKUP_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const escapeQuery = (value: string) => value.replace(/([+\-&|!(){}\[\]^"~*?:\/])/g, "\\$1");
+  const query = cleanArtist
+    ? `recording:"${escapeQuery(cleanTitle)}" AND artist:"${escapeQuery(cleanArtist)}"`
+    : `recording:"${escapeQuery(cleanTitle)}"`;
+  const params = new URLSearchParams({ query, fmt: "json", limit: String(limit) });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await enterMusicBrainzGate();
+    try {
+      const response = await fetch(`https://musicbrainz.org/ws/2/recording/?${params.toString()}`, {
+        mode: "cors",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+          const delayMs = 1800 * (attempt + 1);
+          options?.onRetry?.({ status: response.status, attempt: attempt + 1, delayMs });
+          await wait(delayMs);
+          continue;
+        }
+        return [];
+      }
+
+      const payload = (await response.json()) as MusicBrainzResponse;
+      const rows = (payload.recordings || [])
+        .filter((recording) => recording.id && recording.title)
+        .map((recording) => {
+          const release = recording.releases?.find((item) => item.id && item.title) || recording.releases?.[0];
+          const releaseId = release?.id || null;
+          return {
+            sourceId: `mb:${recording.id}`,
+            title: recording.title || "",
+            artist: musicBrainzArtist(recording["artist-credit"]),
+            album: release?.title || "",
+            releaseYear: yearFromDate(recording["first-release-date"] || release?.date),
+            genre: null,
+            artworkUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-500` : null,
+            durationSeconds: recording.length ? Math.round(recording.length / 1000) : null,
+            source: "musicbrainz" as const,
+          };
+        })
+        .filter((row) => row.artist);
+
+      LOOKUP_CACHE.set(cacheKey, rows);
+      return rows;
+    } catch {
+      if (attempt >= 2) return [];
+      const delayMs = 1800 * (attempt + 1);
+      options?.onRetry?.({ status: 0, attempt: attempt + 1, delayMs });
+      await wait(delayMs);
+    }
+  }
+  return [];
+}
+
 export async function findMusicMetadataCandidates(
   track: MusicTrack,
   options?: LookupOptions
@@ -564,14 +681,19 @@ export async function findMusicMetadataCandidates(
   };
 
   for (const request of searchPlan.slice(0, 3)) {
-    addRows(
-      await searchItunes(
-        request.term,
-        request.attribute,
-        request.limit,
-        options
-      )
-    );
+    try {
+      addRows(
+        await searchItunes(
+          request.term,
+          request.attribute,
+          request.limit,
+          options
+        )
+      );
+    } catch {
+      // Apple can temporarily throttle browser lookups. The fallback catalog below
+      // still gets a chance instead of turning the song into a false miss.
+    }
 
     const perfect = [...combined.values()].some((candidate) =>
       exactAgainst(signals.titleVariants, candidate.title) &&
@@ -581,6 +703,20 @@ export async function findMusicMetadataCandidates(
     );
 
     if (perfect) break;
+  }
+
+  const appleHasStrongMatch = [...combined.values()].some((candidate) =>
+    candidate.confidence >= 0.94 &&
+    exactAgainst(signals.titleVariants, candidate.title) &&
+    (!signals.artistVariants.length || bestTextScore(signals.artistVariants, candidate.artist) >= 0.9)
+  );
+
+  if (!appleHasStrongMatch) {
+    const mbRows = await searchMusicBrainz(primaryTitle, bestArtist, 25, options);
+    addRows(mbRows);
+    if (!mbRows.length && secondaryTitle) {
+      addRows(await searchMusicBrainz(secondaryTitle, bestArtist, 20, options));
+    }
   }
 
   let filtered = [...combined.values()].filter((candidate) => {
@@ -639,8 +775,8 @@ export async function findMusicMetadataCandidates(
 
 export function musicMatchTier(confidence: number) {
   if (confidence >= 0.95) return "EXACT MATCH";
-  if (confidence >= 0.84) return "STRONG MATCH";
-  if (confidence >= 0.62) return "POSSIBLE MATCH";
+  if (confidence >= 0.87) return "STRONG MATCH";
+  if (confidence >= 0.72) return "POSSIBLE MATCH";
   return "WEAK MATCH";
 }
 
