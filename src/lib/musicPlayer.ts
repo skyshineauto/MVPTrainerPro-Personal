@@ -400,7 +400,7 @@ function connectMusicGraph() {
     headphoneLeftCrossDelay = context.createDelay(0.03); headphoneRightCrossDelay = context.createDelay(0.03);
     headphoneLeftCrossLowpass = context.createBiquadFilter(); headphoneRightCrossLowpass = context.createBiquadFilter(); headphoneLeftCrossLowpass.type = "lowpass"; headphoneRightCrossLowpass.type = "lowpass";
     headphoneCenterSum = context.createGain(); headphoneCenterSum.gain.value = 0.5; headphoneCenterLeft = context.createGain(); headphoneCenterRight = context.createGain();
-    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 4096; analyserNode.smoothingTimeConstant = 0.16; analyserNode.minDecibels = -92; analyserNode.maxDecibels = -10; musicGain = context.createGain(); musicGain.gain.value = 1;
+    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 4096; analyserNode.smoothingTimeConstant = 0.08; analyserNode.minDecibels = -92; analyserNode.maxDecibels = -10; musicGain = context.createGain(); musicGain.gain.value = 1;
 
     mediaSource.connect(masterVolumeGain); masterVolumeGain.connect(preampGain);
     let node: AudioNode = preampGain;
@@ -714,13 +714,15 @@ export function getMusicRtaLevels() {
 
     const rms = samples ? Math.sqrt(energy / samples) : 0;
     const topAverage = samples >= 4 ? (top1 + top2 + top3 + top4) / 4 : peak;
-    const measured = Math.min(1, rms * 0.46 + topAverage * 0.36 + peak * 0.22);
+    // RMS carries most of the band level while the top bins add transient response. The higher
+    // exponent deliberately preserves more contrast between quiet and strong bands, which is
+    // what a real 10-band analyzer visually needs.
+    const measured = Math.min(1, rms * 0.60 + topAverage * 0.27 + peak * 0.13);
     const floor = bandFloor[index];
-    const opened = Math.max(0, (measured - floor) / Math.max(0.001, 0.76 - floor));
-    const shaped = Math.min(1, Math.pow(opened, 0.72) * bandGain[index]);
+    const opened = Math.max(0, (measured - floor) / Math.max(0.001, 0.80 - floor));
+    const shaped = Math.min(1, Math.pow(opened, 1.08) * bandGain[index]);
 
-    // Keep the engine almost instantaneous. The display layer owns attack, release and peak hold.
-    // That avoids the previous double-smoothing that made every band hover at similar heights.
+    // Keep the engine instantaneous. The canvas layer owns attack, release and peak hold.
     rtaEnvelope[index] = shaped;
   }
 
