@@ -65,6 +65,8 @@ import {
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
 type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "discover";
+type DiscoverySort = "newest" | "oldest" | "artist" | "most";
+type DiscoveryFilter = "all" | "new_current" | "to_add" | "unowned";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
 type SongSort =
@@ -199,25 +201,79 @@ function buildDraftMap(rows: MusicTrack[]): DraftMap {
 
 
 const DISCOVERY_SECTIONS: Array<{ key: MusicDiscoveryCategory; title: string; subtitle: string; tone: string }> = [
-  { key: "new_upcoming", title: "New & Upcoming", subtitle: "Newer and current artists carrying this sound forward", tone: "new" },
+  { key: "new_upcoming", title: "New & Current", subtitle: "New artists plus new releases from established related artists", tone: "new" },
   { key: "same_era", title: "Similar From That Era", subtitle: "Popular, essential, and overlooked matches from the seed song's era", tone: "era" },
-  { key: "hidden_era", title: "Hidden Gems From That Era", subtitle: "Deep cuts and lesser-known tracks from that era you may have missed", tone: "hidden" },
+  { key: "hidden_era", title: "Hidden Gems Across Eras", subtitle: "Deeper new-to-you tracks from any era that genuinely fit the seed sound", tone: "hidden" },
 ];
 
-function DiscoveryCard({ seedId, item }: { seedId: string; item: MusicDiscoveryRecommendation; key?: string }) {
+const DISCOVERY_SEED_UI_KEY = "mvp_rediscover_expanded_seeds_v1";
+const DISCOVERY_LANE_UI_KEY = "mvp_rediscover_expanded_lanes_v1";
+
+function readUiSet(key: string) {
+  if (typeof window === "undefined") return new Set<string>();
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "[]");
+    return new Set<string>(Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+function writeUiSet(key: string, value: Set<string>) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(key, JSON.stringify([...value])); } catch { /* UI state is optional. */ }
+}
+function hasUiSet(key: string) {
+  if (typeof window === "undefined") return false;
+  try { return window.localStorage.getItem(key) !== null; } catch { return false; }
+}
+function formatDiscoveryDate(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const dateText = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
+  const timeText = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  return `${dateText} • ${timeText}`;
+}
+function discoveryTypeLabel(item: MusicDiscoveryRecommendation) {
+  if (item.discoveryType === "new_artist") return "NEW ARTIST";
+  if (item.discoveryType === "new_release") return "NEW RELEASE";
+  if (item.discoveryType === "modern_match") return "MODERN MATCH";
+  if (item.discoveryType === "hidden_gem") return "HIDDEN GEM";
+  return "ERA MATCH";
+}
+
+function DiscoveryCard({
+  seedId,
+  item,
+  previewingId,
+  previewErrorId,
+  onPreview,
+}: {
+  seedId: string;
+  item: MusicDiscoveryRecommendation;
+  previewingId: string | null;
+  previewErrorId: string | null;
+  onPreview: (item: MusicDiscoveryRecommendation) => void;
+  key?: string;
+}) {
+  const previewing = previewingId === item.id;
+  const previewError = previewErrorId === item.id;
   return <article className={item.inLibrary ? "is-owned" : ""}>
     {item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}
     <div>
-      <small>{item.year ? `TRACK • ${item.year}` : "TRACK"}</small>
+      <small className={`tr10-discoverType is-${item.discoveryType}`}>{discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
       <strong>{item.title}</strong>
       <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
       <p>{item.reason}</p>
     </div>
     <footer>
+      {item.previewUrl
+        ? <button className={`tr10-previewButton ${previewing ? "is-playing" : ""}`} onClick={() => onPreview(item)}>{previewing ? "■ STOP PREVIEW" : previewError ? "↻ RETRY PREVIEW" : "▶ PREVIEW"}</button>
+        : <span className="tr10-previewUnavailable">PREVIEW UNAVAILABLE</span>}
       {item.inLibrary
         ? <b>✓ IN YOUR LIBRARY</b>
         : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seedId,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}
       <button onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}>NOT INTERESTED</button>
+      {item.storeUrl ? <a className="tr10-storeLink" href={item.storeUrl} target="_blank" rel="noreferrer">APPLE ↗</a> : null}
     </footer>
   </article>;
 }
@@ -265,6 +321,16 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [smartIntensity, setSmartIntensity] = useState<SmartIntensity>("high");
   const [discoverySeeds, setDiscoverySeeds] = useState<MusicDiscoverySeed[]>(() => listMusicDiscoverySeeds());
   const [removingDiscoverySeedId, setRemovingDiscoverySeedId] = useState<string | null>(null);
+  const [discoverySearch, setDiscoverySearch] = useState("");
+  const [discoverySort, setDiscoverySort] = useState<DiscoverySort>("newest");
+  const [discoveryFilter, setDiscoveryFilter] = useState<DiscoveryFilter>("all");
+  const [expandedDiscoverySeedIds, setExpandedDiscoverySeedIds] = useState<Set<string>>(() => readUiSet(DISCOVERY_SEED_UI_KEY));
+  const [expandedDiscoveryLaneIds, setExpandedDiscoveryLaneIds] = useState<Set<string>>(() => readUiSet(DISCOVERY_LANE_UI_KEY));
+  const discoveryDefaultsInitializedRef = useRef(false);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewStopTimerRef = useRef<number | null>(null);
+  const [previewingRecommendationId, setPreviewingRecommendationId] = useState<string | null>(null);
+  const [previewErrorRecommendationId, setPreviewErrorRecommendationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -309,6 +375,38 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     tracks.forEach((track) => { const album = albumLabel(track); const artist = artistLabel(track); const key = `${artist}|||${album}`; const group = map.get(key) || { album, artist, tracks: [] }; group.tracks.push(track); map.set(key, group); });
     return [...map.values()].sort((a, b) => a.album.localeCompare(b.album));
   }, [tracks]);
+
+  const discoveryArchive = useMemo(() => {
+    const query = discoverySearch.trim().toLowerCase();
+    const filtered = discoverySeeds.filter((seed) => {
+      const visible = seed.recommendations.filter((item) => !item.dismissed);
+      if (discoveryFilter === "new_current" && !visible.some((item) => item.category === "new_upcoming")) return false;
+      if (discoveryFilter === "to_add" && !visible.some((item) => item.toAdd)) return false;
+      if (discoveryFilter === "unowned" && !visible.some((item) => !item.inLibrary)) return false;
+      if (!query) return true;
+      const haystack = [
+        seed.trackTitle,
+        seed.trackArtist,
+        ...visible.flatMap((item) => [item.title, item.artist, item.album, item.reason]),
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+    return [...filtered].sort((a, b) => {
+      if (discoverySort === "oldest") return a.createdAt - b.createdAt;
+      if (discoverySort === "artist") return a.trackArtist.localeCompare(b.trackArtist) || a.trackTitle.localeCompare(b.trackTitle);
+      if (discoverySort === "most") {
+        const aCount = a.recommendations.filter((item) => !item.dismissed).length;
+        const bCount = b.recommendations.filter((item) => !item.dismissed).length;
+        return bCount - aCount || b.refreshedAt - a.refreshedAt;
+      }
+      return b.refreshedAt - a.refreshedAt;
+    });
+  }, [discoverySeeds, discoverySearch, discoverySort, discoveryFilter]);
+
+  const discoveryCount = useMemo(
+    () => discoverySeeds.reduce((sum, seed) => sum + seed.recommendations.filter((item) => !item.dismissed).length, 0),
+    [discoverySeeds],
+  );
 
   const filteredTracks = useMemo(() => {
     const query = songSearch.trim().toLowerCase();
@@ -759,6 +857,84 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not play Smart Mix."); }
   }
 
+  function toggleDiscoverySeed(seedId: string) {
+    setExpandedDiscoverySeedIds((current) => {
+      const next = new Set(current);
+      if (next.has(seedId)) next.delete(seedId); else next.add(seedId);
+      return next;
+    });
+  }
+  function discoveryLaneKey(seedId: string, category: MusicDiscoveryCategory) {
+    return `${seedId}|${category}`;
+  }
+  function toggleDiscoveryLane(seedId: string, category: MusicDiscoveryCategory) {
+    const key = discoveryLaneKey(seedId, category);
+    setExpandedDiscoveryLaneIds((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+  function stopDiscoveryPreview() {
+    if (previewStopTimerRef.current != null) {
+      window.clearTimeout(previewStopTimerRef.current);
+      previewStopTimerRef.current = null;
+    }
+    const audio = previewAudioRef.current;
+    if (audio) {
+      try { audio.pause(); audio.currentTime = 0; } catch { /* Ignore browser media cleanup errors. */ }
+    }
+    previewAudioRef.current = null;
+    setPreviewingRecommendationId(null);
+  }
+  function toggleDiscoveryPreview(item: MusicDiscoveryRecommendation) {
+    if (!item.previewUrl) {
+      setPreviewErrorRecommendationId(item.id);
+      return;
+    }
+    if (previewingRecommendationId === item.id) {
+      stopDiscoveryPreview();
+      return;
+    }
+    stopDiscoveryPreview();
+    pauseMusic();
+    setPreviewErrorRecommendationId(null);
+    const audio = new Audio(item.previewUrl);
+    audio.preload = "none";
+    audio.volume = 0.9;
+    previewAudioRef.current = audio;
+    setPreviewingRecommendationId(item.id);
+    audio.onended = () => stopDiscoveryPreview();
+    audio.onerror = () => {
+      stopDiscoveryPreview();
+      setPreviewErrorRecommendationId(item.id);
+    };
+    void audio.play().then(() => {
+      previewStopTimerRef.current = window.setTimeout(() => stopDiscoveryPreview(), 15000);
+    }).catch(() => {
+      stopDiscoveryPreview();
+      setPreviewErrorRecommendationId(item.id);
+    });
+  }
+
+  useEffect(() => {
+    if (discoveryDefaultsInitializedRef.current || !discoverySeeds.length) return;
+    discoveryDefaultsInitializedRef.current = true;
+    const newest = [...discoverySeeds].sort((a, b) => b.refreshedAt - a.refreshedAt)[0];
+    if (!newest) return;
+    if (!hasUiSet(DISCOVERY_SEED_UI_KEY)) setExpandedDiscoverySeedIds(new Set([newest.id]));
+    if (!hasUiSet(DISCOVERY_LANE_UI_KEY)) setExpandedDiscoveryLaneIds(new Set([discoveryLaneKey(newest.id, "new_upcoming")]));
+  }, [discoverySeeds]);
+
+  useEffect(() => { writeUiSet(DISCOVERY_SEED_UI_KEY, expandedDiscoverySeedIds); }, [expandedDiscoverySeedIds]);
+  useEffect(() => { writeUiSet(DISCOVERY_LANE_UI_KEY, expandedDiscoveryLaneIds); }, [expandedDiscoveryLaneIds]);
+  useEffect(() => () => {
+    if (previewStopTimerRef.current != null) window.clearTimeout(previewStopTimerRef.current);
+    if (previewAudioRef.current) {
+      try { previewAudioRef.current.pause(); } catch { /* Ignore cleanup errors. */ }
+    }
+  }, []);
+
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
   return (
@@ -864,20 +1040,51 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section> : null}
 
         {tab === "discover" ? <section className="tr10-discover">
-          <header className="tr10-discoverHead"><div><span>REDISCOVER</span><h2>Find music you have not heard yet</h2><p>New and upcoming artists, strong same-era matches, and hidden tracks you may have missed.</p></div><div className="tr10-discoverSummary"><strong>{discoverySeeds.reduce((sum,seed)=>sum+seed.recommendations.filter((item)=>!item.dismissed).length,0)}</strong><span>DISCOVERIES</span><small>3 CURATED LANES</small></div></header>
-          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : discoverySeeds.map((seed) => {
+          <header className="tr10-discoverHead">
+            <div><span>REDISCOVER ARCHIVE</span><h2>Your saved music discovery library</h2><p>New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later.</p></div>
+            <div className="tr10-discoverSummary"><strong>{discoveryCount}</strong><span>DISCOVERIES</span><small>{discoverySeeds.length} SAVED SEED{discoverySeeds.length === 1 ? "" : "S"} • 3 CURATED LANES</small></div>
+          </header>
+          {discoverySeeds.length ? <div className="tr10-discoverArchiveTools">
+            <label className="tr10-discoverSearch"><span>SEARCH ARCHIVE</span><input value={discoverySearch} onChange={(event) => setDiscoverySearch(event.target.value)} placeholder="Song, artist, or recommendation" /></label>
+            <label><span>SORT</span><select value={discoverySort} onChange={(event) => setDiscoverySort(event.target.value as DiscoverySort)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="artist">Artist A–Z</option><option value="most">Most discoveries</option></select></label>
+            <label><span>FILTER</span><select value={discoveryFilter} onChange={(event) => setDiscoveryFilter(event.target.value as DiscoveryFilter)}><option value="all">All saved</option><option value="new_current">Has New & Current</option><option value="to_add">Marked to add</option><option value="unowned">Has new-to-you tracks</option></select></label>
+            <div className="tr10-discoverArchiveCount"><strong>{discoveryArchive.length}</strong><span>SHOWING</span></div>
+          </div> : null}
+          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : !discoveryArchive.length ? <div className="tr10-empty">No saved Rediscover results match these filters.</div> : discoveryArchive.map((seed) => {
             const visible = seed.recommendations.filter((item)=>!item.dismissed);
-            return <section className="tr10-discoverSeed" key={seed.id}>
-              <header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p></div><button disabled={removingDiscoverySeedId === seed.id} onClick={() => void (async () => { setRemovingDiscoverySeedId(seed.id); const removed = await removeDiscoverySeed(seed.id); setDiscoverySeeds(listMusicDiscoverySeeds()); if (!removed) setError("Rediscover was removed from this device, but cloud deletion could not be confirmed. Check your connection and try again."); setRemovingDiscoverySeedId(null); })()}>{removingDiscoverySeedId === seed.id ? "REMOVING…" : "REMOVE"}</button></header>
-              {visible.length ? <div className="tr10-discoverSections">
+            const seedExpanded = expandedDiscoverySeedIds.has(seed.id);
+            const wasRefreshed = seed.refreshedAt - seed.createdAt > 60000;
+            return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} key={seed.id}>
+              <header className="tr10-discoverSeedHead">
+                <button type="button" className="tr10-discoverSeedToggle" onClick={() => toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
+                  <div className="tr10-discoverSeedIdentity"><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p><time>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</time></div>
+                  <div className="tr10-discoverSeedStats"><strong>{visible.length}</strong><span>DISCOVERIES</span><small>3 CURATED LANES</small></div>
+                  <span className="tr10-discoverChevron" aria-hidden>{seedExpanded ? "⌃" : "⌄"}</span>
+                </button>
+                <button type="button" className="tr10-discoverRemove" disabled={removingDiscoverySeedId === seed.id} onClick={() => void (async () => {
+                  stopDiscoveryPreview();
+                  setRemovingDiscoverySeedId(seed.id);
+                  const removed = await removeDiscoverySeed(seed.id);
+                  setDiscoverySeeds(listMusicDiscoverySeeds());
+                  setExpandedDiscoverySeedIds((current) => { const next = new Set(current); next.delete(seed.id); return next; });
+                  setExpandedDiscoveryLaneIds((current) => new Set([...current].filter((key) => !key.startsWith(`${seed.id}|`))));
+                  if (!removed) setError("Rediscover was removed from this device, but cloud deletion could not be confirmed. Check your connection and try again.");
+                  setRemovingDiscoverySeedId(null);
+                })()}>{removingDiscoverySeedId === seed.id ? "REMOVING…" : "REMOVE"}</button>
+              </header>
+              {seedExpanded ? (visible.length ? <div className="tr10-discoverSections">
                 {DISCOVERY_SECTIONS.map((section) => {
                   const items = visible.filter((item) => item.category === section.key);
-                  return <section className={`tr10-discoverCategory is-${section.tone}`} key={section.key}>
-                    <header><div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b></header>
-                    {items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to widen this lane.</div>}
+                  const laneKey = discoveryLaneKey(seed.id, section.key);
+                  const laneExpanded = expandedDiscoveryLaneIds.has(laneKey);
+                  return <section className={`tr10-discoverCategory is-${section.tone} ${laneExpanded ? "is-expanded" : "is-collapsed"}`} key={section.key}>
+                    <button type="button" className="tr10-discoverCategoryToggle" onClick={() => toggleDiscoveryLane(seed.id, section.key)} aria-expanded={laneExpanded}>
+                      <div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
+                    </button>
+                    {laneExpanded ? (items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} onPreview={toggleDiscoveryPreview} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to refresh and widen this lane.</div>) : null}
                   </section>;
                 })}
-              </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to widen the search.</div>}
+              </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to refresh the search.</div>) : null}
             </section>;
           })}
         </section> : null}
@@ -1770,6 +1977,60 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-orderCell button:active:not(:disabled){transform:scale(.88)!important;color:#62dbfb!important}.tr10-orderCell button:disabled{opacity:.18!important}
           .tr10-discoverCategory>header{min-height:48px!important;padding:9px 10px!important}.tr10-discoverCategory>header span{font-size:11px!important}.tr10-discoverCategory>header small{font-size:7.5px!important}.tr10-discoverCategory .tr10-discoverGrid{padding:6px!important}
         }
+
+        /* AUG 9 REDISCOVER ARCHIVE + PREVIEW PRO PASS */
+        .tr10-discover{gap:12px!important}
+        .tr10-discoverHead{padding-bottom:2px}
+        .tr10-discoverArchiveTools{display:grid;grid-template-columns:minmax(260px,1.6fr) minmax(150px,.65fr) minmax(180px,.75fr) 82px;gap:8px;align-items:end;padding:10px;border:1px solid rgba(112,173,196,.12);border-radius:12px;background:linear-gradient(180deg,#081217,#050b0f)}
+        .tr10-discoverArchiveTools label{display:grid;gap:5px;min-width:0}.tr10-discoverArchiveTools label>span{font-size:7px;font-weight:1000;letter-spacing:.10em;color:#7e9aa5}
+        .tr10-discoverArchiveTools input,.tr10-discoverArchiveTools select{width:100%;height:38px;min-width:0;padding:0 10px;border:1px solid rgba(119,178,199,.16);border-radius:9px;background:#071117;color:#f4fbfd;font-size:10px;font-weight:850;outline:none}
+        .tr10-discoverArchiveTools input:focus,.tr10-discoverArchiveTools select:focus{border-color:rgba(76,205,243,.50);box-shadow:0 0 0 2px rgba(76,205,243,.07)}
+        .tr10-discoverArchiveCount{height:38px;display:flex;align-items:center;justify-content:center;gap:6px;border-left:2px solid #f1b352;border-radius:9px;background:rgba(241,179,82,.07)}.tr10-discoverArchiveCount strong{font-size:17px;color:#ffd17f}.tr10-discoverArchiveCount span{font-size:7px;font-weight:1000;color:#b9c9ce}
+
+        .tr10-discoverSeed{padding:0!important;border:1px solid rgba(115,175,197,.12)!important;border-radius:12px!important;background:linear-gradient(180deg,#081318,#050b0e)!important;overflow:hidden}
+        .tr10-discoverSeed+.tr10-discoverSeed{margin-top:0!important}
+        .tr10-discoverSeedHead{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;gap:8px!important;align-items:stretch!important;padding:0!important;background:#081218!important;border:0!important}
+        .tr10-discoverSeed>header button{border-radius:0!important}
+        .tr10-discoverSeedToggle{width:100%;min-width:0;min-height:72px;padding:10px 12px!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto 24px!important;gap:12px!important;align-items:center!important;border:0!important;background:transparent!important;color:#fff!important;text-align:left!important;cursor:pointer}
+        .tr10-discoverSeedToggle:hover{background:rgba(73,166,199,.035)!important}
+        .tr10-discoverSeedIdentity{min-width:0;display:grid;gap:2px}.tr10-discoverSeedIdentity small{font-size:7px!important;color:#69d8f8!important}.tr10-discoverSeedIdentity h3{margin:0!important;font-size:17px!important;line-height:1.16!important;white-space:normal!important;overflow-wrap:anywhere}.tr10-discoverSeedIdentity p{margin:0!important;font-size:9px!important;color:#a8c0c9!important}.tr10-discoverSeedIdentity time{margin-top:4px;font-size:8px;font-weight:800;color:#718c96}
+        .tr10-discoverSeedStats{min-width:96px;padding:7px 9px;display:grid;grid-template-columns:auto 1fr;grid-template-areas:"count label" "count meta";column-gap:6px;align-items:center;border-left:1px solid rgba(241,179,82,.23);background:linear-gradient(90deg,rgba(241,179,82,.075),transparent)}
+        .tr10-discoverSeedStats strong{grid-area:count;font-size:20px;line-height:1;color:#ffd17f}.tr10-discoverSeedStats span{grid-area:label;font-size:7px;font-weight:1000;color:#f2f7f9}.tr10-discoverSeedStats small{grid-area:meta;font-size:6px!important;color:#78909a!important;letter-spacing:.04em!important}
+        .tr10-discoverChevron{display:grid;place-items:center;width:24px;height:24px;border:1px solid rgba(120,181,204,.14);border-radius:8px;color:#cce3ea;font-size:13px}
+        .tr10-discoverRemove{align-self:center!important;margin-right:9px!important;min-height:32px!important;padding:0 9px!important;border:1px solid rgba(255,95,105,.22)!important;border-radius:8px!important;background:#18090b!important;color:#ff9298!important;font-size:7px!important;font-weight:1000!important}
+
+        .tr10-discoverSections{padding:0 9px 9px!important;gap:7px!important;margin-top:0!important;border-top:1px solid rgba(115,175,197,.08)}
+        .tr10-discoverCategory{border-radius:9px!important}
+        .tr10-discoverCategoryToggle{width:100%;min-height:48px;padding:8px 10px;display:grid;grid-template-columns:minmax(0,1fr) auto 20px;gap:8px;align-items:center;border:0;background:#091116;color:#fff;text-align:left;cursor:pointer}
+        .tr10-discoverCategoryToggle>div{display:grid;gap:2px;min-width:0}.tr10-discoverCategoryToggle span{font-size:11px;font-weight:1000}.tr10-discoverCategoryToggle small{font-size:7.5px;color:#8fa5ae;line-height:1.3}.tr10-discoverCategoryToggle b{min-width:27px;height:27px;display:grid;place-items:center;border-radius:999px;background:#101b20;color:#d9e9ee;font-size:8px}.tr10-discoverCategoryToggle i{font-style:normal;color:#9db5be;text-align:center}
+        .tr10-discoverCategory.is-new .tr10-discoverCategoryToggle span{color:#7fe8b2}.tr10-discoverCategory.is-era .tr10-discoverCategoryToggle span{color:#7adcf7}.tr10-discoverCategory.is-hidden .tr10-discoverCategoryToggle span{color:#ffd17f}
+        .tr10-discoverCategory.is-collapsed .tr10-discoverCategoryToggle{border-bottom:0}
+        .tr10-discoverCategory.is-expanded .tr10-discoverCategoryToggle{border-bottom:1px solid rgba(153,177,187,.09)}
+
+        .tr10-discoverType{display:inline-flex!important;justify-self:start;padding:3px 6px;border-radius:999px;background:#0e1b21;color:#b5cdd6!important;font-size:6.5px!important;font-weight:1000!important;letter-spacing:.06em!important}
+        .tr10-discoverType.is-new_artist{color:#9af0bf!important;background:rgba(38,164,102,.12)}
+        .tr10-discoverType.is-new_release{color:#ffd27e!important;background:rgba(211,140,35,.12)}
+        .tr10-discoverType.is-modern_match{color:#a8dfff!important;background:rgba(60,151,197,.12)}
+        .tr10-discoverType.is-era_match{color:#89e0f7!important;background:rgba(48,156,190,.10)}
+        .tr10-discoverType.is-hidden_gem{color:#e7c0ff!important;background:rgba(145,82,192,.11)}
+        .tr10-discoverGrid article footer{align-items:center}
+        .tr10-discoverGrid article footer .tr10-previewButton{border-color:rgba(80,203,241,.26);color:#aeeaff;background:#071b24}.tr10-discoverGrid article footer .tr10-previewButton.is-playing{border-color:rgba(79,225,167,.46);color:#bcf8dc;background:#0a2a20}
+        .tr10-previewUnavailable{min-height:28px;padding:0 7px;display:inline-flex;align-items:center;border:1px solid rgba(124,150,160,.09);border-radius:8px;color:#677d86;font-size:6.5px;font-weight:900}
+        .tr10-storeLink{min-height:28px;padding:0 7px;display:inline-flex;align-items:center;border:1px solid rgba(166,172,178,.12);border-radius:8px;background:#0a1115;color:#aebbc0;font-size:6.5px;font-weight:1000;text-decoration:none}.tr10-storeLink:hover{color:#fff;border-color:rgba(199,207,211,.24)}
+        .tr10-discoverSeed.is-collapsed .tr10-discoverSeedHead{background:linear-gradient(180deg,#081318,#060d11)}
+        .tr10-discoverSeed.is-collapsed .tr10-discoverSeedToggle{min-height:64px}
+
+        @media(max-width:760px){
+          .tr10-discoverArchiveTools{grid-template-columns:1fr 1fr!important;padding:7px!important;gap:6px!important}.tr10-discoverSearch{grid-column:1/-1!important}.tr10-discoverArchiveCount{height:35px!important}.tr10-discoverArchiveTools input,.tr10-discoverArchiveTools select{height:35px!important;font-size:9px!important}
+          .tr10-discoverSeedHead{grid-template-columns:minmax(0,1fr)!important}.tr10-discoverSeedToggle{min-height:66px!important;padding:8px 8px!important;grid-template-columns:minmax(0,1fr) 82px 20px!important;gap:7px!important}.tr10-discoverSeedIdentity h3{font-size:14px!important}.tr10-discoverSeedIdentity p{font-size:8.5px!important}.tr10-discoverSeedIdentity time{font-size:7px!important}.tr10-discoverSeedStats{min-width:0!important;padding:6px 6px!important}.tr10-discoverSeedStats strong{font-size:17px!important}.tr10-discoverSeedStats span{font-size:6.5px!important}.tr10-discoverSeedStats small{font-size:5.5px!important}
+          .tr10-discoverRemove{margin:0 8px 8px!important;width:max-content!important;justify-self:end!important;min-height:29px!important}
+          .tr10-discoverSections{padding:0 6px 6px!important;gap:5px!important}.tr10-discoverCategoryToggle{min-height:44px!important;padding:7px 8px!important}.tr10-discoverCategoryToggle span{font-size:10px!important}.tr10-discoverCategoryToggle small{font-size:7px!important}.tr10-discoverCategoryToggle b{min-width:24px!important;height:24px!important;font-size:7px!important}
+          .tr10-discoverGrid article footer button,.tr10-discoverGrid article footer b,.tr10-previewUnavailable,.tr10-storeLink{min-height:27px!important;font-size:6.4px!important;padding:0 6px!important}
+        }
+        @media(max-width:390px){
+          .tr10-discoverSeedToggle{grid-template-columns:minmax(0,1fr) 72px 18px!important}.tr10-discoverSeedStats small{display:none!important}.tr10-discoverSeedStats{grid-template-areas:"count label"!important}.tr10-discoverArchiveTools label>span{font-size:6.5px!important}
+        }
+
       `}</style>
     </main>
   );
