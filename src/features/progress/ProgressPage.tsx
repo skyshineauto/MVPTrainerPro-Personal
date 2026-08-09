@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
 
-type Range = 7 | 14 | 30 | 90 | 365 | "all";
+type Range = 30 | 90 | 180 | 365 | "all";
 type Tone = "blue" | "green" | "amber" | "red";
 
 type ProgramBlockRow = {
@@ -157,7 +157,6 @@ type ExerciseTrend = {
   pain: number | null;
 };
 
-const HISTORY_BATCH = 6;
 
 function ms(value: string | null | undefined) {
   if (!value) return NaN;
@@ -230,8 +229,15 @@ function buildPrograms(
       ? intakeMap.get(block.intake_snapshot_id) ?? null
       : null;
     const programType = programTypeLabel(block.goal_mode);
-    const isTargeted = programType === "Targeted Program";
-    const purpose = isTargeted ? symptomFromSnapshot(intake) : goalLabel(block.goal);
+    const goalPurpose = goalLabel(block.goal);
+    const targetedPurpose = symptomFromSnapshot(intake);
+    const hasTarget = targetedPurpose !== "Targeted Training";
+    const hasGoal = goalPurpose !== "Training";
+    const purpose = hasGoal && hasTarget && goalPurpose.toLowerCase() !== targetedPurpose.toLowerCase()
+      ? `${goalPurpose} + ${targetedPurpose}`
+      : hasTarget
+        ? targetedPurpose
+        : goalPurpose;
     const equipment = equipmentLabel(intake);
     const isActive = String(block.status ?? "").toLowerCase() === "active";
     return {
@@ -377,7 +383,9 @@ function inRange(date: string, range: Range) {
 function rangeName(range: Range) {
   if (range === "all") return "All Time";
   if (range === 365) return "1 Year";
-  return `${range} Days`;
+  if (range === 180) return "6 Months";
+  if (range === 90) return "3 Months";
+  return "30 Days";
 }
 
 function Icon({ name }: { name: "program" | "time" | "volume" | "sets" | "pain" | "trend" | "trash" }) {
@@ -407,7 +415,10 @@ export function ProgressPage() {
   const [selectedProgramId, setSelectedProgramId] = useState<string>("all");
   const [range, setRange] = useState<Range>(30);
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [historyVisible, setHistoryVisible] = useState(HISTORY_BATCH);
+  const [historyCollapsed, setHistoryCollapsed] = useState<boolean>(() => {
+    try { return window.localStorage.getItem("mvp_progress_history_collapsed") === "true"; } catch { return false; }
+  });
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [detailId, setDetailId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -601,7 +612,7 @@ export function ProgressPage() {
   }, []);
 
   useEffect(() => {
-    setHistoryVisible(HISTORY_BATCH);
+    setCollapsedGroups({});
     setDetailId(null);
     setEditId(null);
     setEditDraft(null);
@@ -671,7 +682,50 @@ export function ProgressPage() {
     }).sort((a, b) => (b.change ?? -999) - (a.change ?? -999));
   }, [scopedHistory]);
 
-  const visibleHistory = scopedHistory.slice(0, historyVisible);
+  const historyGroups = useMemo(() => {
+    const now = new Date();
+    const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const startOfWeek = (date: Date) => {
+      const d = startOfDay(date);
+      const day = (d.getDay() + 6) % 7;
+      d.setDate(d.getDate() - day);
+      return d;
+    };
+    const thisWeek = startOfWeek(now);
+    const lastWeek = new Date(thisWeek); lastWeek.setDate(lastWeek.getDate() - 7);
+    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const groups = new Map<string, { key: string; label: string; sort: number; rows: HistoryRow[] }>();
+    for (const row of scopedHistory) {
+      const date = new Date(row.completedAt);
+      if (Number.isNaN(date.getTime())) continue;
+      let key = ""; let label = ""; let sort = 0;
+      if (date >= thisWeek) { key = "this-week"; label = "This Week"; sort = 5000000000; }
+      else if (date >= lastWeek && date < thisWeek) { key = "last-week"; label = "Last Week"; sort = 4900000000; }
+      else if (date >= thisMonth) { key = "this-month"; label = "This Month"; sort = 4800000000; }
+      else if (date >= lastMonth && date < thisMonth) { key = `${date.getFullYear()}-${date.getMonth()}`; label = date.toLocaleDateString(undefined,{month:"long",year:"numeric"}); sort = date.getFullYear()*100+date.getMonth(); }
+      else if (date.getFullYear() === now.getFullYear()) { key = `${date.getFullYear()}-${date.getMonth()}`; label = date.toLocaleDateString(undefined,{month:"long",year:"numeric"}); sort = date.getFullYear()*100+date.getMonth(); }
+      else { key = `year-${date.getFullYear()}`; label = String(date.getFullYear()); sort = date.getFullYear(); }
+      const group = groups.get(key) ?? { key, label, sort, rows: [] };
+      group.rows.push(row); groups.set(key, group);
+    }
+    return [...groups.values()].sort((a,b)=>b.sort-a.sort);
+  }, [scopedHistory]);
+
+  useEffect(() => {
+    if (!historyGroups.length) return;
+    setCollapsedGroups((current) => {
+      const next = { ...current };
+      historyGroups.forEach((group, index) => { if (!(group.key in next)) next[group.key] = index > 0; });
+      return next;
+    });
+  }, [historyGroups]);
+
+  function setHistoryCollapsedPersisted(value: boolean) {
+    setHistoryCollapsed(value);
+    try { window.localStorage.setItem("mvp_progress_history_collapsed", String(value)); } catch {}
+  }
+
   const detail = history.find((row) => row.id === detailId) ?? null;
   const deleting = history.find((row) => row.id === deleteId) ?? null;
   const editing = history.find((row) => row.id === editId) ?? null;
@@ -897,22 +951,20 @@ export function ProgressPage() {
 
   const currentProgramText = selectedProgramId === "all"
     ? "All Programs"
-    : selectedProgram?.label ?? "Active Program";
+    : selectedProgram?.purpose ?? "Active Program";
 
   return (
     <main className="prx-page">
       <section className="prx-hero">
         <div className="prx-heroText">
-          <span>MVP TRAINER • PERFORMANCE INTELLIGENCE</span>
           <h1>Progress</h1>
-          <p>Every completed workout stays tied to the program that produced it. Change programs without mixing the history underneath them.</p>
         </div>
         <div className="prx-controls">
           <label>
             <span>PROGRAM</span>
             <select value={selectedProgramId} onChange={(event) => setSelectedProgramId(event.target.value)}>
               {programs.length ? <optgroup label="PROGRAMS">
-                {[...programs].reverse().map((program) => <option key={program.id} value={program.id}>{program.label}</option>)}
+                {[...programs].reverse().map((program) => <option key={program.id} value={program.id}>{program.purpose}{program.isActive ? " • ACTIVE" : ""}</option>)}
               </optgroup> : null}
               <option value="all">All Programs</option>
             </select>
@@ -920,7 +972,7 @@ export function ProgressPage() {
           <label>
             <span>RANGE</span>
             <select value={String(range)} onChange={(event) => setRange(event.target.value === "all" ? "all" : Number(event.target.value) as Range)}>
-              <option value="7">7 Days</option><option value="14">14 Days</option><option value="30">30 Days</option><option value="90">90 Days</option><option value="365">1 Year</option><option value="all">All Time</option>
+              <option value="30">30 Days</option><option value="90">3 Months</option><option value="180">6 Months</option><option value="365">1 Year</option><option value="all">All</option>
             </select>
           </label>
         </div>
@@ -962,20 +1014,35 @@ export function ProgressPage() {
       </section>
 
       <section className="prx-panel prx-historyPanel">
-        <header className="prx-sectionHead"><div><span>COMPLETED TRAINING</span><h2>Session History</h2></div><small>{scopedHistory.length} SESSION{scopedHistory.length === 1 ? "" : "S"}</small></header>
+        <header className="prx-sectionHead prx-historyHead">
+          <div><h2>Session History</h2><small>{scopedHistory.length} SESSION{scopedHistory.length === 1 ? "" : "S"}</small></div>
+          <button type="button" className="prx-collapseAll" onClick={() => setHistoryCollapsedPersisted(!historyCollapsed)}>{historyCollapsed ? "EXPAND" : "COLLAPSE"}</button>
+        </header>
         {!loading && !scopedHistory.length ? <div className="prx-empty">No completed sessions match this program and date range.</div> : null}
-        <div className="prx-historyList">
-          {visibleHistory.map((row) => <article key={row.id} className="prx-historyRow">
-            <div className="prx-historyMain">
-              <div className="prx-programBadge"><span>{row.programPurpose.toUpperCase()}</span><strong>{row.programId ? programs.find((program) => program.id === row.programId)?.programType ?? "PROGRAM" : "LEGACY / UNASSIGNED"}</strong></div>
-              <h3>{row.templateName}</h3>
-              <p>{formatDate(row.completedAt)}</p>
-              <div className="prx-historyMetrics"><span><b>{formatDuration(row.workoutSeconds)}</b> TIME</span><span><b>{formatNumber(row.volumeTotal)}</b> LB</span><span><b>{row.setsLogged}</b> SETS</span><span className={`is-${toneForPain(row.painMax)}`}><b>{row.painMax.toFixed(0)}</b> PAIN</span></div>
-            </div>
-            <div className="prx-historyActions"><button type="button" onClick={() => setDetailId(row.id)}>VIEW DETAILS</button><button type="button" className="is-edit" onClick={() => openEditSession(row)}>EDIT SESSION</button><button type="button" className="is-delete" onClick={() => setDeleteId(row.id)}><Icon name="trash" />DELETE SESSION</button></div>
-          </article>)}
-        </div>
-        {historyVisible < scopedHistory.length ? <button className="prx-loadMore" onClick={() => setHistoryVisible((value) => value + HISTORY_BATCH)}>LOAD MORE</button> : null}
+        {!historyCollapsed ? <div className="prx-historyGroups">
+          {historyGroups.map((group) => {
+            const collapsed = Boolean(collapsedGroups[group.key]);
+            return <section className="prx-historyGroup" key={group.key}>
+              <button type="button" className="prx-historyGroupHead" onClick={() => setCollapsedGroups((current) => ({ ...current, [group.key]: !collapsed }))}>
+                <span>{group.label}</span><b>{group.rows.length} SESSION{group.rows.length === 1 ? "" : "S"}</b><i>{collapsed ? "+" : "−"}</i>
+              </button>
+              {!collapsed ? <div className="prx-historyList">
+                {group.rows.map((row) => {
+                  const programForRow = selectedProgramId !== "all" && selectedProgram ? selectedProgram : programs.find((program) => program.id === row.programId) ?? null;
+                  return <article key={row.id} className="prx-historyRow">
+                    <div className="prx-historyMain">
+                      <div className="prx-programBadge"><span>{(programForRow?.purpose ?? row.programPurpose).toUpperCase()}</span><strong>{programForRow?.programType ?? (row.programId ? "PROGRAM" : "LEGACY / UNASSIGNED")}</strong></div>
+                      <h3>{row.templateName}</h3>
+                      <p>{formatDate(row.completedAt)}</p>
+                      <div className="prx-historyMetrics"><span><b>{formatDuration(row.workoutSeconds)}</b> TIME</span><span><b>{formatNumber(row.volumeTotal)}</b> LB</span><span><b>{row.setsLogged}</b> SETS</span><span className={`is-${toneForPain(row.painMax)}`}><b>{row.painMax.toFixed(0)}</b> PAIN</span></div>
+                    </div>
+                    <div className="prx-historyActions"><button type="button" onClick={() => setDetailId(row.id)}>VIEW DETAILS</button><button type="button" className="is-edit" onClick={() => openEditSession(row)}>EDIT SESSION</button><button type="button" className="is-delete" onClick={() => setDeleteId(row.id)}><Icon name="trash" />DELETE SESSION</button></div>
+                  </article>;
+                })}
+              </div> : null}
+            </section>;
+          })}
+        </div> : null}
       </section>
 
       <section className="prx-dangerZone">
@@ -996,7 +1063,7 @@ export function ProgressPage() {
           <section className="prx-editBasics">
             <label><span>SESSION DURATION</span><div className="prx-durationInput"><input type="number" min="1" max="1440" inputMode="numeric" value={editDraft.durationMinutes} onChange={(event) => setEditDraft((current) => current ? { ...current, durationMinutes: event.target.value } : current)} /><b>MINUTES</b></div><small>Correct the recorded session length when needed.</small></label>
             <label><span>COMPLETED DATE / TIME</span><input type="datetime-local" value={editDraft.completedLocal} onChange={(event) => setEditDraft((current) => current ? { ...current, completedLocal: event.target.value } : current)} /></label>
-            <label><span>PROGRAM</span><select value={editDraft.programId} disabled={!editDraft.scheduledSessionId} onChange={(event) => setEditDraft((current) => current ? { ...current, programId: event.target.value } : current)}><option value="">Legacy / Unassigned</option>{[...programs].reverse().map((program) => <option key={program.id} value={program.id}>{program.label}</option>)}</select><small>{editDraft.scheduledSessionId ? "Moving a session changes the program totals it contributes to." : "This legacy workout is not linked to a scheduled session."}</small></label>
+            <label><span>PROGRAM</span><select value={editDraft.programId} disabled={!editDraft.scheduledSessionId} onChange={(event) => setEditDraft((current) => current ? { ...current, programId: event.target.value } : current)}><option value="">Legacy / Unassigned</option>{[...programs].reverse().map((program) => <option key={program.id} value={program.id}>{program.purpose}{program.isActive ? " • ACTIVE" : ""}</option>)}</select><small>{editDraft.scheduledSessionId ? "Moving a session changes the program totals it contributes to." : "This legacy workout is not linked to a scheduled session."}</small></label>
           </section>
           <section className="prx-editLog">
             <div className="prx-editLogHead"><span>EXERCISE LOG</span><strong>Edit only values that were entered incorrectly.</strong></div>
@@ -1056,6 +1123,47 @@ export function ProgressPage() {
         /* FINAL READABILITY PASS */
         .prx-heroText>span,.prx-sectionHead span,.prx-programIdentity span,.prx-dangerZone span{font-size:11px!important;line-height:1.35!important}.prx-hero p{font-size:14px!important;line-height:1.55!important}.prx-controls label>span,.prx-programMeta span,.prx-kpis span,.prx-trendTop span,.prx-trendMetrics span{font-size:10px!important;line-height:1.3!important}.prx-controls select{font-size:14px!important}.prx-programIdentity strong{font-size:22px!important}.prx-programIdentity small{font-size:13px!important}.prx-programMeta strong{font-size:14px!important}.prx-kpis article>div>strong{font-size:25px!important}.prx-kpis article>div>small{font-size:12px!important}.prx-sectionHead h2{font-size:26px!important}.prx-sectionHead>small,.prx-empty{font-size:12px!important}.prx-volumeCol>b,.prx-volumeCol strong,.prx-volumeCol small{font-size:10px!important}.prx-trendTop strong{font-size:15px!important}.prx-trendTop em{font-size:11px!important}.prx-trendMetrics strong{font-size:14px!important}.prx-trendGrid article>small{font-size:11px!important;line-height:1.45!important}.prx-historyRow{padding:17px 18px!important}.prx-programBadge span{font-size:11px!important}.prx-programBadge strong{font-size:11px!important}.prx-historyMain h3{font-size:20px!important}.prx-historyMain>p{font-size:13px!important}.prx-historyMetrics span{font-size:11px!important}.prx-historyMetrics b{font-size:13px!important}.prx-historyActions button,.prx-loadMore,.prx-dangerZone button,.prx-modal footer button{min-height:42px!important;font-size:12px!important}.prx-modal>header span{font-size:11px!important}.prx-modal>header p{font-size:12px!important}.prx-detailSummary span{font-size:10px!important}.prx-detailSummary strong{font-size:15px!important}.prx-exerciseDetail>header span{font-size:10px!important}.prx-exerciseDetail>header strong{font-size:15px!important}.prx-setTable .prx-setHead{font-size:10px!important}.prx-setTable span,.prx-setTable strong{font-size:12px!important}.prx-editBasics label>span,.prx-editLogHead span,.prx-editExercise header label span{font-size:10px!important}.prx-editBasics input,.prx-editBasics select,.prx-editExercise input,.prx-editSet input{font-size:14px!important}.prx-editBasics small{font-size:11px!important}.prx-durationInput b,.prx-editLogHead strong,.prx-editSet>b{font-size:11px!important}
         @media(max-width:650px){.prx-page{width:calc(100% - 12px)!important}.prx-hero{padding:18px 16px!important}.prx-hero h1{font-size:36px!important}.prx-programIdentity{align-items:flex-start!important}.prx-programIdentity strong{white-space:normal!important;font-size:21px!important}.prx-programIdentity small{font-size:13px!important}.prx-programMeta span{font-size:9px!important}.prx-programMeta strong{font-size:13px!important}.prx-kpis article{min-height:100px!important}.prx-kpis article>div>span{font-size:9px!important}.prx-kpis article>div>strong{font-size:25px!important}.prx-kpis article>div>small{font-size:11px!important}.prx-sectionHead{align-items:flex-start!important;flex-direction:column!important}.prx-sectionHead h2{font-size:25px!important}.prx-sectionHead>small{font-size:11px!important}.prx-volumeChart{height:230px!important}.prx-volumeCol{min-width:78px!important}.prx-historyMain h3{font-size:21px!important}.prx-historyMain>p{font-size:13px!important}.prx-historyMetrics{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}.prx-historyMetrics span{font-size:11px!important}.prx-historyMetrics b{font-size:13px!important}.prx-historyActions button{font-size:12px!important}.prx-modal{width:calc(100vw - 14px)!important;max-height:calc(100dvh - 20px)!important}.prx-modal>footer button{font-size:12px!important}.prx-editBasics input,.prx-editBasics select{font-size:14px!important}.prx-editSet input{font-size:13px!important}}
+
+        /* AUG 9 FINAL PROGRESS SCALING + HISTORY */
+        .prx-hero{grid-template-columns:minmax(0,1fr) minmax(360px,520px)!important;align-items:end!important}
+        .prx-controls{width:100%!important;min-width:0!important;grid-template-columns:minmax(220px,1.4fr) minmax(150px,.7fr)!important}
+        .prx-controls label,.prx-controls select{min-width:0!important;width:100%!important}
+        .prx-controls select{overflow:hidden!important;text-overflow:ellipsis!important}
+        .prx-programIdentity{min-width:0!important}
+        .prx-programIdentity>div{min-width:0!important}
+        .prx-programIdentity strong{display:block!important;white-space:normal!important;overflow-wrap:anywhere!important;line-height:1.15!important}
+        .prx-historyHead{align-items:center!important;flex-direction:row!important}
+        .prx-historyHead>div{display:flex!important;align-items:baseline!important;gap:10px!important;min-width:0!important}
+        .prx-historyHead>div>small{color:#a9c0c9!important;font-size:11px!important;font-weight:900!important}
+        .prx-collapseAll{min-height:38px!important;padding:0 13px!important;border:1px solid rgba(82,196,234,.28)!important;border-radius:8px!important;background:#08202a!important;color:#fff!important;font-size:11px!important;font-weight:1000!important}
+        .prx-historyGroups{display:grid!important;gap:8px!important;padding:9px!important}
+        .prx-historyGroup{overflow:hidden!important;border:1px solid rgba(105,178,203,.13)!important;border-radius:11px!important;background:#061219!important}
+        .prx-historyGroupHead{width:100%!important;min-height:44px!important;padding:0 12px!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto 24px!important;gap:9px!important;align-items:center!important;border:0!important;background:#091923!important;color:#fff!important;text-align:left!important}
+        .prx-historyGroupHead span{font-size:13px!important;font-weight:1000!important}.prx-historyGroupHead b{color:#9eb5be!important;font-size:10px!important}.prx-historyGroupHead i{font-style:normal!important;text-align:center!important;color:#75dcfa!important;font-size:19px!important}
+        .prx-historyGroup .prx-historyList{border-top:1px solid rgba(103,177,203,.10)!important}
+        @media(max-width:650px){
+          .prx-hero{grid-template-columns:1fr!important;padding:16px 13px!important;gap:12px!important}
+          .prx-hero h1{font-size:34px!important}
+          .prx-controls{grid-template-columns:1fr!important;width:100%!important}
+          .prx-controls select{height:46px!important;font-size:13px!important;padding-inline:10px 32px!important}
+          .prx-programDeck{padding:13px 11px!important;gap:11px!important}
+          .prx-programIdentity{align-items:flex-start!important}
+          .prx-programIdentity strong{font-size:20px!important;overflow-wrap:anywhere!important}
+          .prx-programMeta{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .prx-programMeta>div{min-width:0!important;padding:10px 8px!important}
+          .prx-programMeta strong{font-size:12px!important;overflow-wrap:anywhere!important}
+          .prx-historyHead{flex-direction:row!important;align-items:center!important;padding:12px!important}
+          .prx-historyHead h2{font-size:22px!important}
+          .prx-historyHead>div{display:grid!important;gap:2px!important}
+          .prx-collapseAll{min-height:38px!important;font-size:10px!important}
+          .prx-historyGroups{padding:7px!important;gap:7px!important}
+          .prx-historyGroupHead{min-height:48px!important;padding:0 10px!important;grid-template-columns:minmax(0,1fr) auto 22px!important}
+          .prx-historyGroupHead span{font-size:13px!important}.prx-historyGroupHead b{font-size:9px!important}
+          .prx-historyRow{padding:13px 10px!important}
+          .prx-historyActions{grid-template-columns:1fr 1fr!important}.prx-historyActions .is-delete{grid-column:1/-1!important}
+        }
+
+        .prx-programBadge{min-width:0!important;flex-wrap:wrap!important}.prx-programBadge span,.prx-programBadge strong{white-space:normal!important;overflow-wrap:anywhere!important}
       `}</style>
     </main>
   );
