@@ -1484,6 +1484,14 @@ export function ProgressPage() {
           .prx-sectionHead h2{font-size:22px!important;line-height:1.12!important}.prx-sectionHead span{font-size:9px!important}.prx-sectionHead>small{font-size:9px!important;line-height:1.25!important}
           .prx-historyMain h3{font-size:17px!important}.prx-historyMain p{font-size:11px!important}.prx-historyMetrics span{font-size:9px!important}.prx-historyActions button{font-size:10px!important;min-height:40px!important;white-space:normal!important}
         }
+
+        /* AUG 9 DESKTOP PROGRESS HEADER NO-WRAP */
+        @media(min-width:651px){
+          .prx-hero{display:grid!important;grid-template-columns:minmax(180px,240px) minmax(460px,1fr)!important;align-items:end!important;gap:24px!important}
+          .prx-heroText{min-width:180px!important;align-self:end!important}
+          .prx-hero h1{white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;hyphens:none!important}
+          .prx-controls{justify-self:end!important;width:min(100%,520px)!important;grid-template-columns:minmax(280px,1fr) minmax(150px,180px)!important}
+        }
       `}</style>
     </main>
   );
