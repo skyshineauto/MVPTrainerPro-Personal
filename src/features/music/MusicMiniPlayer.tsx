@@ -164,6 +164,7 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
     let lastDraw = 0;
     let visible = true;
     const displayed = new Float32Array(10);
+    const rawHistory = new Float32Array(10);
     const peaks = new Float32Array(10);
     const peakHoldUntil = new Float64Array(10);
 
@@ -210,25 +211,41 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       ctx.fillRect(0, 0, width, height);
 
       const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
-      const framePeak = raw.reduce((peak, value) => Math.max(peak, Math.max(0, Math.min(1, Number(value) || 0))), 0);
+      let framePeak = 0;
+      let frameSum = 0;
+      for (let index = 0; index < 10; index += 1) {
+        const value = Math.max(0, Math.min(1, Number(raw[index]) || 0));
+        framePeak = Math.max(framePeak, value);
+        frameSum += value;
+      }
+      const frameAverage = frameSum / 10;
+      const activity = Math.max(0, Math.min(1, (framePeak - 0.025) / 0.52));
+      const dynamicFloor = Math.min(framePeak * 0.46, Math.max(0.014, frameAverage * 0.52));
+      const dynamicRange = Math.max(0.075, framePeak - dynamicFloor);
+
       for (let index = 0; index < 10; index += 1) {
         const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
-        const opened = source < 0.012 ? 0 : Math.min(1, (source - 0.012) / 0.84);
-        // Absolute level keeps the meter honest. A small frame-relative component increases
-        // visible separation between neighboring bands without inventing motion or random data.
-        const absoluteShape = Math.pow(opened, 1.18);
-        const relative = framePeak > 0.05 ? Math.min(1, source / framePeak) : 0;
-        const relativeShape = Math.pow(relative, 2.1) * Math.min(1, framePeak * 1.55);
-        const shaped = Math.min(1, absoluteShape * 0.86 + relativeShape * 0.14);
+        const opened = source < 0.014 ? 0 : Math.min(1, (source - 0.014) / 0.72);
+        const absoluteShape = Math.pow(opened, 1.02);
+        const contrast = Math.max(0, Math.min(1, (source - dynamicFloor) / dynamicRange));
+        const contrastShape = Math.pow(contrast, 1.34) * activity;
+        const transient = playing ? Math.max(0, source - rawHistory[index]) : 0;
+        rawHistory[index] = source;
+
+        // All three terms come from the real analyzer signal. The frame-relative contrast and
+        // short transient lift simply use more of the available meter travel so the display
+        // behaves like a lively hardware RTA instead of ten similarly tall columns.
+        const shaped = Math.min(1, absoluteShape * 0.62 + contrastShape * 0.31 + Math.min(0.16, transient * 1.65));
         const previous = displayed[index];
-        const attack = 0.95;
-        const release = playing ? 0.145 : 0.48;
+        const attack = 0.97;
+        const release = playing ? 0.105 : 0.46;
         displayed[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
-        if (displayed[index] >= peaks[index] - 0.004) {
+
+        if (displayed[index] >= peaks[index] - 0.003) {
           peaks[index] = displayed[index];
-          peakHoldUntil[index] = now + 520;
+          peakHoldUntil[index] = now + 680;
         } else if (now > peakHoldUntil[index]) {
-          peaks[index] = Math.max(displayed[index], peaks[index] - 0.021);
+          peaks[index] = Math.max(displayed[index], peaks[index] - 0.013);
         }
       }
 
@@ -304,6 +321,8 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
           ctx.fillRect(barX + 1, activeY, 1, activeHeight);
           ctx.fillStyle = "rgba(0,0,0,.22)";
           ctx.fillRect(barX + barWidth - 2, activeY, 1, activeHeight);
+          ctx.fillStyle = level > 0.78 ? "rgba(255,224,139,.62)" : "rgba(205,251,255,.48)";
+          ctx.fillRect(barX, Math.round(activeY), barWidth, compact ? 1 : 1.5);
 
           const division = compact ? 6 : 7;
           ctx.strokeStyle = "rgba(0,5,8,.28)";
@@ -1510,6 +1529,52 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-playerPreferenceStage button svg{width:15px!important;height:15px!important}
           .tr-playerPreferenceStage button>span{font-size:9px!important;letter-spacing:.01em!important}
           .tr-playerPreferenceStage .tr-prefDiscover{grid-column:1/-1!important;width:min(56%,180px)!important;justify-self:center!important}
+        }
+
+        /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button{
+          height:30px!important;min-height:30px!important;padding:0 9px!important;gap:6px!important;
+          border:1px solid rgba(96,175,203,.17)!important;border-radius:8px!important;
+          background:#08151b!important;color:#e8f6fa!important;
+          box-shadow:none!important;text-shadow:none!important;
+          font-size:7px!important;font-weight:1000!important;letter-spacing:0!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button svg{
+          width:14px!important;height:14px!important;flex:0 0 14px!important;fill:currentColor!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button>span{
+          display:inline-block!important;visibility:visible!important;color:inherit!important;
+          font-size:7px!important;line-height:1!important;font-weight:1000!important;
+          white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference .tr-prefLike.is-liked{
+          color:#fff!important;border-color:rgba(68,227,152,.66)!important;
+          background:linear-gradient(180deg,#159b63,#087748)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 0 13px rgba(35,207,126,.18)!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference .tr-prefLess.is-disliked{
+          color:#fff!important;border-color:rgba(255,93,105,.72)!important;
+          background:linear-gradient(180deg,#c73541,#8f1822)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 0 13px rgba(226,48,62,.16)!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference .tr-prefDiscover.is-confirming{
+          color:#1a1005!important;border-color:rgba(255,175,68,.66)!important;
+          background:linear-gradient(180deg,#ef9d2e,#b8650e)!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.30),0 0 14px rgba(239,157,46,.20)!important;
+        }
+        @media(max-width:650px){
+          .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px 6px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button{
+            height:30px!important;min-height:30px!important;padding:0 7px!important;gap:5px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button>span{
+            display:inline-block!important;visibility:visible!important;font-size:7px!important;white-space:nowrap!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference .tr-prefDiscover{
+            grid-column:1/-1!important;width:min(54%,170px)!important;justify-self:center!important;
+          }
         }
       `}</style>
     </section>
