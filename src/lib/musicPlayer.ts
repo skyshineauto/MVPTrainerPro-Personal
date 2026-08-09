@@ -400,7 +400,7 @@ function connectMusicGraph() {
     headphoneLeftCrossDelay = context.createDelay(0.03); headphoneRightCrossDelay = context.createDelay(0.03);
     headphoneLeftCrossLowpass = context.createBiquadFilter(); headphoneRightCrossLowpass = context.createBiquadFilter(); headphoneLeftCrossLowpass.type = "lowpass"; headphoneRightCrossLowpass.type = "lowpass";
     headphoneCenterSum = context.createGain(); headphoneCenterSum.gain.value = 0.5; headphoneCenterLeft = context.createGain(); headphoneCenterRight = context.createGain();
-    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 4096; analyserNode.smoothingTimeConstant = 0.38; analyserNode.minDecibels = -92; analyserNode.maxDecibels = -10; musicGain = context.createGain(); musicGain.gain.value = 1;
+    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 4096; analyserNode.smoothingTimeConstant = 0.16; analyserNode.minDecibels = -92; analyserNode.maxDecibels = -10; musicGain = context.createGain(); musicGain.gain.value = 1;
 
     mediaSource.connect(masterVolumeGain); masterVolumeGain.connect(preampGain);
     let node: AudioNode = preampGain;
@@ -667,7 +667,7 @@ const MUSIC_RTA_CENTERS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 export function getMusicRtaLevels() {
   const count = MUSIC_RTA_CENTERS.length;
   if (!analyserNode || !state.playing || typeof document === "undefined" || document.hidden) {
-    for (let index = 0; index < count; index += 1) rtaEnvelope[index] *= 0.62;
+    for (let index = 0; index < count; index += 1) rtaEnvelope[index] *= 0.48;
     return Array.from(rtaEnvelope);
   }
 
@@ -680,6 +680,10 @@ export function getMusicRtaLevels() {
   const sampleRate = audioContext?.sampleRate ?? 44100;
   const nyquist = sampleRate / 2;
   const binHz = nyquist / analyserBuffer.length;
+  // Gentle compensation reflects how a 10-band RTA is normally calibrated. It does not create motion,
+  // it only keeps the naturally lower high-frequency energy visually useful without flattening the bands.
+  const bandGain = [1.08, 1.05, 1.02, 1.0, 1.0, 1.03, 1.08, 1.16, 1.27, 1.38];
+  const bandFloor = [0.045, 0.042, 0.040, 0.038, 0.036, 0.035, 0.034, 0.032, 0.030, 0.028];
 
   for (let index = 0; index < count; index += 1) {
     const center = MUSIC_RTA_CENTERS[index];
@@ -693,26 +697,35 @@ export function getMusicRtaLevels() {
     let energy = 0;
     let peak = 0;
     let samples = 0;
+    let top1 = 0;
+    let top2 = 0;
+    let top3 = 0;
+    let top4 = 0;
     for (let bin = start; bin < end; bin += 1) {
       const value = analyserBuffer[bin] / 255;
       energy += value * value;
       peak = Math.max(peak, value);
       samples += 1;
+      if (value >= top1) { top4 = top3; top3 = top2; top2 = top1; top1 = value; }
+      else if (value >= top2) { top4 = top3; top3 = top2; top2 = value; }
+      else if (value >= top3) { top4 = top3; top3 = value; }
+      else if (value > top4) top4 = value;
     }
 
     const rms = samples ? Math.sqrt(energy / samples) : 0;
-    const measured = Math.min(1, rms * 0.82 + peak * 0.32);
-    // A mild perceptual curve keeps quieter bands visible without inventing motion.
-    const shaped = Math.pow(measured, 0.72);
-    const previous = rtaEnvelope[index] || 0;
-    const attack = 0.78;
-    const release = 0.18;
-    rtaEnvelope[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
+    const topAverage = samples >= 4 ? (top1 + top2 + top3 + top4) / 4 : peak;
+    const measured = Math.min(1, rms * 0.46 + topAverage * 0.36 + peak * 0.22);
+    const floor = bandFloor[index];
+    const opened = Math.max(0, (measured - floor) / Math.max(0.001, 0.76 - floor));
+    const shaped = Math.min(1, Math.pow(opened, 0.72) * bandGain[index]);
+
+    // Keep the engine almost instantaneous. The display layer owns attack, release and peak hold.
+    // That avoids the previous double-smoothing that made every band hover at similar heights.
+    rtaEnvelope[index] = shaped;
   }
 
   return Array.from(rtaEnvelope);
 }
-
 export const MUSIC_RTA_FREQUENCIES = MUSIC_RTA_CENTERS;
 
 function duckTargetForStrength(strength: MusicDuckingStrength) { return strength === "off" ? 1 : strength === "light" ? 0.5 : strength === "strong" ? 0.08 : 0.18; }
