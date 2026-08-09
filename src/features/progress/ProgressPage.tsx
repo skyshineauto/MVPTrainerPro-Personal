@@ -157,6 +157,55 @@ type ExerciseTrend = {
   pain: number | null;
 };
 
+type DailyCheckIn = {
+  id: string;
+  programId: string;
+  date: string;
+  bodyweightLb: number | null;
+  calories: number | null;
+  proteinG: number | null;
+  calorieTarget: number | null;
+  proteinTarget: number | null;
+  pain: number | null;
+  recovery: number | null;
+  savedAt: number;
+};
+
+type CheckInDraft = {
+  date: string;
+  bodyweight: string;
+  calories: string;
+  protein: string;
+  calorieTarget: string;
+  proteinTarget: string;
+  pain: string;
+  recovery: string;
+};
+
+const DAILY_CHECKIN_KEY = "mvp_progress_daily_checkins_v1";
+
+function todayInputDate() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function readDailyCheckIns(): DailyCheckIn[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(DAILY_CHECKIN_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDailyCheckIns(rows: DailyCheckIn[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(DAILY_CHECKIN_KEY, JSON.stringify(rows.slice(0, 730)));
+}
+
 
 function ms(value: string | null | undefined) {
   if (!value) return NaN;
@@ -297,19 +346,22 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return `${date.toLocaleDateString(undefined, {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
-  }).toUpperCase()} • ${date.toLocaleTimeString(undefined, {
+  })} • ${date.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
   })}`;
 }
 
 function shortDate(value: string) {
-  const date = new Date(value);
+  const raw = String(value ?? "").trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T12:00:00`) : new Date(raw);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase();
+  const month = date.getMonth() + 1;
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${month}/${day}/${date.getFullYear()}`;
 }
 
 function formatNumber(value: number, digits = 0) {
@@ -428,6 +480,11 @@ export function ProgressPage() {
   const [clearOpen, setClearOpen] = useState(false);
   const [clearText, setClearText] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
+  const [scheduledSessions, setScheduledSessions] = useState<ScheduledSessionRow[]>([]);
+  const [dailyCheckIns, setDailyCheckIns] = useState<DailyCheckIn[]>(() => readDailyCheckIns());
+  const [checkInDraft, setCheckInDraft] = useState<CheckInDraft>(() => ({
+    date: todayInputDate(), bodyweight: "", calories: "", protein: "", calorieTarget: "", proteinTarget: "", pain: "", recovery: "",
+  }));
 
   async function loadAll(preferredProgramId?: string | null) {
     setLoading(true);
@@ -437,6 +494,32 @@ export function ProgressPage() {
       if (authError) throw authError;
       if (!auth.user) throw new Error("Sign in to view progress.");
       const userId = auth.user.id;
+
+      // Daily body/nutrition metrics sync through Supabase when the optional
+      // trainer_daily_metrics table is installed. Local storage remains a safe
+      // fallback so this page never fails if the migration has not been run yet.
+      const { data: dailyMetricData, error: dailyMetricError } = await supabase
+        .from("trainer_daily_metrics")
+        .select("id,program_block_id,log_date,bodyweight_lb,calories_kcal,protein_g,calorie_target_kcal,protein_target_g,pain,recovery,updated_at")
+        .eq("user_id", userId)
+        .order("log_date", { ascending: false });
+      if (!dailyMetricError && Array.isArray(dailyMetricData)) {
+        const synced: DailyCheckIn[] = dailyMetricData.map((raw: any) => ({
+          id: `${String(raw.program_block_id)}:${String(raw.log_date)}`,
+          programId: String(raw.program_block_id),
+          date: String(raw.log_date),
+          bodyweightLb: raw.bodyweight_lb == null ? null : Number(raw.bodyweight_lb),
+          calories: raw.calories_kcal == null ? null : Number(raw.calories_kcal),
+          proteinG: raw.protein_g == null ? null : Number(raw.protein_g),
+          calorieTarget: raw.calorie_target_kcal == null ? null : Number(raw.calorie_target_kcal),
+          proteinTarget: raw.protein_target_g == null ? null : Number(raw.protein_target_g),
+          pain: raw.pain == null ? null : Number(raw.pain),
+          recovery: raw.recovery == null ? null : Number(raw.recovery),
+          savedAt: raw.updated_at ? ms(String(raw.updated_at)) : Date.now(),
+        }));
+        setDailyCheckIns(synced);
+        writeDailyCheckIns(synced);
+      }
 
       const { data: blockData, error: blockError } = await supabase
         .from("program_blocks")
@@ -472,6 +555,7 @@ export function ProgressPage() {
         .eq("user_id", userId);
       if (scheduledError) throw scheduledError;
       const scheduled = (scheduledData ?? []) as ScheduledSessionRow[];
+      setScheduledSessions(scheduled);
 
       const templateIds = unique(scheduled.map((row) => row.template_id ?? ""));
       const templateMap = new Map<string, string>();
@@ -682,6 +766,156 @@ export function ProgressPage() {
     }).sort((a, b) => (b.change ?? -999) - (a.change ?? -999));
   }, [scopedHistory]);
 
+  const programCheckIns = useMemo(() => {
+    if (selectedProgramId === "all") return dailyCheckIns.filter((row) => inRange(`${row.date}T12:00:00`, range));
+    return dailyCheckIns.filter((row) => row.programId === selectedProgramId && inRange(`${row.date}T12:00:00`, range));
+  }, [dailyCheckIns, selectedProgramId, range]);
+
+  const bodyweightPoints = useMemo(() => {
+    const points: Array<{ date: string; weight: number }> = [];
+    for (const row of scopedHistory) if ((row.bodyweightLb ?? 0) > 0) points.push({ date: row.completedAt, weight: Number(row.bodyweightLb) });
+    for (const row of programCheckIns) if ((row.bodyweightLb ?? 0) > 0) points.push({ date: `${row.date}T12:00:00`, weight: Number(row.bodyweightLb) });
+    const byDay = new Map<string, { date: string; weight: number }>();
+    points.sort((a, b) => ms(a.date) - ms(b.date)).forEach((point) => byDay.set(new Date(point.date).toISOString().slice(0,10), point));
+    return [...byDay.values()].sort((a, b) => ms(a.date) - ms(b.date));
+  }, [scopedHistory, programCheckIns]);
+
+  const performance = useMemo(() => {
+    const comparable = exerciseTrends.filter((item) => item.sessions >= 2 && item.change != null && Number.isFinite(item.change));
+    const strengthChange = comparable.length ? comparable.reduce((sum, item) => sum + Number(item.change), 0) / comparable.length : null;
+    const progressing = comparable.filter((item) => Number(item.change) > 1).length;
+    const holding = comparable.filter((item) => Math.abs(Number(item.change)) <= 1).length;
+    const needsAttention = comparable.filter((item) => Number(item.change) < -1).length;
+
+    const allSets = scopedHistory.flatMap((workout) => workout.exercises.flatMap((exercise) => exercise.sets.filter((set) => set.reps > 0)));
+    const rirValues = allSets.map((set) => set.rir).filter((value): value is number => value != null && Number.isFinite(value));
+    const avgRir = rirValues.length ? rirValues.reduce((sum, value) => sum + value, 0) / rirValues.length : null;
+
+    const muscleSets = new Map<string, number>();
+    scopedHistory.forEach((workout) => workout.exercises.forEach((exercise) => {
+      const hardSets = exercise.sets.filter((set) => set.reps > 0 && (set.rir == null || set.rir <= 4)).length;
+      const muscles = exercise.primaryMuscles.length ? exercise.primaryMuscles : ["Other"];
+      muscles.forEach((muscle) => muscleSets.set(muscle, (muscleSets.get(muscle) ?? 0) + hardSets));
+    }));
+    const muscleRows = [...muscleSets.entries()].map(([muscle, sets]) => ({ muscle, sets })).sort((a,b)=>b.sets-a.sets);
+
+    let newPrs = 0;
+    const exerciseHistory = new Map<string, Array<{ date: string; best: number; weight: number; reps: number }>>();
+    [...scopedHistory].reverse().forEach((workout) => workout.exercises.forEach((exercise) => {
+      const bestSet = exercise.sets.filter((set)=>set.reps>0).sort((a,b)=>e1rm(b.weight,b.reps)-e1rm(a.weight,a.reps))[0];
+      if (!bestSet) return;
+      const list = exerciseHistory.get(exercise.exerciseId) ?? [];
+      list.push({ date: workout.completedAt, best: e1rm(bestSet.weight,bestSet.reps), weight: bestSet.weight, reps: bestSet.reps });
+      exerciseHistory.set(exercise.exerciseId,list);
+    }));
+    exerciseHistory.forEach((points) => {
+      if (points.length < 2) return;
+      const latest = points.at(-1)!;
+      const priorBest = Math.max(0, ...points.slice(0,-1).map((point)=>point.best));
+      if (latest.best > priorBest * 1.005) newPrs += 1;
+    });
+
+    const latestWeight = bodyweightPoints.at(-1)?.weight ?? null;
+    const startWeight = bodyweightPoints[0]?.weight ?? null;
+    const weightChange = latestWeight != null && startWeight != null && bodyweightPoints.length > 1 ? latestWeight - startWeight : null;
+    const latestDate = bodyweightPoints.at(-1)?.date;
+    const firstDate = bodyweightPoints[0]?.date;
+    const weeks = latestDate && firstDate ? Math.max(0.01, (ms(latestDate)-ms(firstDate))/604800000) : 0;
+    const weeklyWeightChange = weightChange != null && weeks > 0.2 ? weightChange / weeks : null;
+    const last7 = bodyweightPoints.filter((point) => Date.now() - ms(point.date) <= 7*86400000);
+    const avg7 = last7.length ? last7.reduce((sum,point)=>sum+point.weight,0)/last7.length : latestWeight;
+
+    const calorieRows = programCheckIns.filter((row): row is DailyCheckIn & { calories: number } => row.calories != null && row.calories > 0);
+    const proteinRows = programCheckIns.filter((row): row is DailyCheckIn & { proteinG: number } => row.proteinG != null && row.proteinG > 0);
+    const recoveryRows = programCheckIns.filter((row): row is DailyCheckIn & { recovery: number } => row.recovery != null && row.recovery >= 1 && row.recovery <= 5);
+    const dailyPainRows = programCheckIns.filter((row): row is DailyCheckIn & { pain: number } => row.pain != null && row.pain >= 0 && row.pain <= 10);
+    const calorieAverage = calorieRows.length ? calorieRows.reduce((sum,row)=>sum+row.calories,0)/calorieRows.length : null;
+    const proteinAverage = proteinRows.length ? proteinRows.reduce((sum,row)=>sum+row.proteinG,0)/proteinRows.length : null;
+    const recoveryAverage = recoveryRows.length ? recoveryRows.reduce((sum,row)=>sum+row.recovery,0)/recoveryRows.length : null;
+    const dailyPainAverage = dailyPainRows.length ? dailyPainRows.reduce((sum,row)=>sum+row.pain,0)/dailyPainRows.length : null;
+    const calorieTarget = [...programCheckIns].reverse().find((row)=>(row.calorieTarget ?? 0)>0)?.calorieTarget ?? null;
+    const proteinTarget = [...programCheckIns].reverse().find((row)=>(row.proteinTarget ?? 0)>0)?.proteinTarget ?? scopedHistory.find((row)=>(row.proteinTargetG ?? 0)>0)?.proteinTargetG ?? null;
+    const calorieHit = calorieTarget && calorieRows.length ? calorieRows.filter((row)=>row.calories >= calorieTarget*0.95 && row.calories <= calorieTarget*1.05).length : 0;
+    const proteinHit = proteinTarget && proteinRows.length ? proteinRows.filter((row)=>row.proteinG >= proteinTarget).length : 0;
+
+    const painRows = scopedHistory.filter((row)=>row.painAvg > 0);
+    const recentPain = painRows.slice(0, Math.max(1,Math.ceil(painRows.length/2)));
+    const olderPain = painRows.slice(Math.max(1,Math.ceil(painRows.length/2)));
+    const painAvg = recentPain.length ? recentPain.reduce((sum,row)=>sum+row.painAvg,0)/recentPain.length : 0;
+    const painPrior = olderPain.length ? olderPain.reduce((sum,row)=>sum+row.painAvg,0)/olderPain.length : null;
+    const painChange = painPrior != null ? painAvg - painPrior : null;
+
+    const planned = scheduledSessions.filter((session) => {
+      if (selectedProgramId !== "all" && session.program_block_id !== selectedProgramId) return false;
+      if (!session.date) return false;
+      const date = new Date(`${session.date}T12:00:00`);
+      if (Number.isNaN(date.getTime()) || date.getTime() > Date.now()+86400000) return false;
+      return inRange(date.toISOString(), range);
+    }).length;
+    const adherence = planned > 0 ? Math.min(100, (scopedHistory.length/planned)*100) : null;
+
+    return { strengthChange, progressing, holding, needsAttention, avgRir, muscleRows, newPrs, latestWeight, startWeight, weightChange, weeklyWeightChange, avg7, calorieAverage, proteinAverage, recoveryAverage, dailyPainAverage, calorieTarget, proteinTarget, calorieDays: calorieRows.length, proteinDays: proteinRows.length, recoveryDays: recoveryRows.length, calorieHit, proteinHit, painAvg, painChange, planned, adherence };
+  }, [exerciseTrends, scopedHistory, bodyweightPoints, programCheckIns, scheduledSessions, selectedProgramId, range]);
+
+  async function saveDailyCheckIn() {
+    if (selectedProgramId === "all") { setError("Choose a specific program before saving a daily check-in."); return; }
+    const numberOrNull = (value: string) => { const parsed = Number(value); return value.trim() && Number.isFinite(parsed) ? parsed : null; };
+    const row: DailyCheckIn = {
+      id: `${selectedProgramId}:${checkInDraft.date}`,
+      programId: selectedProgramId,
+      date: checkInDraft.date || todayInputDate(),
+      bodyweightLb: numberOrNull(checkInDraft.bodyweight),
+      calories: numberOrNull(checkInDraft.calories),
+      proteinG: numberOrNull(checkInDraft.protein),
+      calorieTarget: numberOrNull(checkInDraft.calorieTarget),
+      proteinTarget: numberOrNull(checkInDraft.proteinTarget),
+      pain: numberOrNull(checkInDraft.pain),
+      recovery: numberOrNull(checkInDraft.recovery),
+      savedAt: Date.now(),
+    };
+    const next = [row, ...dailyCheckIns.filter((item)=>item.id!==row.id)].sort((a,b)=>b.date.localeCompare(a.date));
+    setDailyCheckIns(next);
+    writeDailyCheckIns(next);
+
+    let synced = false;
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (auth.user) {
+        const { error: syncError } = await supabase
+          .from("trainer_daily_metrics")
+          .upsert({
+            user_id: auth.user.id,
+            program_block_id: selectedProgramId,
+            log_date: row.date,
+            bodyweight_lb: row.bodyweightLb,
+            calories_kcal: row.calories,
+            protein_g: row.proteinG,
+            calorie_target_kcal: row.calorieTarget,
+            protein_target_g: row.proteinTarget,
+            pain: row.pain,
+            recovery: row.recovery,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id,program_block_id,log_date" });
+        synced = !syncError;
+      }
+    } catch {
+      synced = false;
+    }
+
+    setCheckInDraft((current)=>({ ...current, bodyweight:"", calories:"", protein:"", pain:"", recovery:"" }));
+    setMessage(synced ? "✓ DAILY CHECK-IN SAVED" : "✓ CHECK-IN SAVED ON THIS DEVICE");
+    window.setTimeout(()=>setMessage(""),1800);
+  }
+
+  const programInsight = useMemo(() => {
+    const pieces: string[] = [];
+    if (performance.weeklyWeightChange != null) pieces.push(`Body weight is ${performance.weeklyWeightChange >= 0 ? "up" : "down"} ${Math.abs(performance.weeklyWeightChange).toFixed(2)} lb/week.`);
+    if (performance.strengthChange != null) pieces.push(`Comparable exercise strength is ${performance.strengthChange >= 0 ? "up" : "down"} ${Math.abs(performance.strengthChange).toFixed(1)}%.`);
+    if (performance.proteinAverage != null && performance.proteinTarget) pieces.push(`Protein is averaging ${Math.round(performance.proteinAverage)} of ${Math.round(performance.proteinTarget)} g/day.`);
+    if (performance.painChange != null) pieces.push(`Pain trend is ${performance.painChange > .2 ? "higher" : performance.painChange < -.2 ? "lower" : "stable"} versus the earlier sessions in this view.`);
+    return pieces.length ? pieces.join(" ") : "Keep logging workouts, body weight, nutrition and pain to build a clearer program trend.";
+  }, [performance]);
+
   const historyGroups = useMemo(() => {
     const now = new Date();
     const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -865,20 +1099,6 @@ export function ProgressPage() {
     }
   }
 
-  const volumeRows = useMemo(
-    () => scopedHistory.slice(0, 10).reverse(),
-    [scopedHistory]
-  );
-  const volumeMax = Math.max(1, ...volumeRows.map((row) => row.volumeTotal));
-  const volumeSummary = useMemo(() => {
-    const rows = volumeRows.filter((row) => row.volumeTotal > 0);
-    const total = rows.reduce((sum, row) => sum + row.volumeTotal, 0);
-    const averageValue = rows.length ? total / rows.length : 0;
-    const latest = rows.at(-1)?.volumeTotal ?? 0;
-    const previous = rows.at(-2)?.volumeTotal ?? 0;
-    const change = previous > 0 ? ((latest - previous) / previous) * 100 : null;
-    return { total, average: averageValue, change };
-  }, [volumeRows]);
 
   async function deleteSession() {
     if (!deleting || deleteBusy) return;
@@ -998,20 +1218,51 @@ export function ProgressPage() {
         {selectedProgram ? <div className="prx-programMeta"><div><span>PROGRAM TYPE</span><strong>{selectedProgram.programType}</strong></div><div><span>EQUIPMENT</span><strong>{selectedProgram.equipment}</strong></div><div><span>START</span><strong>{selectedProgram.start_date ? shortDate(selectedProgram.start_date) : "—"}</strong></div><div className={selectedProgram.isActive ? "is-active" : ""}><span>STATUS</span><strong>{selectedProgram.isActive ? "ACTIVE" : "PAST"}</strong></div></div> : <div className="prx-programMeta"><div><span>SCOPE</span><strong>EVERY PROGRAM</strong></div><div><span>PROGRAMS</span><strong>{programs.length}</strong></div></div>}
       </section>
 
-      <section className="prx-kpis">
-        <article><Icon name="program" /><div><span>SESSIONS</span><strong>{metrics.sessions}</strong><small>completed</small></div></article>
-        <article><Icon name="time" /><div><span>TRAINING TIME</span><strong>{formatDuration(metrics.seconds)}</strong><small>active time</small></div></article>
-        <article><Icon name="volume" /><div><span>VOLUME</span><strong>{formatNumber(metrics.volume)}</strong><small>LB logged</small></div></article>
-        <article><Icon name="sets" /><div><span>WORKING SETS</span><strong>{metrics.sets}</strong><small>logged sets</small></div></article>
-        <article className={`is-${toneForPain(metrics.pain)}`}><Icon name="pain" /><div><span>AVG PAIN</span><strong>{metrics.pain ? metrics.pain.toFixed(1) : "0"}</strong><small>0–10 scale</small></div></article>
+      <section className="prx-kpis prx-kpis--performance">
+        <article className="is-weight"><Icon name="trend" /><div><span>CURRENT WEIGHT</span><strong>{performance.latestWeight != null ? `${formatNumber(performance.latestWeight, 1)} LB` : "—"}</strong><small>{performance.avg7 != null ? `7-day avg ${formatNumber(performance.avg7,1)} lb` : "Log body weight"}</small></div></article>
+        <article className="is-weight"><Icon name="trend" /><div><span>WEIGHT TREND</span><strong>{performance.weeklyWeightChange != null ? `${performance.weeklyWeightChange >= 0 ? "+" : ""}${performance.weeklyWeightChange.toFixed(2)} LB/WK` : "—"}</strong><small>{performance.weightChange != null ? `${performance.weightChange >= 0 ? "+" : ""}${performance.weightChange.toFixed(1)} lb in this view` : "Needs 2 weigh-ins"}</small></div></article>
+        <article className="is-strength"><Icon name="trend" /><div><span>STRENGTH TREND</span><strong>{formatPct(performance.strengthChange)}</strong><small>{performance.progressing} progressing • {performance.holding} holding</small></div></article>
+        <article className="is-adherence"><Icon name="program" /><div><span>ADHERENCE</span><strong>{performance.adherence != null ? `${Math.round(performance.adherence)}%` : "—"}</strong><small>{scopedHistory.length}{performance.planned ? ` / ${performance.planned}` : ""} completed</small></div></article>
+        <article className="is-nutrition"><Icon name="sets" /><div><span>AVG CALORIES</span><strong>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</strong><small>{performance.calorieTarget ? `target ${formatNumber(performance.calorieTarget)}` : "Set calorie target"}</small></div></article>
+        <article className="is-nutrition"><Icon name="sets" /><div><span>AVG PROTEIN</span><strong>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</strong><small>{performance.proteinTarget ? `target ${formatNumber(performance.proteinTarget)} g` : "Set protein target"}</small></div></article>
+        <article className={`is-pain is-${toneForPain(performance.painAvg)}`}><Icon name="pain" /><div><span>PAIN TREND</span><strong>{performance.painAvg ? performance.painAvg.toFixed(1) : "0.0"}</strong><small>{performance.painChange == null ? "0–10 scale" : `${performance.painChange > 0 ? "+" : ""}${performance.painChange.toFixed(1)} vs earlier`}</small></div></article>
+        <article className="is-recovery"><Icon name="time" /><div><span>AVG RIR</span><strong>{performance.avgRir != null ? performance.avgRir.toFixed(1) : "—"}</strong><small>{metrics.sets} working sets logged</small></div></article>
+        <article className="is-recovery"><Icon name="time" /><div><span>RECOVERY</span><strong>{performance.recoveryAverage != null ? `${performance.recoveryAverage.toFixed(1)} / 5` : "—"}</strong><small>{performance.recoveryDays ? `${performance.recoveryDays} daily check-in${performance.recoveryDays === 1 ? "" : "s"}` : "Log daily recovery"}</small></div></article>
       </section>
 
-      <section className="prx-panel">
-        <header className="prx-sectionHead"><div><span>PROGRAM LOAD</span><h2>Workout Volume</h2></div><small>LAST {volumeRows.length || 0} IN THIS VIEW</small></header>
-        {loading ? <div className="prx-empty">Loading training data…</div> : volumeRows.some((row) => row.volumeTotal > 0) ? <>
-          <div className="prx-volumeSummary"><div><span>TOTAL VOLUME</span><strong>{formatNumber(volumeSummary.total)} LB</strong></div><div><span>AVG / SESSION</span><strong>{formatNumber(volumeSummary.average)} LB</strong></div><div><span>VS PREVIOUS</span><strong className={volumeSummary.change != null && volumeSummary.change > 0 ? "is-up" : volumeSummary.change != null && volumeSummary.change < 0 ? "is-down" : ""}>{volumeSummary.change == null ? "—" : `${volumeSummary.change > 0 ? "+" : ""}${volumeSummary.change.toFixed(1)}%`}</strong></div></div>
-          <div className="prx-volumeChart">{volumeRows.map((row) => <div className="prx-volumeCol" key={row.id}><b>{row.volumeTotal > 0 ? `${formatNumber(row.volumeTotal)} LB` : "NO DATA"}</b><div><i style={{ height: `${row.volumeTotal > 0 ? Math.max(5, row.volumeTotal / volumeMax * 100) : 0}%` }} /></div><strong>{row.templateName}</strong><small>{shortDate(row.completedAt)}</small></div>)}</div>
-        </> : <div className="prx-empty">NO VOLUME DATA for this program and range.</div>}
+      <section className="prx-insightCard">
+        <div><span>PROGRAM INSIGHT</span><strong>{currentProgramText}</strong></div>
+        <p>{programInsight}</p>
+      </section>
+
+      <section className="prx-panel prx-panel--nutrition">
+        <header className="prx-sectionHead"><div><span>BODY & NUTRITION</span><h2>Daily Check-In</h2></div><small>REAL NUMBERS YOU ENTER</small></header>
+        <div className="prx-checkInGrid">
+          <label><span>DATE</span><input type="date" value={checkInDraft.date} onChange={(event)=>setCheckInDraft((current)=>({...current,date:event.target.value}))} /></label>
+          <label><span>BODY WEIGHT</span><div><input type="number" inputMode="decimal" placeholder="lb" value={checkInDraft.bodyweight} onChange={(event)=>setCheckInDraft((current)=>({...current,bodyweight:event.target.value}))} /><b>LB</b></div></label>
+          <label><span>CALORIES EATEN</span><div><input type="number" inputMode="numeric" placeholder="kcal" value={checkInDraft.calories} onChange={(event)=>setCheckInDraft((current)=>({...current,calories:event.target.value}))} /><b>KCAL</b></div></label>
+          <label><span>PROTEIN</span><div><input type="number" inputMode="numeric" placeholder="grams" value={checkInDraft.protein} onChange={(event)=>setCheckInDraft((current)=>({...current,protein:event.target.value}))} /><b>G</b></div></label>
+          <label><span>CALORIE TARGET</span><div><input type="number" inputMode="numeric" placeholder="target" value={checkInDraft.calorieTarget} onChange={(event)=>setCheckInDraft((current)=>({...current,calorieTarget:event.target.value}))} /><b>KCAL</b></div></label>
+          <label><span>PROTEIN TARGET</span><div><input type="number" inputMode="numeric" placeholder="target" value={checkInDraft.proteinTarget} onChange={(event)=>setCheckInDraft((current)=>({...current,proteinTarget:event.target.value}))} /><b>G</b></div></label>
+          <label><span>PAIN TODAY</span><div><input type="number" min="0" max="10" inputMode="decimal" placeholder="0–10" value={checkInDraft.pain} onChange={(event)=>setCheckInDraft((current)=>({...current,pain:event.target.value}))} /><b>/10</b></div></label>
+          <label><span>RECOVERY</span><div><input type="number" min="1" max="5" inputMode="numeric" placeholder="1–5" value={checkInDraft.recovery} onChange={(event)=>setCheckInDraft((current)=>({...current,recovery:event.target.value}))} /><b>/5</b></div></label>
+          <button type="button" onClick={() => void saveDailyCheckIn()} disabled={selectedProgramId === "all"}>SAVE CHECK-IN</button>
+        </div>
+        <div className="prx-bodyNutritionGrid">
+          <article className="is-weight"><header><span>BODYWEIGHT</span><strong>{performance.latestWeight != null ? `${formatNumber(performance.latestWeight,1)} LB` : "NO WEIGHT DATA"}</strong></header><div className="prx-miniMetrics"><div><span>PROGRAM START</span><b>{performance.startWeight != null ? `${formatNumber(performance.startWeight,1)} LB` : "—"}</b></div><div><span>7-DAY AVG</span><b>{performance.avg7 != null ? `${formatNumber(performance.avg7,1)} LB` : "—"}</b></div><div><span>RATE</span><b>{performance.weeklyWeightChange != null ? `${performance.weeklyWeightChange >= 0 ? "+" : ""}${performance.weeklyWeightChange.toFixed(2)} LB/WK` : "—"}</b></div></div><div className="prx-weightPoints">{bodyweightPoints.slice(-7).map((point)=><span key={point.date}><b>{formatNumber(point.weight,1)}</b><small>{shortDate(point.date)}</small></span>)}</div></article>
+          <article className="is-nutrition"><header><span>NUTRITION</span><strong>{performance.calorieDays || performance.proteinDays ? "TRACKING" : "NO DAILY LOGS"}</strong></header><div className="prx-miniMetrics"><div><span>CAL AVG</span><b>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</b></div><div><span>CAL TARGET HIT</span><b>{performance.calorieTarget && performance.calorieDays ? `${performance.calorieHit}/${performance.calorieDays}` : "—"}</b></div><div><span>PROTEIN AVG</span><b>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</b></div><div><span>PROTEIN TARGET HIT</span><b>{performance.proteinTarget && performance.proteinDays ? `${performance.proteinHit}/${performance.proteinDays}` : "—"}</b></div></div><p>{performance.calorieTarget && performance.calorieAverage != null ? `Calories are averaging ${Math.round(performance.calorieAverage-performance.calorieTarget)} kcal ${performance.calorieAverage >= performance.calorieTarget ? "above" : "below"} the current target.` : "Add calorie and protein entries to connect nutrition with weight and strength trends."}</p></article>
+        </div>
+      </section>
+
+      <section className="prx-panel prx-panel--training">
+        <header className="prx-sectionHead"><div><span>TRAINING PERFORMANCE</span><h2>Muscle-Building Work</h2></div><small>{performance.newPrs} RECENT PR{performance.newPrs === 1 ? "" : "S"}</small></header>
+        <div className="prx-trainingSummary">
+          <article className="is-strength"><span>EXERCISES</span><strong>{performance.progressing} ↑</strong><small>progressing</small></article>
+          <article className="is-hold"><span>HOLDING</span><strong>{performance.holding}</strong><small>stable</small></article>
+          <article className="is-pain"><span>NEEDS ATTENTION</span><strong>{performance.needsAttention}</strong><small>strength down</small></article>
+          <article className="is-recovery"><span>AVG SESSION</span><strong>{metrics.sessions ? formatDuration(metrics.seconds/metrics.sessions) : "—"}</strong><small>active training time</small></article>
+        </div>
+        {performance.muscleRows.length ? <div className="prx-muscleSetGrid">{performance.muscleRows.slice(0,12).map((row)=><article key={row.muscle}><span>{row.muscle}</span><strong>{row.sets}</strong><small>hard sets</small><i style={{width:`${Math.min(100,(row.sets/Math.max(1,performance.muscleRows[0]?.sets ?? 1))*100)}%`}} /></article>)}</div> : <div className="prx-empty">Complete logged working sets to build muscle-group training data.</div>}
       </section>
 
       <section className="prx-panel">
@@ -1044,7 +1295,7 @@ export function ProgressPage() {
                       <div className="prx-programBadge"><span>{(programForRow?.purpose ?? row.programPurpose).toUpperCase()}</span><strong>{programForRow?.programType ?? (row.programId ? "PROGRAM" : "LEGACY / UNASSIGNED")}</strong></div>
                       <h3>{row.templateName}</h3>
                       <p>{formatDate(row.completedAt)}</p>
-                      <div className="prx-historyMetrics"><span><b>{formatDuration(row.workoutSeconds)}</b> TIME</span><span><b>{formatNumber(row.volumeTotal)}</b> LB</span><span><b>{row.setsLogged}</b> SETS</span><span className={`is-${toneForPain(row.painMax)}`}><b>{row.painMax.toFixed(0)}</b> PAIN</span></div>
+                      <div className="prx-historyMetrics"><span><b>{formatDuration(row.workoutSeconds)}</b> TIME</span><span><b>{row.exercises.length}</b> EXERCISES</span><span><b>{row.setsLogged}</b> SETS</span><span className={`is-${toneForPain(row.painMax)}`}><b>{row.painMax.toFixed(0)}</b> PAIN</span></div>
                     </div>
                     <div className="prx-historyActions"><button type="button" onClick={() => setDetailId(row.id)}>VIEW DETAILS</button><button type="button" className="is-edit" onClick={() => openEditSession(row)}>EDIT SESSION</button><button type="button" className="is-delete" onClick={() => setDeleteId(row.id)}><Icon name="trash" />DELETE SESSION</button></div>
                   </article>;
@@ -1062,7 +1313,7 @@ export function ProgressPage() {
 
       {detail ? <div className="prx-modalBack" onMouseDown={() => setDetailId(null)}><section className="prx-modal prx-detailModal" onMouseDown={(event) => event.stopPropagation()}>
         <header><div><span>{detail.programLabel}</span><h2>{detail.templateName}</h2><p>{formatDate(detail.completedAt)}</p></div><button onClick={() => setDetailId(null)}>×</button></header>
-        <div className="prx-detailSummary"><div><span>TIME</span><strong>{formatDuration(detail.workoutSeconds)}</strong></div><div><span>VOLUME</span><strong>{formatNumber(detail.volumeTotal)} LB</strong></div><div><span>SETS</span><strong>{detail.setsLogged}</strong></div><div><span>PAIN MAX</span><strong>{detail.painMax.toFixed(0)}/10</strong></div></div>
+        <div className="prx-detailSummary"><div><span>TIME</span><strong>{formatDuration(detail.workoutSeconds)}</strong></div><div><span>EXERCISES</span><strong>{detail.exercises.length}</strong></div><div><span>SETS</span><strong>{detail.setsLogged}</strong></div><div><span>PAIN MAX</span><strong>{detail.painMax.toFixed(0)}/10</strong></div></div>
         <div className="prx-detailScroll">{detail.exercises.map((exercise) => <article className="prx-exerciseDetail" key={exercise.workoutExerciseId}><header><div><span>{exercise.primaryMuscles.join(" • ") || "EXERCISE"}</span><strong>{exercise.name}</strong></div>{exercise.pain != null ? <em>PAIN {exercise.pain}/10</em> : null}</header><div className="prx-setTable"><div className="prx-setHead"><span>SET</span><span>WEIGHT</span><span>REPS</span><span>RIR</span><span>FORM</span></div>{exercise.sets.map((set) => <div key={`${exercise.workoutExerciseId}-${set.set_index}`}><span>{set.set_index}</span><strong>{set.weight > 0 ? `${formatNumber(set.weight, set.weight % 1 ? 1 : 0)} LB` : "BW"}</strong><strong>{set.reps || "—"}</strong><span>{set.rir ?? "—"}</span><span>{set.form ?? "—"}</span></div>)}</div></article>)}</div>
         <footer><button onClick={() => setDetailId(null)}>CLOSE</button><button className="is-edit" onClick={() => openEditSession(detail)}>EDIT SESSION</button><button className="is-delete" onClick={() => { setDeleteId(detail.id); setDetailId(null); }}>DELETE SESSION</button></footer>
       </section></div> : null}
@@ -1179,6 +1430,60 @@ export function ProgressPage() {
         .prx-controls,.prx-controls label,.prx-controls select,.prx-programDeck,.prx-programIdentity,.prx-programIdentity>div{min-width:0!important;max-width:100%!important}.prx-controls select{width:100%!important;white-space:normal!important;text-overflow:clip!important}.prx-programIdentity strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important;line-height:1.25!important;padding-bottom:2px!important}
         .prx-volumeSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:12px 14px 2px}.prx-volumeSummary>div{display:grid;gap:4px;padding:10px 12px;border:1px solid rgba(94,173,201,.13);border-radius:10px;background:#061118}.prx-volumeSummary span{font-size:9px;font-weight:1000;letter-spacing:.08em;color:#88a7b3}.prx-volumeSummary strong{font-size:17px;color:#fff}.prx-volumeSummary strong.is-up{color:#76e6ad}.prx-volumeSummary strong.is-down{color:#ff888f}.prx-volumeCol>b{font-size:9px!important;color:#f3f8fa!important;white-space:nowrap!important}.prx-volumeCol strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.15!important}
         @media(max-width:650px){.prx-controls{width:100%!important}.prx-controls label{width:100%!important}.prx-controls select{font-size:13px!important;line-height:1.2!important}.prx-volumeSummary{grid-template-columns:1fr!important;padding:9px 9px 0!important}.prx-volumeSummary>div{grid-template-columns:1fr auto;align-items:center;padding:9px 10px!important}.prx-volumeSummary span{font-size:9px!important}.prx-volumeSummary strong{font-size:14px!important}.prx-volumeChart{overflow-x:auto!important;scroll-snap-type:x proximity}.prx-volumeCol{min-width:76px!important;scroll-snap-align:end}.prx-volumeCol>b{font-size:8px!important}.prx-historyGroupHead,.prx-historyTop{min-width:0!important;flex-wrap:wrap!important}.prx-historyMain,.prx-historyMain>*{max-width:100%!important;min-width:0!important;overflow:visible!important;white-space:normal!important;word-break:break-word!important}}
+
+
+        /* AUG 9 FINAL PROGRESS SYSTEM: semantic sections, real program metrics, no blue wall */
+        .prx-page{min-width:0!important;overflow-x:hidden!important}
+        .prx-hero,.prx-programDeck,.prx-panel,.prx-insightCard{border-color:rgba(153,177,187,.16)!important;border-top-color:rgba(205,223,230,.20)!important;background:linear-gradient(180deg,#0d151a,#070c10)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 16px 38px rgba(0,0,0,.24)!important}
+        .prx-hero{background:radial-gradient(620px 220px at 4% -30%,rgba(65,190,230,.11),transparent 62%),linear-gradient(180deg,#0e171d,#070c10)!important}
+        .prx-programDeck{background:linear-gradient(180deg,#10171b,#080d10)!important}
+        .prx-kpis--performance{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important}
+        .prx-kpis--performance article{position:relative;overflow:hidden;min-height:96px!important;border:1px solid rgba(155,178,188,.14)!important;background:linear-gradient(180deg,#10181d,#080d10)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)!important}
+        .prx-kpis--performance article::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#6c8490}
+        .prx-kpis--performance article.is-weight::before{background:#48d58d}.prx-kpis--performance article.is-strength::before{background:#4bd3f6}.prx-kpis--performance article.is-adherence::before{background:#5f8df5}.prx-kpis--performance article.is-nutrition::before{background:#f0ad48}.prx-kpis--performance article.is-pain::before{background:#f26872}.prx-kpis--performance article.is-recovery::before{background:#a879f4}
+        .prx-kpis--performance article.is-weight svg{color:#5be09a!important}.prx-kpis--performance article.is-strength svg{color:#5adcf8!important}.prx-kpis--performance article.is-adherence svg{color:#7ca2ff!important}.prx-kpis--performance article.is-nutrition svg{color:#f2b75c!important}.prx-kpis--performance article.is-pain svg{color:#ff7881!important}.prx-kpis--performance article.is-recovery svg{color:#b78cff!important}
+        .prx-kpis--performance article>div>span{color:#9db1ba!important;font-size:9px!important}.prx-kpis--performance article>div>strong{font-size:23px!important;color:#fff!important;white-space:normal!important;overflow-wrap:anywhere!important}.prx-kpis--performance article>div>small{font-size:10px!important;color:#80959e!important;line-height:1.3!important}
+        .prx-insightCard{margin-top:10px;padding:15px 17px;border:1px solid rgba(92,204,232,.18);border-radius:13px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:center}
+        .prx-insightCard>div{display:grid;gap:4px}.prx-insightCard span{color:#58d3f3;font-size:8px;font-weight:1000;letter-spacing:.14em}.prx-insightCard strong{color:#fff;font-size:15px}.prx-insightCard p{margin:0;color:#bfd0d6;font-size:11px;line-height:1.55}
+        .prx-panel--nutrition{border-top:2px solid rgba(240,173,72,.72)!important}.prx-panel--nutrition .prx-sectionHead span{color:#f0ad48!important}
+        .prx-panel--training{border-top:2px solid rgba(75,211,246,.72)!important}.prx-panel--training .prx-sectionHead span{color:#4bd3f6!important}
+        .prx-historyPanel{border-top:2px solid rgba(160,178,188,.42)!important}.prx-historyPanel .prx-sectionHead span{color:#a9bac1!important}
+        .prx-checkInGrid{padding:12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;background:linear-gradient(180deg,rgba(240,173,72,.025),transparent)}
+        .prx-checkInGrid label{display:grid;gap:5px;min-width:0}.prx-checkInGrid label>span{color:#a5967e;font-size:7px;font-weight:1000;letter-spacing:.08em}.prx-checkInGrid label>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;border:1px solid rgba(211,179,122,.15);border-radius:8px;background:#090f12;overflow:hidden}.prx-checkInGrid input{width:100%;min-width:0;height:38px;padding:0 9px;border:1px solid rgba(211,179,122,.15);border-radius:8px;background:#090f12;color:#fff;font-size:11px;font-weight:850;outline:none}.prx-checkInGrid label>div input{border:0;border-radius:0;background:transparent}.prx-checkInGrid label>div b{padding:0 9px;color:#8b7b62;font-size:7px}.prx-checkInGrid button{grid-column:4;min-height:38px;border:1px solid rgba(244,181,81,.42);border-radius:8px;background:linear-gradient(180deg,#e8a53f,#a96212);color:#171006;font-size:9px;font-weight:1000}.prx-checkInGrid button:disabled{opacity:.42}
+        .prx-bodyNutritionGrid{padding:0 12px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}.prx-bodyNutritionGrid>article{min-width:0;padding:13px;border:1px solid rgba(150,174,184,.12);border-radius:10px;background:#080f13}.prx-bodyNutritionGrid>article.is-weight{box-shadow:inset 3px 0 #48d58d}.prx-bodyNutritionGrid>article.is-nutrition{box-shadow:inset 3px 0 #f0ad48}.prx-bodyNutritionGrid header{display:grid;gap:4px}.prx-bodyNutritionGrid header span{color:#8ea4ad;font-size:7px;font-weight:1000;letter-spacing:.1em}.prx-bodyNutritionGrid header strong{color:#fff;font-size:18px}.prx-miniMetrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:10px;border-top:1px solid rgba(150,174,184,.08);border-bottom:1px solid rgba(150,174,184,.08)}.prx-miniMetrics>div{padding:8px 5px;min-width:0}.prx-miniMetrics>div+div{border-left:1px solid rgba(150,174,184,.08)}.prx-miniMetrics span{display:block;color:#718892;font-size:6px;font-weight:900}.prx-miniMetrics b{display:block;margin-top:4px;color:#f1f7f9;font-size:10px;white-space:normal;overflow-wrap:anywhere}.prx-bodyNutritionGrid p{margin:9px 0 0;color:#8da2aa;font-size:9px;line-height:1.45}.prx-weightPoints{display:flex;gap:5px;overflow-x:auto;padding-top:9px}.prx-weightPoints span{flex:0 0 auto;display:grid;gap:2px;padding:6px 8px;border-radius:7px;background:#0d1816;border:1px solid rgba(72,213,141,.12)}.prx-weightPoints b{color:#a4ecc6;font-size:9px}.prx-weightPoints small{color:#668277;font-size:6px}
+        .prx-trainingSummary{padding:12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.prx-trainingSummary article{padding:11px;border:1px solid rgba(150,174,184,.11);border-radius:9px;background:#080f13;box-shadow:inset 3px 0 #6e8791}.prx-trainingSummary article.is-strength{box-shadow:inset 3px 0 #4bd3f6}.prx-trainingSummary article.is-hold{box-shadow:inset 3px 0 #7ca2ff}.prx-trainingSummary article.is-pain{box-shadow:inset 3px 0 #f26872}.prx-trainingSummary article.is-recovery{box-shadow:inset 3px 0 #a879f4}.prx-trainingSummary span{display:block;color:#8298a1;font-size:7px;font-weight:1000}.prx-trainingSummary strong{display:block;margin-top:5px;color:#fff;font-size:19px}.prx-trainingSummary small{display:block;margin-top:2px;color:#6f858e;font-size:7px}
+        .prx-muscleSetGrid{padding:0 12px 12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.prx-muscleSetGrid article{position:relative;overflow:hidden;padding:11px 10px 13px;border:1px solid rgba(85,190,221,.12);border-radius:9px;background:#071116}.prx-muscleSetGrid span{display:block;color:#8faab4;font-size:7px;font-weight:1000;text-transform:uppercase}.prx-muscleSetGrid strong{display:inline-block;margin-top:5px;color:#fff;font-size:19px}.prx-muscleSetGrid small{margin-left:5px;color:#69838d;font-size:7px}.prx-muscleSetGrid i{position:absolute;left:0;bottom:0;height:3px;background:linear-gradient(90deg,#38c9ed,#64e3bd);border-radius:0 999px 999px 0}
+        .prx-trendGrid article{background:linear-gradient(180deg,#0a1419,#070d10)!important}.prx-trendGrid article:nth-child(4n+1){box-shadow:inset 2px 0 #4bd3f6}.prx-trendGrid article:nth-child(4n+2){box-shadow:inset 2px 0 #48d58d}.prx-trendGrid article:nth-child(4n+3){box-shadow:inset 2px 0 #a879f4}.prx-trendGrid article:nth-child(4n+4){box-shadow:inset 2px 0 #f0ad48}
+        .prx-historyRow{background:#080f13!important;border-color:rgba(155,178,188,.11)!important}.prx-historyMain>p{color:#b5c7cd!important}
+        @media(max-width:900px){.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-checkInGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.prx-checkInGrid button{grid-column:1/-1}.prx-muscleSetGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.prx-insightCard{grid-template-columns:1fr}}
+        @media(max-width:650px){
+          .prx-page{width:calc(100% - 8px)!important;overflow-x:hidden!important}
+          .prx-hero,.prx-programDeck,.prx-panel,.prx-insightCard{border-radius:13px!important}
+          .prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}.prx-kpis--performance article{min-height:91px!important;padding:11px 9px!important}.prx-kpis--performance article>div>strong{font-size:20px!important}.prx-kpis--performance article>div>small{font-size:9px!important;white-space:normal!important}
+          .prx-insightCard{padding:13px;gap:7px}.prx-insightCard strong{font-size:14px}.prx-insightCard p{font-size:11px;line-height:1.48}
+          .prx-checkInGrid{grid-template-columns:1fr 1fr!important;padding:9px;gap:6px}.prx-checkInGrid label>span{font-size:7.5px!important}.prx-checkInGrid input{height:42px!important;font-size:12px!important}.prx-checkInGrid button{grid-column:1/-1!important;min-height:44px!important;font-size:10px!important}
+          .prx-bodyNutritionGrid{grid-template-columns:1fr!important;padding:0 9px 9px!important}.prx-bodyNutritionGrid>article{padding:11px!important}.prx-bodyNutritionGrid header strong{font-size:17px!important}.prx-miniMetrics span{font-size:7px!important}.prx-miniMetrics b{font-size:10px!important}.prx-weightPoints span{padding:6px 7px}.prx-weightPoints b{font-size:9px!important}.prx-weightPoints small{font-size:6.5px!important}
+          .prx-trainingSummary{grid-template-columns:1fr 1fr!important;padding:9px!important}.prx-trainingSummary article{padding:10px!important}.prx-trainingSummary strong{font-size:18px!important}
+          .prx-muscleSetGrid{grid-template-columns:1fr 1fr!important;padding:0 9px 9px!important;gap:6px!important}.prx-muscleSetGrid article{padding:10px 8px 12px!important}.prx-muscleSetGrid strong{font-size:17px!important}
+          .prx-sectionHead{align-items:flex-start!important}.prx-sectionHead>small{white-space:normal!important;text-align:right!important;max-width:40%!important}
+          .prx-historyMetrics{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px!important}.prx-historyMetrics span{min-width:0!important;white-space:normal!important}
+        }
+        @media(max-width:365px){.prx-kpis--performance{grid-template-columns:1fr!important}.prx-checkInGrid{grid-template-columns:1fr!important}.prx-muscleSetGrid{grid-template-columns:1fr!important}}
+
+        /* FINAL PROGRESS READABILITY / NO-BUNCHING PASS */
+        .prx-page,.prx-page *{min-width:0}
+        .prx-page h1,.prx-page h2,.prx-page h3,.prx-page strong,.prx-page b,.prx-page span,.prx-page small,.prx-page p,.prx-page button,.prx-page label{overflow-wrap:anywhere;word-break:normal;text-overflow:clip}
+        .prx-miniMetrics{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+        .prx-miniMetrics span,.prx-trainingSummary span,.prx-muscleSetGrid span{font-size:8.5px!important;line-height:1.2!important}.prx-miniMetrics b{font-size:11px!important;line-height:1.25!important}.prx-trainingSummary small,.prx-muscleSetGrid small{font-size:8.5px!important;line-height:1.25!important}
+        .prx-bodyNutritionGrid p{font-size:10.5px!important}.prx-weightPoints b{font-size:10px!important}.prx-weightPoints small{font-size:8px!important}
+        .prx-historyMain h3{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.2!important}.prx-historyMain p{white-space:normal!important;line-height:1.3!important}
+        @media(max-width:650px){
+          .prx-kpis--performance article>div>span{font-size:9.5px!important}.prx-kpis--performance article>div>strong{font-size:21px!important;line-height:1.12!important}.prx-kpis--performance article>div>small{font-size:10px!important;line-height:1.35!important}
+          .prx-miniMetrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-miniMetrics>div:nth-child(3){border-left:0!important;border-top:1px solid rgba(150,174,184,.08)!important}.prx-miniMetrics>div:nth-child(4){border-top:1px solid rgba(150,174,184,.08)!important}
+          .prx-miniMetrics span,.prx-trainingSummary span,.prx-muscleSetGrid span{font-size:9px!important}.prx-miniMetrics b{font-size:11.5px!important}.prx-trainingSummary small,.prx-muscleSetGrid small{font-size:9px!important}
+          .prx-sectionHead h2{font-size:22px!important;line-height:1.12!important}.prx-sectionHead span{font-size:9px!important}.prx-sectionHead>small{font-size:9px!important;line-height:1.25!important}
+          .prx-historyMain h3{font-size:17px!important}.prx-historyMain p{font-size:11px!important}.prx-historyMetrics span{font-size:9px!important}.prx-historyActions button{font-size:10px!important;min-height:40px!important;white-space:normal!important}
+        }
       `}</style>
     </main>
   );
