@@ -2,6 +2,7 @@ import type { MusicTrack } from "./musicStorage";
 import { supabase } from "./supabase";
 
 export type MusicDiscoveryCategory = "new_upcoming" | "same_era" | "hidden_era";
+export type MusicDiscoveryType = "new_artist" | "new_release" | "modern_match" | "era_match" | "hidden_gem";
 
 export type MusicDiscoveryRecommendation = {
   id: string;
@@ -14,6 +15,9 @@ export type MusicDiscoveryRecommendation = {
   year: number | null;
   category: MusicDiscoveryCategory;
   reason: string;
+  discoveryType: MusicDiscoveryType;
+  previewUrl: string | null;
+  storeUrl: string | null;
   inLibrary: boolean;
   toAdd: boolean;
   dismissed: boolean;
@@ -76,10 +80,12 @@ const DELETED_TTL_MS = 30 * 86400000;
 const EVENT = "mvp:music-discovery-changed";
 const CLOUD_TABLE = "music_discovery_seeds";
 const HISTORY_TABLE = "music_discovery_history";
-const CLOUD_LIMIT = 24;
-const MAX_LOCAL_SEEDS = 24;
+const CLOUD_LIMIT = 500;
+const MAX_MEMORY_SEEDS = 500;
+const MAX_OFFLINE_SEEDS = 40;
 
 let cloudHydrationPromise: Promise<void> | null = null;
+let memorySeeds: MusicDiscoverySeed[] | null = null;
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -125,12 +131,20 @@ function safeCategory(value: unknown): MusicDiscoveryCategory {
   return "same_era";
 }
 
+function safeDiscoveryType(value: unknown, category: MusicDiscoveryCategory): MusicDiscoveryType {
+  if (value === "new_artist" || value === "new_release" || value === "modern_match" || value === "era_match" || value === "hidden_gem") return value;
+  if (category === "new_upcoming") return "new_release";
+  if (category === "hidden_era") return "hidden_gem";
+  return "era_match";
+}
+
 function sanitizeRecommendation(value: unknown): MusicDiscoveryRecommendation | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<MusicDiscoveryRecommendation>;
   const title = clean(row.title);
   const artist = clean(row.artist);
   if (!title || !artist) return null;
+  const category = safeCategory(row.category);
   return {
     id: clean(row.id) || `track:${normalized(artist)}:${canonicalTitle(title)}`,
     kind: row.kind === "artist" || row.kind === "album" ? row.kind : "track",
@@ -140,8 +154,11 @@ function sanitizeRecommendation(value: unknown): MusicDiscoveryRecommendation | 
     artworkUrl: clean(row.artworkUrl) || null,
     genre: clean(row.genre) || null,
     year: Number(row.year) >= 1900 ? Number(row.year) : null,
-    category: safeCategory(row.category),
+    category,
     reason: clean(row.reason) || "Related discovery",
+    discoveryType: safeDiscoveryType((row as Partial<MusicDiscoveryRecommendation>).discoveryType, category),
+    previewUrl: clean((row as Partial<MusicDiscoveryRecommendation>).previewUrl) || null,
+    storeUrl: clean((row as Partial<MusicDiscoveryRecommendation>).storeUrl) || null,
     inLibrary: Boolean(row.inLibrary),
     toAdd: Boolean(row.toAdd),
     dismissed: Boolean(row.dismissed),
@@ -229,26 +246,35 @@ function parseLocalStorageKey(key: string): MusicDiscoverySeed[] {
 
 function safeParse(): MusicDiscoverySeed[] {
   const deleted = locallyDeletedSeedIds();
+  if (memorySeeds) return memorySeeds.filter((seed) => !deleted.has(seed.id));
   const current = parseLocalStorageKey(STORAGE_KEY).filter((seed) => !deleted.has(seed.id));
-  if (current.length) return current;
+  if (current.length) {
+    memorySeeds = current.slice(0, MAX_MEMORY_SEEDS);
+    return memorySeeds;
+  }
   const legacy = parseLocalStorageKey(LEGACY_STORAGE_KEY).filter((seed) => !deleted.has(seed.id));
   if (legacy.length) saveLocal(legacy);
-  return legacy;
+  return memorySeeds ?? legacy;
 }
 
 function saveLocal(seeds: MusicDiscoverySeed[]) {
-  if (typeof window === "undefined") return;
-  try {
-    const deleted = locallyDeletedSeedIds();
-    const deduped = new Map<string, MusicDiscoverySeed>();
-    for (const seed of [...seeds].sort((a, b) => b.refreshedAt - a.refreshedAt)) {
-      if (!deleted.has(seed.id) && !deduped.has(seed.id)) deduped.set(seed.id, seed);
+  const deleted = locallyDeletedSeedIds();
+  const deduped = new Map<string, MusicDiscoverySeed>();
+  for (const seed of [...seeds].sort((a, b) => b.refreshedAt - a.refreshedAt)) {
+    if (!deleted.has(seed.id) && !deduped.has(seed.id)) deduped.set(seed.id, seed);
+  }
+  const next = [...deduped.values()].slice(0, MAX_MEMORY_SEEDS);
+  memorySeeds = next;
+
+  if (typeof window !== "undefined") {
+    try {
+      // Keep the permanent archive in Supabase and only a recent offline slice in localStorage.
+      // This avoids browser quota failures when the account grows to hundreds of Rediscover seeds.
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(0, MAX_OFFLINE_SEEDS)));
+    } catch {
+      // The in-memory/cloud archive remains usable even if browser storage is unavailable.
     }
-    const next = [...deduped.values()].slice(0, MAX_LOCAL_SEEDS);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     window.dispatchEvent(new Event(EVENT));
-  } catch {
-    // Discovery remains usable even if browser storage is unavailable.
   }
 }
 
