@@ -281,7 +281,7 @@ let headphoneCenterRight: GainNode | null = null;
 let limiterNode: DynamicsCompressorNode | null = null;
 let analyserNode: AnalyserNode | null = null;
 let musicGain: GainNode | null = null;
-let analyserBuffer: Uint8Array | null = null;
+let analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
 let visualizerEnvelope = new Float32Array(64);
 let mediaSourceConnected = false;
 let loadingTrackId: string | null = null;
@@ -642,7 +642,11 @@ export async function rebuildMusicAudioEngine() { const track = state.currentTra
 export function getMusicVisualizerLevels(barCount = 44) {
   const count = Math.max(8, Math.min(64, Math.floor(barCount)));
   if (!analyserNode || !state.playing || document.hidden) { for (let i = 0; i < count; i += 1) visualizerEnvelope[i] *= 0.72; return Array.from(visualizerEnvelope.slice(0, count)); }
-  if (!analyserBuffer || analyserBuffer.length !== analyserNode.frequencyBinCount) analyserBuffer = new Uint8Array(analyserNode.frequencyBinCount);
+  if (!analyserBuffer || analyserBuffer.length !== analyserNode.frequencyBinCount) {
+    const rawBuffer = new ArrayBuffer(analyserNode.frequencyBinCount);
+    const nextFrequencyData: Uint8Array<ArrayBuffer> = new Uint8Array(rawBuffer);
+    analyserBuffer = nextFrequencyData;
+  }
   analyserNode.getByteFrequencyData(analyserBuffer);
   const nyquist = (audioContext?.sampleRate ?? 44100) / 2;
   for (let index = 0; index < count; index += 1) {
