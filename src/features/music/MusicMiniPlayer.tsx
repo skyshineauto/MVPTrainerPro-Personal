@@ -580,6 +580,181 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-dspSaveBack{position:fixed;inset:0;z-index:7000;display:grid;place-items:center;padding:16px;background:rgba(0,4,7,.86);backdrop-filter:blur(8px)}.tr-dspSaveDialog{width:min(560px,100%);overflow:hidden;border:1px solid rgba(78,196,236,.30);border-radius:16px;background:linear-gradient(180deg,#0b202a,#050d12);box-shadow:0 30px 80px rgba(0,0,0,.66)}.tr-dspSaveDialog header{padding:15px 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(91,170,199,.12)}.tr-dspSaveDialog header small,.tr-dspSaveName>span,.tr-dspSaveSlots>span,.tr-dspSaveIncludes>span{color:#5bd3f5;font-size:7px;font-weight:1000;letter-spacing:.12em}.tr-dspSaveDialog h3{margin:4px 0 0;font-size:18px}.tr-dspSaveDialog header>button{width:34px;height:34px;border:1px solid rgba(123,174,193,.16);border-radius:9px;background:#071219;color:#dce9ed;font-size:20px}.tr-dspSaveName{padding:13px 17px 7px;display:grid;gap:6px}.tr-dspSaveName input{height:42px;border:1px solid rgba(116,198,228,.20);border-radius:10px;padding:0 12px;color:#f5f9fb;background:#060d12;outline:none;font:inherit;font-weight:850}.tr-dspSaveSlots{display:grid;gap:7px;padding:9px 17px}.tr-dspSaveSlots>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tr-dspSaveSlots button{min-height:60px;display:grid;align-content:center;gap:4px;padding:8px;border:1px solid rgba(255,255,255,.07);border-radius:10px;color:#d8e7ee;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.15));cursor:pointer;text-align:left}.tr-dspSaveSlots button b{font-size:9px}.tr-dspSaveSlots button small{color:rgba(184,205,216,.50);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspSaveSlots button.is-active{border-color:rgba(65,200,248,.52);background:rgba(0,158,223,.10)}.tr-dspSaveIncludes{display:grid;gap:5px;margin:7px 17px 0;padding:11px;border:1px solid rgba(255,255,255,.055);border-radius:10px;background:rgba(0,0,0,.13)}.tr-dspSaveIncludes p{margin:0;color:rgba(212,227,235,.62);font-size:9px;line-height:1.45}.tr-dspSaveDialog footer{display:flex;justify-content:flex-end;gap:8px;padding:15px 17px 17px}.tr-dspSaveDialog footer button{min-height:38px;padding:0 16px;border:1px solid rgba(120,193,220,.14);border-radius:10px;color:#dceaf1;background:#0b151c;font-size:9px;font-weight:1000;cursor:pointer}.tr-dspSaveDialog footer button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18)}
         @media(max-width:900px){.tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:50px minmax(0,1fr) minmax(150px,175px) max-content!important;gap:8px!important}.tr-audioDeck--pro7 .tr-audioLibraryButton{min-width:70px;padding:0 9px}.tr-audioDeck--pro7 .tr-audioEqToggle{padding-left:8px!important;padding-right:8px!important}}
         @media(max-width:700px){.tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:48px minmax(0,1fr)!important;gap:8px!important}.tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/-1;max-width:none!important}.tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:1/-1;width:100%;display:grid;grid-template-columns:1fr 1fr;min-width:0;justify-self:stretch}.tr-audioDeck--pro7 .tr-audioLibraryButton{min-height:42px;min-width:0}.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr);min-height:112px}.tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 5px 6px;gap:3px}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:80px 12px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{inset:2px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5px}.tr-audioDeck--pro7 .tr-rta10Scale{padding-right:4px;font-size:5px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}.tr-audioEqBands--31{grid-template-columns:repeat(31,44px)!important;min-width:1530px!important}.tr-headphoneProcessor header{grid-template-columns:1fr}.tr-headphoneControls{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-dspProfileSave{align-items:flex-start;flex-direction:column}.tr-dspSaveSlots>div{grid-template-columns:1fr}}
+
+        /* FINAL PRO RESPONSIVE PASS: presentation only, player behavior untouched */
+        .tr-audioDeck--pro7 .tr-audioDeckTop{
+          grid-template-columns:52px minmax(180px,1fr) minmax(170px,196px) auto!important;
+          column-gap:9px!important;
+          padding-right:12px!important;
+          overflow:hidden!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioTopButtons{
+          min-width:0!important;
+          max-width:192px;
+          display:grid!important;
+          grid-template-columns:82px 96px;
+          gap:7px!important;
+          justify-self:end!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioEqToggle,
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{
+          width:100%!important;
+          min-width:0!important;
+          height:40px!important;
+          min-height:40px!important;
+          box-sizing:border-box!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          padding:0 10px!important;
+          border:1px solid rgba(91,187,219,.28)!important;
+          border-radius:8px!important;
+          background:
+            linear-gradient(180deg,rgba(18,39,49,.96),rgba(5,15,21,.98))!important;
+          color:#e4f6fb!important;
+          font-size:7px!important;
+          font-weight:1000!important;
+          letter-spacing:.12em!important;
+          text-shadow:0 1px 0 rgba(0,0,0,.85);
+          box-shadow:
+            inset 0 1px rgba(255,255,255,.045),
+            inset 0 -1px rgba(0,0,0,.65),
+            0 3px 10px rgba(0,0,0,.18)!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          left:12px;
+          right:12px;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(92,216,249,.58),transparent);
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:hover,
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:focus-visible{
+          border-color:rgba(91,210,247,.56)!important;
+          color:#fff!important;
+          background:linear-gradient(180deg,rgba(16,53,67,.98),rgba(6,24,32,.98))!important;
+        }
+
+        @media(max-width:900px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{
+            grid-template-columns:50px minmax(150px,1fr) minmax(145px,176px) auto!important;
+            gap:7px!important;
+            padding-right:10px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTopButtons{
+            grid-template-columns:74px 86px;
+            max-width:167px;
+            gap:6px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{font-size:6.5px!important;letter-spacing:.09em!important}
+        }
+
+        @media(max-width:700px){
+          .tr-audioDeck--pro7{
+            overflow:hidden!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioDeckTop{
+            grid-template-columns:48px minmax(0,1fr)!important;
+            grid-auto-rows:auto;
+            gap:8px!important;
+            padding:10px!important;
+            overflow:hidden!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioArtwork{
+            grid-column:1;
+            grid-row:1;
+            width:48px!important;
+            height:48px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity{
+            grid-column:2;
+            grid-row:1;
+            width:100%!important;
+            min-width:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{
+            font-size:14px!important;
+            line-height:1.12!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity small{
+            font-size:8px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{
+            grid-column:1/-1!important;
+            grid-row:2;
+            max-width:none!important;
+            width:100%!important;
+            margin:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTopButtons{
+            grid-column:1/-1!important;
+            grid-row:3;
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            display:grid!important;
+            grid-template-columns:1fr 1fr!important;
+            gap:8px!important;
+            justify-self:stretch!important;
+            margin:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioEqToggle,
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:42px!important;
+            min-height:42px!important;
+            justify-content:center!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{
+            font-size:7.5px!important;
+            letter-spacing:.13em!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTelemetry{
+            margin-top:0!important;
+            display:grid!important;
+            grid-template-columns:repeat(3,minmax(0,1fr));
+            gap:5px!important;
+          }
+          .tr-audioDeck--pro7 .tr-dspHealth{
+            grid-column:1/-1;
+            justify-self:stretch!important;
+            text-align:center!important;
+            min-height:30px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioControls{
+            grid-template-columns:1fr!important;
+            gap:10px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioModeButton{
+            width:100%!important;
+            justify-content:center!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTransport{
+            grid-row:1;
+            width:100%;
+            justify-content:space-between!important;
+          }
+        }
+
+        @media(max-width:430px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{padding:9px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:13px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head{padding-left:8px!important;padding-right:8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head strong{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:72px 12px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{gap:2px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{gap:8px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-width:0!important;width:100%!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:5.5px!important}
+        }
       `}</style>
     </section>
   );
