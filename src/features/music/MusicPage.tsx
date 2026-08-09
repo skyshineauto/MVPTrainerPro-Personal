@@ -439,7 +439,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }, [tracks]);
   const albumGroups = useMemo(() => {
     const map = new Map<string, { album: string; artist: string; tracks: MusicTrack[] }>();
-    tracks.forEach((track) => { const album = albumLabel(track); const artist = artistLabel(track); const key = `${artist}|||${album}`; const group = map.get(key) || { album, artist, tracks: [] }; group.tracks.push(track); map.set(key, group); });
+    tracks.forEach((track) => { const album = albumLabel(track); const artist = artistLabel(track); const key = `${artist}|||${album}`; const group = map.get(key) || { album, artist, tracks: [] as MusicTrack[] }; group.tracks.push(track); map.set(key, group); });
     return [...map.values()].sort((a, b) => a.album.localeCompare(b.album));
   }, [tracks]);
 
