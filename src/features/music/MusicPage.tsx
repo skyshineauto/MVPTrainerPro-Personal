@@ -52,13 +52,17 @@ import {
 } from "../../lib/musicPlayer";
 import {
   getDiscoverPreferenceBoost,
+  listMusicDiscoverySavedSongs,
   listMusicDiscoverySeeds,
   refreshDiscoveryLibraryFlags,
   removeDiscoverySeed,
+  removeMusicDiscoverySavedSong,
+  saveMusicDiscoveryRecommendation,
   setDiscoveryRecommendationState,
   subscribeMusicDiscovery,
   type MusicDiscoveryCategory,
   type MusicDiscoveryRecommendation,
+  type MusicDiscoverySavedSong,
   type MusicDiscoverySeed,
 } from "../../lib/musicDiscovery";
 
@@ -66,7 +70,8 @@ type DraftMap = Record<string, { title: string; artist: string; album: string; r
 type PlaylistTrackMap = Record<string, string[]>;
 type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "discover";
 type DiscoverySort = "newest" | "oldest" | "artist" | "most";
-type DiscoveryFilter = "all" | "new_current" | "to_add" | "unowned";
+type DiscoveryFilter = "all" | "new_current" | "same_era" | "hidden" | "unowned";
+type DiscoveryView = "archive" | "saved";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
 type SongSort =
@@ -206,6 +211,21 @@ const DISCOVERY_SECTIONS: Array<{ key: MusicDiscoveryCategory; title: string; su
   { key: "hidden_era", title: "Hidden Gems Across Eras", subtitle: "Deeper new-to-you tracks from any era that genuinely fit the seed sound", tone: "hidden" },
 ];
 
+function filterDiscoveryRecommendations(items: MusicDiscoveryRecommendation[], filter: DiscoveryFilter) {
+  if (filter === "new_current") return items.filter((item) => item.category === "new_upcoming");
+  if (filter === "same_era") return items.filter((item) => item.category === "same_era");
+  if (filter === "hidden") return items.filter((item) => item.category === "hidden_era");
+  if (filter === "unowned") return items.filter((item) => !item.inLibrary);
+  return items;
+}
+
+function discoverySectionsForFilter(filter: DiscoveryFilter) {
+  if (filter === "new_current") return DISCOVERY_SECTIONS.filter((section) => section.key === "new_upcoming");
+  if (filter === "same_era") return DISCOVERY_SECTIONS.filter((section) => section.key === "same_era");
+  if (filter === "hidden") return DISCOVERY_SECTIONS.filter((section) => section.key === "hidden_era");
+  return DISCOVERY_SECTIONS;
+}
+
 const DISCOVERY_SEED_UI_KEY = "mvp_rediscover_expanded_seeds_v1";
 const DISCOVERY_LANE_UI_KEY = "mvp_rediscover_expanded_lanes_v1";
 
@@ -233,7 +253,7 @@ function formatDiscoveryDate(value: number) {
   const timeText = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
   return `${dateText} • ${timeText}`;
 }
-function discoveryTypeLabel(item: MusicDiscoveryRecommendation) {
+function discoveryTypeLabel(item: MusicDiscoveryRecommendation | MusicDiscoverySavedSong) {
   if (item.discoveryType === "new_artist") return "NEW ARTIST";
   if (item.discoveryType === "new_release") return "NEW RELEASE";
   if (item.discoveryType === "modern_match") return "MODERN MATCH";
@@ -246,13 +266,19 @@ function DiscoveryCard({
   item,
   previewingId,
   previewErrorId,
+  saved,
+  saving,
   onPreview,
+  onSave,
 }: {
   seedId: string;
   item: MusicDiscoveryRecommendation;
   previewingId: string | null;
   previewErrorId: string | null;
+  saved: boolean;
+  saving: boolean;
   onPreview: (item: MusicDiscoveryRecommendation) => void;
+  onSave: (item: MusicDiscoveryRecommendation) => void;
   key?: string;
 }) {
   const previewing = previewingId === item.id;
@@ -271,9 +297,45 @@ function DiscoveryCard({
         : <span className="tr10-previewUnavailable">PREVIEW UNAVAILABLE</span>}
       {item.inLibrary
         ? <b>✓ IN YOUR LIBRARY</b>
-        : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seedId,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}
+        : <button className={saved ? "is-toAdd" : ""} disabled={saved || saving} onClick={() => onSave(item)}>{saved ? "✓ SAVED" : saving ? "SAVING…" : "MARK TO ADD"}</button>}
       <button onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}>NOT INTERESTED</button>
       {item.storeUrl ? <a className="tr10-storeLink" href={item.storeUrl} target="_blank" rel="noreferrer">APPLE ↗</a> : null}
+    </footer>
+  </article>;
+}
+
+function SavedSongCard({
+  item,
+  previewingId,
+  previewErrorId,
+  removing,
+  onPreview,
+  onDelete,
+}: {
+  item: MusicDiscoverySavedSong;
+  previewingId: string | null;
+  previewErrorId: string | null;
+  removing: boolean;
+  onPreview: (item: MusicDiscoverySavedSong) => void;
+  onDelete: (item: MusicDiscoverySavedSong) => void;
+  key?: string;
+}) {
+  const previewing = previewingId === item.id;
+  const previewError = previewErrorId === item.id;
+  return <article className={item.inLibrary ? "is-owned" : ""}>
+    {item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}
+    <div>
+      <small className={`tr10-discoverType is-${item.discoveryType}`}>{discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
+      <strong>{item.title}</strong>
+      <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
+      <p>Saved from {item.seedTrackTitle}{item.seedTrackArtist ? ` • ${item.seedTrackArtist}` : ""}</p>
+    </div>
+    <footer>
+      {item.previewUrl
+        ? <button className={`tr10-previewButton ${previewing ? "is-playing" : ""}`} onClick={() => onPreview(item)}>{previewing ? "■ STOP PREVIEW" : previewError ? "↻ RETRY PREVIEW" : "▶ PREVIEW"}</button>
+        : <span className="tr10-previewUnavailable">PREVIEW UNAVAILABLE</span>}
+      {item.storeUrl ? <a className="tr10-storeLink" href={item.storeUrl} target="_blank" rel="noreferrer">APPLE ↗</a> : null}
+      <button className="tr10-savedDelete" disabled={removing} onClick={() => onDelete(item)}>{removing ? "DELETING…" : "DELETE"}</button>
     </footer>
   </article>;
 }
@@ -320,6 +382,11 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [smartMinutes, setSmartMinutes] = useState(60);
   const [smartIntensity, setSmartIntensity] = useState<SmartIntensity>("high");
   const [discoverySeeds, setDiscoverySeeds] = useState<MusicDiscoverySeed[]>(() => listMusicDiscoverySeeds());
+  const [savedDiscoverySongs, setSavedDiscoverySongs] = useState<MusicDiscoverySavedSong[]>(() => listMusicDiscoverySavedSongs());
+  const [discoveryView, setDiscoveryView] = useState<DiscoveryView>("archive");
+  const [savedSongsPage, setSavedSongsPage] = useState(1);
+  const [savingRecommendationId, setSavingRecommendationId] = useState<string | null>(null);
+  const [removingSavedSongId, setRemovingSavedSongId] = useState<string | null>(null);
   const [removingDiscoverySeedId, setRemovingDiscoverySeedId] = useState<string | null>(null);
   const [discoverySearch, setDiscoverySearch] = useState("");
   const [discoverySort, setDiscoverySort] = useState<DiscoverySort>("newest");
@@ -379,10 +446,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const discoveryArchive = useMemo(() => {
     const query = discoverySearch.trim().toLowerCase();
     const filtered = discoverySeeds.filter((seed) => {
-      const visible = seed.recommendations.filter((item) => !item.dismissed);
-      if (discoveryFilter === "new_current" && !visible.some((item) => item.category === "new_upcoming")) return false;
-      if (discoveryFilter === "to_add" && !visible.some((item) => item.toAdd)) return false;
-      if (discoveryFilter === "unowned" && !visible.some((item) => !item.inLibrary)) return false;
+      const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item) => !item.dismissed), discoveryFilter);
+      if (!visible.length) return false;
       if (!query) return true;
       const haystack = [
         seed.trackTitle,
@@ -407,6 +472,26 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     () => discoverySeeds.reduce((sum, seed) => sum + seed.recommendations.filter((item) => !item.dismissed).length, 0),
     [discoverySeeds],
   );
+
+  const savedDiscoverySongIds = useMemo(() => new Set(savedDiscoverySongs.map((song) => song.id)), [savedDiscoverySongs]);
+  const savedSongsFiltered = useMemo(() => {
+    const query = discoverySearch.trim().toLowerCase();
+    const filtered = savedDiscoverySongs.filter((song) => !query || [
+      song.title,
+      song.artist,
+      song.album,
+      song.seedTrackTitle,
+      song.seedTrackArtist,
+    ].join(" ").toLowerCase().includes(query));
+    return [...filtered].sort((a, b) => {
+      if (discoverySort === "oldest") return a.savedAt - b.savedAt;
+      if (discoverySort === "artist") return a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title);
+      return b.savedAt - a.savedAt;
+    });
+  }, [savedDiscoverySongs, discoverySearch, discoverySort]);
+  const savedSongsPageCount = Math.max(1, Math.ceil(savedSongsFiltered.length / 5));
+  const safeSavedSongsPage = Math.min(savedSongsPage, savedSongsPageCount);
+  const pagedSavedSongs = savedSongsFiltered.slice((safeSavedSongsPage - 1) * 5, safeSavedSongsPage * 5);
 
   const filteredTracks = useMemo(() => {
     const query = songSearch.trim().toLowerCase();
@@ -447,6 +532,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const allVisibleSelected = Boolean(pagedTracks.length && pagedTracks.every((track) => selectedSongIds.has(track.id)));
 
   useEffect(() => { setPage(1); }, [songSearch, songSort, energyFilter, healthFilter, pageSize]);
+  useEffect(() => { setSavedSongsPage(1); }, [discoverySearch, discoverySort, discoveryView]);
 
   async function hydrateArtworkPresence(rows: MusicTrack[]) {
     const candidates = rows.filter(needsMusicArtwork);
@@ -481,7 +567,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary(true)]).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your music library.")).finally(() => setLoading(false));
   }, []);
   useEffect(() => {
-    const refreshDiscovery = () => setDiscoverySeeds(listMusicDiscoverySeeds());
+    const refreshDiscovery = () => {
+      setDiscoverySeeds(listMusicDiscoverySeeds());
+      setSavedDiscoverySongs(listMusicDiscoverySavedSongs());
+    };
     const unsubscribe = subscribeMusicDiscovery(refreshDiscovery);
     refreshDiscovery();
     return unsubscribe;
@@ -887,7 +976,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     previewAudioRef.current = null;
     setPreviewingRecommendationId(null);
   }
-  function toggleDiscoveryPreview(item: MusicDiscoveryRecommendation) {
+  function toggleDiscoveryPreview(item: { id: string; previewUrl: string | null }) {
     if (!item.previewUrl) {
       setPreviewErrorRecommendationId(item.id);
       return;
@@ -915,6 +1004,31 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       stopDiscoveryPreview();
       setPreviewErrorRecommendationId(item.id);
     });
+  }
+
+  async function saveDiscoveryRecommendation(seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) {
+    if (savedDiscoverySongIds.has(item.id) || savingRecommendationId === item.id) return;
+    setSavingRecommendationId(item.id);
+    try {
+      await saveMusicDiscoveryRecommendation(seed, item);
+      setSavedDiscoverySongs(listMusicDiscoverySavedSongs());
+      setDiscoverySeeds(listMusicDiscoverySeeds());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save this song.");
+    } finally {
+      setSavingRecommendationId(null);
+    }
+  }
+
+  async function deleteSavedDiscoverySong(item: MusicDiscoverySavedSong) {
+    if (removingSavedSongId === item.id) return;
+    stopDiscoveryPreview();
+    setRemovingSavedSongId(item.id);
+    const removed = await removeMusicDiscoverySavedSong(item.id);
+    setSavedDiscoverySongs(listMusicDiscoverySavedSongs());
+    setDiscoverySeeds(listMusicDiscoverySeeds());
+    if (!removed) setError("Saved song was removed on this device, but cloud deletion could not be confirmed. Check your connection and try again.");
+    setRemovingSavedSongId(null);
   }
 
   useEffect(() => {
@@ -970,7 +1084,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
@@ -1041,52 +1155,67 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "discover" ? <section className="tr10-discover">
           <header className="tr10-discoverHead">
-            <div><span>REDISCOVER ARCHIVE</span><h2>Your saved music discovery library</h2><p>New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later.</p></div>
-            <div className="tr10-discoverSummary"><strong>{discoveryCount}</strong><span>DISCOVERIES</span><small>{discoverySeeds.length} SAVED SEED{discoverySeeds.length === 1 ? "" : "S"} • 3 CURATED LANES</small></div>
+            <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
+            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? "5 SONGS PER PAGE" : `${discoverySeeds.length} SAVED SEED${discoverySeeds.length === 1 ? "" : "S"} • 3 CURATED LANES`}</small></div>
           </header>
-          {discoverySeeds.length ? <div className="tr10-discoverArchiveTools">
-            <label className="tr10-discoverSearch"><span>SEARCH ARCHIVE</span><input value={discoverySearch} onChange={(event) => setDiscoverySearch(event.target.value)} placeholder="Song, artist, or recommendation" /></label>
-            <label><span>SORT</span><select value={discoverySort} onChange={(event) => setDiscoverySort(event.target.value as DiscoverySort)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="artist">Artist A–Z</option><option value="most">Most discoveries</option></select></label>
-            <label><span>FILTER</span><select value={discoveryFilter} onChange={(event) => setDiscoveryFilter(event.target.value as DiscoveryFilter)}><option value="all">All saved</option><option value="new_current">Has New & Current</option><option value="to_add">Marked to add</option><option value="unowned">Has new-to-you tracks</option></select></label>
-            <div className="tr10-discoverArchiveCount"><strong>{discoveryArchive.length}</strong><span>SHOWING</span></div>
+
+          {(discoverySeeds.length || savedDiscoverySongs.length) ? <div className="tr10-discoverArchiveTools">
+            <label className="tr10-discoverSearch"><span>{discoveryView === "saved" ? "SEARCH SAVED SONGS" : "SEARCH ARCHIVE"}</span><input value={discoverySearch} onChange={(event) => setDiscoverySearch(event.target.value)} placeholder={discoveryView === "saved" ? "Song, artist, or source" : "Song, artist, or recommendation"} /></label>
+            <label><span>SORT</span><select value={discoverySort} onChange={(event) => setDiscoverySort(event.target.value as DiscoverySort)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="artist">Artist A–Z</option>{discoveryView === "archive" ? <option value="most">Most discoveries</option> : null}</select></label>
+            <label><span>FILTER</span><select value={discoveryFilter} disabled={discoveryView === "saved"} onChange={(event) => setDiscoveryFilter(event.target.value as DiscoveryFilter)}><option value="all">{discoveryView === "saved" ? "Saved songs" : "All discoveries"}</option><option value="new_current">Has New & Current</option><option value="same_era">Has Same-Era Matches</option><option value="hidden">Has Hidden Gems</option><option value="unowned">Has New-to-You Tracks</option></select></label>
+            <button type="button" className={`tr10-savedSongsButton ${discoveryView === "saved" ? "is-active" : ""}`} aria-pressed={discoveryView === "saved"} onClick={() => setDiscoveryView((current) => current === "saved" ? "archive" : "saved")}>Saved Songs</button>
           </div> : null}
-          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : !discoveryArchive.length ? <div className="tr10-empty">No saved Rediscover results match these filters.</div> : discoveryArchive.map((seed) => {
-            const visible = seed.recommendations.filter((item)=>!item.dismissed);
-            const seedExpanded = expandedDiscoverySeedIds.has(seed.id);
-            const wasRefreshed = seed.refreshedAt - seed.createdAt > 60000;
-            return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} key={seed.id}>
-              <header className="tr10-discoverSeedHead">
-                <button type="button" className="tr10-discoverSeedToggle" onClick={() => toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
-                  <div className="tr10-discoverSeedIdentity"><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p><time>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</time></div>
-                  <div className="tr10-discoverSeedStats"><strong>{visible.length}</strong><span>DISCOVERIES</span><small>3 CURATED LANES</small></div>
-                  <span className="tr10-discoverChevron" aria-hidden>{seedExpanded ? "⌃" : "⌄"}</span>
-                </button>
-                <button type="button" className="tr10-discoverRemove" disabled={removingDiscoverySeedId === seed.id} onClick={() => void (async () => {
-                  stopDiscoveryPreview();
-                  setRemovingDiscoverySeedId(seed.id);
-                  const removed = await removeDiscoverySeed(seed.id);
-                  setDiscoverySeeds(listMusicDiscoverySeeds());
-                  setExpandedDiscoverySeedIds((current) => { const next = new Set(current); next.delete(seed.id); return next; });
-                  setExpandedDiscoveryLaneIds((current) => new Set([...current].filter((key) => !key.startsWith(`${seed.id}|`))));
-                  if (!removed) setError("Rediscover was removed from this device, but cloud deletion could not be confirmed. Check your connection and try again.");
-                  setRemovingDiscoverySeedId(null);
-                })()}>{removingDiscoverySeedId === seed.id ? "REMOVING…" : "REMOVE"}</button>
-              </header>
-              {seedExpanded ? (visible.length ? <div className="tr10-discoverSections">
-                {DISCOVERY_SECTIONS.map((section) => {
-                  const items = visible.filter((item) => item.category === section.key);
-                  const laneKey = discoveryLaneKey(seed.id, section.key);
-                  const laneExpanded = expandedDiscoveryLaneIds.has(laneKey);
-                  return <section className={`tr10-discoverCategory is-${section.tone} ${laneExpanded ? "is-expanded" : "is-collapsed"}`} key={section.key}>
-                    <button type="button" className="tr10-discoverCategoryToggle" onClick={() => toggleDiscoveryLane(seed.id, section.key)} aria-expanded={laneExpanded}>
-                      <div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
-                    </button>
-                    {laneExpanded ? (items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} onPreview={toggleDiscoveryPreview} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to refresh and widen this lane.</div>) : null}
-                  </section>;
-                })}
-              </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to refresh the search.</div>) : null}
-            </section>;
-          })}
+
+          {discoveryView === "saved" ? <>
+            {!savedDiscoverySongs.length ? <div className="tr10-empty">Songs you mark to add will appear here.</div> : !savedSongsFiltered.length ? <div className="tr10-empty">No Saved Songs match this search.</div> : <>
+              <div className="tr10-discoverGrid tr10-savedSongsGrid">
+                {pagedSavedSongs.map((item) => <SavedSongCard key={item.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} removing={removingSavedSongId === item.id} onPreview={toggleDiscoveryPreview} onDelete={(song) => void deleteSavedDiscoverySong(song)} />)}
+              </div>
+              <div className="tr10-savedSongsPager">
+                <button type="button" disabled={safeSavedSongsPage <= 1} onClick={() => setSavedSongsPage((value) => Math.max(1, value - 1))}>PREVIOUS</button>
+                <span>{safeSavedSongsPage} / {savedSongsPageCount}</span>
+                <button type="button" disabled={safeSavedSongsPage >= savedSongsPageCount} onClick={() => setSavedSongsPage((value) => Math.min(savedSongsPageCount, value + 1))}>NEXT</button>
+              </div>
+            </>}
+          </> : <>
+            {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : !discoveryArchive.length ? <div className="tr10-empty">No saved Rediscover results match these filters.</div> : discoveryArchive.map((seed) => {
+              const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item)=>!item.dismissed), discoveryFilter);
+              const seedExpanded = expandedDiscoverySeedIds.has(seed.id);
+              const wasRefreshed = seed.refreshedAt - seed.createdAt > 60000;
+              return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} key={seed.id}>
+                <header className="tr10-discoverSeedHead">
+                  <button type="button" className="tr10-discoverSeedToggle" onClick={() => toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
+                    <div className="tr10-discoverSeedIdentity"><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p><time>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</time></div>
+                    <div className="tr10-discoverSeedStats"><strong>{visible.length}</strong><span>DISCOVERIES</span><small>3 CURATED LANES</small></div>
+                    <span className="tr10-discoverChevron" aria-hidden>{seedExpanded ? "⌃" : "⌄"}</span>
+                  </button>
+                  <button type="button" className="tr10-discoverRemove" disabled={removingDiscoverySeedId === seed.id} onClick={() => void (async () => {
+                    stopDiscoveryPreview();
+                    setRemovingDiscoverySeedId(seed.id);
+                    const removed = await removeDiscoverySeed(seed.id);
+                    setDiscoverySeeds(listMusicDiscoverySeeds());
+                    setExpandedDiscoverySeedIds((current) => { const next = new Set(current); next.delete(seed.id); return next; });
+                    setExpandedDiscoveryLaneIds((current) => new Set([...current].filter((key) => !key.startsWith(`${seed.id}|`))));
+                    if (!removed) setError("Rediscover was removed from this device, but cloud deletion could not be confirmed. Check your connection and try again.");
+                    setRemovingDiscoverySeedId(null);
+                  })()}>{removingDiscoverySeedId === seed.id ? "REMOVING…" : "REMOVE"}</button>
+                </header>
+                {seedExpanded ? (visible.length ? <div className="tr10-discoverSections">
+                  {discoverySectionsForFilter(discoveryFilter).map((section) => {
+                    const items = visible.filter((item) => item.category === section.key);
+                    const laneKey = discoveryLaneKey(seed.id, section.key);
+                    const laneExpanded = expandedDiscoveryLaneIds.has(laneKey);
+                    return <section className={`tr10-discoverCategory is-${section.tone} ${laneExpanded ? "is-expanded" : "is-collapsed"}`} key={section.key}>
+                      <button type="button" className="tr10-discoverCategoryToggle" onClick={() => toggleDiscoveryLane(seed.id, section.key)} aria-expanded={laneExpanded}>
+                        <div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
+                      </button>
+                      {laneExpanded ? (items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} saved={savedDiscoverySongIds.has(item.id)} saving={savingRecommendationId === item.id} onPreview={toggleDiscoveryPreview} onSave={(recommendation) => void saveDiscoveryRecommendation(seed, recommendation)} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to refresh and widen this lane.</div>) : null}
+                    </section>;
+                  })}
+                </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to refresh the search.</div>) : null}
+              </section>;
+            })}
+          </>}
         </section> : null}
       </section>
 
@@ -2031,6 +2160,46 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-discoverSeedToggle{grid-template-columns:minmax(0,1fr) 72px 18px!important}.tr10-discoverSeedStats small{display:none!important}.tr10-discoverSeedStats{grid-template-areas:"count label"!important}.tr10-discoverArchiveTools label>span{font-size:6.5px!important}
         }
 
+
+        /* AUG 9 REMAINING REDISCOVER FIXES: functional filters + Saved Songs */
+        .tr10-discoverArchiveTools{
+          grid-template-columns:minmax(260px,1.6fr) minmax(145px,.62fr) minmax(180px,.76fr) 116px!important;
+        }
+        .tr10-discoverArchiveTools select:disabled{opacity:.62;cursor:not-allowed}
+        .tr10-savedSongsButton{
+          height:38px;min-height:38px;width:100%;padding:0 10px;
+          border:1px solid rgba(96,175,203,.17);border-radius:9px;
+          background:#08151b;color:#e8f6fa;font-size:8px;font-weight:1000;letter-spacing:.035em;
+          cursor:pointer;white-space:nowrap;
+        }
+        .tr10-savedSongsButton:hover{border-color:rgba(80,203,241,.38);background:#0a2029}
+        .tr10-savedSongsButton.is-active{
+          border-color:rgba(80,203,241,.56);background:linear-gradient(180deg,#0b3b4b,#082630);
+          color:#fff;box-shadow:inset 0 -2px #48d1f5;
+        }
+        .tr10-savedSongsGrid{margin-top:0!important;padding:0!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+        .tr10-savedSongsGrid article{margin:0!important}
+        .tr10-savedDelete{
+          border-color:rgba(255,95,105,.30)!important;background:#18090b!important;color:#ff9aa0!important;
+        }
+        .tr10-savedSongsPager{
+          display:grid;grid-template-columns:110px auto 110px;align-items:center;justify-content:center;gap:10px;
+          margin-top:2px;padding:9px;border:1px solid rgba(112,173,196,.10);border-radius:10px;background:#061015;
+        }
+        .tr10-savedSongsPager button{
+          height:32px;border:1px solid rgba(96,175,203,.17);border-radius:8px;background:#08151b;color:#e8f6fa;
+          font-size:7px;font-weight:1000;cursor:pointer;
+        }
+        .tr10-savedSongsPager button:disabled{opacity:.32;cursor:not-allowed}
+        .tr10-savedSongsPager span{color:#b8ccd4;font-size:8px;font-weight:1000;text-align:center}
+        @media(max-width:760px){
+          .tr10-discoverArchiveTools{grid-template-columns:1fr 1fr!important}
+          .tr10-discoverSearch{grid-column:1/-1!important}
+          .tr10-savedSongsButton{height:35px!important;min-height:35px!important;font-size:8px!important}
+          .tr10-savedSongsGrid{grid-template-columns:1fr!important}
+          .tr10-savedSongsPager{grid-template-columns:1fr auto 1fr!important;gap:6px!important;padding:7px!important}
+          .tr10-savedSongsPager button{height:30px!important}
+        }
       `}</style>
     </main>
   );
