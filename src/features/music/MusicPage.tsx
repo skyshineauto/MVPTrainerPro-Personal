@@ -1654,6 +1654,66 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:8.5px!important}
           .tr10-duration{font-size:10px!important}.tr10-energy{font-size:9px!important}
         }
+
+
+        /* AUG 9 AUTHORITATIVE MOBILE LIBRARY V3: compact rows, artwork never covered */
+        @media(max-width:650px){
+          .tr10-row{
+            display:grid!important;
+            grid-template-columns:28px 20px minmax(0,1fr)!important;
+            grid-template-rows:auto 29px auto!important;
+            gap:5px 6px!important;
+            padding:7px 6px!important;
+            min-height:0!important;
+            overflow:hidden!important;
+            align-items:center!important;
+          }
+          .tr10-orderCell{grid-column:1!important;grid-row:1/3!important;width:28px!important;min-width:28px!important;align-self:start!important;padding-top:1px!important;gap:3px!important}
+          .tr10-orderCell button{width:27px!important;height:23px!important;min-height:23px!important;border-radius:6px!important;font-size:12px!important}
+          .tr10-check{grid-column:2!important;grid-row:1!important;align-self:center!important;padding:0!important;margin:0!important}
+          .tr10-trackCell{
+            grid-column:3!important;grid-row:1!important;
+            display:grid!important;
+            grid-template-columns:30px 44px minmax(0,1fr)!important;
+            grid-template-rows:auto!important;
+            grid-template-areas:"play art copy"!important;
+            align-items:center!important;gap:6px!important;min-width:0!important;
+          }
+          .tr10-trackCell>.tr10-play{
+            grid-area:play!important;position:static!important;inset:auto!important;margin:0!important;z-index:auto!important;
+            width:30px!important;height:30px!important;min-width:30px!important;min-height:30px!important;padding:0!important;
+            border-radius:7px!important;background:linear-gradient(180deg,#ffc45b,#f29514)!important;backdrop-filter:none!important;color:#1b1104!important;
+          }
+          .tr10-trackCell>.tr10-play.is-playing{background:linear-gradient(180deg,#74e9ff,#2ebedc)!important;color:#041117!important}
+          .tr10-trackCell>.tr10-artwork,.tr10-trackCell>.tr10-art--row,.tr10-trackCell>.tr10-art{
+            grid-area:art!important;position:static!important;margin:0!important;width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;max-width:44px!important;max-height:44px!important;border-radius:7px!important;overflow:hidden!important;
+          }
+          .tr10-trackCell>.tr10-artwork img,.tr10-trackCell>.tr10-art--row img,.tr10-trackCell>.tr10-art img{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important}
+          .tr10-trackText{grid-area:copy!important;min-width:0!important;padding:0!important}
+          .tr10-trackText strong{font-size:12.5px!important;line-height:1.18!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;overflow:hidden!important;overflow-wrap:anywhere!important}
+          .tr10-trackText span{margin-top:2px!important;font-size:9px!important;line-height:1.2!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:1!important;overflow:hidden!important;color:#9eb5be!important}
+          .tr10-trackText small,.tr10-healthBadge{display:none!important}
+          .tr10-row>.tr10-duration{grid-column:3!important;grid-row:2!important;justify-self:start!important;align-self:center!important;margin-left:36px!important;font-size:9px!important;line-height:1!important;color:#a9c0c9!important}
+          .tr10-row>.tr10-energy{grid-column:3!important;grid-row:2!important;justify-self:end!important;align-self:center!important;width:72px!important;min-width:72px!important;height:27px!important;min-height:27px!important;padding:0 6px!important;font-size:8px!important;border-radius:7px!important}
+          .tr10-actions{
+            grid-column:1/-1!important;grid-row:3!important;width:100%!important;padding:1px 0 0!important;margin:0!important;
+            display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:4px!important;
+          }
+          .tr10-actions button,.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{
+            width:100%!important;min-width:0!important;height:30px!important;min-height:30px!important;padding:0 4px!important;border-radius:6px!important;
+            font-size:7.5px!important;line-height:1.05!important;font-weight:950!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
+          }
+          .tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{display:flex!important;align-items:center!important;justify-content:center!important;gap:3px!important}
+          .tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:7px!important;line-height:1!important}
+        }
+        @media(max-width:380px){
+          .tr10-row{grid-template-columns:26px 18px minmax(0,1fr)!important;padding:6px 5px!important;gap:5px!important}
+          .tr10-trackCell{grid-template-columns:28px 40px minmax(0,1fr)!important;gap:5px!important}
+          .tr10-trackCell>.tr10-play{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important}
+          .tr10-trackCell>.tr10-artwork,.tr10-trackCell>.tr10-art--row,.tr10-trackCell>.tr10-art{width:40px!important;height:40px!important;min-width:40px!important;min-height:40px!important;max-width:40px!important;max-height:40px!important}
+          .tr10-trackText strong{font-size:11.5px!important}.tr10-trackText span{font-size:8.5px!important}
+          .tr10-actions{grid-template-columns:repeat(3,minmax(0,1fr))!important}.tr10-actions button,.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{font-size:7px!important;height:29px!important;min-height:29px!important;padding:0 2px!important}
+        }
       `}</style>
     </main>
   );
