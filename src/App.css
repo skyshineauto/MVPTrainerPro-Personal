@@ -10160,3 +10160,201 @@ body{
   .tr-audioTelemetry .is-live i{animation:none;}
   .tr-audioDeck--v4::after{transition:none;}
 }
+
+/* ========================================================================== */
+/* SESSION TIMER FINAL POLISH: SINGLE-SURFACE 3D CHRONOGRAPH                 */
+/* Visual-only override. Keeps all workout/timer behavior unchanged.         */
+/* ========================================================================== */
+
+/* Remove the active HUD's outer card shell so the chronograph is the one
+   physical surface. This eliminates the box-inside-a-box appearance. */
+.tr-hud--active.tr-hudPanel.tr-card,
+.tr-hud--activePaused.tr-hudPanel.tr-card{
+  overflow:visible !important;
+  border-color:transparent !important;
+  background:transparent !important;
+  box-shadow:none !important;
+}
+
+.tr-hud--active .tr-sessionOverviewBody,
+.tr-hud--activePaused .tr-sessionOverviewBody{
+  padding:4px 2px 16px !important;
+  overflow:visible !important;
+}
+
+/* One elevated premium timer slab. Depth comes from dark layered shadows,
+   while the cyan is only a restrained reflected edge highlight. */
+.tr-sessionChronograph{
+  position:relative !important;
+  isolation:isolate !important;
+  overflow:hidden !important;
+  border:1px solid rgba(101,205,244,.30) !important;
+  border-radius:22px !important;
+  background:
+    radial-gradient(900px 280px at 50% -38%,rgba(79,184,224,.105),transparent 66%),
+    radial-gradient(760px 240px at 50% 118%,rgba(0,0,0,.62),transparent 72%),
+    linear-gradient(180deg,#111b25 0%,#0a1119 46%,#05090e 100%) !important;
+  box-shadow:
+    0 2px 0 rgba(0,0,0,.96),
+    0 7px 0 rgba(0,0,0,.82),
+    0 15px 22px rgba(0,0,0,.86),
+    0 32px 58px rgba(0,0,0,.74),
+    0 56px 110px rgba(0,0,0,.52),
+    -18px 22px 54px rgba(0,0,0,.38),
+    18px 22px 54px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.105),
+    inset 0 2px 0 rgba(107,211,250,.055),
+    inset 0 -1px 0 rgba(0,0,0,.92),
+    inset 0 -8px 22px rgba(0,0,0,.24) !important;
+  transform:translateZ(0);
+}
+
+/* Subtle surface light only. No second framed rectangle. */
+.tr-sessionChronograph::before{
+  content:"" !important;
+  position:absolute !important;
+  inset:0 !important;
+  z-index:-1 !important;
+  pointer-events:none !important;
+  border-radius:inherit !important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.075) 0%,rgba(255,255,255,.022) 14%,transparent 38%),
+    radial-gradient(70% 36% at 50% 0%,rgba(120,220,255,.055),transparent 72%),
+    linear-gradient(90deg,transparent 0%,rgba(255,255,255,.012) 50%,transparent 100%) !important;
+  opacity:1 !important;
+}
+
+/* Paused changes the information state, not the physical chassis. */
+.tr-sessionChronograph.is-paused{
+  border-color:rgba(101,205,244,.25) !important;
+  background:
+    radial-gradient(820px 250px at 50% -40%,rgba(255,84,84,.035),transparent 66%),
+    radial-gradient(760px 240px at 50% 118%,rgba(0,0,0,.62),transparent 72%),
+    linear-gradient(180deg,#111a23 0%,#0a1017 46%,#05090e 100%) !important;
+  box-shadow:
+    0 2px 0 rgba(0,0,0,.96),
+    0 7px 0 rgba(0,0,0,.82),
+    0 15px 22px rgba(0,0,0,.86),
+    0 32px 58px rgba(0,0,0,.74),
+    0 56px 110px rgba(0,0,0,.52),
+    -18px 22px 54px rgba(0,0,0,.38),
+    18px 22px 54px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.095),
+    inset 0 2px 0 rgba(107,211,250,.04),
+    inset 0 -1px 0 rgba(0,0,0,.92),
+    inset 0 -8px 22px rgba(0,0,0,.24) !important;
+}
+
+/* ACTIVE: premium performance green with a crisp dark extrusion and
+   restrained bloom. */
+.tr-sessionChronographTime{
+  color:#66ed91 !important;
+  -webkit-text-stroke:.35px rgba(174,255,199,.18);
+  text-shadow:
+    0 1px 0 rgba(194,255,211,.18),
+    0 3px 0 rgba(16,67,35,.72),
+    0 7px 0 rgba(0,0,0,.68),
+    0 12px 20px rgba(0,0,0,.70),
+    0 0 14px rgba(65,226,117,.24),
+    0 0 32px rgba(45,211,102,.14) !important;
+}
+
+/* PAUSED: same premium treatment, red state color only. */
+.tr-sessionChronograph.is-paused .tr-sessionChronographTime{
+  color:#ff6767 !important;
+  -webkit-text-stroke:.35px rgba(255,190,190,.16);
+  text-shadow:
+    0 1px 0 rgba(255,211,211,.15),
+    0 3px 0 rgba(104,24,24,.72),
+    0 7px 0 rgba(0,0,0,.68),
+    0 12px 20px rgba(0,0,0,.70),
+    0 0 14px rgba(255,75,75,.24),
+    0 0 32px rgba(239,68,68,.14) !important;
+}
+
+/* Keep state pills clear and deliberate without spreading color across the
+   whole timer chassis. */
+.tr-sessionChronographState{
+  border-color:rgba(58,223,116,.34) !important;
+  color:#8af1ac !important;
+  background:linear-gradient(180deg,rgba(48,205,105,.11),rgba(17,82,44,.08)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.055),
+    0 8px 20px rgba(0,0,0,.24) !important;
+}
+
+.tr-sessionChronographState.is-paused{
+  border-color:rgba(255,90,90,.34) !important;
+  color:#ff9a9a !important;
+  background:linear-gradient(180deg,rgba(239,68,68,.12),rgba(91,18,18,.09)) !important;
+}
+
+/* The controls sit slightly lower in the slab, adding to the hardware depth
+   without creating another enclosing box. */
+.tr-sessionChronographPrimary,
+.tr-sessionChronographEnd{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.10),
+    inset 0 -2px 0 rgba(0,0,0,.34),
+    0 8px 18px rgba(0,0,0,.34) !important;
+}
+
+.tr-sessionChronographPrimary{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.11),
+    inset 0 -2px 0 rgba(0,28,48,.55),
+    0 8px 18px rgba(0,0,0,.36),
+    0 0 20px rgba(0,146,222,.055) !important;
+}
+
+.tr-sessionChronographPrimary.is-resume{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.11),
+    inset 0 -2px 0 rgba(0,45,19,.54),
+    0 8px 18px rgba(0,0,0,.36),
+    0 0 20px rgba(40,208,102,.05) !important;
+}
+
+.tr-sessionChronographEnd{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.075),
+    inset 0 -2px 0 rgba(52,0,0,.50),
+    0 8px 18px rgba(0,0,0,.36) !important;
+}
+
+@media (max-width:760px){
+  .tr-hud--active .tr-sessionOverviewBody,
+  .tr-hud--activePaused .tr-sessionOverviewBody{
+    padding:3px 1px 14px !important;
+  }
+
+  .tr-sessionChronograph{
+    box-shadow:
+      0 2px 0 rgba(0,0,0,.95),
+      0 6px 0 rgba(0,0,0,.78),
+      0 13px 20px rgba(0,0,0,.82),
+      0 27px 48px rgba(0,0,0,.68),
+      0 44px 82px rgba(0,0,0,.44),
+      -10px 18px 34px rgba(0,0,0,.30),
+      10px 18px 34px rgba(0,0,0,.30),
+      inset 0 1px 0 rgba(255,255,255,.10),
+      inset 0 2px 0 rgba(107,211,250,.05),
+      inset 0 -1px 0 rgba(0,0,0,.92),
+      inset 0 -7px 18px rgba(0,0,0,.22) !important;
+  }
+
+  .tr-sessionChronograph.is-paused{
+    box-shadow:
+      0 2px 0 rgba(0,0,0,.95),
+      0 6px 0 rgba(0,0,0,.78),
+      0 13px 20px rgba(0,0,0,.82),
+      0 27px 48px rgba(0,0,0,.68),
+      0 44px 82px rgba(0,0,0,.44),
+      -10px 18px 34px rgba(0,0,0,.30),
+      10px 18px 34px rgba(0,0,0,.30),
+      inset 0 1px 0 rgba(255,255,255,.095),
+      inset 0 2px 0 rgba(107,211,250,.04),
+      inset 0 -1px 0 rgba(0,0,0,.92),
+      inset 0 -7px 18px rgba(0,0,0,.22) !important;
+  }
+}
