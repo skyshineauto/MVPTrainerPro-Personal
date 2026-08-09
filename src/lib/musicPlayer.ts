@@ -4,9 +4,9 @@ import {
   getMusicArtworkSignedUrl,
   getMusicTrackSignedUrl,
   listMusicTracks,
+  recordMusicTrackCompleted,
   recordMusicTrackPlayed,
   recordMusicTrackSkipped,
-  recordMusicTrackCompleted,
   setMusicTrackPreference,
   type MusicTrack,
 } from "./musicStorage";
@@ -41,13 +41,7 @@ export type MusicEqPreset =
   | "custom";
 export type MusicDuckingStrength = "off" | "light" | "standard" | "strong";
 export type MusicDspStatus = "active" | "bypassed" | "recovering" | "unavailable";
-export type MusicHeadphoneMode =
-  | "off"
-  | "wide"
-  | "spatial"
-  | "stage"
-  | "focus"
-  | "bass_impact";
+export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "stage" | "focus" | "bass_impact";
 
 export const MUSIC_EQ_FREQUENCIES = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500,
@@ -55,15 +49,9 @@ export const MUSIC_EQ_FREQUENCIES = [
   10000, 12500, 16000, 20000,
 ] as const;
 
-const LEGACY_EQ_FREQUENCIES = [
-  60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000,
-] as const;
+const LEGACY_EQ_FREQUENCIES = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000] as const;
 
-type BuiltInMusicEqPreset = Exclude<
-  MusicEqPreset,
-  "custom" | MusicCustomPresetSlot
->;
-
+type BuiltInMusicEqPreset = Exclude<MusicEqPreset, "custom" | MusicCustomPresetSlot>;
 type EqDefinition = { label: string; gains: number[]; preamp: number };
 
 function interpolateEqCurve(points: Array<[number, number]>) {
@@ -71,19 +59,13 @@ function interpolateEqCurve(points: Array<[number, number]>) {
   return MUSIC_EQ_FREQUENCIES.map((frequency) => {
     if (frequency <= sorted[0][0]) return sorted[0][1];
     if (frequency >= sorted[sorted.length - 1][0]) return sorted[sorted.length - 1][1];
-
     for (let index = 0; index < sorted.length - 1; index += 1) {
       const [leftHz, leftGain] = sorted[index];
       const [rightHz, rightGain] = sorted[index + 1];
       if (frequency < leftHz || frequency > rightHz) continue;
-
-      const left = Math.log(leftHz);
-      const right = Math.log(rightHz);
-      const current = Math.log(frequency);
-      const ratio = (current - left) / Math.max(0.0001, right - left);
+      const ratio = (Math.log(frequency) - Math.log(leftHz)) / Math.max(0.0001, Math.log(rightHz) - Math.log(leftHz));
       return Math.round((leftGain + (rightGain - leftGain) * ratio) * 10) / 10;
     }
-
     return 0;
   });
 }
@@ -113,16 +95,13 @@ export const MUSIC_EQ_PRESETS: Record<BuiltInMusicEqPreset, EqDefinition> = {
   headphones: preset("Headphones", -2, [[20, 1], [63, 2], [200, 0.5], [630, -0.5], [1600, 1], [4000, 2], [8000, 1.5], [16000, 0], [20000, -1]]),
 };
 
-export const MUSIC_HEADPHONE_MODES: Record<
-  MusicHeadphoneMode,
-  { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }
-> = {
+export const MUSIC_HEADPHONE_MODES: Record<MusicHeadphoneMode, { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }> = {
   off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 68, depth: 20, crossfeed: 8, center: 42, bass: 8 },
-  spatial: { label: "Spatial", width: 76, depth: 48, crossfeed: 15, center: 55, bass: 12 },
-  stage: { label: "Stage", width: 55, depth: 32, crossfeed: 24, center: 68, bass: 8 },
-  focus: { label: "Focus", width: 34, depth: 18, crossfeed: 18, center: 86, bass: 5 },
-  bass_impact: { label: "Bass Impact", width: 48, depth: 22, crossfeed: 10, center: 62, bass: 42 },
+  wide: { label: "Wide", width: 78, depth: 18, crossfeed: 8, center: 38, bass: 8 },
+  spatial: { label: "Spatial", width: 88, depth: 58, crossfeed: 20, center: 50, bass: 14 },
+  stage: { label: "Stage", width: 66, depth: 44, crossfeed: 32, center: 68, bass: 10 },
+  focus: { label: "Focus", width: 28, depth: 12, crossfeed: 22, center: 92, bass: 5 },
+  bass_impact: { label: "Bass Impact", width: 52, depth: 28, crossfeed: 12, center: 62, bass: 58 },
 };
 
 export type MusicPlayerState = {
@@ -139,6 +118,7 @@ export type MusicPlayerState = {
   repeat: MusicRepeatMode;
   error: string | null;
   libraryLoaded: boolean;
+  volume: number;
   eqEnabled: boolean;
   eqPreset: MusicEqPreset;
   eqGains: number[];
@@ -164,6 +144,7 @@ const STORAGE_KEYS = {
   repeat: "mvp_music_repeat",
   activePlaylistId: "mvp_music_active_playlist_id",
   activePlaylistName: "mvp_music_active_playlist_name",
+  volume: "mvp_music_volume_v2",
   eqEnabled: "mvp_music_eq_enabled",
   eqPreset: "mvp_music_eq_preset",
   eqGains: "mvp_music_eq_gains",
@@ -187,183 +168,100 @@ const STORAGE_KEYS = {
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
+  try { return localStorage.getItem(key) ?? ""; } catch { return ""; }
 }
-
+function savePlayerSetting(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* optional */ }
+}
+function removePlayerSetting(key: string) {
+  try { localStorage.removeItem(key); } catch { /* optional */ }
+}
 function readBoolean(key: string, fallback = false) {
   const value = readStored(key);
-  if (!value) return fallback;
-  return value === "true";
+  return value ? value === "true" : fallback;
 }
-
 function readNumber(key: string, fallback: number, min: number, max: number) {
   const value = Number(readStored(key));
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, value));
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
-
 function readRepeatMode(): MusicRepeatMode {
   const value = readStored(STORAGE_KEYS.repeat);
-  return value === "one" ? "one" : "off";
+  return value === "one" || value === "all" ? value : "off";
 }
-
 function readDuckingStrength(): MusicDuckingStrength {
   const value = readStored(STORAGE_KEYS.duckingStrength);
-  return value === "off" ||
-    value === "light" ||
-    value === "standard" ||
-    value === "strong"
-    ? value
-    : "standard";
+  return value === "off" || value === "light" || value === "standard" || value === "strong" ? value : "standard";
 }
-
 function isCustomPresetSlot(value: MusicEqPreset): value is MusicCustomPresetSlot {
   return value === "custom_1" || value === "custom_2" || value === "custom_3";
 }
-
 function isBuiltInPreset(value: MusicEqPreset): value is BuiltInMusicEqPreset {
   return Object.prototype.hasOwnProperty.call(MUSIC_EQ_PRESETS, value);
 }
-
 function customPresetStorageKey(slot: MusicCustomPresetSlot) {
-  if (slot === "custom_1") return STORAGE_KEYS.custom1;
-  if (slot === "custom_2") return STORAGE_KEYS.custom2;
-  return STORAGE_KEYS.custom3;
+  return slot === "custom_1" ? STORAGE_KEYS.custom1 : slot === "custom_2" ? STORAGE_KEYS.custom2 : STORAGE_KEYS.custom3;
 }
-
 function readCustomPreset(slot: MusicCustomPresetSlot): EqDefinition | null {
   try {
     const parsed = JSON.parse(readStored(customPresetStorageKey(slot)));
-    if (
-      parsed &&
-      Array.isArray(parsed.gains) &&
-      parsed.gains.length === MUSIC_EQ_FREQUENCIES.length &&
-      parsed.gains.every((value: unknown) => Number.isFinite(Number(value))) &&
-      Number.isFinite(Number(parsed.preamp))
-    ) {
-      return {
-        label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3",
-        gains: parsed.gains.map((value: unknown) => Math.max(-12, Math.min(12, Number(value)))),
-        preamp: Math.max(-12, Math.min(12, Number(parsed.preamp))),
-      };
+    if (parsed && Array.isArray(parsed.gains) && parsed.gains.length === MUSIC_EQ_FREQUENCIES.length && parsed.gains.every((value: unknown) => Number.isFinite(Number(value))) && Number.isFinite(Number(parsed.preamp))) {
+      return { label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3", gains: parsed.gains.map((value: unknown) => Math.max(-12, Math.min(12, Number(value)))), preamp: Math.max(-12, Math.min(12, Number(parsed.preamp))) };
     }
-  } catch {
-    // Empty or legacy custom slot.
-  }
+  } catch { /* empty */ }
   return null;
 }
-
 function readEqPreset(): MusicEqPreset {
   const value = readStored(STORAGE_KEYS.eqPreset) as MusicEqPreset;
-  if (
-    value === "custom" ||
-    isCustomPresetSlot(value) ||
-    Object.prototype.hasOwnProperty.call(MUSIC_EQ_PRESETS, value)
-  ) {
-    return value;
-  }
-  return "power";
+  return value === "custom" || isCustomPresetSlot(value) || isBuiltInPreset(value) ? value : "power";
 }
-
 function interpolateLegacyEqGains(values: number[]) {
-  const points = LEGACY_EQ_FREQUENCIES.map((frequency, index) => [
-    frequency,
-    Math.max(-12, Math.min(12, Number(values[index] || 0))),
-  ] as [number, number]);
+  const points = LEGACY_EQ_FREQUENCIES.map((frequency, index) => [frequency, Math.max(-12, Math.min(12, Number(values[index] || 0)))] as [number, number]);
   return interpolateEqCurve(points);
 }
-
 function readEqGains(presetName: MusicEqPreset) {
   try {
     const parsed = JSON.parse(readStored(STORAGE_KEYS.eqGains));
     if (Array.isArray(parsed) && parsed.every((value) => Number.isFinite(Number(value)))) {
-      if (parsed.length === MUSIC_EQ_FREQUENCIES.length) {
-        return parsed.map((value) => Math.max(-12, Math.min(12, Number(value))));
-      }
-      if (parsed.length === LEGACY_EQ_FREQUENCIES.length) {
-        return interpolateLegacyEqGains(parsed.map(Number));
-      }
+      if (parsed.length === MUSIC_EQ_FREQUENCIES.length) return parsed.map((value) => Math.max(-12, Math.min(12, Number(value))));
+      if (parsed.length === LEGACY_EQ_FREQUENCIES.length) return interpolateLegacyEqGains(parsed.map(Number));
     }
-  } catch {
-    // Use the selected preset below.
-  }
-
-  if (isCustomPresetSlot(presetName)) {
-    return [...(readCustomPreset(presetName)?.gains ?? MUSIC_EQ_PRESETS.flat.gains)];
-  }
+  } catch { /* preset below */ }
+  if (isCustomPresetSlot(presetName)) return [...(readCustomPreset(presetName)?.gains ?? MUSIC_EQ_PRESETS.flat.gains)];
   if (isBuiltInPreset(presetName)) return [...MUSIC_EQ_PRESETS[presetName].gains];
   return [...MUSIC_EQ_PRESETS.flat.gains];
 }
-
 function readPreamp(presetName: MusicEqPreset) {
   const value = Number(readStored(STORAGE_KEYS.preampDb));
   if (Number.isFinite(value)) return Math.max(-12, Math.min(12, value));
   if (isCustomPresetSlot(presetName)) return readCustomPreset(presetName)?.preamp ?? 0;
   return isBuiltInPreset(presetName) ? MUSIC_EQ_PRESETS[presetName].preamp : 0;
 }
-
 function readHeadphoneMode(): MusicHeadphoneMode {
   const value = readStored(STORAGE_KEYS.headphoneMode) as MusicHeadphoneMode;
   return Object.prototype.hasOwnProperty.call(MUSIC_HEADPHONE_MODES, value) ? value : "off";
 }
 
 const initialPreset = readEqPreset();
-
 let state: MusicPlayerState = {
-  libraryTracks: [],
-  tracks: [],
-  currentTrack: null,
+  libraryTracks: [], tracks: [], currentTrack: null,
   activePlaylistId: readStored(STORAGE_KEYS.activePlaylistId) || null,
   activePlaylistName: readStored(STORAGE_KEYS.activePlaylistName) || null,
-  loading: false,
-  playing: false,
-  currentTime: 0,
-  duration: 0,
-  shuffle: readBoolean(STORAGE_KEYS.shuffle),
-  repeat: readRepeatMode(),
-  error: null,
-  libraryLoaded: false,
-  eqEnabled: readBoolean(STORAGE_KEYS.eqEnabled, true),
-  eqPreset: initialPreset,
-  eqGains: readEqGains(initialPreset),
-  preampDb: readPreamp(initialPreset),
-  crossfadeSeconds: readNumber(
-    STORAGE_KEYS.crossfadeSeconds,
-    2,
-    0,
-    8
-  ),
-  normalizationEnabled: readBoolean(
-    STORAGE_KEYS.normalizationEnabled,
-    true
-  ),
-  limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true),
-  duckingStrength: readDuckingStrength(),
-  headphoneMode: readHeadphoneMode(),
-  headphoneWidth: readNumber(STORAGE_KEYS.headphoneWidth, 76, 0, 100),
-  headphoneDepth: readNumber(STORAGE_KEYS.headphoneDepth, 48, 0, 100),
-  headphoneCrossfeed: readNumber(STORAGE_KEYS.headphoneCrossfeed, 15, 0, 100),
-  headphoneCenter: readNumber(STORAGE_KEYS.headphoneCenter, 55, 0, 100),
-  headphoneBassImpact: readNumber(STORAGE_KEYS.headphoneBassImpact, 12, 0, 100),
-  dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false),
-  dspStatus: "recovering",
+  loading: false, playing: false, currentTime: 0, duration: 0,
+  shuffle: readBoolean(STORAGE_KEYS.shuffle), repeat: readRepeatMode(), error: null, libraryLoaded: false,
+  volume: readNumber(STORAGE_KEYS.volume, 0.72, 0, 1),
+  eqEnabled: readBoolean(STORAGE_KEYS.eqEnabled, true), eqPreset: initialPreset, eqGains: readEqGains(initialPreset), preampDb: readPreamp(initialPreset),
+  crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8), normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, true), limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true), duckingStrength: readDuckingStrength(),
+  headphoneMode: readHeadphoneMode(), headphoneWidth: readNumber(STORAGE_KEYS.headphoneWidth, 76, 0, 100), headphoneDepth: readNumber(STORAGE_KEYS.headphoneDepth, 48, 0, 100), headphoneCrossfeed: readNumber(STORAGE_KEYS.headphoneCrossfeed, 15, 0, 100), headphoneCenter: readNumber(STORAGE_KEYS.headphoneCenter, 55, 0, 100), headphoneBassImpact: readNumber(STORAGE_KEYS.headphoneBassImpact, 12, 0, 100),
+  dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false), dspStatus: "recovering",
 };
 
 let audioElement: HTMLAudioElement | null = null;
 let audioContext: AudioContext | null = null;
 let mediaSource: MediaElementAudioSourceNode | null = null;
+let masterVolumeGain: GainNode | null = null;
 let preampGain: GainNode | null = null;
 let equalizerFilters: BiquadFilterNode[] = [];
 let normalizerNode: DynamicsCompressorNode | null = null;
-let limiterNode: DynamicsCompressorNode | null = null;
-let musicGain: GainNode | null = null;
-let analyserNode: AnalyserNode | null = null;
-let rtaBuffer: Uint8Array<ArrayBuffer> | null = null;
-let rtaEnvelope = Array(10).fill(0) as number[];
 let headphoneBassShelf: BiquadFilterNode | null = null;
 let headphoneSplitter: ChannelSplitterNode | null = null;
 let headphoneMerger: ChannelMergerNode | null = null;
@@ -377,1890 +275,395 @@ let headphoneLeftCrossDelay: DelayNode | null = null;
 let headphoneRightCrossDelay: DelayNode | null = null;
 let headphoneLeftCrossLowpass: BiquadFilterNode | null = null;
 let headphoneRightCrossLowpass: BiquadFilterNode | null = null;
+let headphoneCenterSum: GainNode | null = null;
+let headphoneCenterLeft: GainNode | null = null;
+let headphoneCenterRight: GainNode | null = null;
+let limiterNode: DynamicsCompressorNode | null = null;
+let analyserNode: AnalyserNode | null = null;
+let musicGain: GainNode | null = null;
+let analyserBuffer: Uint8Array | null = null;
+let visualizerEnvelope = new Float32Array(64);
 let mediaSourceConnected = false;
 let loadingTrackId: string | null = null;
 let timeSaveTimer = 0;
 let recordedPlayToken = "";
 let transportQueue: Promise<void> = Promise.resolve();
-let outputGainBeforeDuck = 1;
 let playbackIntent = false;
-let recoveryAttempt = 0;
-let stallTimer = 0;
-let watchdogTimer = 0;
-let lastWatchdogTime = 0;
-let lastWatchdogPosition = 0;
-let preloadedTrackId: string | null = null;
-let preloadedTrackUrl: string | null = null;
-let autoSkipDepth = 0;
-let hardRecoveryInFlight: Promise<void> | null = null;
-let lifecycleListenersInstalled = false;
 const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
-const SIGNED_URL_TTL_MS = 10 * 60 * 1000;
-const MAX_SIGNED_URL_CACHE = 6;
-
-function pruneSignedUrlCache() {
-  const now = Date.now();
-
-  for (const [trackId, entry] of signedUrlCache.entries()) {
-    if (now - entry.cachedAt >= SIGNED_URL_TTL_MS) {
-      signedUrlCache.delete(trackId);
-    }
-  }
-
-  while (signedUrlCache.size > MAX_SIGNED_URL_CACHE) {
-    const oldest = [...signedUrlCache.entries()].sort(
-      (left, right) => left[1].cachedAt - right[1].cachedAt
-    )[0];
-    if (!oldest) break;
-    signedUrlCache.delete(oldest[0]);
-  }
-}
-
-async function resolveTrackUrl(track: MusicTrack) {
-  pruneSignedUrlCache();
-
-  const cached = signedUrlCache.get(track.id);
-  if (cached && Date.now() - cached.cachedAt < SIGNED_URL_TTL_MS) {
-    return cached.url;
-  }
-
-  const url = await getMusicTrackSignedUrl(track);
-  signedUrlCache.set(track.id, { url, cachedAt: Date.now() });
-  pruneSignedUrlCache();
-  return url;
-}
-
-function resetPreloadedAudio() {
-  // STEP 9: signed-URL hint only. We intentionally do not keep a second
-  // HTMLAudioElement alive because iOS/WebKit can retain its decoded media
-  // pipeline and accumulate memory across track changes.
-  preloadedTrackId = null;
-  preloadedTrackUrl = null;
-}
-
-function preloadUpcomingTrack() {
-  const currentIndex = getCurrentIndex();
-  if (currentIndex < 0 || state.tracks.length < 2) return;
-
-  const nextTrack = state.shuffle
-    ? null
-    : state.tracks[(currentIndex + 1) % state.tracks.length];
-
-  if (!nextTrack || nextTrack.id === state.currentTrack?.id) return;
-  if (preloadedTrackId === nextTrack.id && preloadedTrackUrl) return;
-
-  // Prefetch only the short-lived signed URL. The actual media element is
-  // created once and reused for playback, which is substantially lighter on iOS.
-  void resolveTrackUrl(nextTrack)
-    .then((url) => {
-      if (state.currentTrack?.id === nextTrack.id) return;
-      preloadedTrackId = nextTrack.id;
-      preloadedTrackUrl = url;
-    })
-    .catch(() => undefined);
-}
+const SIGNED_URL_TTL_MS = 8 * 60 * 1000;
 
 function emit(patch: Partial<MusicPlayerState>) {
   state = { ...state, ...patch };
-  for (const listener of listeners) listener();
+  listeners.forEach((listener) => listener());
 }
-
-function savePlayerSetting(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage is optional.
-  }
-}
-
-function removePlayerSetting(key: string) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // Storage is optional.
-  }
-}
-
-function savePlaybackPosition() {
-  if (!audioElement || !state.currentTrack) return;
-  const now = Date.now();
-  if (now - timeSaveTimer < 1500) return;
-  timeSaveTimer = now;
-
-  savePlayerSetting(
-    STORAGE_KEYS.currentTime,
-    String(audioElement.currentTime || 0)
-  );
-}
-
 function getAudioContext() {
   if (typeof window === "undefined") return null;
-
-  const Context =
-    window.AudioContext ||
-    (window as typeof window & {
-      webkitAudioContext?: typeof AudioContext;
-    }).webkitAudioContext;
-
+  const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Context) return null;
-
-  if (audioContext?.state === "closed") {
-    audioContext = null;
-  }
-
+  if (audioContext?.state === "closed") audioContext = null;
   if (!audioContext) audioContext = new Context();
   return audioContext;
 }
-
-function dbToGain(db: number) {
-  return Math.pow(10, db / 20);
+function dbToGain(db: number) { return Math.pow(10, db / 20); }
+function volumeToGain(volume: number) {
+  const value = Math.max(0, Math.min(1, volume));
+  if (value <= 0.001) return 0;
+  return Math.pow(value, 2.05);
 }
-
-function setCompressorBypass(node: DynamicsCompressorNode) {
-  node.threshold.value = 0;
-  node.knee.value = 0;
-  node.ratio.value = 1;
-  node.attack.value = 0.003;
-  node.release.value = 0.12;
-}
-
-function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.025) {
+function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.018) {
   param.cancelScheduledValues(now);
   param.setTargetAtTime(value, now, timeConstant);
+}
+function setCompressorBypass(node: DynamicsCompressorNode) {
+  node.threshold.value = 0; node.knee.value = 0; node.ratio.value = 1; node.attack.value = 0.003; node.release.value = 0.12;
 }
 
 function applyHeadphoneSettings(now: number) {
   if (!audioContext) return;
-
   const enabled = !state.dspBypass && state.headphoneMode !== "off";
-  const widthInput = enabled ? state.headphoneWidth : 0;
-  const depthInput = enabled ? state.headphoneDepth : 0;
-  const crossfeedInput = enabled ? state.headphoneCrossfeed : 0;
-  const centerInput = enabled ? state.headphoneCenter : 50;
-  const bassInput = enabled ? state.headphoneBassImpact : 0;
+  const width = enabled ? state.headphoneWidth / 100 : 0;
+  const depth = enabled ? state.headphoneDepth / 100 : 0;
+  const crossfeed = enabled ? state.headphoneCrossfeed / 100 : 0;
+  const center = enabled ? state.headphoneCenter / 100 : 0.5;
+  const bass = enabled ? state.headphoneBassImpact / 100 : 0;
 
-  const rawWidth = 1 + (widthInput / 100) * 0.58;
-  const centerRetention = 1 - (centerInput / 100) * 0.34;
-  const stereoWidth = enabled ? 1 + (rawWidth - 1) * centerRetention : 1;
-  const directGain = (1 + stereoWidth) / 2;
-  const widthCrossGain = (1 - stereoWidth) / 2;
-  const crossfeedGain = enabled ? (crossfeedInput / 100) * 0.20 : 0;
-  const crossfeedDelay = enabled ? 0.0003 + (depthInput / 100) * 0.0095 : 0;
-  const bassDb = enabled ? (bassInput / 100) * 6.5 : 0;
+  const stereoWidth = enabled ? 1 + width * 1.05 : 1;
+  const direct = (1 + stereoWidth) / 2;
+  const widthCross = (1 - stereoWidth) / 2;
+  const crossfeedGain = enabled ? crossfeed * 0.38 : 0;
+  const crossDelay = enabled ? 0.0002 + depth * 0.014 : 0;
+  const lowpassHz = enabled ? 1100 + (1 - depth) * 2600 : 3500;
+  const centerGain = enabled ? Math.max(0, (center - 0.5) * 0.9) : 0;
+  const centerAttenuation = enabled ? 1 - Math.max(0, center - 0.5) * 0.22 : 1;
+  const bassDb = enabled ? bass * 10 : 0;
 
-  if (headphoneLeftDirect) setAudioParam(headphoneLeftDirect.gain, directGain, now);
-  if (headphoneRightDirect) setAudioParam(headphoneRightDirect.gain, directGain, now);
-  if (headphoneLeftWidthCross) setAudioParam(headphoneLeftWidthCross.gain, widthCrossGain, now);
-  if (headphoneRightWidthCross) setAudioParam(headphoneRightWidthCross.gain, widthCrossGain, now);
+  if (headphoneLeftDirect) setAudioParam(headphoneLeftDirect.gain, direct * centerAttenuation, now);
+  if (headphoneRightDirect) setAudioParam(headphoneRightDirect.gain, direct * centerAttenuation, now);
+  if (headphoneLeftWidthCross) setAudioParam(headphoneLeftWidthCross.gain, widthCross, now);
+  if (headphoneRightWidthCross) setAudioParam(headphoneRightWidthCross.gain, widthCross, now);
   if (headphoneLeftCrossfeed) setAudioParam(headphoneLeftCrossfeed.gain, crossfeedGain, now);
   if (headphoneRightCrossfeed) setAudioParam(headphoneRightCrossfeed.gain, crossfeedGain, now);
-  if (headphoneLeftCrossDelay) setAudioParam(headphoneLeftCrossDelay.delayTime, crossfeedDelay, now);
-  if (headphoneRightCrossDelay) setAudioParam(headphoneRightCrossDelay.delayTime, crossfeedDelay, now);
+  if (headphoneLeftCrossDelay) setAudioParam(headphoneLeftCrossDelay.delayTime, crossDelay, now);
+  if (headphoneRightCrossDelay) setAudioParam(headphoneRightCrossDelay.delayTime, crossDelay, now);
+  if (headphoneLeftCrossLowpass) setAudioParam(headphoneLeftCrossLowpass.frequency, lowpassHz, now, 0.03);
+  if (headphoneRightCrossLowpass) setAudioParam(headphoneRightCrossLowpass.frequency, lowpassHz, now, 0.03);
+  if (headphoneCenterLeft) setAudioParam(headphoneCenterLeft.gain, centerGain, now);
+  if (headphoneCenterRight) setAudioParam(headphoneCenterRight.gain, centerGain, now);
   if (headphoneBassShelf) setAudioParam(headphoneBassShelf.gain, bassDb, now);
 }
 
 function applyProcessingSettings() {
   if (!audioContext || !mediaSourceConnected) return;
   const now = audioContext.currentTime;
-
-  if (preampGain) {
-    const target = !state.dspBypass ? dbToGain(state.preampDb) : 1;
-    setAudioParam(preampGain.gain, target, now, 0.02);
-  }
-
-  equalizerFilters.forEach((filter, index) => {
-    const gain = !state.dspBypass && state.eqEnabled ? Number(state.eqGains[index] || 0) : 0;
-    setAudioParam(filter.gain, gain, now, 0.02);
-  });
-
+  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(state.volume), now, 0.012);
+  if (preampGain) setAudioParam(preampGain.gain, state.dspBypass ? 1 : dbToGain(state.preampDb), now);
+  equalizerFilters.forEach((filter, index) => setAudioParam(filter.gain, !state.dspBypass && state.eqEnabled ? Number(state.eqGains[index] || 0) : 0, now));
   if (normalizerNode) {
     if (!state.dspBypass && state.normalizationEnabled) {
-      normalizerNode.threshold.value = -18;
-      normalizerNode.knee.value = 18;
-      normalizerNode.ratio.value = 3;
-      normalizerNode.attack.value = 0.012;
-      normalizerNode.release.value = 0.24;
-    } else {
-      setCompressorBypass(normalizerNode);
-    }
+      normalizerNode.threshold.value = -20; normalizerNode.knee.value = 18; normalizerNode.ratio.value = 2.6; normalizerNode.attack.value = 0.012; normalizerNode.release.value = 0.28;
+    } else setCompressorBypass(normalizerNode);
   }
-
   applyHeadphoneSettings(now);
-
   if (limiterNode) {
     if (!state.dspBypass && state.limiterEnabled) {
-      limiterNode.threshold.value = -2;
-      limiterNode.knee.value = 0;
-      limiterNode.ratio.value = 20;
-      limiterNode.attack.value = 0.002;
-      limiterNode.release.value = 0.09;
-    } else {
-      setCompressorBypass(limiterNode);
-    }
+      limiterNode.threshold.value = -1.4; limiterNode.knee.value = 0; limiterNode.ratio.value = 20; limiterNode.attack.value = 0.002; limiterNode.release.value = 0.08;
+    } else setCompressorBypass(limiterNode);
   }
-
-  const contextRunning = audioContext.state === "running";
-  emit({ dspStatus: contextRunning ? (state.dspBypass ? "bypassed" : "active") : "recovering" });
+  emit({ dspStatus: audioContext.state === "running" ? (state.dspBypass ? "bypassed" : "active") : "recovering" });
 }
 
-function configureMediaSession() {
-  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-
-  const session = navigator.mediaSession;
-  const current = state.currentTrack;
-
-  const setMetadata = (artworkUrl?: string | null) => {
-    if (state.currentTrack?.id !== current?.id) return;
-    try {
-      session.metadata = current
-        ? new MediaMetadata({
-            title: current.title,
-            artist: current.artist || "MVP Trainer Music",
-            album: current.album || state.activePlaylistName || "MVP Trainer",
-            artwork: artworkUrl
-              ? [
-                  { src: artworkUrl, sizes: "512x512" },
-                  { src: artworkUrl, sizes: "256x256" },
-                ]
-              : undefined,
-          })
-        : null;
-    } catch {
-      // Metadata is optional.
-    }
-  };
-
-  setMetadata();
-  if (current?.artwork_path) {
-    void getMusicArtworkSignedUrl(current)
-      .then((url) => setMetadata(url))
-      .catch(() => undefined);
-  }
-
-  const handlers: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
-    ["play", () => void playMusic()],
-    ["pause", pauseMusic],
-    ["previoustrack", () => void previousMusicTrack()],
-    ["nexttrack", () => void nextMusicTrack()],
-    ["stop", stopMusic],
-    [
-      "seekto",
-      (details) => {
-        if (typeof details.seekTime === "number") seekMusic(details.seekTime);
-      },
-    ],
-  ];
-
-  for (const [action, handler] of handlers) {
-    try {
-      session.setActionHandler(action, handler);
-    } catch {
-      // Some browsers expose only part of Media Session.
-    }
-  }
-}
-
-function clearStallTimer() {
-  if (stallTimer) {
-    window.clearTimeout(stallTimer);
-    stallTimer = 0;
-  }
-}
-
-function clearPlaybackWatchdog() {
-  if (watchdogTimer) {
-    window.clearInterval(watchdogTimer);
-    watchdogTimer = 0;
-  }
-
-  lastWatchdogTime = 0;
-  lastWatchdogPosition = 0;
-}
-
-function disconnectNode(node: AudioNode | null) {
-  if (!node) return;
-  try {
-    node.disconnect();
-  } catch {
-    // A partially-built Web Audio graph may already be disconnected.
-  }
-}
-
-function releaseMusicGraphNodes() {
-  disconnectNode(mediaSource);
-  disconnectNode(preampGain);
-  equalizerFilters.forEach((filter) => disconnectNode(filter));
-  disconnectNode(normalizerNode);
-  disconnectNode(headphoneBassShelf);
-  disconnectNode(headphoneSplitter);
-  disconnectNode(headphoneMerger);
-  disconnectNode(headphoneLeftDirect);
-  disconnectNode(headphoneRightDirect);
-  disconnectNode(headphoneLeftWidthCross);
-  disconnectNode(headphoneRightWidthCross);
-  disconnectNode(headphoneLeftCrossfeed);
-  disconnectNode(headphoneRightCrossfeed);
-  disconnectNode(headphoneLeftCrossDelay);
-  disconnectNode(headphoneRightCrossDelay);
-  disconnectNode(headphoneLeftCrossLowpass);
-  disconnectNode(headphoneRightCrossLowpass);
-  disconnectNode(limiterNode);
-  disconnectNode(analyserNode);
-  disconnectNode(musicGain);
-
-  mediaSource = null;
-  preampGain = null;
-  equalizerFilters = [];
-  normalizerNode = null;
-  limiterNode = null;
-  analyserNode = null;
-  rtaBuffer = null;
-  rtaEnvelope = Array(10).fill(0);
-  musicGain = null;
-  headphoneBassShelf = null;
-  headphoneSplitter = null;
-  headphoneMerger = null;
-  headphoneLeftDirect = null;
-  headphoneRightDirect = null;
-  headphoneLeftWidthCross = null;
-  headphoneRightWidthCross = null;
-  headphoneLeftCrossfeed = null;
-  headphoneRightCrossfeed = null;
-  headphoneLeftCrossDelay = null;
-  headphoneRightCrossDelay = null;
-  headphoneLeftCrossLowpass = null;
-  headphoneRightCrossLowpass = null;
-  mediaSourceConnected = false;
-  emit({ dspStatus: "recovering" });
-}
-
-async function destroyMusicAudioEngine() {
-  clearStallTimer();
-  clearPlaybackWatchdog();
-  resetPreloadedAudio();
-
-  const oldAudio = audioElement;
-  audioElement = null;
-
-  if (oldAudio) {
-    try {
-      oldAudio.pause();
-    } catch {}
-
-    try {
-      oldAudio.removeAttribute("src");
-      oldAudio.load();
-    } catch {}
-  }
-
-  releaseMusicGraphNodes();
-
-  const oldContext = audioContext;
-  audioContext = null;
-
-  if (oldContext && oldContext.state !== "closed") {
-    try {
-      await oldContext.close();
-    } catch {}
-  }
-}
-
-function wait(milliseconds: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-async function safeAudioPlay(audio: HTMLAudioElement, attempts = 3) {
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      await audio.play();
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt < attempts - 1) await wait(280 + attempt * 420);
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Playback could not start.");
-}
-
-async function confirmHealthyPlayback(
-  audio: HTMLAudioElement,
-  timeoutMs = 1800
-) {
-  if (!playbackIntent) return;
-
-  const startedAt = performance.now();
-  const startPosition = Number(audio.currentTime || 0);
-
-  while (performance.now() - startedAt < timeoutMs) {
-    if (!playbackIntent) return;
-
-    const contextState = String(audioContext?.state ?? "running");
-    if (mediaSourceConnected && contextState !== "running") emit({ dspStatus: "recovering" });
-    const position = Number(audio.currentTime || 0);
-    const progressed = position > startPosition + 0.04;
-
-    if (
-      !audio.paused &&
-      !audio.ended &&
-      audio.readyState >= 2 &&
-      contextState === "running" &&
-      (progressed || performance.now() - startedAt > 650)
-    ) {
-      return;
-    }
-
-    await wait(120);
-  }
-
-  throw new Error("The browser audio engine did not enter a healthy playing state.");
-}
-
-async function skipUnplayableCurrent(reason: string) {
-  if (!playbackIntent || !state.tracks.length) return;
-
-  autoSkipDepth += 1;
-  if (autoSkipDepth > state.tracks.length) {
-    playbackIntent = false;
-    autoSkipDepth = 0;
-    emit({
-      playing: false,
-      loading: false,
-      error: "Playback stopped because the current queue could not be loaded.",
-    });
-    return;
-  }
-
-  const index = state.shuffle
-    ? nextShuffleIndex()
-    : (Math.max(0, getCurrentIndex()) + 1) % state.tracks.length;
-  const nextTrack = state.tracks[index];
-  if (!nextTrack) return;
-
-  console.warn(`Skipping an unavailable music track after ${reason}:`, state.currentTrack?.title);
-  try {
-    await performPlayMusicTrack(nextTrack.id, 0);
-  } catch {
-    await skipUnplayableCurrent("automatic recovery failed");
-  }
-}
-
-async function hardResetCurrentPlayback(reason: string) {
-  if (hardRecoveryInFlight) return hardRecoveryInFlight;
-
-  hardRecoveryInFlight = (async () => {
-    const track = state.currentTrack;
-    if (!track) return;
-
-    const oldAudio = audioElement;
-    const resumeAt = Math.max(
-      0,
-      Number(oldAudio?.currentTime || state.currentTime || 0)
-    );
-
-    emit({
-      playing: false,
-      loading: true,
-      error: "Rebuilding audio engine…",
-    });
-
-    signedUrlCache.delete(track.id);
-    clearMusicUrlCache(track.id);
-    await destroyMusicAudioEngine();
-
-    if (!playbackIntent || state.currentTrack?.id !== track.id) {
-      emit({ loading: false });
-      return;
-    }
-
-    await unlockMusicAudio();
-    const freshAudio = ensureAudioElement();
-    await loadTrack(track, resumeAt);
-
-    if (!playbackIntent || state.currentTrack?.id !== track.id) {
-      emit({ loading: false });
-      return;
-    }
-
-    await safeAudioPlay(freshAudio, 2);
-    await confirmHealthyPlayback(freshAudio, 2200);
-
-    recoveryAttempt = 0;
-    autoSkipDepth = 0;
-    emit({ playing: true, loading: false, error: null });
-    preloadUpcomingTrack();
-
-    console.info(`MVP music audio engine rebuilt after ${reason}.`);
-  })()
-    .catch((error) => {
-      console.warn(`Hard music recovery failed after ${reason}:`, error);
-      throw error;
-    })
-    .finally(() => {
-      hardRecoveryInFlight = null;
-    });
-
-  return hardRecoveryInFlight;
-}
-
-async function recoverCurrentPlayback(reason: string) {
-  if (!playbackIntent || !state.currentTrack) return;
-
-  if (recoveryAttempt >= 2) {
-    recoveryAttempt = 0;
-
-    try {
-      await hardResetCurrentPlayback(reason);
-      return;
-    } catch {
-      await skipUnplayableCurrent(`${reason}; hard audio reset failed`);
-      return;
-    }
-  }
-
-  recoveryAttempt += 1;
-  const track = state.currentTrack;
-  const audio = ensureAudioElement();
-  const resumeAt = Math.max(0, Number(audio.currentTime || state.currentTime || 0));
-
-  try {
-    signedUrlCache.delete(track.id);
-    clearMusicUrlCache(track.id);
-    const url = await resolveTrackUrl(track);
-    if (!playbackIntent || state.currentTrack?.id !== track.id) return;
-
-    audio.pause();
-    recordedPlayToken = "";
-    audio.src = url;
-    audio.dataset.trackId = track.id;
-    audio.load();
-
-    await new Promise<void>((resolve) => {
-      if (audio.readyState >= 2) {
-        resolve();
-        return;
-      }
-      const timeout = window.setTimeout(resolve, 2200);
-      audio.addEventListener(
-        "canplay",
-        () => {
-          window.clearTimeout(timeout);
-          resolve();
-        },
-        { once: true }
-      );
-    });
-
-    if (resumeAt > 0 && Number.isFinite(audio.duration)) {
-      try {
-        audio.currentTime = Math.min(resumeAt, Math.max(0, audio.duration - 0.2));
-      } catch {
-        // Resume from the browser's available position.
-      }
-    }
-
-    await safeAudioPlay(audio, 2);
-    await confirmHealthyPlayback(audio, 1900);
-    recoveryAttempt = 0;
-    autoSkipDepth = 0;
-    preloadUpcomingTrack();
-  } catch (error) {
-    console.warn(`Music recovery attempt failed after ${reason}:`, error);
-
-    if (recoveryAttempt >= 2) {
-      recoveryAttempt = 0;
-
-      try {
-        await hardResetCurrentPlayback(reason);
-      } catch {
-        await skipUnplayableCurrent(`${reason}; hard audio reset failed`);
-      }
-    } else {
-      window.setTimeout(() => void recoverCurrentPlayback(reason), 650);
-    }
-  }
-}
-
-function schedulePlaybackRecovery(reason: string, delay = 4200) {
-  if (!playbackIntent) return;
-  clearStallTimer();
-  stallTimer = window.setTimeout(() => {
-    stallTimer = 0;
-    void recoverCurrentPlayback(reason);
-  }, delay);
-}
-
-function ensurePlaybackWatchdog(audio: HTMLAudioElement) {
-  if (watchdogTimer) return;
-  lastWatchdogTime = Date.now();
-  lastWatchdogPosition = audio.currentTime || 0;
-
-  watchdogTimer = window.setInterval(() => {
-    if (audio !== audioElement) {
-      clearPlaybackWatchdog();
-      return;
-    }
-
-    if (document.visibilityState === "hidden") {
-      lastWatchdogTime = Date.now();
-      lastWatchdogPosition = audio.currentTime || 0;
-      return;
-    }
-
-    if (!playbackIntent || audio.paused || audio.ended || !audio.src) {
-      lastWatchdogTime = Date.now();
-      lastWatchdogPosition = audio.currentTime || 0;
-      return;
-    }
-
-    const position = audio.currentTime || 0;
-    if (position > lastWatchdogPosition + 0.08) {
-      lastWatchdogTime = Date.now();
-      lastWatchdogPosition = position;
-      return;
-    }
-
-    if (Date.now() - lastWatchdogTime > 6500) {
-      lastWatchdogTime = Date.now();
-      schedulePlaybackRecovery("playback watchdog detected a stall", 50);
-    }
-  }, 1800);
-}
-
-function installMusicLifecycleListeners() {
-  if (lifecycleListenersInstalled || typeof window === "undefined") return;
-  lifecycleListenersInstalled = true;
-
-  const recoverOnReturn = () => {
-    if (document.visibilityState !== "visible") return;
-    if (!playbackIntent || !state.currentTrack) return;
-
-    const audio = audioElement;
-    const contextState = String(audioContext?.state ?? "running");
-
-    if (
-      !audio ||
-      audio.paused ||
-      audio.ended ||
-      !audio.src ||
-      contextState !== "running"
-    ) {
-      window.setTimeout(() => {
-        if (playbackIntent) {
-          void recoverCurrentPlayback("app returned to foreground");
-        }
-      }, 120);
-    }
-  };
-
-  document.addEventListener("visibilitychange", recoverOnReturn);
-  window.addEventListener("pageshow", recoverOnReturn);
-
-  window.addEventListener("pagehide", () => {
-    savePlaybackPosition();
-    clearStallTimer();
-  });
-}
-
-function ensureAudioElement() {
-  if (audioElement) return audioElement;
-
-  installMusicLifecycleListeners();
-
-  const audio = new Audio();
-  audio.preload = "auto";
-  audio.crossOrigin = "anonymous";
-
-  audio.addEventListener("play", () => {
-    clearStallTimer();
-    recoveryAttempt = 0;
-    autoSkipDepth = 0;
-    lastWatchdogTime = Date.now();
-    lastWatchdogPosition = audio.currentTime || 0;
-    emit({ playing: true, loading: false, error: null });
-    configureMediaSession();
-    ensurePlaybackWatchdog(audio);
-
-    const trackId = audio.dataset.trackId;
-    const token = trackId ? `${trackId}:${audio.src}` : "";
-    if (trackId && token !== recordedPlayToken) {
-      recordedPlayToken = token;
-      void recordMusicTrackPlayed(trackId).catch(() => undefined);
-    }
-  });
-
-  audio.addEventListener("playing", () => {
-    clearStallTimer();
-    emit({ playing: true, loading: false, error: null });
-  });
-
-  audio.addEventListener("pause", () => {
-    if (!playbackIntent) clearPlaybackWatchdog();
-    emit({ playing: false });
-  });
-
-  audio.addEventListener("loadedmetadata", () => {
-    const duration = Number(audio.duration);
-    emit({ duration: Number.isFinite(duration) ? duration : 0 });
-  });
-
-  audio.addEventListener("durationchange", () => {
-    const duration = Number(audio.duration);
-    emit({ duration: Number.isFinite(duration) ? duration : 0 });
-  });
-
-  audio.addEventListener("timeupdate", () => {
-    const position = audio.currentTime || 0;
-    lastWatchdogTime = Date.now();
-    lastWatchdogPosition = position;
-    emit({ currentTime: position });
-    savePlaybackPosition();
-  });
-
-  audio.addEventListener("canplay", clearStallTimer);
-  audio.addEventListener("waiting", () => schedulePlaybackRecovery("audio buffering"));
-  audio.addEventListener("stalled", () => schedulePlaybackRecovery("network stall"));
-  audio.addEventListener("suspend", () => {
-    if (playbackIntent && audio.readyState < 3) schedulePlaybackRecovery("browser suspended loading", 5200);
-  });
-
-  audio.addEventListener("ended", () => {
-    clearStallTimer();
-    clearPlaybackWatchdog();
-    const completedTrackId = audio.dataset.trackId;
-    if (completedTrackId) void recordMusicTrackCompleted(completedTrackId).catch(() => undefined);
-    recordedPlayToken = "";
-    emit({ playing: false, currentTime: 0 });
-    if (playbackIntent) void handleTrackEnded();
-  });
-
-  audio.addEventListener("error", () => {
-    emit({ playing: false, loading: false, error: "Recovering music playback…" });
-    if (playbackIntent) schedulePlaybackRecovery("audio element error", 250);
-  });
-
-  audioElement = audio;
-  return audio;
+function disconnectNode(node: AudioNode | null) { if (!node) return; try { node.disconnect(); } catch { /* already disconnected */ } }
+function releaseGraph() {
+  [mediaSource, masterVolumeGain, preampGain, normalizerNode, headphoneBassShelf, headphoneSplitter, headphoneMerger, headphoneLeftDirect, headphoneRightDirect, headphoneLeftWidthCross, headphoneRightWidthCross, headphoneLeftCrossfeed, headphoneRightCrossfeed, headphoneLeftCrossDelay, headphoneRightCrossDelay, headphoneLeftCrossLowpass, headphoneRightCrossLowpass, headphoneCenterSum, headphoneCenterLeft, headphoneCenterRight, limiterNode, analyserNode, musicGain].forEach(disconnectNode);
+  equalizerFilters.forEach(disconnectNode);
+  mediaSource = null; masterVolumeGain = null; preampGain = null; equalizerFilters = []; normalizerNode = null; headphoneBassShelf = null; headphoneSplitter = null; headphoneMerger = null; headphoneLeftDirect = null; headphoneRightDirect = null; headphoneLeftWidthCross = null; headphoneRightWidthCross = null; headphoneLeftCrossfeed = null; headphoneRightCrossfeed = null; headphoneLeftCrossDelay = null; headphoneRightCrossDelay = null; headphoneLeftCrossLowpass = null; headphoneRightCrossLowpass = null; headphoneCenterSum = null; headphoneCenterLeft = null; headphoneCenterRight = null; limiterNode = null; analyserNode = null; musicGain = null; analyserBuffer = null; mediaSourceConnected = false;
 }
 
 function connectMusicGraph() {
   const audio = ensureAudioElement();
   const context = getAudioContext();
   if (!context || mediaSourceConnected) return;
-
   try {
     mediaSource = context.createMediaElementSource(audio);
+    masterVolumeGain = context.createGain();
     preampGain = context.createGain();
-
     equalizerFilters = MUSIC_EQ_FREQUENCIES.map((frequency) => {
-      const filter = context.createBiquadFilter();
-      filter.type = "peaking";
-      filter.frequency.value = Math.min(
-        frequency,
-        Math.max(20, context.sampleRate / 2 - 20)
-      );
-      filter.Q.value = 4.32;
-      filter.gain.value = 0;
-      return filter;
+      const filter = context.createBiquadFilter(); filter.type = "peaking"; filter.frequency.value = Math.min(frequency, Math.max(20, context.sampleRate / 2 - 20)); filter.Q.value = 1.05; filter.gain.value = 0; return filter;
     });
-
     normalizerNode = context.createDynamicsCompressor();
-    headphoneBassShelf = context.createBiquadFilter();
-    headphoneBassShelf.type = "lowshelf";
-    headphoneBassShelf.frequency.value = 95;
-    headphoneSplitter = context.createChannelSplitter(2);
-    headphoneMerger = context.createChannelMerger(2);
-    headphoneLeftDirect = context.createGain();
-    headphoneRightDirect = context.createGain();
-    headphoneLeftWidthCross = context.createGain();
-    headphoneRightWidthCross = context.createGain();
-    headphoneLeftCrossfeed = context.createGain();
-    headphoneRightCrossfeed = context.createGain();
-    headphoneLeftCrossDelay = context.createDelay(0.03);
-    headphoneRightCrossDelay = context.createDelay(0.03);
-    headphoneLeftCrossLowpass = context.createBiquadFilter();
-    headphoneRightCrossLowpass = context.createBiquadFilter();
-    headphoneLeftCrossLowpass.type = "lowpass";
-    headphoneRightCrossLowpass.type = "lowpass";
-    headphoneLeftCrossLowpass.frequency.value = 700;
-    headphoneRightCrossLowpass.frequency.value = 700;
-    headphoneLeftCrossLowpass.Q.value = 0.7;
-    headphoneRightCrossLowpass.Q.value = 0.7;
+    headphoneBassShelf = context.createBiquadFilter(); headphoneBassShelf.type = "lowshelf"; headphoneBassShelf.frequency.value = 110; headphoneBassShelf.gain.value = 0;
+    headphoneSplitter = context.createChannelSplitter(2); headphoneMerger = context.createChannelMerger(2);
+    headphoneLeftDirect = context.createGain(); headphoneRightDirect = context.createGain();
+    headphoneLeftWidthCross = context.createGain(); headphoneRightWidthCross = context.createGain();
+    headphoneLeftCrossfeed = context.createGain(); headphoneRightCrossfeed = context.createGain();
+    headphoneLeftCrossDelay = context.createDelay(0.03); headphoneRightCrossDelay = context.createDelay(0.03);
+    headphoneLeftCrossLowpass = context.createBiquadFilter(); headphoneRightCrossLowpass = context.createBiquadFilter(); headphoneLeftCrossLowpass.type = "lowpass"; headphoneRightCrossLowpass.type = "lowpass";
+    headphoneCenterSum = context.createGain(); headphoneCenterSum.gain.value = 0.5; headphoneCenterLeft = context.createGain(); headphoneCenterRight = context.createGain();
+    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 1024; analyserNode.smoothingTimeConstant = 0.56; musicGain = context.createGain(); musicGain.gain.value = 1;
 
-    limiterNode = context.createDynamicsCompressor();
-    analyserNode = context.createAnalyser();
-    analyserNode.fftSize = 1024;
-    analyserNode.smoothingTimeConstant = 0.66;
-    rtaBuffer = new Uint8Array(new ArrayBuffer(analyserNode.frequencyBinCount));
-    musicGain = context.createGain();
-    musicGain.gain.value = 1;
+    mediaSource.connect(masterVolumeGain); masterVolumeGain.connect(preampGain);
+    let node: AudioNode = preampGain;
+    equalizerFilters.forEach((filter) => { node.connect(filter); node = filter; });
+    node.connect(normalizerNode); normalizerNode.connect(headphoneBassShelf); headphoneBassShelf.connect(headphoneSplitter);
 
-    let node: AudioNode = mediaSource;
-    node.connect(preampGain);
-    node = preampGain;
+    headphoneSplitter.connect(headphoneLeftDirect, 0); headphoneLeftDirect.connect(headphoneMerger, 0, 0);
+    headphoneSplitter.connect(headphoneRightDirect, 1); headphoneRightDirect.connect(headphoneMerger, 0, 1);
+    headphoneSplitter.connect(headphoneLeftWidthCross, 0); headphoneLeftWidthCross.connect(headphoneMerger, 0, 1);
+    headphoneSplitter.connect(headphoneRightWidthCross, 1); headphoneRightWidthCross.connect(headphoneMerger, 0, 0);
+    headphoneSplitter.connect(headphoneLeftCrossDelay, 0); headphoneLeftCrossDelay.connect(headphoneLeftCrossLowpass); headphoneLeftCrossLowpass.connect(headphoneLeftCrossfeed); headphoneLeftCrossfeed.connect(headphoneMerger, 0, 1);
+    headphoneSplitter.connect(headphoneRightCrossDelay, 1); headphoneRightCrossDelay.connect(headphoneRightCrossLowpass); headphoneRightCrossLowpass.connect(headphoneRightCrossfeed); headphoneRightCrossfeed.connect(headphoneMerger, 0, 0);
+    headphoneSplitter.connect(headphoneCenterSum, 0); headphoneSplitter.connect(headphoneCenterSum, 1); headphoneCenterSum.connect(headphoneCenterLeft); headphoneCenterSum.connect(headphoneCenterRight); headphoneCenterLeft.connect(headphoneMerger, 0, 0); headphoneCenterRight.connect(headphoneMerger, 0, 1);
 
-    for (const filter of equalizerFilters) {
-      node.connect(filter);
-      node = filter;
-    }
-
-    node.connect(normalizerNode);
-    normalizerNode.connect(headphoneBassShelf);
-    headphoneBassShelf.connect(headphoneSplitter);
-
-    headphoneSplitter.connect(headphoneLeftDirect, 0);
-    headphoneLeftDirect.connect(headphoneMerger, 0, 0);
-    headphoneSplitter.connect(headphoneRightDirect, 1);
-    headphoneRightDirect.connect(headphoneMerger, 0, 1);
-
-    headphoneSplitter.connect(headphoneLeftWidthCross, 0);
-    headphoneLeftWidthCross.connect(headphoneMerger, 0, 1);
-    headphoneSplitter.connect(headphoneRightWidthCross, 1);
-    headphoneRightWidthCross.connect(headphoneMerger, 0, 0);
-
-    headphoneSplitter.connect(headphoneLeftCrossLowpass, 0);
-    headphoneLeftCrossLowpass.connect(headphoneLeftCrossDelay);
-    headphoneLeftCrossDelay.connect(headphoneLeftCrossfeed);
-    headphoneLeftCrossfeed.connect(headphoneMerger, 0, 1);
-
-    headphoneSplitter.connect(headphoneRightCrossLowpass, 1);
-    headphoneRightCrossLowpass.connect(headphoneRightCrossDelay);
-    headphoneRightCrossDelay.connect(headphoneRightCrossfeed);
-    headphoneRightCrossfeed.connect(headphoneMerger, 0, 0);
-
-    headphoneMerger.connect(limiterNode);
-    limiterNode.connect(analyserNode);
-    analyserNode.connect(musicGain);
-    musicGain.connect(context.destination);
-
+    headphoneMerger.connect(limiterNode); limiterNode.connect(analyserNode); analyserNode.connect(musicGain); musicGain.connect(context.destination);
     mediaSourceConnected = true;
-    emit({ dspStatus: state.dspBypass ? "bypassed" : "active", error: null });
     applyProcessingSettings();
   } catch (error) {
-    mediaSourceConnected = false;
+    console.warn("Music DSP connection unavailable; browser will use direct audio output.", error);
     emit({ dspStatus: "unavailable" });
-    console.warn("Music DSP graph unavailable; playback is using the browser audio path.", error);
   }
 }
 
 async function unlockMusicAudio() {
-  if (!mediaSourceConnected) emit({ dspStatus: "recovering" });
   connectMusicGraph();
   const context = getAudioContext();
-  if (!context) return;
-
-  const currentState = String(context.state);
-  if (currentState !== "running" && currentState !== "closed") {
-    try {
-      await context.resume();
-    } catch {
-      emit({ dspStatus: mediaSourceConnected ? "recovering" : "unavailable" });
-      return;
-    }
-  }
-  if (mediaSourceConnected) {
-    applyProcessingSettings();
-    emit({ dspStatus: state.dspBypass ? "bypassed" : "active" });
-  }
+  if (context?.state === "suspended") await context.resume();
+  if (mediaSourceConnected) applyProcessingSettings();
 }
 
-function getCurrentIndex() {
-  if (!state.currentTrack) return -1;
-
-  return state.tracks.findIndex(
-    (track) => track.id === state.currentTrack?.id
-  );
-}
-
-function nextSequentialIndex(direction: 1 | -1) {
-  const count = state.tracks.length;
-  if (!count) return -1;
-
-  const currentIndex = getCurrentIndex();
-  if (currentIndex < 0) return direction === 1 ? 0 : count - 1;
-
-  return (currentIndex + direction + count) % count;
-}
-
-function nextShuffleIndex() {
-  const count = state.tracks.length;
-  if (count <= 1) return count ? 0 : -1;
-
-  const currentIndex = getCurrentIndex();
-  let nextIndex = currentIndex;
-
-  while (nextIndex === currentIndex) {
-    nextIndex = Math.floor(Math.random() * count);
-  }
-
-  return nextIndex;
-}
-
-async function handleTrackEnded() {
-  if (state.repeat === "one" && state.currentTrack) {
-    await playMusicTrack(state.currentTrack.id, 0);
-    return;
-  }
-
-  await nextMusicTrack(true);
-}
-
-async function loadTrack(track: MusicTrack, startAt = 0) {
-  const audio = ensureAudioElement();
-  loadingTrackId = track.id;
-
-  emit({
-    loading: true,
-    error: null,
-    currentTrack: track,
-  });
-
-  savePlayerSetting(STORAGE_KEYS.currentTrackId, track.id);
-  configureMediaSession();
-
+function configureMediaSession() {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  const current = state.currentTrack;
   try {
-    const url =
-      preloadedTrackId === track.id && preloadedTrackUrl
-        ? preloadedTrackUrl
-        : await resolveTrackUrl(track);
-    if (loadingTrackId !== track.id) return;
-
-    if (audio.dataset.trackId !== track.id || audio.src !== url) {
-      audio.pause();
-      recordedPlayToken = "";
-
-      // Explicitly release the previous media resource before moving to the
-      // next track. This helps WebKit discard the old decode/buffer pipeline.
-      try {
-        audio.removeAttribute("src");
-        audio.load();
-      } catch {
-        // Releasing the old resource is best-effort.
-      }
-
-      audio.src = url;
-      audio.dataset.trackId = track.id;
-      audio.load();
-    }
-
-    const seekWhenReady = () => {
-      const target = Math.max(0, Number(startAt) || 0);
-
-      if (target > 0 && Number.isFinite(audio.duration)) {
-        audio.currentTime = Math.min(
-          target,
-          Math.max(0, audio.duration - 0.25)
-        );
-      } else {
-        audio.currentTime = target;
-      }
-    };
-
-    if (audio.readyState >= 1) {
-      seekWhenReady();
-    } else {
-      audio.addEventListener("loadedmetadata", seekWhenReady, {
-        once: true,
-      });
-    }
-
-    if (preloadedTrackId === track.id) resetPreloadedAudio();
-    emit({ loading: false, currentTime: startAt });
-    preloadUpcomingTrack();
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Could not load this song.";
-
-    emit({
-      loading: false,
-      playing: false,
-      error: message,
-    });
-
-    throw error;
-  } finally {
-    if (loadingTrackId === track.id) loadingTrackId = null;
+    navigator.mediaSession.metadata = current ? new MediaMetadata({ title: current.title, artist: (current as MusicTrack & { artist?: string | null }).artist || "MVP Trainer Music", album: (current as MusicTrack & { album?: string | null }).album || state.activePlaylistName || "MVP Trainer" }) : null;
+  } catch { /* optional */ }
+  if (current && (current as MusicTrack & { artwork_path?: string | null }).artwork_path) {
+    void getMusicArtworkSignedUrl(current).then((url) => {
+      if (!url || state.currentTrack?.id !== current.id) return;
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: current.title, artist: (current as any).artist || "MVP Trainer Music", album: (current as any).album || state.activePlaylistName || "MVP Trainer", artwork: [{ src: url, sizes: "512x512" }] }); } catch { /* optional */ }
+    }).catch(() => undefined);
   }
+  const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [["play", () => void playMusic()], ["pause", pauseMusic], ["previoustrack", () => void previousMusicTrack()], ["nexttrack", () => void nextMusicTrack()], ["stop", stopMusic], ["seekto", (details) => { if (typeof details.seekTime === "number") seekMusic(details.seekTime); }]];
+  actions.forEach(([action, handler]) => { try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* partial support */ } });
 }
+
+function savePlaybackPosition() {
+  if (!audioElement || !state.currentTrack) return;
+  const now = Date.now(); if (now - timeSaveTimer < 1500) return; timeSaveTimer = now;
+  savePlayerSetting(STORAGE_KEYS.currentTime, String(audioElement.currentTime || 0));
+}
+
+function ensureAudioElement() {
+  if (audioElement) return audioElement;
+  const audio = new Audio(); audio.preload = "metadata"; audio.crossOrigin = "anonymous";
+  audio.addEventListener("play", () => {
+    playbackIntent = true; emit({ playing: true, error: null }); configureMediaSession();
+    const trackId = audio.dataset.trackId; const token = trackId ? `${trackId}:${audio.currentSrc || audio.src}` : "";
+    if (trackId && token !== recordedPlayToken) { recordedPlayToken = token; void recordMusicTrackPlayed(trackId).catch(() => undefined); }
+  });
+  audio.addEventListener("pause", () => emit({ playing: false }));
+  audio.addEventListener("loadedmetadata", () => { const duration = Number(audio.duration); emit({ duration: Number.isFinite(duration) ? duration : 0 }); });
+  audio.addEventListener("durationchange", () => { const duration = Number(audio.duration); emit({ duration: Number.isFinite(duration) ? duration : 0 }); });
+  audio.addEventListener("timeupdate", () => { emit({ currentTime: audio.currentTime || 0 }); savePlaybackPosition(); });
+  audio.addEventListener("ended", () => { const finishedId = state.currentTrack?.id; recordedPlayToken = ""; emit({ playing: false, currentTime: 0 }); if (finishedId) void recordMusicTrackCompleted(finishedId).catch(() => undefined); void handleTrackEnded(); });
+  audio.addEventListener("error", () => { if (!state.loading) emit({ playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" }); });
+  audioElement = audio; return audio;
+}
+
+function pruneSignedUrlCache() {
+  const now = Date.now(); for (const [id, entry] of signedUrlCache) if (now - entry.cachedAt > SIGNED_URL_TTL_MS) signedUrlCache.delete(id);
+  while (signedUrlCache.size > 8) { const oldest = [...signedUrlCache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt)[0]; if (!oldest) break; signedUrlCache.delete(oldest[0]); }
+}
+async function resolveTrackUrl(track: MusicTrack, force = false) {
+  pruneSignedUrlCache();
+  if (!force) { const cached = signedUrlCache.get(track.id); if (cached) return cached.url; }
+  if (force) { signedUrlCache.delete(track.id); clearMusicUrlCache(track.id); }
+  const url = await getMusicTrackSignedUrl(track); signedUrlCache.set(track.id, { url, cachedAt: Date.now() }); return url;
+}
+function waitForMediaReady(audio: HTMLAudioElement, timeoutMs = 7000) {
+  return new Promise<void>((resolve, reject) => {
+    if (audio.readyState >= 2) { resolve(); return; }
+    let done = false;
+    const cleanup = () => { audio.removeEventListener("canplay", onReady); audio.removeEventListener("loadeddata", onReady); audio.removeEventListener("error", onError); window.clearTimeout(timer); };
+    const finish = (error?: Error) => { if (done) return; done = true; cleanup(); error ? reject(error) : resolve(); };
+    const onReady = () => finish();
+    const onError = () => finish(new Error("The browser could not decode this audio source."));
+    const timer = window.setTimeout(() => finish(new Error("Audio source did not become ready.")), timeoutMs);
+    audio.addEventListener("canplay", onReady, { once: true }); audio.addEventListener("loadeddata", onReady, { once: true }); audio.addEventListener("error", onError, { once: true });
+  });
+}
+async function assignTrackSource(track: MusicTrack, startAt: number, forceUrl: boolean) {
+  const audio = ensureAudioElement(); const url = await resolveTrackUrl(track, forceUrl);
+  audio.pause(); recordedPlayToken = ""; audio.removeAttribute("src"); audio.load(); audio.src = url; audio.dataset.trackId = track.id; audio.load();
+  await waitForMediaReady(audio);
+  const target = Math.max(0, Number(startAt) || 0);
+  if (target > 0) { try { audio.currentTime = Number.isFinite(audio.duration) ? Math.min(target, Math.max(0, audio.duration - 0.25)) : target; } catch { /* metadata may still settle */ } }
+}
+async function loadTrack(track: MusicTrack, startAt = 0) {
+  loadingTrackId = track.id; emit({ loading: true, error: null, currentTrack: track }); savePlayerSetting(STORAGE_KEYS.currentTrackId, track.id); configureMediaSession();
+  try {
+    try { await assignTrackSource(track, startAt, false); }
+    catch { await assignTrackSource(track, startAt, true); }
+    if (loadingTrackId !== track.id) return;
+    emit({ loading: false, currentTime: startAt, error: null });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load this song.";
+    emit({ loading: false, playing: false, error: `COULDN'T PLAY THIS TRACK • ${message}` }); throw error;
+  } finally { if (loadingTrackId === track.id) loadingTrackId = null; }
+}
+function getCurrentIndex() { return state.currentTrack ? state.tracks.findIndex((track) => track.id === state.currentTrack?.id) : -1; }
+function nextSequentialIndex(direction: 1 | -1) { const count = state.tracks.length; if (!count) return -1; const current = getCurrentIndex(); if (current < 0) return direction === 1 ? 0 : count - 1; const next = current + direction; if (next >= 0 && next < count) return next; return state.repeat === "all" ? (direction === 1 ? 0 : count - 1) : -1; }
+function nextShuffleIndex() { const count = state.tracks.length; if (count <= 1) return count ? 0 : -1; const current = getCurrentIndex(); let next = current; while (next === current) next = Math.floor(Math.random() * count); return next; }
+async function handleTrackEnded() { if (state.repeat === "one" && state.currentTrack) { await playMusicTrack(state.currentTrack.id, 0); return; } await nextMusicTrack(true); }
 
 async function resolveSavedQueue(libraryTracks: MusicTrack[]) {
   const savedPlaylistId = readStored(STORAGE_KEYS.activePlaylistId);
-
-  if (!savedPlaylistId) {
-    return {
-      tracks: libraryTracks,
-      playlistId: null as string | null,
-      playlistName: null as string | null,
-    };
-  }
-
+  if (!savedPlaylistId) return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
   try {
-    const [playlist, links] = await Promise.all([
-      getMusicPlaylist(savedPlaylistId),
-      listMusicPlaylistTrackLinks(savedPlaylistId),
-    ]);
-
+    const [playlist, links] = await Promise.all([getMusicPlaylist(savedPlaylistId), listMusicPlaylistTrackLinks(savedPlaylistId)]);
     if (!playlist) throw new Error("Playlist no longer exists.");
-
-    const byId = new Map(
-      libraryTracks.map((track) => [track.id, track])
-    );
-
-    const tracks = links
-      .map((link) => byId.get(link.track_id))
-      .filter((track): track is MusicTrack => Boolean(track));
-
+    const byId = new Map(libraryTracks.map((track) => [track.id, track]));
+    const tracks = links.map((link) => byId.get(link.track_id)).filter((track): track is MusicTrack => Boolean(track));
     if (!tracks.length) throw new Error("Playlist is empty.");
-
-    return {
-      tracks,
-      playlistId: playlist.id,
-      playlistName: playlist.name,
-    };
+    return { tracks, playlistId: playlist.id, playlistName: playlist.name };
   } catch {
-    removePlayerSetting(STORAGE_KEYS.activePlaylistId);
-    removePlayerSetting(STORAGE_KEYS.activePlaylistName);
-
-    return {
-      tracks: libraryTracks,
-      playlistId: null as string | null,
-      playlistName: null as string | null,
-    };
+    removePlayerSetting(STORAGE_KEYS.activePlaylistId); removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+    return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
   }
 }
 
 export async function loadMusicLibrary(force = false) {
   if (state.loading) return state.libraryTracks;
   if (state.libraryLoaded && !force) return state.libraryTracks;
-
   emit({ loading: true, error: null });
-
   try {
-    const libraryTracks = await listMusicTracks();
-    const queue = await resolveSavedQueue(libraryTracks);
-    const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
-
-    const currentTrack =
-      queue.tracks.find(
-        (track) => track.id === state.currentTrack?.id
-      ) ??
-      queue.tracks.find((track) => track.id === savedTrackId) ??
-      queue.tracks[0] ??
-      null;
-
-    emit({
-      libraryTracks,
-      tracks: queue.tracks,
-      activePlaylistId: queue.playlistId,
-      activePlaylistName: queue.playlistName,
-      currentTrack,
-      loading: false,
-      libraryLoaded: true,
-      error: null,
-    });
-
-    configureMediaSession();
-    return libraryTracks;
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Could not load your music library.";
-
-    emit({
-      loading: false,
-      libraryLoaded: true,
-      error: message,
-    });
-
-    return [];
-  }
-}
-
-function replaceTrackEverywhere(updated: MusicTrack) {
-  const libraryTracks = state.libraryTracks.map((track) => track.id === updated.id ? updated : track);
-  const tracks = state.tracks.map((track) => track.id === updated.id ? updated : track);
-  const currentTrack = state.currentTrack?.id === updated.id ? updated : state.currentTrack;
-  emit({ libraryTracks, tracks, currentTrack });
-  configureMediaSession();
-}
-
-export async function setPlayerMusicPreference(
-  trackId: string,
-  preference: "like" | "play_less" | "neutral"
-) {
-  const updated = await setMusicTrackPreference(trackId, preference);
-  replaceTrackEverywhere(updated);
-  return updated;
-}
-
-export function playMusicNext(trackId: string) {
-  const track = state.libraryTracks.find((item) => item.id === trackId);
-  if (!track) return;
-  const currentIndex = state.currentTrack
-    ? state.tracks.findIndex((item) => item.id === state.currentTrack?.id)
-    : -1;
-  const without = state.tracks.filter((item) => item.id !== trackId);
-  const insertAt = currentIndex >= 0 ? Math.min(without.length, currentIndex + 1) : 0;
-  const tracks = [...without.slice(0, insertAt), track, ...without.slice(insertAt)];
-  emit({ tracks, activePlaylistId: null, activePlaylistName: "Custom Queue" });
-}
-
-export function addMusicToQueue(trackId: string) {
-  const track = state.libraryTracks.find((item) => item.id === trackId);
-  if (!track || state.tracks.some((item) => item.id === trackId)) return;
-  emit({ tracks: [...state.tracks, track], activePlaylistId: null, activePlaylistName: "Custom Queue" });
+    const libraryTracks = await listMusicTracks(); const queue = await resolveSavedQueue(libraryTracks); const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
+    const currentTrack = queue.tracks.find((track) => track.id === state.currentTrack?.id) ?? queue.tracks.find((track) => track.id === savedTrackId) ?? queue.tracks[0] ?? null;
+    emit({ libraryTracks, tracks: queue.tracks, activePlaylistId: queue.playlistId, activePlaylistName: queue.playlistName, currentTrack, loading: false, libraryLoaded: true, error: null }); configureMediaSession(); return libraryTracks;
+  } catch (error) { emit({ loading: false, libraryLoaded: true, error: error instanceof Error ? error.message : "Could not load your music library." }); return []; }
 }
 
 export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
-  const activeIds = new Set(
-    state.tracks.map((track) => track.id)
-  );
-
-  const tracks = state.activePlaylistId
-    ? libraryTracks.filter((track) => activeIds.has(track.id))
-    : libraryTracks;
-
-  const currentTrack = state.currentTrack
-    ? tracks.find(
-        (track) => track.id === state.currentTrack?.id
-      ) ??
-      tracks[0] ??
-      null
-    : tracks[0] ?? null;
-
-  if (state.currentTrack && !currentTrack) stopMusic();
-
-  emit({
-    libraryTracks,
-    tracks,
-    currentTrack,
-    libraryLoaded: true,
-  });
-
-  configureMediaSession();
+  const activeIds = new Set(state.tracks.map((track) => track.id));
+  const tracks = state.activePlaylistId ? libraryTracks.filter((track) => activeIds.has(track.id)) : state.activePlaylistName && !state.activePlaylistId ? state.tracks.map((track) => libraryTracks.find((item) => item.id === track.id)).filter((track): track is MusicTrack => Boolean(track)) : libraryTracks;
+  const currentTrack = state.currentTrack ? tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null : tracks[0] ?? null;
+  if (state.currentTrack && !currentTrack) stopMusic(); emit({ libraryTracks, tracks, currentTrack, libraryLoaded: true }); configureMediaSession();
 }
 
 export function activateAllMusicTracks() {
-  removePlayerSetting(STORAGE_KEYS.activePlaylistId);
-  removePlayerSetting(STORAGE_KEYS.activePlaylistName);
-
-  const currentTrack =
-    state.libraryTracks.find(
-      (track) => track.id === state.currentTrack?.id
-    ) ??
-    state.libraryTracks[0] ??
-    null;
-
-  emit({
-    tracks: state.libraryTracks,
-    currentTrack,
-    activePlaylistId: null,
-    activePlaylistName: null,
-  });
-
-  configureMediaSession();
+  removePlayerSetting(STORAGE_KEYS.activePlaylistId); removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+  const currentTrack = state.libraryTracks.find((track) => track.id === state.currentTrack?.id) ?? state.libraryTracks[0] ?? null;
+  emit({ tracks: [...state.libraryTracks], currentTrack, activePlaylistId: null, activePlaylistName: null, error: null }); configureMediaSession();
 }
-
 export function activateMusicAdHocQueue(name: string, tracks: MusicTrack[]) {
-  removePlayerSetting(STORAGE_KEYS.activePlaylistId);
-  savePlayerSetting(STORAGE_KEYS.activePlaylistName, name);
-  const currentTrack =
-    tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
-  emit({
-    tracks,
-    currentTrack,
-    activePlaylistId: null,
-    activePlaylistName: name,
-    error: tracks.length ? null : "This collection has no songs.",
-  });
-  configureMediaSession();
+  removePlayerSetting(STORAGE_KEYS.activePlaylistId); savePlayerSetting(STORAGE_KEYS.activePlaylistName, name);
+  const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
+  emit({ tracks: [...tracks], currentTrack, activePlaylistId: null, activePlaylistName: name, error: tracks.length ? null : "This collection has no songs." }); configureMediaSession();
+}
+export async function playMusicAdHocQueue(name: string, tracks: MusicTrack[], startTrackId?: string) { activateMusicAdHocQueue(name, tracks); const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0]; if (start) await playMusicTrack(start.id, 0); }
+export function activateMusicPlaylistQueue(playlist: Pick<MusicPlaylist, "id" | "name">, tracks: MusicTrack[]) {
+  savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id); savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
+  const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
+  emit({ tracks: [...tracks], currentTrack, activePlaylistId: playlist.id, activePlaylistName: playlist.name, error: tracks.length ? null : "This playlist has no songs." }); configureMediaSession();
+}
+export async function playMusicPlaylist(playlist: Pick<MusicPlaylist, "id" | "name">, tracks: MusicTrack[], startTrackId?: string) { activateMusicPlaylistQueue(playlist, tracks); const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0]; if (!start) throw new Error("Add songs to this playlist before playing it."); await playMusicTrack(start.id, 0); }
+
+async function performPlayMusicTrack(trackId: string, startAt = 0) {
+  playbackIntent = true; if (!state.libraryLoaded) await loadMusicLibrary();
+  const track = state.tracks.find((item) => item.id === trackId) ?? state.libraryTracks.find((item) => item.id === trackId); if (!track) throw new Error("Song not found in your music library.");
+  if (!state.tracks.some((item) => item.id === trackId)) activateAllMusicTracks();
+  await unlockMusicAudio(); await loadTrack(track, startAt); await ensureAudioElement().play();
+}
+export function playMusicTrack(trackId: string, startAt = 0) { const operation = transportQueue.catch(() => undefined).then(() => performPlayMusicTrack(trackId, startAt)); transportQueue = operation.catch(() => undefined); return operation; }
+export async function playMusic() { playbackIntent = true; await unlockMusicAudio(); if (!state.libraryLoaded) await loadMusicLibrary(); const audio = ensureAudioElement(); const track = state.currentTrack ?? state.tracks[0] ?? null; if (!track) { emit({ error: "Upload music before pressing Play." }); return; } if (audio.dataset.trackId !== track.id || !audio.src) { const saved = Number(readStored(STORAGE_KEYS.currentTime) || 0); await loadTrack(track, Number.isFinite(saved) ? saved : 0); } await audio.play(); }
+export function pauseMusic() { playbackIntent = false; ensureAudioElement().pause(); }
+export function stopMusic() { playbackIntent = false; const audio = ensureAudioElement(); audio.pause(); try { audio.currentTime = 0; } catch { /* mobile */ } savePlayerSetting(STORAGE_KEYS.currentTime, "0"); emit({ playing: false, currentTime: 0 }); }
+export function seekMusic(seconds: number) { const audio = ensureAudioElement(); const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration; const next = Math.max(0, Math.min(Number(seconds) || 0, Math.max(0, duration || 0))); try { audio.currentTime = next; emit({ currentTime: next }); savePlayerSetting(STORAGE_KEYS.currentTime, String(next)); } catch { /* not ready */ } }
+function shouldRecordSkip() { const audio = ensureAudioElement(); const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration; return Boolean(state.currentTrack && audio.currentTime < Math.max(30, (duration || 0) * 0.35)); }
+export async function nextMusicTrack(fromEnded = false) { if (!state.libraryLoaded) await loadMusicLibrary(); if (!fromEnded && shouldRecordSkip() && state.currentTrack) void recordMusicTrackSkipped(state.currentTrack.id).catch(() => undefined); const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1); if (index < 0) { if (fromEnded) stopMusic(); return; } const track = state.tracks[index]; if (track) await playMusicTrack(track.id, 0); }
+export async function previousMusicTrack() { const audio = ensureAudioElement(); if (audio.currentTime > 5) { seekMusic(0); return; } if (!state.libraryLoaded) await loadMusicLibrary(); const index = nextSequentialIndex(-1); if (index < 0) { seekMusic(0); return; } const track = state.tracks[index]; if (track) await playMusicTrack(track.id, 0); }
+export function toggleMusicShuffle() { const shuffle = !state.shuffle; savePlayerSetting(STORAGE_KEYS.shuffle, String(shuffle)); emit({ shuffle }); }
+export function cycleMusicRepeat() { const repeat: MusicRepeatMode = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off"; savePlayerSetting(STORAGE_KEYS.repeat, repeat); emit({ repeat }); }
+
+export function addMusicToQueue(trackId: string) {
+  const track = state.libraryTracks.find((item) => item.id === trackId); if (!track) return;
+  if (state.tracks.some((item) => item.id === trackId)) return;
+  emit({ tracks: [...state.tracks, track] });
+}
+export function playMusicNext(trackId: string) {
+  const track = state.libraryTracks.find((item) => item.id === trackId); if (!track) return;
+  const without = state.tracks.filter((item) => item.id !== trackId); const currentIndex = state.currentTrack ? without.findIndex((item) => item.id === state.currentTrack?.id) : -1; const insertAt = Math.max(0, currentIndex + 1); without.splice(insertAt, 0, track); emit({ tracks: without });
 }
 
-export async function playMusicAdHocQueue(name: string, tracks: MusicTrack[], startTrackId?: string) {
-  activateMusicAdHocQueue(name, tracks);
-  const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0];
-  if (!start) return;
-  await playMusicTrack(start.id, 0);
+export async function setPlayerMusicPreference(trackId: string, preference: "neutral" | "like" | "play_less") {
+  const updated = await setMusicTrackPreference(trackId, preference);
+  const patchTrack = (track: MusicTrack) => track.id === trackId ? updated : track;
+  emit({ libraryTracks: state.libraryTracks.map(patchTrack), tracks: state.tracks.map(patchTrack), currentTrack: state.currentTrack?.id === trackId ? updated : state.currentTrack });
+  return updated;
 }
 
-export function activateMusicPlaylistQueue(
-  playlist: Pick<MusicPlaylist, "id" | "name">,
-  tracks: MusicTrack[]
-) {
-  savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id);
-  savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
-
-  const currentTrack =
-    tracks.find(
-      (track) => track.id === state.currentTrack?.id
-    ) ??
-    tracks[0] ??
-    null;
-
-  emit({
-    tracks,
-    currentTrack,
-    activePlaylistId: playlist.id,
-    activePlaylistName: playlist.name,
-    error: tracks.length ? null : "This playlist has no songs.",
-  });
-
-  configureMediaSession();
-}
-
-export async function playMusicPlaylist(
-  playlist: Pick<MusicPlaylist, "id" | "name">,
-  tracks: MusicTrack[],
-  startTrackId?: string
-) {
-  activateMusicPlaylistQueue(playlist, tracks);
-
-  const startTrack =
-    tracks.find((track) => track.id === startTrackId) ??
-    tracks[0];
-
-  if (!startTrack) {
-    throw new Error(
-      "Add songs to this playlist before playing it."
-    );
-  }
-
-  await playMusicTrack(startTrack.id, 0);
-}
-
-function fadeGainTo(target: number, milliseconds: number) {
-  if (!musicGain || !audioContext) return Promise.resolve();
-
-  const now = audioContext.currentTime;
-  const durationSeconds = Math.max(0.03, milliseconds / 1000);
-  const safeTarget = Math.max(0.0001, target);
-
-  musicGain.gain.cancelScheduledValues(now);
-  musicGain.gain.setValueAtTime(
-    Math.max(0.0001, musicGain.gain.value),
-    now
-  );
-  musicGain.gain.linearRampToValueAtTime(
-    safeTarget,
-    now + durationSeconds
-  );
-
-  return new Promise<void>((resolve) =>
-    window.setTimeout(resolve, milliseconds + 20)
-  );
-}
-
-async function performPlayMusicTrack(
-  trackId: string,
-  startAt = 0
-) {
-  playbackIntent = true;
-  if (!state.libraryLoaded) await loadMusicLibrary();
-
-  const track =
-    state.tracks.find((item) => item.id === trackId) ??
-    state.libraryTracks.find((item) => item.id === trackId);
-
-  if (!track) {
-    throw new Error("Song not found in your music library.");
-  }
-
-  if (!state.tracks.some((item) => item.id === trackId)) {
-    activateAllMusicTracks();
-  }
-
-  await unlockMusicAudio();
-
-  const audio = ensureAudioElement();
-  const changingTrack =
-    Boolean(state.currentTrack) &&
-    state.currentTrack?.id !== trackId &&
-    !audio.paused;
-  const fadeMilliseconds = Math.round(
-    Math.max(0, state.crossfadeSeconds) * 1000
-  );
-
-  if (changingTrack && fadeMilliseconds > 0 && musicGain) {
-    const half = Math.max(90, Math.round(fadeMilliseconds / 2));
-    await fadeGainTo(0.0001, half);
-    await loadTrack(track, startAt);
-    await safeAudioPlay(audio);
-    await fadeGainTo(1, half);
-    return;
-  }
-
-  await loadTrack(track, startAt);
-  await safeAudioPlay(audio);
-}
-
-export function playMusicTrack(
-  trackId: string,
-  startAt = 0
-) {
-  const operation = transportQueue
-    .catch(() => undefined)
-    .then(() => performPlayMusicTrack(trackId, startAt));
-
-  transportQueue = operation.catch(() => undefined);
-  return operation;
-}
-
-export async function playMusic() {
-  playbackIntent = true;
-  await unlockMusicAudio();
-  if (!state.libraryLoaded) await loadMusicLibrary();
-
-  const audio = ensureAudioElement();
-  const track = state.currentTrack ?? state.tracks[0] ?? null;
-
-  if (!track) {
-    emit({ error: "Upload music before pressing Play." });
-    return;
-  }
-
-  if (audio.dataset.trackId !== track.id || !audio.src) {
-    const savedTime = Number(
-      readStored(STORAGE_KEYS.currentTime) || 0
-    );
-
-    await loadTrack(
-      track,
-      Number.isFinite(savedTime) ? savedTime : 0
-    );
-  }
-
-  if (musicGain && musicGain.gain.value < 0.99) {
-    await fadeGainTo(1, 180);
-  }
-
-  try {
-    await safeAudioPlay(audio);
-    await confirmHealthyPlayback(audio, 1800);
-  } catch (error) {
-    console.warn("Normal music Play failed; rebuilding the audio engine.", error);
-    await hardResetCurrentPlayback("manual Play could not recover");
-  }
-}
-
-export function pauseMusic() {
-  playbackIntent = false;
-  clearStallTimer();
-  clearPlaybackWatchdog();
-  resetPreloadedAudio();
-  ensureAudioElement().pause();
-}
-
-export function stopMusic() {
-  playbackIntent = false;
-  clearStallTimer();
-  clearPlaybackWatchdog();
-  resetPreloadedAudio();
-  const audio = ensureAudioElement();
-  audio.pause();
-
-  try {
-    audio.currentTime = 0;
-  } catch {
-    // Some mobile browsers reject seeking before metadata is ready.
-  }
-
-  savePlayerSetting(STORAGE_KEYS.currentTime, "0");
-  emit({ playing: false, currentTime: 0 });
-}
-
-export function seekMusic(seconds: number) {
-  const audio = ensureAudioElement();
-
-  const duration = Number.isFinite(audio.duration)
-    ? audio.duration
-    : state.duration;
-
-  const next = Math.max(
-    0,
-    Math.min(
-      Number(seconds) || 0,
-      Math.max(0, duration || 0)
-    )
-  );
-
-  try {
-    audio.currentTime = next;
-    emit({ currentTime: next });
-    savePlayerSetting(STORAGE_KEYS.currentTime, String(next));
-  } catch {
-    // Ignore unavailable seeking until metadata exists.
-  }
-}
-
-function shouldRecordSkip() {
-  const audio = ensureAudioElement();
-
-  const duration = Number.isFinite(audio.duration)
-    ? audio.duration
-    : state.duration;
-
-  const threshold = Math.max(30, (duration || 0) * 0.35);
-
-  return Boolean(
-    state.currentTrack && audio.currentTime < threshold
-  );
-}
-
-export async function nextMusicTrack(fromEnded = false) {
-  if (!state.libraryLoaded) await loadMusicLibrary();
-
-  if (
-    !fromEnded &&
-    shouldRecordSkip() &&
-    state.currentTrack
-  ) {
-    void recordMusicTrackSkipped(
-      state.currentTrack.id
-    ).catch(() => undefined);
-  }
-
-  const index = state.shuffle
-    ? nextShuffleIndex()
-    : nextSequentialIndex(1);
-
-  if (index < 0) return;
-
-  const track = state.tracks[index];
-  if (!track) return;
-
-  try {
-    await playMusicTrack(track.id, 0);
-  } catch (error) {
-    if (playbackIntent || fromEnded) {
-      console.warn("Automatic next-track playback failed; recovering.", error);
-      await skipUnplayableCurrent("next-track transition");
-    } else {
-      throw error;
-    }
-  }
-}
-
-export async function previousMusicTrack() {
-  const audio = ensureAudioElement();
-
-  if (audio.currentTime > 5) {
-    seekMusic(0);
-    return;
-  }
-
-  if (!state.libraryLoaded) await loadMusicLibrary();
-
-  const index = nextSequentialIndex(-1);
-
-  if (index < 0) {
-    seekMusic(0);
-    return;
-  }
-
-  const track = state.tracks[index];
-  if (track) await playMusicTrack(track.id, 0);
-}
-
-export function toggleMusicShuffle() {
-  const shuffle = !state.shuffle;
-  savePlayerSetting(STORAGE_KEYS.shuffle, String(shuffle));
-  emit({ shuffle });
-}
-
-export function cycleMusicRepeat() {
-  const repeat: MusicRepeatMode = state.repeat === "one" ? "off" : "one";
-  savePlayerSetting(STORAGE_KEYS.repeat, repeat);
-  emit({ repeat });
-}
-
-export function setMusicEqEnabled(enabled: boolean) {
-  savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled));
-  emit({ eqEnabled: enabled });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
+export function setMusicVolume(value: number) { const next = Math.max(0, Math.min(1, Number(value) || 0)); savePlayerSetting(STORAGE_KEYS.volume, String(next)); emit({ volume: next }); if (audioContext && mediaSourceConnected && masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(next), audioContext.currentTime, 0.01); else if (audioElement) audioElement.volume = Math.max(0, Math.min(1, next)); }
+export function setMusicEqEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled)); emit({ eqEnabled: enabled }); applyProcessingSettings(); }
 export function applyMusicEqPreset(presetName: MusicEqPreset) {
-  if (presetName === "custom") {
-    savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
-    emit({ eqPreset: presetName });
-    return;
-  }
-
-  const definition = isCustomPresetSlot(presetName)
-    ? readCustomPreset(presetName)
-    : isBuiltInPreset(presetName)
-      ? MUSIC_EQ_PRESETS[presetName]
-      : null;
-
-  if (!definition) {
-    emit({ error: "Save this custom EQ slot before loading it." });
-    return;
-  }
-
-  const gains = [...definition.gains];
-  savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
-  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
-  savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
-  savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
-
-  emit({
-    eqEnabled: true,
-    eqPreset: presetName,
-    eqGains: gains,
-    preampDb: definition.preamp,
-    error: null,
-  });
-  void unlockMusicAudio();
-  applyProcessingSettings();
+  if (presetName === "custom") { savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); emit({ eqPreset: presetName }); return; }
+  const definition = isCustomPresetSlot(presetName) ? readCustomPreset(presetName) : isBuiltInPreset(presetName) ? MUSIC_EQ_PRESETS[presetName] : null;
+  if (!definition) { savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); emit({ eqPreset: presetName }); return; }
+  const gains = [...definition.gains]; savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains)); savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp)); emit({ eqPreset: presetName, eqGains: gains, preampDb: definition.preamp }); applyProcessingSettings();
 }
-
-export function saveMusicEqCustomPreset(slot: MusicCustomPresetSlot) {
-  const definition = {
-    gains: [...state.eqGains],
-    preamp: state.preampDb,
-  };
-  savePlayerSetting(customPresetStorageKey(slot), JSON.stringify(definition));
-  savePlayerSetting(STORAGE_KEYS.eqPreset, slot);
-  emit({ eqPreset: slot, error: null });
-}
-
-export function setMusicEqBand(index: number, gainDb: number) {
-  if (
-    index < 0 ||
-    index >= MUSIC_EQ_FREQUENCIES.length
-  ) {
-    return;
-  }
-
-  const gains = [...state.eqGains];
-  gains[index] = Math.max(
-    -12,
-    Math.min(12, Number(gainDb) || 0)
-  );
-
-  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
-  savePlayerSetting(
-    STORAGE_KEYS.eqGains,
-    JSON.stringify(gains)
-  );
-
-  emit({
-    eqPreset: "custom",
-    eqGains: gains,
-  });
-
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicPreamp(preampDb: number) {
-  const next = Math.max(
-    -12,
-    Math.min(12, Number(preampDb) || 0)
-  );
-
-  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
-  savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
-
-  emit({
-    eqPreset: "custom",
-    preampDb: next,
-  });
-
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicDspBypass(bypassed: boolean) {
-  savePlayerSetting(STORAGE_KEYS.dspBypass, String(Boolean(bypassed)));
-  emit({ dspBypass: Boolean(bypassed) });
-  void unlockMusicAudio().then(() => applyProcessingSettings());
-}
-
-export async function recoverMusicDsp() {
-  emit({ dspStatus: "recovering" });
-  await unlockMusicAudio();
-  if (!mediaSourceConnected) emit({ dspStatus: "unavailable" });
-  return state.dspStatus;
-}
-
-export function setMusicCrossfadeSeconds(seconds: number) {
-  const next = Math.max(
-    0,
-    Math.min(8, Number(seconds) || 0)
-  );
-
-  savePlayerSetting(
-    STORAGE_KEYS.crossfadeSeconds,
-    String(next)
-  );
-
-  emit({ crossfadeSeconds: next });
-}
-
-export function setMusicNormalizationEnabled(enabled: boolean) {
-  savePlayerSetting(
-    STORAGE_KEYS.normalizationEnabled,
-    String(enabled)
-  );
-
-  emit({ normalizationEnabled: enabled });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicLimiterEnabled(enabled: boolean) {
-  savePlayerSetting(
-    STORAGE_KEYS.limiterEnabled,
-    String(enabled)
-  );
-
-  emit({ limiterEnabled: enabled });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicDuckingStrength(
-  strength: MusicDuckingStrength
-) {
-  savePlayerSetting(
-    STORAGE_KEYS.duckingStrength,
-    strength
-  );
-
-  emit({ duckingStrength: strength });
-}
-
-export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) {
-  const definition = MUSIC_HEADPHONE_MODES[mode] ?? MUSIC_HEADPHONE_MODES.off;
-  savePlayerSetting(STORAGE_KEYS.headphoneMode, mode);
-  savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(definition.width));
-  savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(definition.depth));
-  savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(definition.crossfeed));
-  savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(definition.center));
-  savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(definition.bass));
-  emit({
-    headphoneMode: mode,
-    headphoneWidth: definition.width,
-    headphoneDepth: definition.depth,
-    headphoneCrossfeed: definition.crossfeed,
-    headphoneCenter: definition.center,
-    headphoneBassImpact: definition.bass,
-  });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicHeadphoneWidth(value: number) {
-  const next = Math.max(0, Math.min(100, Number(value) || 0));
-  savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(next));
-  emit({ headphoneWidth: next });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicHeadphoneDepth(value: number) {
-  const next = Math.max(0, Math.min(100, Number(value) || 0));
-  savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(next));
-  emit({ headphoneDepth: next });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicHeadphoneCrossfeed(value: number) {
-  const next = Math.max(0, Math.min(100, Number(value) || 0));
-  savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(next));
-  emit({ headphoneCrossfeed: next });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicHeadphoneCenter(value: number) {
-  const next = Math.max(0, Math.min(100, Number(value) || 0));
-  savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(next));
-  emit({ headphoneCenter: next });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
-
-export function setMusicHeadphoneBassImpact(value: number) {
-  const next = Math.max(0, Math.min(100, Number(value) || 0));
-  savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(next));
-  emit({ headphoneBassImpact: next });
-  void unlockMusicAudio();
-  applyProcessingSettings();
-}
+export function saveMusicEqCustomPreset(slot: MusicCustomPresetSlot) { const definition: EqDefinition = { label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3", gains: [...state.eqGains], preamp: state.preampDb }; savePlayerSetting(customPresetStorageKey(slot), JSON.stringify(definition)); savePlayerSetting(STORAGE_KEYS.eqPreset, slot); emit({ eqPreset: slot }); }
+export function setMusicEqBand(index: number, gainDb: number) { if (index < 0 || index >= MUSIC_EQ_FREQUENCIES.length) return; const gains = [...state.eqGains]; gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0)); savePlayerSetting(STORAGE_KEYS.eqPreset, "custom"); savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains)); emit({ eqPreset: "custom", eqGains: gains }); applyProcessingSettings(); }
+export function setMusicPreamp(preampDb: number) { const next = Math.max(-12, Math.min(12, Number(preampDb) || 0)); savePlayerSetting(STORAGE_KEYS.eqPreset, "custom"); savePlayerSetting(STORAGE_KEYS.preampDb, String(next)); emit({ eqPreset: "custom", preampDb: next }); applyProcessingSettings(); }
+export function setMusicCrossfadeSeconds(seconds: number) { const next = Math.max(0, Math.min(8, Number(seconds) || 0)); savePlayerSetting(STORAGE_KEYS.crossfadeSeconds, String(next)); emit({ crossfadeSeconds: next }); }
+export function setMusicNormalizationEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.normalizationEnabled, String(enabled)); emit({ normalizationEnabled: enabled }); applyProcessingSettings(); }
+export function setMusicLimiterEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.limiterEnabled, String(enabled)); emit({ limiterEnabled: enabled }); applyProcessingSettings(); }
+export function setMusicDuckingStrength(value: MusicDuckingStrength) { savePlayerSetting(STORAGE_KEYS.duckingStrength, value); emit({ duckingStrength: value }); }
 
 export function getNextMusicTrackPreview() {
   if (!state.tracks.length) return null;
-
-  if (state.shuffle) {
-    return {
-      track: null as MusicTrack | null,
-      label: "Shuffle selection",
-    };
-  }
-
+  if (state.shuffle) return { track: null as MusicTrack | null, label: "Shuffle selection" };
   const index = nextSequentialIndex(1);
-
   return {
     track: index >= 0 ? state.tracks[index] ?? null : null,
-    label: index >= 0 ? state.tracks[index]?.title ?? "Next track" : "Next track",
+    label: index >= 0 ? state.tracks[index]?.title ?? "Next track" : "End of queue",
   };
 }
 
-export const MUSIC_RTA_FREQUENCIES = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
+function applyHeadphoneModeValues(mode: MusicHeadphoneMode) { const values = MUSIC_HEADPHONE_MODES[mode]; savePlayerSetting(STORAGE_KEYS.headphoneMode, mode); savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(values.width)); savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(values.depth)); savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(values.crossfeed)); savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(values.center)); savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(values.bass)); emit({ headphoneMode: mode, headphoneWidth: values.width, headphoneDepth: values.depth, headphoneCrossfeed: values.crossfeed, headphoneCenter: values.center, headphoneBassImpact: values.bass }); applyProcessingSettings(); }
+export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) { applyHeadphoneModeValues(mode); }
+function setHeadphoneValue(key: keyof Pick<MusicPlayerState, "headphoneWidth" | "headphoneDepth" | "headphoneCrossfeed" | "headphoneCenter" | "headphoneBassImpact">, storageKey: string, value: number) { const next = Math.max(0, Math.min(100, Number(value) || 0)); savePlayerSetting(storageKey, String(next)); emit({ [key]: next } as Pick<MusicPlayerState, typeof key>); applyProcessingSettings(); }
+export function setMusicHeadphoneWidth(value: number) { setHeadphoneValue("headphoneWidth", STORAGE_KEYS.headphoneWidth, value); }
+export function setMusicHeadphoneDepth(value: number) { setHeadphoneValue("headphoneDepth", STORAGE_KEYS.headphoneDepth, value); }
+export function setMusicHeadphoneCrossfeed(value: number) { setHeadphoneValue("headphoneCrossfeed", STORAGE_KEYS.headphoneCrossfeed, value); }
+export function setMusicHeadphoneCenter(value: number) { setHeadphoneValue("headphoneCenter", STORAGE_KEYS.headphoneCenter, value); }
+export function setMusicHeadphoneBassImpact(value: number) { setHeadphoneValue("headphoneBassImpact", STORAGE_KEYS.headphoneBassImpact, value); }
+export function setMusicDspBypass(bypassed: boolean) { savePlayerSetting(STORAGE_KEYS.dspBypass, String(bypassed)); emit({ dspBypass: bypassed }); applyProcessingSettings(); }
+export async function recoverMusicDsp() { try { await unlockMusicAudio(); applyProcessingSettings(); } catch { emit({ dspStatus: "unavailable" }); } }
+export async function rebuildMusicAudioEngine() { const track = state.currentTrack; if (!track) return; const wasPlaying = state.playing || playbackIntent; const position = state.currentTime; if (audioElement) { try { audioElement.pause(); audioElement.removeAttribute("src"); audioElement.load(); } catch { /* ignore */ } } releaseGraph(); if (audioContext && audioContext.state !== "closed") { try { await audioContext.close(); } catch { /* ignore */ } } audioContext = null; audioElement = null; await unlockMusicAudio(); await loadTrack(track, position); if (wasPlaying) await ensureAudioElement().play(); }
 
-export function getMusicRtaLevels() {
-  if (!analyserNode || !audioContext || !mediaSourceConnected || !rtaBuffer || !state.playing) {
-    rtaEnvelope = rtaEnvelope.map((value) => value * 0.72);
-    return [...rtaEnvelope];
+export function getMusicVisualizerLevels(barCount = 44) {
+  const count = Math.max(8, Math.min(64, Math.floor(barCount)));
+  if (!analyserNode || !state.playing || document.hidden) { for (let i = 0; i < count; i += 1) visualizerEnvelope[i] *= 0.72; return Array.from(visualizerEnvelope.slice(0, count)); }
+  if (!analyserBuffer || analyserBuffer.length !== analyserNode.frequencyBinCount) analyserBuffer = new Uint8Array(analyserNode.frequencyBinCount);
+  analyserNode.getByteFrequencyData(analyserBuffer);
+  const nyquist = (audioContext?.sampleRate ?? 44100) / 2;
+  for (let index = 0; index < count; index += 1) {
+    const lowHz = 28 * Math.pow(18000 / 28, index / count);
+    const highHz = 28 * Math.pow(18000 / 28, (index + 1) / count);
+    const start = Math.max(1, Math.floor((lowHz / nyquist) * analyserBuffer.length));
+    const end = Math.max(start + 1, Math.min(analyserBuffer.length, Math.ceil((highHz / nyquist) * analyserBuffer.length)));
+    let sum = 0; let peak = 0; let samples = 0;
+    for (let bin = start; bin < end; bin += 1) { const value = analyserBuffer[bin]; sum += value; peak = Math.max(peak, value); samples += 1; }
+    const average = samples ? sum / samples : 0; const raw = Math.min(1, (average * 0.72 + peak * 0.28) / 210); const shaped = Math.pow(raw, 0.78);
+    const previous = visualizerEnvelope[index] || 0; visualizerEnvelope[index] = shaped > previous ? previous + (shaped - previous) * 0.72 : previous + (shaped - previous) * 0.24;
   }
-
-  analyserNode.getByteFrequencyData(rtaBuffer);
-  const nyquist = audioContext.sampleRate / 2;
-  const binHz = nyquist / rtaBuffer.length;
-
-  const levels = MUSIC_RTA_FREQUENCIES.map((center, index) => {
-    const low = index === 0 ? 20 : Math.sqrt(MUSIC_RTA_FREQUENCIES[index - 1] * center);
-    const high = index === MUSIC_RTA_FREQUENCIES.length - 1
-      ? Math.min(20000, nyquist - 1)
-      : Math.sqrt(center * MUSIC_RTA_FREQUENCIES[index + 1]);
-    const start = Math.max(0, Math.floor(low / binHz));
-    const end = Math.min(rtaBuffer!.length - 1, Math.ceil(high / binHz));
-    let sum = 0;
-    let peak = 0;
-    let count = 0;
-    for (let bin = start; bin <= end; bin += 1) {
-      const value = rtaBuffer![bin] / 255;
-      sum += value;
-      peak = Math.max(peak, value);
-      count += 1;
-    }
-    const average = count ? sum / count : 0;
-    const weighted = Math.min(1, average * 0.78 + peak * 0.44);
-    const previous = rtaEnvelope[index] || 0;
-    return weighted > previous ? previous * 0.28 + weighted * 0.72 : previous * 0.78 + weighted * 0.22;
-  });
-
-  rtaEnvelope = levels;
-  return [...levels];
+  return Array.from(visualizerEnvelope.slice(0, count));
 }
+export function getMusicRtaLevels() { return getMusicVisualizerLevels(10); }
 
-export function getMusicVisualizerLevels(barCount = 10) {
-  const levels = getMusicRtaLevels();
-  if (barCount === 10) return levels;
-  return Array.from({ length: Math.max(1, barCount) }, (_, index) => {
-    const source = Math.min(levels.length - 1, Math.floor(index * levels.length / Math.max(1, barCount)));
-    return levels[source] || 0;
-  });
-}
+function duckTargetForStrength(strength: MusicDuckingStrength) { return strength === "off" ? 1 : strength === "light" ? 0.5 : strength === "strong" ? 0.08 : 0.18; }
+function fadeOutputTo(target: number, milliseconds: number) { if (!musicGain || !audioContext) return Promise.resolve(); const now = audioContext.currentTime; const seconds = Math.max(0.03, milliseconds / 1000); musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), now); musicGain.gain.linearRampToValueAtTime(Math.max(0.0001, target), now + seconds); return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds + 20)); }
+export async function playWithMusicDucked(playAlert: () => Promise<void>) { const audio = ensureAudioElement(); const wasPlaying = !audio.paused && !audio.ended && Boolean(audio.src); if (!wasPlaying || state.duckingStrength === "off") { await playAlert(); return; } await unlockMusicAudio(); if (musicGain && audioContext) { const original = Math.max(0.0001, musicGain.gain.value || 1); try { await fadeOutputTo(duckTargetForStrength(state.duckingStrength), 180); await playAlert(); } finally { await fadeOutputTo(original, 360); } return; } const original = audio.volume; try { audio.volume = Math.min(original, duckTargetForStrength(state.duckingStrength)); await playAlert(); } finally { audio.volume = original; } }
 
-function duckTargetForStrength(
-  strength: MusicDuckingStrength
-) {
-  if (strength === "off") return 1;
-  if (strength === "light") return 0.42;
-  if (strength === "strong") return 0.07;
-  return 0.16;
-}
-
-export async function playWithMusicDucked(
-  playAlert: () => Promise<void>
-) {
-  const audio = ensureAudioElement();
-  const wasPlaying =
-    !audio.paused &&
-    !audio.ended &&
-    Boolean(audio.src);
-
-  if (!wasPlaying || state.duckingStrength === "off") {
-    await playAlert();
-    return;
-  }
-
-  connectMusicGraph();
-
-  if (musicGain && audioContext) {
-    outputGainBeforeDuck = Math.max(
-      0.0001,
-      musicGain.gain.value || 1
-    );
-
-    try {
-      await fadeGainTo(
-        duckTargetForStrength(state.duckingStrength),
-        220
-      );
-
-      await playAlert();
-    } finally {
-      await fadeGainTo(outputGainBeforeDuck || 1, 420);
-    }
-
-    return;
-  }
-
-  const originalVolume = audio.volume;
-
-  try {
-    audio.volume = Math.min(
-      originalVolume,
-      duckTargetForStrength(state.duckingStrength)
-    );
-
-    await playAlert();
-  } finally {
-    audio.volume = originalVolume;
-  }
-}
-
-export async function rebuildMusicAudioEngine() {
-  if (!state.currentTrack) return;
-
-  const previousIntent = playbackIntent;
-  playbackIntent = true;
-
-  try {
-    await hardResetCurrentPlayback("manual audio-engine rebuild");
-  } finally {
-    if (!previousIntent && audioElement) {
-      playbackIntent = false;
-      audioElement.pause();
-      clearPlaybackWatchdog();
-    }
-  }
-}
-
-export function formatMusicTime(value: number) {
-  const total = Math.max(
-    0,
-    Math.floor(Number(value) || 0)
-  );
-
-  const minutes = Math.floor(total / 60);
-  const seconds = String(total % 60).padStart(2, "0");
-
-  return `${minutes}:${seconds}`;
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function getSnapshot() {
-  return state;
-}
-
-export function useMusicPlayer() {
-  return useSyncExternalStore(
-    subscribe,
-    getSnapshot,
-    getSnapshot
-  );
-}
+export function formatMusicTime(value: number) { const total = Math.max(0, Math.floor(Number(value) || 0)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`; }
+function subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); }
+function getSnapshot() { return state; }
+export function useMusicPlayer() { return useSyncExternalStore(subscribe, getSnapshot, getSnapshot); }
