@@ -157,6 +157,27 @@ function normalizeTenBands(values: number[]) {
   });
 }
 
+function rtaRawToDb(rawValue: number) {
+  const raw = Math.max(0, Math.min(1, Number(rawValue) || 0));
+  if (raw <= 0.002) return -72;
+
+  // The engine returns a normalized per-band amplitude. Shape each band
+  // independently so normal music has real headroom instead of pinning all
+  // ten columns near the ceiling. This does not normalize bands against one
+  // another and never introduces synthetic/random movement.
+  // Convert the real normalized analyser amplitude to a display dB value.
+  // The extra display headroom keeps mastered music from pinning every band
+  // near the ceiling while preserving the real relationship between bands.
+  const db = 20 * Math.log10(Math.max(raw, 0.00025)) - 18;
+  return Math.max(-72, Math.min(-4, db));
+}
+
+function rtaDbToMeter(db: number) {
+  return Math.max(0, Math.min(1, (db + 72) / 72));
+}
+
+const RTA_SEGMENTS = 18;
+
 function TenBandRta({ playing }: { playing: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(true);
@@ -177,28 +198,36 @@ function TenBandRta({ playing }: { playing: boolean }) {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      const raw = playing && visible ? normalizeTenBands(getMusicRtaLevels()) : Array(10).fill(0);
-      setLevels((current) => raw.map((target, index) => {
-        const previous = current[index] || 0;
-        const attack = target > previous ? 0.58 : 0.18;
-        const next = previous + (target - previous) * attack;
-        return next < 0.006 ? 0 : next;
-      }));
-    }, 84);
+      const raw = playing && visible
+        ? normalizeTenBands(getMusicRtaLevels())
+        : Array(10).fill(0);
+      const targets = raw.map((value) => rtaDbToMeter(rtaRawToDb(value)));
+
+      setLevels((current) =>
+        targets.map((target, index) => {
+          const previous = current[index] || 0;
+          const coefficient = target > previous ? 0.7 : playing ? 0.12 : 0.24;
+          const next = previous + (target - previous) * coefficient;
+          return next < 0.012 ? 0 : next;
+        })
+      );
+    }, 64);
     return () => window.clearInterval(timer);
   }, [playing, visible]);
 
   useEffect(() => {
     const now = performance.now();
-    setPeaks((current) => levels.map((value, index) => {
-      const previous = current[index] || 0;
-      if (value >= previous) {
-        peakHoldUntilRef.current[index] = now + 680;
-        return value;
-      }
-      if (now < (peakHoldUntilRef.current[index] || 0)) return previous;
-      return Math.max(value, Math.max(0, previous - (playing ? 0.022 : 0.075)));
-    }));
+    setPeaks((current) =>
+      levels.map((value, index) => {
+        const previous = current[index] || 0;
+        if (value >= previous) {
+          peakHoldUntilRef.current[index] = now + 760;
+          return value;
+        }
+        if (now < (peakHoldUntilRef.current[index] || 0)) return previous;
+        return Math.max(value, Math.max(0, previous - (playing ? 0.018 : 0.07)));
+      })
+    );
   }, [levels, playing]);
 
   const labels = MUSIC_RTA_FREQUENCIES.length === 10
@@ -206,11 +235,7 @@ function TenBandRta({ playing }: { playing: boolean }) {
     : ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"];
 
   return (
-    <div ref={hostRef} className="tr-rta10 tr-rta10--restored" aria-label="10 band real-time audio analyzer">
-      <div className="tr-rta10Head">
-        <span><i className={playing ? "is-live" : ""} />10-BAND REAL-TIME ANALYZER</span>
-        <span>{playing ? "PROCESSED OUTPUT • LIVE" : "PROCESSED OUTPUT • READY"}</span>
-      </div>
+    <div ref={hostRef} className="tr-rta10 tr-rta10--restored tr-rta10--segmented" aria-label="10 band real-time audio analyzer">
       <div className="tr-rta10Body" aria-hidden>
         <div className="tr-rta10Scale">
           <span>0</span><span>-12</span><span>-24</span><span>-36</span><span>-48</span><span>-60</span><small>dB</small>
@@ -219,15 +244,26 @@ function TenBandRta({ playing }: { playing: boolean }) {
           {levels.map((level, index) => {
             const value = Math.max(0, Math.min(1, level));
             const peak = Math.max(value, Math.min(1, peaks[index] || 0));
+            const db = -72 + value * 72;
             return (
               <div className="tr-rta10Band" key={labels[index] || index}>
                 <div className="tr-rta10Meter">
-                  <span className="tr-rta10Inactive" />
-                  <span className="tr-rta10Fill" style={{ transform: `scaleY(${value})` }} />
+                  <div className="tr-rta10Segments">
+                    {Array.from({ length: RTA_SEGMENTS }, (_, segmentIndex) => {
+                      const threshold = (segmentIndex + 1) / RTA_SEGMENTS;
+                      const zone = segmentIndex >= 16 ? "hot" : segmentIndex >= 13 ? "warm" : "normal";
+                      return (
+                        <i
+                          key={segmentIndex}
+                          className={`${value + 0.002 >= threshold ? "is-on" : ""} is-${zone}`}
+                        />
+                      );
+                    })}
+                  </div>
                   <span className="tr-rta10Peak" style={{ bottom: `${Math.max(1, peak * 100)}%` }} />
                 </div>
                 <strong>{labels[index] || index + 1}</strong>
-                <small>{playing && value > 0.001 ? `${Math.max(-60, 20 * Math.log10(value)).toFixed(0)} dB` : "—"}</small>
+                <small>{playing && value > 0.012 ? `${Math.max(-72, db).toFixed(0)} dB` : "—"}</small>
               </div>
             );
           })}
@@ -427,7 +463,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const track = player.currentTrack;
   const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
   const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
-  const queueLabel = player.activePlaylistName || "All Uploaded Songs";
+  const volumePercent = Math.max(0, Math.min(100, Math.round(((player.preampDb + 12) / 24) * 100)));
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile ? !profileMatchesCurrent(activeSavedProfile) : false;
   const presetSelectValue: MusicEqPreset = activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
@@ -446,9 +482,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </button>
 
         <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}> 
-          <span className="tr-audioEyebrow">{player.playing ? "NOW PLAYING" : "MVP PERFORMANCE AUDIO"}</span>
-          <strong>{track?.title || (player.loading ? "Loading music…" : "Your workout soundtrack")}</strong>
-          <small>{track ? [track.artist || "MVP Trainer library", track.album].filter(Boolean).join(" • ") : "Choose a playlist or upload your music"}</small>
+          <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
+          {track ? <small>{[track.artist || "Unknown Artist", track.album].filter(Boolean).join(" • ")}</small> : null}
         </button>
 
         <div className="tr-audioQueueSelector">
@@ -457,24 +492,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <option value="all">All Uploaded Songs</option>
             {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
           </select>
-          <small>{queueLabel}</small>
         </div>
 
         <div className="tr-audioTopButtons">
           <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
             <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
           </button>
-          <button type="button" className="tr-audioLibraryButton" onClick={() => navigate("/music")}>MY MUSIC</button>
         </div>
-      </div>
-
-      <div className="tr-audioTelemetry">
-        <span className={player.playing ? "is-live" : ""}><i /> {player.playing ? "ANALYZER ACTIVE" : "ANALYZER READY"}</span>
-        <span>EQ {player.dspBypass ? "BYPASS" : player.eqEnabled ? "ACTIVE" : "FLAT"}</span>
-        <span>DSP {player.dspStatus.toUpperCase()}</span>
-        <button type="button" className={`tr-dspHealth is-${player.dspStatus}`} onClick={() => void recoverMusicDsp()}>
-          {player.dspStatus === "active" ? "PROCESSING LOCKED" : player.dspStatus === "bypassed" ? "A/B BYPASS" : "RECOVER DSP"}
-        </button>
       </div>
 
       <TenBandRta playing={player.playing} />
@@ -487,9 +511,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       <div className="tr-mainAudioTuning">
         <label className="tr-mainPreamp">
-          <span>PREAMP</span>
-          <input type="range" min="-12" max="12" step="0.5" value={player.preampDb} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Music preamp" />
-          <strong>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</strong>
+          <span>VOLUME</span>
+          <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const percent = Number(event.target.value);
+            const db = -12 + (Math.max(0, Math.min(100, percent)) / 100) * 24;
+            void runDspMutation(() => setMusicPreamp(db), true);
+          }} aria-label="Music volume" />
+          <strong>{volumePercent}%</strong>
         </label>
         <div className="tr-trackPreference" aria-label="Track preference">
           <button type="button" className={track?.play_less ? "is-disliked" : ""} disabled={!track} onClick={() => {
@@ -518,19 +546,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       {eqOpen ? (
         <section className="tr-audioEqPanel tr-audioEqPanel--pro7">
           <div className="tr-audioEqHead">
-            <div><span className="tr-audioEyebrow">PRO AUDIO PROCESSING</span><strong>31-Band EQ + Headphone DSP</strong></div>
+            <div><strong>31-Band EQ + Headphone DSP</strong></div>
             <div className="tr-dspAbControls">
               <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.eqEnabled ? "ON" : "FLAT"}</span></label>
               <button type="button" className={`tr-dspBypassButton ${player.dspBypass ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>A/B {player.dspBypass ? "BYPASSED" : "PROCESSED"}</button>
             </div>
             <label className="tr-audioEqPreset"><span>EQ PRESET</span><select value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
-              {Object.entries(MUSIC_EQ_PRESETS).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
+              {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
               {DSP_SLOTS.map((slot) => <option key={slot} value={slot}>{dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}</option>)}
               <option value="custom">{activeSavedProfile && activeProfileDirty ? `${activeSavedProfile.name} • Modified` : "Unsaved Custom"}</option>
             </select></label>
           </div>
 
-          <div className="tr-audioDspSignalPath"><span>INPUT</span><i /><span>PREAMP</span><i /><span>31-BAND EQ</span><i /><span>HEADPHONE</span><i /><span>OUTPUT</span></div>
 
           <div className="tr-audioEqScroll" aria-label="31 band equalizer">
             <div className="tr-audioEqBands tr-audioEqBands--31">
@@ -545,7 +572,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </div>
 
           <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
-            <label className="tr-audioPreamp"><span>PREAMP</span><input type="range" min="-12" max="12" step="0.5" value={player.preampDb} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} /><strong>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</strong></label>
+            <label className="tr-audioPreamp"><span>VOLUME</span><input type="range" min="0" max="100" step="1" value={Math.round(((player.preampDb + 12) / 24) * 100)} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp((Number(event.target.value) / 100) * 24 - 12), true)} /><strong>{Math.round(((player.preampDb + 12) / 24) * 100)}%</strong></label>
             <div className="tr-audioEqQuickActions"><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("flat"), true)}>FLAT</button><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("power"), true)}>POWER TRAINING</button></div>
           </div>
 
@@ -558,7 +585,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </div>
 
           <section className="tr-headphoneProcessor">
-            <header><div><span className="tr-audioEyebrow">HEADPHONE IMMERSION</span><strong>Virtual soundstage and natural crossfeed</strong></div><label><span>MODE</span><select value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{Object.entries(MUSIC_HEADPHONE_MODES).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
+            <header><div><strong>Headphone Immersion</strong></div><label><span>MODE</span><select value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
             <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
             <div className="tr-headphoneControls">
               <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneWidth(Number(event.target.value)))} /></label>
@@ -785,6 +812,158 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         /* Active-workout coach decision gets one dominant, unmistakable action. */
         .tr-previousPerformance .tr-progressionCell--action{grid-column:1/-1!important;padding:16px 18px!important;border:1px solid rgba(81,199,237,.28)!important;border-radius:10px!important;background:linear-gradient(180deg,rgba(10,42,54,.92),rgba(4,18,25,.98))!important;box-shadow:inset 4px 0 #46d1f5!important}.tr-previousPerformance .tr-progressionCell--action .tr-kicker{color:#8edff7!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.14em!important}.tr-previousPerformance .tr-progressionAction{display:block!important;margin-top:5px!important;color:#fff!important;font-size:clamp(22px,3vw,34px)!important;line-height:1.04!important;font-weight:1000!important;letter-spacing:-.025em!important;text-shadow:0 2px 12px rgba(0,0,0,.55)!important}.tr-previousPerformance--increase .tr-progressionCell--action{border-color:rgba(75,224,155,.38)!important;box-shadow:inset 4px 0 #4bdf9b!important}.tr-previousPerformance--review .tr-progressionCell--action{border-color:rgba(255,174,76,.40)!important;box-shadow:inset 4px 0 #f1aa4e!important}.tr-previousPerformance--repeat .tr-progressionCell--action{border-color:rgba(80,200,239,.36)!important;box-shadow:inset 4px 0 #50c8ef!important}.tr-previousPerformance button,.tr-progressionActions button{color:#fff!important;font-weight:950!important}.tr-progressionGrid strong,.tr-progressionGrid p{color:#eef9fd!important}
         @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:30px minmax(0,1fr)!important;min-height:124px!important}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:78px 11px 9px!important}.tr-audioDeck--pro7 .tr-rta10Grid{gap:3px!important;padding:8px 5px 5px!important}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5.2px!important}.tr-audioDeck--pro7 .tr-rta10Band>small{font-size:4.5px!important}.tr-previousPerformance .tr-progressionCell--action{padding:13px!important}.tr-previousPerformance .tr-progressionAction{font-size:22px!important}.tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{min-height:42px!important;color:#fff!important}}
+        /* AUG 9 COMPACT PLAYER + TRUE SEGMENTED RTA */
+        .tr-audioDeck--pro7{min-width:0!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:46px minmax(0,1fr) minmax(142px,168px) max-content!important;gap:8px!important;padding:8px 10px!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioArtwork{width:46px!important;height:46px!important;min-width:46px!important;min-height:46px!important;max-width:46px!important;max-height:46px!important;border-radius:8px!important;overflow:hidden!important;align-self:center!important}
+        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity{padding:0!important;align-self:center!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity .tr-audioEyebrow{font-size:6.5px!important;line-height:1.1!important;letter-spacing:.12em!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity strong{margin-top:2px!important;color:#fff!important;font-size:13px!important;line-height:1.15!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity small{margin-top:2px!important;color:#afc5ce!important;font-size:7.5px!important;line-height:1.2!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector{max-width:168px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector>span{font-size:6px!important;color:#8aa7b2!important;letter-spacing:.1em!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:32px!important;min-height:32px!important;padding:0 28px 0 9px!important;color:#f8fdff!important;font-size:8px!important;font-weight:900!important;border-radius:7px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector small{display:none!important}
+        .tr-audioDeck--pro7 .tr-audioTopButtons{gap:6px!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{height:34px!important;min-height:34px!important;border-radius:7px!important;padding:0 10px!important;font-size:7.5px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.075em!important;color:#fff!important;background:linear-gradient(180deg,#0b2834,#06151d)!important;border:1px solid rgba(86,196,232,.34)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 4px 12px rgba(0,0,0,.25)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:14px!important;height:14px!important}
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{min-width:78px!important;background:linear-gradient(180deg,#101d25,#071117)!important;border-color:rgba(170,213,228,.25)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle:hover,.tr-audioDeck--pro7 .tr-audioLibraryButton:hover{border-color:rgba(92,219,255,.64)!important;background:linear-gradient(180deg,#0d3a4a,#08222c)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle.is-active{background:linear-gradient(180deg,#0d465a,#082c39)!important;border-color:rgba(86,222,255,.75)!important;box-shadow:inset 0 -2px #50d9fb,0 0 14px rgba(66,204,241,.12)!important}
+        .tr-audioDeck--pro7 .tr-audioTelemetry{margin:3px 10px 0!important;padding:5px 8px!important;min-height:27px!important;gap:9px!important;font-size:6.5px!important}
+        .tr-audioDeck--pro7 .tr-dspHealth{min-height:24px!important;font-size:6.5px!important;color:#d7e9ef!important}
+        .tr-audioDeck--pro7 .tr-rta10{margin:6px 10px 5px!important;border-radius:7px!important}
+        .tr-audioDeck--pro7 .tr-rta10Head{height:26px!important;padding:0 9px!important;font-size:6.5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:35px minmax(0,1fr)!important;min-height:126px!important;background:linear-gradient(to top,rgba(116,178,199,.055) 1px,transparent 1px)!important;background-size:100% 20%!important}
+        .tr-audioDeck--pro7 .tr-rta10Scale{padding:7px 6px 24px 0!important;font-size:5.7px!important;color:#849ba4!important}
+        .tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 9px 6px!important;gap:5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:82px 11px 9px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Meter{position:relative!important;padding:4px!important;border-radius:3px!important;background:#03090d!important;border:1px solid rgba(116,175,196,.13)!important;box-shadow:inset 0 0 16px rgba(0,0,0,.68)!important;overflow:visible!important}
+        .tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{display:none!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments{height:100%!important;display:flex!important;flex-direction:column-reverse!important;justify-content:space-between!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i{display:block!important;flex:1 1 0!important;min-height:1px!important;border-radius:1px!important;background:#0a1820!important;border:1px solid rgba(105,162,182,.055)!important;box-shadow:none!important;transition:background 54ms linear,box-shadow 54ms linear,border-color 54ms linear!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-normal{background:#25b9df!important;border-color:rgba(85,223,255,.38)!important;box-shadow:0 0 5px rgba(45,191,228,.18)!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-warm{background:#dfa73e!important;border-color:rgba(255,207,105,.38)!important;box-shadow:0 0 5px rgba(223,167,62,.18)!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-hot{background:#e86155!important;border-color:rgba(255,125,110,.44)!important;box-shadow:0 0 5px rgba(232,97,85,.22)!important}
+        .tr-audioDeck--pro7 .tr-rta10Peak{left:8%!important;right:8%!important;height:1px!important;background:#f7fdff!important;opacity:.85!important;box-shadow:0 0 4px rgba(222,250,255,.45)!important;transition:bottom 64ms linear!important}
+        .tr-audioDeck--pro7 .tr-rta10Band strong{color:#e3f0f4!important;font-size:6.1px!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-rta10Band>small{color:#8298a1!important;font-size:5px!important;font-weight:850!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{margin:3px 10px!important;min-height:25px!important}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:2px 10px!important;padding:6px 0!important}
+        .tr-audioDeck--pro7 .tr-audioControls{margin:2px 10px 8px!important;gap:8px!important}
+        .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.9)!important}
+
+        @media(max-width:700px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:44px minmax(0,1fr) 72px 82px!important;grid-template-rows:44px 34px!important;gap:6px!important;padding:7px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{grid-column:1!important;grid-row:1!important;width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;max-width:44px!important;max-height:44px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2/5!important;grid-row:1!important;align-self:center!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:12.5px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity small{font-size:7.4px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/3!important;grid-row:2!important;max-width:none!important;width:100%!important;align-self:center!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector>span{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:34px!important;min-height:34px!important;font-size:7.6px!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:3/5!important;grid-row:2!important;width:100%!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:5px!important;min-width:0!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{width:100%!important;min-width:0!important;height:34px!important;min-height:34px!important;padding:0 5px!important;font-size:6.5px!important;letter-spacing:.055em!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:12px!important;height:12px!important}
+          .tr-audioDeck--pro7 .tr-audioTelemetry{margin:3px 7px 0!important;display:flex!important;flex-wrap:wrap!important;gap:5px 8px!important;padding:5px 7px!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-dspHealth{margin-left:auto!important;min-height:20px!important;font-size:5.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10{margin:5px 7px 4px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head{height:24px!important;padding:0 7px!important;font-size:5.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none!important}
+          .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr)!important;min-height:98px!important}
+          .tr-audioDeck--pro7 .tr-rta10Scale{padding:6px 4px 22px 0!important;font-size:4.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{padding:6px 4px 4px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:62px 10px 8px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Meter{padding:3px 2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Segments{gap:1px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5.1px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band>small{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{margin:2px 7px!important;min-height:22px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:1px 7px!important;padding:4px 0!important}
+          .tr-audioDeck--pro7 .tr-audioControls{margin:1px 7px 6px!important;grid-template-columns:auto minmax(0,1fr) auto!important;gap:5px!important}
+          .tr-audioDeck--pro7 .tr-audioModeButton{width:auto!important;min-width:54px!important;padding:0 7px!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-audioTransport{grid-row:auto!important;gap:3px!important}
+          .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.82)!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:5px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-height:31px!important;font-size:6.2px!important}
+        }
+        @media(max-width:360px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:42px minmax(0,1fr)!important;grid-template-rows:42px 34px 34px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;max-width:42px!important;max-height:42px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/-1!important;grid-row:2!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:1/-1!important;grid-row:3!important}
+        }
+        /* Global chrome cleanup: the mini player itself links to Music. */
+        .tr-appHeaderButton.is-music{display:none!important}
+        .tr-appHeaderButton{color:#fff!important;font-weight:900!important}
+
+        /* AUG 9 FINAL COMPACT PLAYER + READABILITY */
+        .tr-audioDeck--pro7{overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:58px minmax(170px,1fr) minmax(160px,190px) 108px!important;grid-template-rows:58px!important;align-items:center!important;gap:10px!important;padding:9px 10px 7px!important}
+        .tr-audioDeck--pro7 .tr-audioArtwork{width:58px!important;height:58px!important;min-width:58px!important;min-height:58px!important;max-width:58px!important;max-height:58px!important;border-radius:9px!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity{min-width:0!important;overflow:hidden!important;padding:0 2px!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity strong{display:block!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;font-size:16px!important;line-height:1.15!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity small{display:block!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;margin-top:5px!important;font-size:11px!important;line-height:1.2!important;color:#c7d8df!important}
+        .tr-audioDeck--pro7 .tr-audioEyebrow{margin-bottom:4px!important;font-size:9px!important;color:#79dfff!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector{width:100%!important;max-width:190px!important;gap:4px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector>span{font-size:9px!important;color:#a9c4ce!important;letter-spacing:.08em!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector select{width:100%!important;height:38px!important;min-height:38px!important;padding:0 30px 0 10px!important;border-radius:9px!important;color:#fff!important;font-size:11px!important;font-weight:900!important}
+        .tr-audioDeck--pro7 .tr-audioTopButtons{display:block!important;min-width:0!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle{width:100%!important;min-width:0!important;height:40px!important;min-height:40px!important;padding:0 12px!important;border-radius:9px!important;font-size:11px!important;letter-spacing:.05em!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:16px!important;height:16px!important}
+        .tr-audioDeck--pro7 .tr-rta10{margin:4px 10px 3px!important;border-radius:8px!important}
+        .tr-audioDeck--pro7 .tr-rta10Head{display:none!important}
+        .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:32px minmax(0,1fr)!important;min-height:100px!important;background-size:100% 20%!important}
+        .tr-audioDeck--pro7 .tr-rta10Scale{padding:6px 5px 18px 0!important;font-size:8px!important;color:#9db2bb!important}
+        .tr-audioDeck--pro7 .tr-rta10Grid{padding:7px 8px 5px!important;gap:5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:67px 14px 10px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:8px!important;color:#f2f8fa!important}
+        .tr-audioDeck--pro7 .tr-rta10Band>small{font-size:7px!important;color:#9aadb5!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{margin:2px 10px!important;min-height:28px!important;font-size:10px!important;color:#dce9ee!important}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:1px 10px!important;padding:4px 0 5px!important;gap:10px!important}
+        .tr-audioDeck--pro7 .tr-mainPreamp>span{font-size:9px!important;color:#c5d8df!important}
+        .tr-audioDeck--pro7 .tr-mainPreamp>strong{font-size:11px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-trackPreference button{min-height:35px!important;font-size:10px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioControls{margin:0 10px 7px!important;gap:7px!important}
+        .tr-audioDeck--pro7 .tr-audioModeButton{min-height:36px!important;font-size:9px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:8px!important;color:#dce8ed!important}
+        @media(max-width:700px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:50px minmax(0,1fr) 96px!important;grid-template-rows:50px 38px!important;gap:7px!important;padding:7px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{grid-column:1!important;grid-row:1!important;width:50px!important;height:50px!important;min-width:50px!important;min-height:50px!important;max-width:50px!important;max-height:50px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2/4!important;grid-row:1!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:14px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity small{font-size:10px!important;margin-top:3px!important}
+          .tr-audioDeck--pro7 .tr-audioEyebrow{font-size:8px!important;margin-bottom:2px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/3!important;grid-row:2!important;max-width:none!important;display:grid!important;grid-template-columns:auto minmax(0,1fr)!important;align-items:center!important;gap:7px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector>span{display:block!important;font-size:8px!important;white-space:nowrap!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:36px!important;min-height:36px!important;font-size:10px!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:3!important;grid-row:2!important;width:100%!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle{height:36px!important;min-height:36px!important;padding:0 7px!important;font-size:9px!important}
+          .tr-audioDeck--pro7 .tr-rta10{margin:4px 7px 2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:24px minmax(0,1fr)!important;min-height:79px!important}
+          .tr-audioDeck--pro7 .tr-rta10Scale{padding:4px 3px 17px 0!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{padding:5px 3px 3px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:49px 12px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band>small{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{margin:1px 7px!important;min-height:25px!important;font-size:9px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:0 7px!important;padding:3px 0!important;grid-template-columns:minmax(0,1fr) auto!important}
+          .tr-audioDeck--pro7 .tr-mainPreamp>span{font-size:8px!important}.tr-audioDeck--pro7 .tr-mainPreamp>strong{font-size:10px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-height:32px!important;font-size:8px!important;padding:0 7px!important}
+          .tr-audioDeck--pro7 .tr-audioControls{margin:0 7px 5px!important;gap:4px!important}
+          .tr-audioDeck--pro7 .tr-audioModeButton{min-width:50px!important;min-height:33px!important;padding:0 5px!important;font-size:7.5px!important}
+          .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.78)!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:6.5px!important}
+        }
+        @media(max-width:390px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:48px minmax(0,1fr) 88px!important;grid-template-rows:48px 36px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{width:48px!important;height:48px!important;min-width:48px!important;min-height:48px!important;max-width:48px!important;max-height:48px!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle{font-size:8px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button span{display:none!important}
+        }
       `}</style>
     </section>
   );
