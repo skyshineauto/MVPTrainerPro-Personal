@@ -15,14 +15,23 @@ type ProgramBlockRow = {
   weeks: number | null;
   created_at: string | null;
   status?: string | null;
+  intake_snapshot_id?: string | null;
+};
+
+type IntakeSnapshotRow = {
+  id: string;
+  constraints?: any;
+  symptoms?: any;
+  aesthetic_interests?: any;
 };
 
 type ProgramView = ProgramBlockRow & {
   label: string;
   shortLabel: string;
   purpose: string;
+  programType: string;
+  equipment: string;
   isActive: boolean;
-  ordinal: number;
 };
 
 type ScheduledSessionRow = {
@@ -89,6 +98,7 @@ type ExerciseDetail = {
 
 type HistoryRow = {
   id: string;
+  scheduledSessionId: string | null;
   completedAt: string;
   templateName: string;
   programId: string | null;
@@ -104,6 +114,33 @@ type HistoryRow = {
   notes: string | null;
   postDifficulty: string | null;
   exercises: ExerciseDetail[];
+};
+
+type EditSetDraft = {
+  workoutExerciseId: string;
+  setIndex: number;
+  weight: string;
+  reps: string;
+  rir: string;
+  pain: string;
+  form: string;
+};
+
+type EditExerciseDraft = {
+  workoutExerciseId: string;
+  name: string;
+  pain: string;
+  sets: EditSetDraft[];
+};
+
+type EditSessionDraft = {
+  workoutId: string;
+  scheduledSessionId: string | null;
+  workoutName: string;
+  durationMinutes: string;
+  completedLocal: string;
+  programId: string;
+  exercises: EditExerciseDraft[];
 };
 
 type ExerciseTrend = {
@@ -144,40 +181,93 @@ function goalLabel(value: string | null | undefined) {
   if (["lose_weight", "cut"].includes(key)) return "Cut";
   if (key === "strength") return "Strength";
   if (key === "fitness") return "Fitness";
-  if (/posture|rehab|mobility|corrective/.test(key)) return "Posture Rebuild";
   return titleCase(value) || "Training";
 }
 
-function programPurpose(block: ProgramBlockRow) {
-  const mode = String(block.goal_mode ?? "").toLowerCase();
-  const goal = String(block.goal ?? "").toLowerCase();
-  if (/symptom|posture|rehab|corrective|mobility/.test(`${mode} ${goal}`)) return "Posture Rebuild";
-  return goalLabel(block.goal);
+function symptomFromSnapshot(snapshot: IntakeSnapshotRow | null | undefined) {
+  const symptoms = snapshot?.symptoms;
+  if (!symptoms || typeof symptoms !== "object") return "Targeted Training";
+  const active = Object.entries(symptoms).find(([, value]) => Boolean(value))?.[0] ?? "";
+  const map: Record<string, string> = {
+    posture: "Posture",
+    shoulder_pain: "Shoulder",
+    back_pain: "Back",
+    knee_pain: "Knee",
+    elbow_wrist: "Elbow / Wrist",
+  };
+  return map[active] ?? (titleCase(active) || "Targeted Training");
 }
 
-function buildPrograms(blocks: ProgramBlockRow[]) {
+function programTypeLabel(goalMode: string | null | undefined) {
+  const mode = String(goalMode ?? "").toLowerCase();
+  return /symptom|target|corrective|posture|rehab/.test(mode)
+    ? "Targeted Program"
+    : "Goal Program";
+}
+
+function equipmentLabel(snapshot: IntakeSnapshotRow | null | undefined) {
+  const equipment = snapshot?.constraints?.equipment;
+  if (!Array.isArray(equipment) || !equipment.length) return "Equipment";
+  const labels = equipment
+    .map((value: unknown) => String(value ?? "").toLowerCase())
+    .filter(Boolean)
+    .map((value: string) => value === "gym" ? "Gym" : value === "home" ? "Home" : titleCase(value));
+  return Array.from(new Set(labels)).join(" + ") || "Equipment";
+}
+
+function buildPrograms(
+  blocks: ProgramBlockRow[],
+  intakeMap: Map<string, IntakeSnapshotRow>
+) {
   const ordered = [...blocks].sort((a, b) => {
     const left = ms(a.created_at || a.start_date);
     const right = ms(b.created_at || b.start_date);
     return (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
   });
-  const purposeCounts = new Map<string, number>();
+
   return ordered.map((block): ProgramView => {
-    const purpose = programPurpose(block);
-    const ordinal = (purposeCounts.get(purpose) ?? 0) + 1;
-    purposeCounts.set(purpose, ordinal);
+    const intake = block.intake_snapshot_id
+      ? intakeMap.get(block.intake_snapshot_id) ?? null
+      : null;
+    const programType = programTypeLabel(block.goal_mode);
+    const isTargeted = programType === "Targeted Program";
+    const purpose = isTargeted ? symptomFromSnapshot(intake) : goalLabel(block.goal);
+    const equipment = equipmentLabel(intake);
     const isActive = String(block.status ?? "").toLowerCase() === "active";
-    const shortLabel = `${purpose} • Block ${ordinal}`;
     return {
       ...block,
       purpose,
-      ordinal,
+      programType,
+      equipment,
       isActive,
-      shortLabel,
-      label: `${shortLabel}${isActive ? " • ACTIVE" : ""}`,
+      shortLabel: purpose,
+      label: `${purpose} • ${programType}${isActive ? " • ACTIVE" : ""}`,
     };
   });
 }
+
+function cleanWorkoutName(...values: Array<string | null | undefined>) {
+  for (const raw of values) {
+    const value = String(raw ?? "").trim();
+    if (!value) continue;
+
+    const canonical = value.match(/\b(upper|lower)\s*([12])\b/i);
+    if (canonical) return `${titleCase(canonical[1])} ${canonical[2]}`;
+
+    const parts = value
+      .split(/[•|]/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => !/^\d{4}-\d{2}-\d{2}/.test(part))
+      .filter((part) => !/^(future|past|scheduled|completed|active)$/i.test(part));
+    const deduped = parts.filter(
+      (part, index) => parts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index
+    );
+    if (deduped.length) return titleCase(deduped[0]);
+  }
+  return "Workout";
+}
+
 
 function prettyMuscle(value: string) {
   const key = titleCase(value);
@@ -231,6 +321,20 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor((total % 3600) / 60);
   if (hours) return `${hours}H${minutes ? ` ${minutes}M` : ""}`;
   return `${Math.max(1, minutes)} MIN`;
+}
+
+function toDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function parseOptionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const number = Number(trimmed);
+  return Number.isFinite(number) ? number : null;
 }
 
 function formatPct(value: number | null) {
@@ -307,6 +411,9 @@ export function ProgressPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<EditSessionDraft | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearText, setClearText] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
@@ -322,12 +429,23 @@ export function ProgressPage() {
 
       const { data: blockData, error: blockError } = await supabase
         .from("program_blocks")
-        .select("id,goal,goal_mode,start_date,end_date,weeks,created_at,status")
+        .select("id,goal,goal_mode,start_date,end_date,weeks,created_at,status,intake_snapshot_id")
         .eq("user_id", userId)
         .order("created_at", { ascending: true });
       if (blockError) throw blockError;
 
-      const builtPrograms = buildPrograms((blockData ?? []) as ProgramBlockRow[]);
+      const programBlocks = (blockData ?? []) as ProgramBlockRow[];
+      const intakeIds = unique(programBlocks.map((block) => block.intake_snapshot_id ?? ""));
+      const intakeMap = new Map<string, IntakeSnapshotRow>();
+      if (intakeIds.length) {
+        const { data: intakeData } = await supabase
+          .from("intake_snapshots")
+          .select("id,constraints,symptoms,aesthetic_interests")
+          .in("id", intakeIds);
+        for (const row of (intakeData ?? []) as IntakeSnapshotRow[]) intakeMap.set(row.id, row);
+      }
+
+      const builtPrograms = buildPrograms(programBlocks, intakeMap);
       setPrograms(builtPrograms);
       const active = [...builtPrograms].reverse().find((program) => program.isActive) ?? builtPrograms.at(-1) ?? null;
       setSelectedProgramId((current) => {
@@ -438,11 +556,11 @@ export function ProgressPage() {
         const session = workout.scheduled_session_id ? sessionMap.get(workout.scheduled_session_id) ?? null : null;
         const program = session?.program_block_id ? programMap.get(session.program_block_id) ?? null : null;
         const summary = workout.workout_summary as any;
-        const templateName =
-          (session?.template_id ? templateMap.get(session.template_id) : null) ||
-          (typeof summary?.template_name === "string" && summary.template_name.trim() ? summary.template_name.trim() : null) ||
-          titleCase(session?.session_type) ||
-          "Workout";
+        const templateName = cleanWorkoutName(
+          session?.session_type,
+          session?.template_id ? templateMap.get(session.template_id) : null,
+          typeof summary?.template_name === "string" ? summary.template_name : null
+        );
         const exercises = (detailsByWorkout.get(workout.id) ?? []).slice().sort((a, b) => a.orderIndex - b.orderIndex);
         const loggedSets = exercises.flatMap((exercise) => exercise.sets.filter((set) => set.reps > 0));
         const painValues = [
@@ -451,6 +569,7 @@ export function ProgressPage() {
         ].filter((value): value is number => value != null && Number.isFinite(value));
         return {
           id: workout.id,
+          scheduledSessionId: workout.scheduled_session_id,
           completedAt: workout.completed_at,
           templateName,
           programId: program?.id ?? null,
@@ -484,6 +603,8 @@ export function ProgressPage() {
   useEffect(() => {
     setHistoryVisible(HISTORY_BATCH);
     setDetailId(null);
+    setEditId(null);
+    setEditDraft(null);
   }, [selectedProgramId, range]);
 
   const selectedProgram = useMemo(
@@ -553,6 +674,142 @@ export function ProgressPage() {
   const visibleHistory = scopedHistory.slice(0, historyVisible);
   const detail = history.find((row) => row.id === detailId) ?? null;
   const deleting = history.find((row) => row.id === deleteId) ?? null;
+  const editing = history.find((row) => row.id === editId) ?? null;
+
+  function openEditSession(row: HistoryRow) {
+    setDetailId(null);
+    setEditId(row.id);
+    setEditDraft({
+      workoutId: row.id,
+      scheduledSessionId: row.scheduledSessionId,
+      workoutName: row.templateName,
+      durationMinutes: String(Math.max(1, Math.round(row.workoutSeconds / 60) || 1)),
+      completedLocal: toDateTimeLocal(row.completedAt),
+      programId: row.programId ?? "",
+      exercises: row.exercises.map((exercise) => ({
+        workoutExerciseId: exercise.workoutExerciseId,
+        name: exercise.name,
+        pain: exercise.pain == null ? "" : String(exercise.pain),
+        sets: exercise.sets.map((set) => ({
+          workoutExerciseId: exercise.workoutExerciseId,
+          setIndex: set.set_index,
+          weight: String(set.weight ?? 0),
+          reps: String(set.reps ?? 0),
+          rir: set.rir == null ? "" : String(set.rir),
+          pain: set.pain == null ? "" : String(set.pain),
+          form: set.form == null ? "" : String(set.form),
+        })),
+      })),
+    });
+  }
+
+  function updateEditExercisePain(workoutExerciseId: string, value: string) {
+    setEditDraft((current) => current ? {
+      ...current,
+      exercises: current.exercises.map((exercise) =>
+        exercise.workoutExerciseId === workoutExerciseId ? { ...exercise, pain: value } : exercise
+      ),
+    } : current);
+  }
+
+  function updateEditSet(
+    workoutExerciseId: string,
+    setIndex: number,
+    field: keyof Pick<EditSetDraft, "weight" | "reps" | "rir" | "pain" | "form">,
+    value: string
+  ) {
+    setEditDraft((current) => current ? {
+      ...current,
+      exercises: current.exercises.map((exercise) =>
+        exercise.workoutExerciseId !== workoutExerciseId ? exercise : {
+          ...exercise,
+          sets: exercise.sets.map((set) =>
+            set.setIndex === setIndex ? { ...set, [field]: value } : set
+          ),
+        }
+      ),
+    } : current);
+  }
+
+  async function saveEditedSession() {
+    if (!editing || !editDraft || editBusy) return;
+    const durationMinutes = Number(editDraft.durationMinutes);
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > 1440) {
+      setError("Enter a session duration between 1 and 1,440 minutes.");
+      return;
+    }
+    const completedDate = new Date(editDraft.completedLocal);
+    if (!editDraft.completedLocal || Number.isNaN(completedDate.getTime())) {
+      setError("Enter a valid completed date and time.");
+      return;
+    }
+
+    setEditBusy(true);
+    setError("");
+    try {
+      const { data: auth, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!auth.user) throw new Error("Sign in first.");
+
+      const { error: workoutError } = await supabase
+        .from("workouts")
+        .update({
+          active_seconds: Math.round(durationMinutes * 60),
+          completed_at: completedDate.toISOString(),
+        })
+        .eq("id", editing.id)
+        .eq("user_id", auth.user.id);
+      if (workoutError) throw workoutError;
+
+      if (
+        editDraft.scheduledSessionId &&
+        editDraft.programId &&
+        editDraft.programId !== (editing.programId ?? "")
+      ) {
+        const { error: programError } = await supabase
+          .from("scheduled_sessions")
+          .update({ program_block_id: editDraft.programId })
+          .eq("id", editDraft.scheduledSessionId)
+          .eq("user_id", auth.user.id);
+        if (programError) throw programError;
+      }
+
+      for (const exercise of editDraft.exercises) {
+        const exercisePain = parseOptionalNumber(exercise.pain);
+        const { error: exerciseError } = await supabase
+          .from("workout_exercises")
+          .update({ pain: exercisePain })
+          .eq("id", exercise.workoutExerciseId)
+          .eq("workout_id", editing.id);
+        if (exerciseError) throw exerciseError;
+
+        for (const set of exercise.sets) {
+          const weight = Math.max(0, Number(set.weight) || 0);
+          const reps = Math.max(0, Math.round(Number(set.reps) || 0));
+          const rir = parseOptionalNumber(set.rir);
+          const pain = parseOptionalNumber(set.pain);
+          const form = parseOptionalNumber(set.form);
+          const { error: setError } = await supabase
+            .from("workout_sets")
+            .update({ weight, reps, rir, pain, form })
+            .eq("workout_exercise_id", set.workoutExerciseId)
+            .eq("set_index", set.setIndex);
+          if (setError) throw setError;
+        }
+      }
+
+      const nextProgramId = editDraft.programId || selectedProgramId;
+      setEditId(null);
+      setEditDraft(null);
+      setMessage("✓ SESSION UPDATED");
+      await loadAll(nextProgramId === "all" ? selectedProgramId : nextProgramId);
+      window.setTimeout(() => setMessage((current) => current === "✓ SESSION UPDATED" ? "" : current), 2000);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update this session.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   const volumeRows = useMemo(
     () => scopedHistory.slice(0, 10).reverse(),
@@ -677,7 +934,7 @@ export function ProgressPage() {
           <Icon name="program" />
           <div><span>VIEWING PROGRAM</span><strong>{currentProgramText}</strong><small>{rangeName(range)} • {scopedHistory.length} completed session{scopedHistory.length === 1 ? "" : "s"}</small></div>
         </div>
-        {selectedProgram ? <div className="prx-programMeta"><div><span>PURPOSE</span><strong>{selectedProgram.purpose}</strong></div><div><span>START</span><strong>{selectedProgram.start_date ? shortDate(selectedProgram.start_date) : "—"}</strong></div><div><span>LENGTH</span><strong>{selectedProgram.weeks ? `${selectedProgram.weeks} WKS` : "—"}</strong></div><div className={selectedProgram.isActive ? "is-active" : ""}><span>STATUS</span><strong>{selectedProgram.isActive ? "ACTIVE" : "PAST"}</strong></div></div> : <div className="prx-programMeta"><div><span>SCOPE</span><strong>EVERY PROGRAM</strong></div><div><span>PROGRAMS</span><strong>{programs.length}</strong></div></div>}
+        {selectedProgram ? <div className="prx-programMeta"><div><span>PROGRAM TYPE</span><strong>{selectedProgram.programType}</strong></div><div><span>EQUIPMENT</span><strong>{selectedProgram.equipment}</strong></div><div><span>START</span><strong>{selectedProgram.start_date ? shortDate(selectedProgram.start_date) : "—"}</strong></div><div className={selectedProgram.isActive ? "is-active" : ""}><span>STATUS</span><strong>{selectedProgram.isActive ? "ACTIVE" : "PAST"}</strong></div></div> : <div className="prx-programMeta"><div><span>SCOPE</span><strong>EVERY PROGRAM</strong></div><div><span>PROGRAMS</span><strong>{programs.length}</strong></div></div>}
       </section>
 
       <section className="prx-kpis">
@@ -710,12 +967,12 @@ export function ProgressPage() {
         <div className="prx-historyList">
           {visibleHistory.map((row) => <article key={row.id} className="prx-historyRow">
             <div className="prx-historyMain">
-              <div className="prx-programBadge"><span>{row.programPurpose}</span><strong>{row.programLabel}</strong></div>
+              <div className="prx-programBadge"><span>{row.programPurpose.toUpperCase()}</span><strong>{row.programId ? programs.find((program) => program.id === row.programId)?.programType ?? "PROGRAM" : "LEGACY / UNASSIGNED"}</strong></div>
               <h3>{row.templateName}</h3>
               <p>{formatDate(row.completedAt)}</p>
               <div className="prx-historyMetrics"><span><b>{formatDuration(row.workoutSeconds)}</b> TIME</span><span><b>{formatNumber(row.volumeTotal)}</b> LB</span><span><b>{row.setsLogged}</b> SETS</span><span className={`is-${toneForPain(row.painMax)}`}><b>{row.painMax.toFixed(0)}</b> PAIN</span></div>
             </div>
-            <div className="prx-historyActions"><button type="button" onClick={() => setDetailId(row.id)}>VIEW DETAILS</button><button type="button" className="is-delete" onClick={() => setDeleteId(row.id)}><Icon name="trash" />DELETE SESSION</button></div>
+            <div className="prx-historyActions"><button type="button" onClick={() => setDetailId(row.id)}>VIEW DETAILS</button><button type="button" className="is-edit" onClick={() => openEditSession(row)}>EDIT SESSION</button><button type="button" className="is-delete" onClick={() => setDeleteId(row.id)}><Icon name="trash" />DELETE SESSION</button></div>
           </article>)}
         </div>
         {historyVisible < scopedHistory.length ? <button className="prx-loadMore" onClick={() => setHistoryVisible((value) => value + HISTORY_BATCH)}>LOAD MORE</button> : null}
@@ -730,7 +987,27 @@ export function ProgressPage() {
         <header><div><span>{detail.programLabel}</span><h2>{detail.templateName}</h2><p>{formatDate(detail.completedAt)}</p></div><button onClick={() => setDetailId(null)}>×</button></header>
         <div className="prx-detailSummary"><div><span>TIME</span><strong>{formatDuration(detail.workoutSeconds)}</strong></div><div><span>VOLUME</span><strong>{formatNumber(detail.volumeTotal)} LB</strong></div><div><span>SETS</span><strong>{detail.setsLogged}</strong></div><div><span>PAIN MAX</span><strong>{detail.painMax.toFixed(0)}/10</strong></div></div>
         <div className="prx-detailScroll">{detail.exercises.map((exercise) => <article className="prx-exerciseDetail" key={exercise.workoutExerciseId}><header><div><span>{exercise.primaryMuscles.join(" • ") || "EXERCISE"}</span><strong>{exercise.name}</strong></div>{exercise.pain != null ? <em>PAIN {exercise.pain}/10</em> : null}</header><div className="prx-setTable"><div className="prx-setHead"><span>SET</span><span>WEIGHT</span><span>REPS</span><span>RIR</span><span>FORM</span></div>{exercise.sets.map((set) => <div key={`${exercise.workoutExerciseId}-${set.set_index}`}><span>{set.set_index}</span><strong>{set.weight > 0 ? `${formatNumber(set.weight, set.weight % 1 ? 1 : 0)} LB` : "BW"}</strong><strong>{set.reps || "—"}</strong><span>{set.rir ?? "—"}</span><span>{set.form ?? "—"}</span></div>)}</div></article>)}</div>
-        <footer><button onClick={() => setDetailId(null)}>CLOSE</button><button className="is-delete" onClick={() => { setDeleteId(detail.id); setDetailId(null); }}>DELETE SESSION</button></footer>
+        <footer><button onClick={() => setDetailId(null)}>CLOSE</button><button className="is-edit" onClick={() => openEditSession(detail)}>EDIT SESSION</button><button className="is-delete" onClick={() => { setDeleteId(detail.id); setDetailId(null); }}>DELETE SESSION</button></footer>
+      </section></div> : null}
+
+      {editing && editDraft ? <div className="prx-modalBack" onMouseDown={() => !editBusy && (setEditId(null), setEditDraft(null))}><section className="prx-modal prx-editModal" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><span>EDIT COMPLETED SESSION</span><h2>{editing.templateName}</h2><p>Correct a logging mistake without deleting the workout.</p></div><button disabled={editBusy} onClick={() => { setEditId(null); setEditDraft(null); }}>×</button></header>
+        <div className="prx-editScroll">
+          <section className="prx-editBasics">
+            <label><span>SESSION DURATION</span><div className="prx-durationInput"><input type="number" min="1" max="1440" inputMode="numeric" value={editDraft.durationMinutes} onChange={(event) => setEditDraft((current) => current ? { ...current, durationMinutes: event.target.value } : current)} /><b>MINUTES</b></div><small>Correct the recorded session length when needed.</small></label>
+            <label><span>COMPLETED DATE / TIME</span><input type="datetime-local" value={editDraft.completedLocal} onChange={(event) => setEditDraft((current) => current ? { ...current, completedLocal: event.target.value } : current)} /></label>
+            <label><span>PROGRAM</span><select value={editDraft.programId} disabled={!editDraft.scheduledSessionId} onChange={(event) => setEditDraft((current) => current ? { ...current, programId: event.target.value } : current)}><option value="">Legacy / Unassigned</option>{[...programs].reverse().map((program) => <option key={program.id} value={program.id}>{program.label}</option>)}</select><small>{editDraft.scheduledSessionId ? "Moving a session changes the program totals it contributes to." : "This legacy workout is not linked to a scheduled session."}</small></label>
+          </section>
+          <section className="prx-editLog">
+            <div className="prx-editLogHead"><span>EXERCISE LOG</span><strong>Edit only values that were entered incorrectly.</strong></div>
+            {editDraft.exercises.map((exercise) => <article className="prx-editExercise" key={exercise.workoutExerciseId}>
+              <header><strong>{exercise.name}</strong><label><span>EXERCISE PAIN</span><input type="number" min="0" max="10" step="1" value={exercise.pain} onChange={(event) => updateEditExercisePain(exercise.workoutExerciseId, event.target.value)} placeholder="—" /></label></header>
+              <div className="prx-editSetHead"><span>SET</span><span>WEIGHT</span><span>REPS</span><span>RIR</span><span>PAIN</span><span>FORM</span></div>
+              {exercise.sets.map((set) => <div className="prx-editSet" key={`${set.workoutExerciseId}-${set.setIndex}`}><b>{set.setIndex}</b><input inputMode="decimal" value={set.weight} onChange={(event) => updateEditSet(set.workoutExerciseId,set.setIndex,"weight",event.target.value)} /><input inputMode="numeric" value={set.reps} onChange={(event) => updateEditSet(set.workoutExerciseId,set.setIndex,"reps",event.target.value)} /><input inputMode="decimal" value={set.rir} onChange={(event) => updateEditSet(set.workoutExerciseId,set.setIndex,"rir",event.target.value)} placeholder="—" /><input inputMode="decimal" value={set.pain} onChange={(event) => updateEditSet(set.workoutExerciseId,set.setIndex,"pain",event.target.value)} placeholder="—" /><input inputMode="decimal" value={set.form} onChange={(event) => updateEditSet(set.workoutExerciseId,set.setIndex,"form",event.target.value)} placeholder="—" /></div>)}
+            </article>)}
+          </section>
+        </div>
+        <footer><button disabled={editBusy} onClick={() => { setEditId(null); setEditDraft(null); }}>CANCEL</button><button className="is-primary" disabled={editBusy} onClick={() => void saveEditedSession()}>{editBusy ? "SAVING…" : "SAVE SESSION"}</button></footer>
       </section></div> : null}
 
       {deleting ? <div className="prx-modalBack" onMouseDown={() => !deleteBusy && setDeleteId(null)}><section className="prx-modal prx-confirm" onMouseDown={(event) => event.stopPropagation()}>
@@ -756,8 +1033,29 @@ export function ProgressPage() {
         .prx-trendGrid{padding:11px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.prx-trendGrid article{padding:12px;border:1px solid rgba(91,163,190,.12);border-radius:9px;background:#061219}.prx-trendTop{display:flex;justify-content:space-between;gap:10px}.prx-trendTop>div{min-width:0;display:grid;gap:3px}.prx-trendTop span{color:#67d6f4;font-size:6px;font-weight:1000;letter-spacing:.1em}.prx-trendTop strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:10px}.prx-trendTop em{align-self:start;padding:4px 6px;border-radius:5px;background:#101c22;color:#98abb3;font-size:7px;font-style:normal;font-weight:1000}.prx-trendTop em.is-up{background:#0d3023;color:#69e2aa}.prx-trendTop em.is-down{background:#331116;color:#ff858d}.prx-trendMetrics{margin-top:10px;display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(102,175,200,.09);border-bottom:1px solid rgba(102,175,200,.07)}.prx-trendMetrics>div{padding:8px 6px}.prx-trendMetrics>div+div{border-left:1px solid rgba(102,175,200,.08)}.prx-trendMetrics span{display:block;color:#657f89;font-size:5.5px;font-weight:900}.prx-trendMetrics strong{display:block;margin-top:4px;color:#edf8fc;font-size:9px}.prx-trendGrid article>small{display:block;margin-top:7px;color:#6c858f;font-size:6.5px}
         .prx-historyList{display:grid}.prx-historyRow{padding:13px 15px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;border-bottom:1px solid rgba(98,167,191,.09)}.prx-historyRow:last-child{border-bottom:0}.prx-historyMain{min-width:0}.prx-programBadge{display:flex;align-items:center;gap:8px;margin-bottom:6px}.prx-programBadge span{padding:4px 6px;border:1px solid rgba(76,203,242,.25);border-radius:4px;background:#082631;color:#76ddf8;font-size:6px;font-weight:1000;letter-spacing:.08em}.prx-programBadge strong{color:#96adb6;font-size:7px}.prx-historyMain h3{margin:0;color:#fff;font-size:15px}.prx-historyMain>p{margin:4px 0 0;color:#748d98;font-size:7px}.prx-historyMetrics{margin-top:9px;display:flex;gap:6px;flex-wrap:wrap}.prx-historyMetrics span{padding:5px 7px;border:1px solid rgba(95,165,189,.09);border-radius:5px;background:#071319;color:#839ba5;font-size:6px;font-weight:900}.prx-historyMetrics b{margin-right:3px;color:#eaf6fa;font-size:7px}.prx-historyMetrics .is-amber b{color:#efba71}.prx-historyMetrics .is-red b{color:#ff7f88}.prx-historyActions{display:flex;gap:7px}.prx-historyActions button,.prx-loadMore,.prx-dangerZone button,.prx-modal footer button{min-height:34px;padding:0 11px;border:1px solid rgba(101,178,205,.19);border-radius:7px;background:#081922;color:#f5fbfe;font-size:7px;font-weight:1000;letter-spacing:.05em}.prx-historyActions button:hover{border-color:rgba(77,205,245,.43);background:#0a2531}.prx-historyActions .is-delete,.prx-modal .is-delete{display:inline-flex;align-items:center;justify-content:center;gap:5px;border-color:rgba(255,84,96,.32);background:#2b0d12;color:#ffdfe1}.prx-historyActions .is-delete .prx-icon{width:13px;height:13px}.prx-loadMore{display:block;margin:11px auto 14px;min-width:150px}.prx-dangerZone{margin-top:12px;padding:13px 15px;display:flex;justify-content:space-between;align-items:center;gap:14px;border:1px solid rgba(255,83,94,.13);border-radius:10px;background:#0d0b0d}.prx-dangerZone>div{display:grid;gap:3px}.prx-dangerZone strong{color:#f5edef;font-size:10px}.prx-dangerZone small{color:#786c70;font-size:7px}.prx-dangerZone button{border-color:rgba(255,83,94,.24);background:#240b10;color:#ffcdd1}
         .prx-modalBack{position:fixed;inset:0;z-index:10000;padding:16px;display:grid;place-items:center;background:rgba(0,4,7,.88);backdrop-filter:blur(10px)}.prx-modal{width:min(860px,100%);max-height:calc(100dvh - 32px);overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto;border:1px solid rgba(91,196,232,.31);border-radius:15px;background:linear-gradient(180deg,#0a202b,#040d12);box-shadow:0 30px 80px rgba(0,0,0,.7)}.prx-modal>header{padding:14px 16px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid rgba(91,170,198,.12)}.prx-modal>header span{color:#66d9f7;font-size:7px;font-weight:1000;letter-spacing:.12em}.prx-modal>header h2{margin:4px 0 2px;color:#fff;font-size:21px}.prx-modal>header p{margin:0;color:#819aa4;font-size:7px}.prx-modal>header>button{width:34px;height:34px;border:1px solid rgba(110,171,193,.16);border-radius:7px;background:#071219;color:#fff;font-size:19px}.prx-detailModal{grid-template-rows:auto auto minmax(0,1fr) auto}.prx-detailSummary{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(98,173,199,.1)}.prx-detailSummary>div{padding:10px 13px}.prx-detailSummary>div+div{border-left:1px solid rgba(98,173,199,.08)}.prx-detailSummary span{display:block;color:#6c8791;font-size:6px;font-weight:900}.prx-detailSummary strong{display:block;margin-top:4px;color:#fff;font-size:11px}.prx-detailScroll{min-height:0;overflow:auto;padding:10px}.prx-exerciseDetail{margin-bottom:8px;border:1px solid rgba(89,166,193,.12);border-radius:9px;background:#061219;overflow:hidden}.prx-exerciseDetail>header{padding:9px 11px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(89,166,193,.08)}.prx-exerciseDetail>header span{display:block;color:#66d5f3;font-size:6px;font-weight:900}.prx-exerciseDetail>header strong{display:block;margin-top:3px;color:#fff;font-size:10px}.prx-exerciseDetail>header em{color:#efa979;font-size:7px;font-style:normal;font-weight:900}.prx-setTable>div{display:grid;grid-template-columns:44px 1fr 1fr 1fr 1fr;padding:7px 10px;border-top:1px solid rgba(94,166,192,.06);text-align:center}.prx-setTable .prx-setHead{background:#071820;color:#6f8993;font-size:6px;font-weight:900}.prx-setTable span,.prx-setTable strong{color:#aec3cb;font-size:7px}.prx-setTable strong{color:#fff}.prx-modal>footer{padding:10px;display:flex;justify-content:flex-end;gap:7px;border-top:1px solid rgba(91,168,195,.11);background:#06151c}.prx-confirm{width:min(520px,100%);grid-template-rows:auto auto auto}.prx-confirm>div{padding:17px}.prx-confirm>div strong{color:#fff;font-size:13px}.prx-confirm>div p{margin:7px 0 0;color:#a0b5bd;font-size:9px;line-height:1.55}.prx-confirm input{width:100%;height:41px;margin-top:12px;padding:0 11px;border:1px solid rgba(255,99,109,.28);border-radius:7px;background:#100b0d;color:#fff;outline:none}.prx-confirm input:focus{border-color:#ff6670}
+        /* AUG 9 READABILITY + EDIT SESSION */
+        .prx-page{width:min(1240px,calc(100% - 28px))!important;color:#f5fbfe!important}
+        .prx-heroText>span,.prx-sectionHead span,.prx-programIdentity span,.prx-dangerZone span{font-size:9px!important;color:#8ce5fb!important}
+        .prx-hero p{font-size:12px!important;line-height:1.55!important;color:#c0d1d8!important}
+        .prx-controls label>span{font-size:8px!important;color:#aac0c9!important}.prx-controls select{height:44px!important;font-size:11px!important}
+        .prx-programIdentity strong{font-size:21px!important;color:#fff!important}.prx-programIdentity small{font-size:10px!important;color:#b5c9d1!important}
+        .prx-programMeta span{font-size:7.5px!important;color:#92aeb9!important}.prx-programMeta strong{font-size:11px!important;color:#fff!important}
+        .prx-kpis article>div>span{font-size:8px!important;color:#9eb7c1!important}.prx-kpis article>div>strong{font-size:22px!important;color:#fff!important}.prx-kpis article>div>small{font-size:8px!important;color:#9db3bc!important}
+        .prx-sectionHead h2{font-size:25px!important}.prx-sectionHead>small{font-size:8px!important;color:#91a8b1!important}
+        .prx-empty{font-size:11px!important;color:#b3c7cf!important}
+        .prx-volumeCol>b{font-size:8px!important;color:#d3e1e6!important}.prx-volumeCol strong{font-size:8px!important;color:#eff8fb!important}.prx-volumeCol small{font-size:7px!important;color:#91a7b0!important}
+        .prx-trendTop span{font-size:8px!important}.prx-trendTop strong{font-size:13px!important}.prx-trendTop em{font-size:9px!important}.prx-trendMetrics span{font-size:7px!important;color:#91a9b2!important}.prx-trendMetrics strong{font-size:11px!important}.prx-trendGrid article>small{font-size:8px!important;color:#9fb5be!important}
+        .prx-programBadge span{font-size:8px!important;padding:5px 8px!important;color:#d9f7ff!important}.prx-programBadge strong{font-size:9px!important;color:#aebfc6!important}
+        .prx-historyMain h3{font-size:19px!important}.prx-historyMain>p{font-size:10px!important;color:#a8bdc5!important}.prx-historyMetrics span{font-size:8px!important;color:#a8bdc5!important;padding:6px 9px!important}.prx-historyMetrics b{font-size:9px!important;color:#fff!important}
+        .prx-historyActions{flex-wrap:wrap!important;justify-content:flex-end!important}.prx-historyActions button,.prx-loadMore,.prx-dangerZone button,.prx-modal footer button{min-height:38px!important;font-size:8.5px!important;color:#fff!important}.prx-historyActions .is-edit,.prx-modal .is-edit{border-color:rgba(74,205,247,.35)!important;background:linear-gradient(180deg,#0b3442,#071e28)!important;color:#fff!important}
+        .prx-modal>header span{font-size:8px!important}.prx-modal>header h2{font-size:24px!important}.prx-modal>header p{font-size:9px!important;color:#a9bdc5!important}.prx-detailSummary span{font-size:7px!important}.prx-detailSummary strong{font-size:13px!important}.prx-exerciseDetail>header span{font-size:7px!important}.prx-exerciseDetail>header strong{font-size:12px!important}.prx-exerciseDetail>header em{font-size:8px!important}.prx-setTable .prx-setHead{font-size:7px!important}.prx-setTable span,.prx-setTable strong{font-size:9px!important}
+        .prx-editModal{width:min(940px,100%)!important}.prx-editScroll{min-height:0;overflow:auto;padding:13px;display:grid;gap:12px}.prx-editBasics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}.prx-editBasics>label{min-width:0;padding:12px;border:1px solid rgba(96,177,206,.15);border-radius:9px;background:#06151c;display:grid;gap:7px}.prx-editBasics label>span,.prx-editLogHead span,.prx-editExercise header label span{color:#8cdff6;font-size:8px;font-weight:1000;letter-spacing:.1em}.prx-editBasics input,.prx-editBasics select,.prx-editExercise input,.prx-editSet input{width:100%;height:40px;min-width:0;padding:0 9px;border:1px solid rgba(108,182,207,.22);border-radius:7px;background:#041017;color:#fff;font-size:11px;font-weight:850;outline:none}.prx-editBasics input:focus,.prx-editBasics select:focus,.prx-editExercise input:focus,.prx-editSet input:focus{border-color:#4bd4f7;box-shadow:0 0 0 2px rgba(75,212,247,.08)}.prx-editBasics small{color:#9ab1ba;font-size:8px;line-height:1.4}.prx-durationInput{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px}.prx-durationInput b{color:#d6e9ef;font-size:9px}.prx-editLog{border:1px solid rgba(94,174,202,.13);border-radius:10px;overflow:hidden;background:#051118}.prx-editLogHead{padding:11px 12px;border-bottom:1px solid rgba(95,174,201,.11);display:flex;justify-content:space-between;gap:12px;align-items:center}.prx-editLogHead strong{color:#dcebf0;font-size:9px}.prx-editExercise+ .prx-editExercise{border-top:1px solid rgba(95,174,201,.12)}.prx-editExercise>header{padding:10px 11px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#071821}.prx-editExercise>header>strong{color:#fff;font-size:13px}.prx-editExercise>header label{display:grid;grid-template-columns:auto 64px;align-items:center;gap:8px}.prx-editExercise>header label input{height:34px;text-align:center}.prx-editSetHead,.prx-editSet{display:grid;grid-template-columns:45px repeat(5,minmax(70px,1fr));gap:6px;align-items:center;padding:7px 10px}.prx-editSetHead{background:#061219;color:#8da7b1;font-size:7px;font-weight:1000;text-align:center}.prx-editSet{border-top:1px solid rgba(91,165,192,.06)}.prx-editSet>b{color:#d5e6ec;text-align:center;font-size:9px}.prx-editSet input{height:36px;text-align:center}.prx-editModal footer .is-primary{border-color:rgba(72,211,250,.55)!important;background:linear-gradient(180deg,#0d4254,#082833)!important;color:#fff!important}
         @media(max-width:900px){.prx-controls{grid-template-columns:1fr 1fr;min-width:330px}.prx-programDeck{grid-template-columns:1fr}.prx-kpis{grid-template-columns:repeat(3,1fr)}.prx-trendGrid{grid-template-columns:repeat(2,1fr)}}
-        @media(max-width:650px){.prx-page{width:calc(100% - 12px);margin-bottom:110px}.prx-hero{padding:17px;display:grid}.prx-hero h1{font-size:34px}.prx-hero p{font-size:9px}.prx-controls{min-width:0;grid-template-columns:1fr}.prx-controls select{height:44px;font-size:10px}.prx-programDeck{padding:13px}.prx-programIdentity strong{white-space:normal;font-size:16px}.prx-programMeta{grid-template-columns:1fr 1fr}.prx-programMeta>div:nth-child(3){border-left:0;border-top:1px solid rgba(111,180,205,.08)}.prx-programMeta>div:nth-child(4){border-top:1px solid rgba(111,180,205,.08)}.prx-kpis{grid-template-columns:1fr 1fr;gap:6px}.prx-kpis article{min-height:78px}.prx-kpis article:last-child{grid-column:1/-1}.prx-sectionHead{padding:13px}.prx-sectionHead h2{font-size:19px}.prx-trendGrid{grid-template-columns:1fr;padding:8px}.prx-volumeChart{height:180px;padding-left:9px;padding-right:9px}.prx-volumeCol{min-width:55px}.prx-historyRow{padding:12px 10px;grid-template-columns:1fr}.prx-historyActions{display:grid;grid-template-columns:1fr 1fr}.prx-historyActions button{min-height:38px;color:#fff;font-size:7px}.prx-programBadge{align-items:flex-start;flex-direction:column;gap:4px}.prx-dangerZone{align-items:flex-start;flex-direction:column}.prx-dangerZone button{width:100%;min-height:40px}.prx-modalBack{padding:7px}.prx-modal{max-height:calc(100dvh - 14px);border-radius:12px}.prx-detailSummary{grid-template-columns:1fr 1fr}.prx-detailSummary>div:nth-child(3){border-left:0;border-top:1px solid rgba(98,173,199,.08)}.prx-detailSummary>div:nth-child(4){border-top:1px solid rgba(98,173,199,.08)}.prx-setTable>div{grid-template-columns:32px 1fr 1fr 42px 42px;padding:7px 5px}.prx-modal>footer{display:grid;grid-template-columns:1fr 1fr}.prx-modal>footer button{min-height:40px;color:#fff}.prx-confirm>div{padding:14px}}
+        @media(max-width:650px){.prx-page{width:calc(100% - 10px);margin-bottom:116px}.prx-hero{padding:17px;display:grid}.prx-hero h1{font-size:36px}.prx-hero p{font-size:12px!important;line-height:1.5!important}.prx-controls{min-width:0;grid-template-columns:1fr}.prx-controls label>span{font-size:8px!important}.prx-controls select{height:46px;font-size:11px!important}.prx-programDeck{padding:13px}.prx-programIdentity strong{white-space:normal;font-size:19px!important}.prx-programIdentity small{font-size:9px!important}.prx-programMeta{grid-template-columns:1fr 1fr}.prx-programMeta>div:nth-child(3){border-left:0;border-top:1px solid rgba(111,180,205,.08)}.prx-programMeta>div:nth-child(4){border-top:1px solid rgba(111,180,205,.08)}.prx-programMeta span{font-size:7px!important}.prx-programMeta strong{font-size:10px!important}.prx-kpis{grid-template-columns:1fr 1fr;gap:7px}.prx-kpis article{min-height:88px}.prx-kpis article:last-child{grid-column:1/-1}.prx-kpis article>div>span{font-size:7.5px!important}.prx-kpis article>div>strong{font-size:21px!important}.prx-kpis article>div>small{font-size:7.5px!important}.prx-sectionHead{padding:13px}.prx-sectionHead h2{font-size:22px!important}.prx-sectionHead>small{font-size:7.5px!important}.prx-trendGrid{grid-template-columns:1fr;padding:8px}.prx-trendTop strong{font-size:14px!important}.prx-trendMetrics strong{font-size:11px!important}.prx-volumeChart{height:188px;padding-left:9px;padding-right:9px}.prx-volumeCol{min-width:60px}.prx-volumeCol>b{font-size:7px!important}.prx-volumeCol strong{font-size:7.5px!important}.prx-historyRow{padding:14px 11px;grid-template-columns:1fr;gap:12px}.prx-historyMain h3{font-size:20px!important}.prx-historyMain>p{font-size:10px!important}.prx-programBadge{align-items:flex-start;flex-direction:column;gap:5px}.prx-programBadge span{font-size:8px!important}.prx-programBadge strong{font-size:8.5px!important}.prx-historyMetrics span{font-size:8px!important}.prx-historyMetrics b{font-size:9px!important}.prx-historyActions{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important}.prx-historyActions button{min-height:42px!important;color:#fff;font-size:8px!important}.prx-historyActions .is-delete{grid-column:1/-1!important}.prx-dangerZone{align-items:flex-start;flex-direction:column}.prx-dangerZone strong{font-size:12px!important}.prx-dangerZone small{font-size:8px!important}.prx-dangerZone button{width:100%;min-height:42px}.prx-modalBack{padding:6px}.prx-modal{max-height:calc(100dvh - 12px);border-radius:12px}.prx-modal>header h2{font-size:21px!important}.prx-detailSummary{grid-template-columns:1fr 1fr}.prx-detailSummary>div:nth-child(3){border-left:0;border-top:1px solid rgba(98,173,199,.08)}.prx-detailSummary>div:nth-child(4){border-top:1px solid rgba(98,173,199,.08)}.prx-detailSummary span{font-size:7px!important}.prx-detailSummary strong{font-size:12px!important}.prx-setTable>div{grid-template-columns:32px 1fr 1fr 42px 42px;padding:8px 5px}.prx-setTable span,.prx-setTable strong{font-size:8px!important}.prx-modal>footer{display:grid;grid-template-columns:1fr 1fr}.prx-modal>footer button{min-height:42px;color:#fff;font-size:8px!important}.prx-detailModal>footer{grid-template-columns:1fr 1fr!important}.prx-detailModal>footer .is-delete{grid-column:1/-1!important}.prx-confirm>div{padding:14px}.prx-editBasics{grid-template-columns:1fr!important}.prx-editBasics>label{padding:11px}.prx-editBasics input,.prx-editBasics select{height:44px;font-size:11px!important}.prx-editLogHead{display:grid;gap:4px}.prx-editLogHead strong{font-size:8px!important}.prx-editExercise>header{align-items:flex-start;display:grid}.prx-editExercise>header>strong{font-size:14px!important}.prx-editExercise>header label{grid-template-columns:1fr 68px}.prx-editSetHead{display:none}.prx-editSet{grid-template-columns:34px 1fr 1fr!important;gap:6px;padding:8px!important}.prx-editSet>b{grid-row:1/3;align-self:stretch;display:grid;place-items:center;border-right:1px solid rgba(97,176,203,.12)}.prx-editSet input{height:40px!important;font-size:10px!important}.prx-editSet input:nth-of-type(1)::before{content:"WEIGHT"}.prx-editScroll{padding:8px}.prx-editModal>footer{grid-template-columns:1fr 1fr!important}}
+
+        /* FINAL READABILITY PASS */
+        .prx-heroText>span,.prx-sectionHead span,.prx-programIdentity span,.prx-dangerZone span{font-size:11px!important;line-height:1.35!important}.prx-hero p{font-size:14px!important;line-height:1.55!important}.prx-controls label>span,.prx-programMeta span,.prx-kpis span,.prx-trendTop span,.prx-trendMetrics span{font-size:10px!important;line-height:1.3!important}.prx-controls select{font-size:14px!important}.prx-programIdentity strong{font-size:22px!important}.prx-programIdentity small{font-size:13px!important}.prx-programMeta strong{font-size:14px!important}.prx-kpis article>div>strong{font-size:25px!important}.prx-kpis article>div>small{font-size:12px!important}.prx-sectionHead h2{font-size:26px!important}.prx-sectionHead>small,.prx-empty{font-size:12px!important}.prx-volumeCol>b,.prx-volumeCol strong,.prx-volumeCol small{font-size:10px!important}.prx-trendTop strong{font-size:15px!important}.prx-trendTop em{font-size:11px!important}.prx-trendMetrics strong{font-size:14px!important}.prx-trendGrid article>small{font-size:11px!important;line-height:1.45!important}.prx-historyRow{padding:17px 18px!important}.prx-programBadge span{font-size:11px!important}.prx-programBadge strong{font-size:11px!important}.prx-historyMain h3{font-size:20px!important}.prx-historyMain>p{font-size:13px!important}.prx-historyMetrics span{font-size:11px!important}.prx-historyMetrics b{font-size:13px!important}.prx-historyActions button,.prx-loadMore,.prx-dangerZone button,.prx-modal footer button{min-height:42px!important;font-size:12px!important}.prx-modal>header span{font-size:11px!important}.prx-modal>header p{font-size:12px!important}.prx-detailSummary span{font-size:10px!important}.prx-detailSummary strong{font-size:15px!important}.prx-exerciseDetail>header span{font-size:10px!important}.prx-exerciseDetail>header strong{font-size:15px!important}.prx-setTable .prx-setHead{font-size:10px!important}.prx-setTable span,.prx-setTable strong{font-size:12px!important}.prx-editBasics label>span,.prx-editLogHead span,.prx-editExercise header label span{font-size:10px!important}.prx-editBasics input,.prx-editBasics select,.prx-editExercise input,.prx-editSet input{font-size:14px!important}.prx-editBasics small{font-size:11px!important}.prx-durationInput b,.prx-editLogHead strong,.prx-editSet>b{font-size:11px!important}
+        @media(max-width:650px){.prx-page{width:calc(100% - 12px)!important}.prx-hero{padding:18px 16px!important}.prx-hero h1{font-size:36px!important}.prx-programIdentity{align-items:flex-start!important}.prx-programIdentity strong{white-space:normal!important;font-size:21px!important}.prx-programIdentity small{font-size:13px!important}.prx-programMeta span{font-size:9px!important}.prx-programMeta strong{font-size:13px!important}.prx-kpis article{min-height:100px!important}.prx-kpis article>div>span{font-size:9px!important}.prx-kpis article>div>strong{font-size:25px!important}.prx-kpis article>div>small{font-size:11px!important}.prx-sectionHead{align-items:flex-start!important;flex-direction:column!important}.prx-sectionHead h2{font-size:25px!important}.prx-sectionHead>small{font-size:11px!important}.prx-volumeChart{height:230px!important}.prx-volumeCol{min-width:78px!important}.prx-historyMain h3{font-size:21px!important}.prx-historyMain>p{font-size:13px!important}.prx-historyMetrics{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}.prx-historyMetrics span{font-size:11px!important}.prx-historyMetrics b{font-size:13px!important}.prx-historyActions button{font-size:12px!important}.prx-modal{width:calc(100vw - 14px)!important;max-height:calc(100dvh - 20px)!important}.prx-modal>footer button{font-size:12px!important}.prx-editBasics input,.prx-editBasics select{font-size:14px!important}.prx-editSet input{font-size:13px!important}}
       `}</style>
     </main>
   );
