@@ -1,734 +1,1468 @@
-import { useSyncExternalStore } from "react";
 import {
-  clearMusicUrlCache,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+import {
   getMusicArtworkSignedUrl,
-  getMusicTrackSignedUrl,
-  listMusicTracks,
-  recordMusicTrackCompleted,
-  recordMusicTrackPlayed,
-  recordMusicTrackSkipped,
-  setMusicTrackPreference,
   type MusicTrack,
-} from "./musicStorage";
+} from "../../lib/musicStorage";
 import {
-  getMusicPlaylist,
+  listMusicPlaylists,
   listMusicPlaylistTrackLinks,
   type MusicPlaylist,
-} from "./playlistStorage";
+} from "../../lib/playlistStorage";
+import {
+  activateAllMusicTracks,
+  activateMusicPlaylistQueue,
+  applyMusicEqPreset,
+  cycleMusicRepeat,
+  formatMusicTime,
+  getMusicRtaLevels,
+  loadMusicLibrary,
+  MUSIC_EQ_FREQUENCIES,
+  MUSIC_EQ_PRESETS,
+  MUSIC_HEADPHONE_MODES,
+  nextMusicTrack,
+  pauseMusic,
+  playMusic,
+  playMusicPlaylist,
+  previousMusicTrack,
+  recoverMusicDsp,
+  saveMusicEqCustomPreset,
+  seekMusic,
+  setMusicDspBypass,
+  setMusicEqBand,
+  setMusicEqEnabled,
+  setMusicHeadphoneBassImpact,
+  setMusicHeadphoneCenter,
+  setMusicHeadphoneCrossfeed,
+  setMusicHeadphoneDepth,
+  setMusicHeadphoneMode,
+  setMusicHeadphoneWidth,
+  setMusicPreamp,
+  setMusicVolume,
+  setPlayerMusicPreference,
+  stopMusic,
+  toggleMusicShuffle,
+  useMusicPlayer,
+  type MusicCustomPresetSlot,
+  type MusicEqPreset,
+  type MusicHeadphoneMode,
+} from "../../lib/musicPlayer";
+import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
 
-export type MusicRepeatMode = "off" | "one" | "all";
-export type MusicCustomPresetSlot = "custom_1" | "custom_2" | "custom_3";
-export type MusicEqPreset =
-  | "flat"
-  | "power"
-  | "rock"
-  | "hard_rock"
-  | "metal"
-  | "alternative"
-  | "pop"
-  | "hip_hop"
-  | "edm"
-  | "bass_boost"
-  | "deep_bass"
-  | "punch"
-  | "vocal"
-  | "acoustic"
-  | "warm"
-  | "bright"
-  | "late_night"
-  | "headphones"
-  | MusicCustomPresetSlot
-  | "custom";
-export type MusicDuckingStrength = "off" | "light" | "standard" | "strong";
-export type MusicDspStatus = "active" | "bypassed" | "recovering" | "unavailable";
-export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "stage" | "focus" | "bass_impact";
+const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
+const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
+const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
 
-export const MUSIC_EQ_FREQUENCIES = [
-  20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500,
-  630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000,
-  10000, 12500, 16000, 20000,
-] as const;
+type IconName =
+  | "back"
+  | "next"
+  | "play"
+  | "pause"
+  | "stop"
+  | "shuffle"
+  | "repeat"
+  | "equalizer"
+  | "like"
+  | "dislike"
+  | "guitar"
+  | "music";
 
-const LEGACY_EQ_FREQUENCIES = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 12000, 16000] as const;
-
-type BuiltInMusicEqPreset = Exclude<MusicEqPreset, "custom" | MusicCustomPresetSlot>;
-type EqDefinition = { label: string; gains: number[]; preamp: number };
-
-function interpolateEqCurve(points: Array<[number, number]>) {
-  const sorted = [...points].sort((a, b) => a[0] - b[0]);
-  return MUSIC_EQ_FREQUENCIES.map((frequency) => {
-    if (frequency <= sorted[0][0]) return sorted[0][1];
-    if (frequency >= sorted[sorted.length - 1][0]) return sorted[sorted.length - 1][1];
-    for (let index = 0; index < sorted.length - 1; index += 1) {
-      const [leftHz, leftGain] = sorted[index];
-      const [rightHz, rightGain] = sorted[index + 1];
-      if (frequency < leftHz || frequency > rightHz) continue;
-      const ratio = (Math.log(frequency) - Math.log(leftHz)) / Math.max(0.0001, Math.log(rightHz) - Math.log(leftHz));
-      return Math.round((leftGain + (rightGain - leftGain) * ratio) * 10) / 10;
-    }
-    return 0;
-  });
-}
-
-function preset(label: string, preamp: number, points: Array<[number, number]>): EqDefinition {
-  return { label, preamp, gains: interpolateEqCurve(points) };
-}
-
-export const MUSIC_EQ_PRESETS: Record<BuiltInMusicEqPreset, EqDefinition> = {
-  flat: preset("Flat", 0, [[20, 0], [20000, 0]]),
-  power: preset("Power Training", -2.5, [[20, 3], [50, 5], [100, 4], [250, 1], [500, -1], [1000, 0], [2500, 2], [5000, 4], [10000, 3], [20000, 1]]),
-  rock: preset("Rock", -2.5, [[20, 2], [63, 4], [160, 3], [500, -1], [1000, 0], [2500, 2], [5000, 4.5], [10000, 4], [20000, 2]]),
-  hard_rock: preset("Hard Rock", -3, [[20, 2], [63, 4.5], [125, 3.5], [400, -1.5], [1000, 0], [2500, 3], [5000, 5], [10000, 4], [20000, 1.5]]),
-  metal: preset("Metal", -3.5, [[20, 2.5], [63, 4], [160, 2.5], [400, -2], [800, -1], [2000, 2.5], [4000, 5], [8000, 5.5], [16000, 3], [20000, 1]]),
-  alternative: preset("Alternative", -2, [[20, 1], [80, 3], [200, 2], [500, -1], [1250, 0.5], [3150, 3], [6300, 3.5], [12500, 2], [20000, 0]]),
-  pop: preset("Pop", -2, [[20, 1], [80, 2.5], [250, 0.5], [630, -0.5], [1600, 1.5], [4000, 3], [8000, 3], [16000, 1.5], [20000, 0]]),
-  hip_hop: preset("Hip-Hop", -3.5, [[20, 4], [40, 6], [80, 5], [160, 3], [400, -1], [1000, 0], [2500, 1], [6300, 2], [12500, 1], [20000, 0]]),
-  edm: preset("EDM", -4, [[20, 5], [40, 7], [80, 5], [200, 1], [500, -1], [1250, 0], [3150, 2], [6300, 4], [10000, 5], [16000, 3], [20000, 1]]),
-  bass_boost: preset("Bass Boost", -3.5, [[20, 5], [40, 6], [63, 6], [100, 5], [160, 3], [250, 1], [500, 0], [20000, 0]]),
-  deep_bass: preset("Deep Bass", -4.5, [[20, 7], [31.5, 8], [50, 7], [80, 5], [125, 3], [250, 1], [500, 0], [20000, 0]]),
-  punch: preset("Punch", -3, [[20, 1], [50, 3], [80, 5], [125, 4], [200, 2], [500, -1], [1000, 0], [3150, 2.5], [6300, 2], [20000, 0]]),
-  vocal: preset("Vocal Clarity", -1.5, [[20, -3], [100, -2], [250, -0.5], [630, 1], [1250, 2.5], [2500, 4.5], [4000, 4], [8000, 1.5], [16000, 0], [20000, -1]]),
-  acoustic: preset("Acoustic", -1.5, [[20, -2], [80, 0], [200, 1], [500, 0.5], [1000, 1], [2500, 2.5], [5000, 3], [10000, 2], [20000, 0]]),
-  warm: preset("Warm", -1.5, [[20, 1], [80, 2.5], [250, 2], [630, 1], [1600, 0], [4000, -1], [10000, -2], [20000, -2.5]]),
-  bright: preset("Bright", -2.5, [[20, -1], [100, 0], [500, 0], [1250, 1], [3150, 2.5], [6300, 4], [12500, 4], [20000, 2.5]]),
-  late_night: preset("Late Night", -4, [[20, 1], [63, 2], [160, 1], [630, 0], [2500, -1], [5000, -2], [10000, -4], [20000, -6]]),
-  headphones: preset("Headphones", -2, [[20, 1], [63, 2], [200, 0.5], [630, -0.5], [1600, 1], [4000, 2], [8000, 1.5], [16000, 0], [20000, -1]]),
-};
-
-export const MUSIC_HEADPHONE_MODES: Record<MusicHeadphoneMode, { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }> = {
-  off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 78, depth: 18, crossfeed: 8, center: 38, bass: 8 },
-  spatial: { label: "Spatial", width: 88, depth: 58, crossfeed: 20, center: 50, bass: 14 },
-  stage: { label: "Stage", width: 66, depth: 44, crossfeed: 32, center: 68, bass: 10 },
-  focus: { label: "Focus", width: 28, depth: 12, crossfeed: 22, center: 92, bass: 5 },
-  bass_impact: { label: "Bass Impact", width: 52, depth: 28, crossfeed: 12, center: 62, bass: 58 },
-};
-
-export type MusicPlayerState = {
-  libraryTracks: MusicTrack[];
-  tracks: MusicTrack[];
-  currentTrack: MusicTrack | null;
-  activePlaylistId: string | null;
-  activePlaylistName: string | null;
-  loading: boolean;
-  playing: boolean;
-  currentTime: number;
-  duration: number;
-  shuffle: boolean;
-  repeat: MusicRepeatMode;
-  error: string | null;
-  libraryLoaded: boolean;
-  volume: number;
+type SavedDspProfile = {
+  name: string;
   eqEnabled: boolean;
-  eqPreset: MusicEqPreset;
   eqGains: number[];
   preampDb: number;
-  crossfadeSeconds: number;
-  normalizationEnabled: boolean;
-  limiterEnabled: boolean;
-  duckingStrength: MusicDuckingStrength;
   headphoneMode: MusicHeadphoneMode;
   headphoneWidth: number;
   headphoneDepth: number;
   headphoneCrossfeed: number;
   headphoneCenter: number;
   headphoneBassImpact: number;
-  dspBypass: boolean;
-  dspStatus: MusicDspStatus;
+  savedAt: number;
 };
 
-const STORAGE_KEYS = {
-  currentTrackId: "mvp_music_current_track_id",
-  currentTime: "mvp_music_current_time",
-  shuffle: "mvp_music_shuffle",
-  repeat: "mvp_music_repeat",
-  activePlaylistId: "mvp_music_active_playlist_id",
-  activePlaylistName: "mvp_music_active_playlist_name",
-  volume: "mvp_music_volume_v2",
-  eqEnabled: "mvp_music_eq_enabled",
-  eqPreset: "mvp_music_eq_preset",
-  eqGains: "mvp_music_eq_gains",
-  preampDb: "mvp_music_eq_preamp_db",
-  crossfadeSeconds: "mvp_music_crossfade_seconds",
-  normalizationEnabled: "mvp_music_normalization_enabled",
-  limiterEnabled: "mvp_music_limiter_enabled",
-  duckingStrength: "mvp_music_ducking_strength",
-  headphoneMode: "mvp_music_headphone_mode",
-  headphoneWidth: "mvp_music_headphone_width",
-  headphoneDepth: "mvp_music_headphone_depth",
-  headphoneCrossfeed: "mvp_music_headphone_crossfeed",
-  headphoneCenter: "mvp_music_headphone_center",
-  headphoneBassImpact: "mvp_music_headphone_bass_impact",
-  dspBypass: "mvp_music_dsp_bypass",
-  custom1: "mvp_music_eq_custom_1",
-  custom2: "mvp_music_eq_custom_2",
-  custom3: "mvp_music_eq_custom_3",
-};
+type SavedDspProfiles = Record<MusicCustomPresetSlot, SavedDspProfile | null>;
 
-const listeners = new Set<() => void>();
+function emptyDspProfiles(): SavedDspProfiles {
+  return { custom_1: null, custom_2: null, custom_3: null };
+}
 
-function readStored(key: string) {
-  try { return localStorage.getItem(key) ?? ""; } catch { return ""; }
+function readSavedDspProfiles(): SavedDspProfiles {
+  if (typeof window === "undefined") return emptyDspProfiles();
+  try {
+    const raw = window.localStorage.getItem(DSP_PROFILE_STORAGE_KEY);
+    if (!raw) return emptyDspProfiles();
+    const parsed = JSON.parse(raw) as Partial<SavedDspProfiles>;
+    return {
+      custom_1: parsed.custom_1 ?? null,
+      custom_2: parsed.custom_2 ?? null,
+      custom_3: parsed.custom_3 ?? null,
+    };
+  } catch {
+    return emptyDspProfiles();
+  }
 }
-function savePlayerSetting(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* optional */ }
+
+function writeSavedDspProfiles(profiles: SavedDspProfiles) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(DSP_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
 }
-function removePlayerSetting(key: string) {
-  try { localStorage.removeItem(key); } catch { /* optional */ }
-}
-function readBoolean(key: string, fallback = false) {
-  const value = readStored(key);
-  return value ? value === "true" : fallback;
-}
-function readNumber(key: string, fallback: number, min: number, max: number) {
-  const value = Number(readStored(key));
-  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
-}
-function readRepeatMode(): MusicRepeatMode {
-  const value = readStored(STORAGE_KEYS.repeat);
-  return value === "one" || value === "all" ? value : "off";
-}
-function readDuckingStrength(): MusicDuckingStrength {
-  const value = readStored(STORAGE_KEYS.duckingStrength);
-  return value === "off" || value === "light" || value === "standard" || value === "strong" ? value : "standard";
-}
-function isCustomPresetSlot(value: MusicEqPreset): value is MusicCustomPresetSlot {
+
+function isCustomSlot(value: MusicEqPreset): value is MusicCustomPresetSlot {
   return value === "custom_1" || value === "custom_2" || value === "custom_3";
 }
-function isBuiltInPreset(value: MusicEqPreset): value is BuiltInMusicEqPreset {
-  return Object.prototype.hasOwnProperty.call(MUSIC_EQ_PRESETS, value);
-}
-function customPresetStorageKey(slot: MusicCustomPresetSlot) {
-  return slot === "custom_1" ? STORAGE_KEYS.custom1 : slot === "custom_2" ? STORAGE_KEYS.custom2 : STORAGE_KEYS.custom3;
-}
-function readCustomPreset(slot: MusicCustomPresetSlot): EqDefinition | null {
-  try {
-    const parsed = JSON.parse(readStored(customPresetStorageKey(slot)));
-    if (parsed && Array.isArray(parsed.gains) && parsed.gains.length === MUSIC_EQ_FREQUENCIES.length && parsed.gains.every((value: unknown) => Number.isFinite(Number(value))) && Number.isFinite(Number(parsed.preamp))) {
-      return { label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3", gains: parsed.gains.map((value: unknown) => Math.max(-12, Math.min(12, Number(value)))), preamp: Math.max(-12, Math.min(12, Number(parsed.preamp))) };
-    }
-  } catch { /* empty */ }
-  return null;
-}
-function readEqPreset(): MusicEqPreset {
-  const value = readStored(STORAGE_KEYS.eqPreset) as MusicEqPreset;
-  return value === "custom" || isCustomPresetSlot(value) || isBuiltInPreset(value) ? value : "power";
-}
-function interpolateLegacyEqGains(values: number[]) {
-  const points = LEGACY_EQ_FREQUENCIES.map((frequency, index) => [frequency, Math.max(-12, Math.min(12, Number(values[index] || 0)))] as [number, number]);
-  return interpolateEqCurve(points);
-}
-function readEqGains(presetName: MusicEqPreset) {
-  try {
-    const parsed = JSON.parse(readStored(STORAGE_KEYS.eqGains));
-    if (Array.isArray(parsed) && parsed.every((value) => Number.isFinite(Number(value)))) {
-      if (parsed.length === MUSIC_EQ_FREQUENCIES.length) return parsed.map((value) => Math.max(-12, Math.min(12, Number(value))));
-      if (parsed.length === LEGACY_EQ_FREQUENCIES.length) return interpolateLegacyEqGains(parsed.map(Number));
-    }
-  } catch { /* preset below */ }
-  if (isCustomPresetSlot(presetName)) return [...(readCustomPreset(presetName)?.gains ?? MUSIC_EQ_PRESETS.flat.gains)];
-  if (isBuiltInPreset(presetName)) return [...MUSIC_EQ_PRESETS[presetName].gains];
-  return [...MUSIC_EQ_PRESETS.flat.gains];
-}
-function readPreamp(presetName: MusicEqPreset) {
-  const value = Number(readStored(STORAGE_KEYS.preampDb));
-  if (Number.isFinite(value)) return Math.max(-12, Math.min(12, value));
-  if (isCustomPresetSlot(presetName)) return readCustomPreset(presetName)?.preamp ?? 0;
-  return isBuiltInPreset(presetName) ? MUSIC_EQ_PRESETS[presetName].preamp : 0;
-}
-function readHeadphoneMode(): MusicHeadphoneMode {
-  const value = readStored(STORAGE_KEYS.headphoneMode) as MusicHeadphoneMode;
-  return Object.prototype.hasOwnProperty.call(MUSIC_HEADPHONE_MODES, value) ? value : "off";
+
+function slotFallbackLabel(slot: MusicCustomPresetSlot) {
+  return slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3";
 }
 
-const initialPreset = readEqPreset();
-let state: MusicPlayerState = {
-  libraryTracks: [], tracks: [], currentTrack: null,
-  activePlaylistId: readStored(STORAGE_KEYS.activePlaylistId) || null,
-  activePlaylistName: readStored(STORAGE_KEYS.activePlaylistName) || null,
-  loading: false, playing: false, currentTime: 0, duration: 0,
-  shuffle: readBoolean(STORAGE_KEYS.shuffle), repeat: readRepeatMode(), error: null, libraryLoaded: false,
-  volume: readNumber(STORAGE_KEYS.volume, 0.72, 0, 1),
-  eqEnabled: readBoolean(STORAGE_KEYS.eqEnabled, true), eqPreset: initialPreset, eqGains: readEqGains(initialPreset), preampDb: readPreamp(initialPreset),
-  crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8), normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, true), limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true), duckingStrength: readDuckingStrength(),
-  headphoneMode: readHeadphoneMode(), headphoneWidth: readNumber(STORAGE_KEYS.headphoneWidth, 76, 0, 100), headphoneDepth: readNumber(STORAGE_KEYS.headphoneDepth, 48, 0, 100), headphoneCrossfeed: readNumber(STORAGE_KEYS.headphoneCrossfeed, 15, 0, 100), headphoneCenter: readNumber(STORAGE_KEYS.headphoneCenter, 55, 0, 100), headphoneBassImpact: readNumber(STORAGE_KEYS.headphoneBassImpact, 12, 0, 100),
-  dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false), dspStatus: "recovering",
-};
-
-let audioElement: HTMLAudioElement | null = null;
-let audioContext: AudioContext | null = null;
-let mediaSource: MediaElementAudioSourceNode | null = null;
-let masterVolumeGain: GainNode | null = null;
-let preampGain: GainNode | null = null;
-let equalizerFilters: BiquadFilterNode[] = [];
-let normalizerNode: DynamicsCompressorNode | null = null;
-let headphoneBassShelf: BiquadFilterNode | null = null;
-let headphoneSplitter: ChannelSplitterNode | null = null;
-let headphoneMerger: ChannelMergerNode | null = null;
-let headphoneLeftDirect: GainNode | null = null;
-let headphoneRightDirect: GainNode | null = null;
-let headphoneLeftWidthCross: GainNode | null = null;
-let headphoneRightWidthCross: GainNode | null = null;
-let headphoneLeftCrossfeed: GainNode | null = null;
-let headphoneRightCrossfeed: GainNode | null = null;
-let headphoneLeftCrossDelay: DelayNode | null = null;
-let headphoneRightCrossDelay: DelayNode | null = null;
-let headphoneLeftCrossLowpass: BiquadFilterNode | null = null;
-let headphoneRightCrossLowpass: BiquadFilterNode | null = null;
-let headphoneCenterSum: GainNode | null = null;
-let headphoneCenterLeft: GainNode | null = null;
-let headphoneCenterRight: GainNode | null = null;
-let limiterNode: DynamicsCompressorNode | null = null;
-let analyserNode: AnalyserNode | null = null;
-let musicGain: GainNode | null = null;
-let analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
-let visualizerEnvelope = new Float32Array(64);
-let rtaEnvelope = new Float32Array(10);
-let mediaSourceConnected = false;
-let loadingTrackId: string | null = null;
-let timeSaveTimer = 0;
-let recordedPlayToken = "";
-let transportQueue: Promise<void> = Promise.resolve();
-let playbackIntent = false;
-const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
-const SIGNED_URL_TTL_MS = 8 * 60 * 1000;
-
-function emit(patch: Partial<MusicPlayerState>) {
-  state = { ...state, ...patch };
-  listeners.forEach((listener) => listener());
-}
-function getAudioContext() {
-  if (typeof window === "undefined") return null;
-  const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Context) return null;
-  if (audioContext?.state === "closed") audioContext = null;
-  if (!audioContext) audioContext = new Context();
-  return audioContext;
-}
-function dbToGain(db: number) { return Math.pow(10, db / 20); }
-function volumeToGain(volume: number) {
-  const value = Math.max(0, Math.min(1, volume));
-  if (value <= 0.001) return 0;
-  return Math.pow(value, 2.05);
-}
-function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.018) {
-  param.cancelScheduledValues(now);
-  param.setTargetAtTime(value, now, timeConstant);
-}
-function setCompressorBypass(node: DynamicsCompressorNode) {
-  node.threshold.value = 0; node.knee.value = 0; node.ratio.value = 1; node.attack.value = 0.003; node.release.value = 0.12;
+function sameDspNumber(left: number, right: number) {
+  return Math.abs(Number(left) - Number(right)) < 0.01;
 }
 
-function applyHeadphoneSettings(now: number) {
-  if (!audioContext) return;
-  const enabled = !state.dspBypass && state.headphoneMode !== "off";
-  const width = enabled ? state.headphoneWidth / 100 : 0;
-  const depth = enabled ? state.headphoneDepth / 100 : 0;
-  const crossfeed = enabled ? state.headphoneCrossfeed / 100 : 0;
-  const center = enabled ? state.headphoneCenter / 100 : 0.5;
-  const bass = enabled ? state.headphoneBassImpact / 100 : 0;
-
-  const stereoWidth = enabled ? 1 + width * 1.05 : 1;
-  const direct = (1 + stereoWidth) / 2;
-  const widthCross = (1 - stereoWidth) / 2;
-  const crossfeedGain = enabled ? crossfeed * 0.38 : 0;
-  const crossDelay = enabled ? 0.0002 + depth * 0.014 : 0;
-  const lowpassHz = enabled ? 1100 + (1 - depth) * 2600 : 3500;
-  const centerGain = enabled ? Math.max(0, (center - 0.5) * 0.9) : 0;
-  const centerAttenuation = enabled ? 1 - Math.max(0, center - 0.5) * 0.22 : 1;
-  const bassDb = enabled ? bass * 10 : 0;
-
-  if (headphoneLeftDirect) setAudioParam(headphoneLeftDirect.gain, direct * centerAttenuation, now);
-  if (headphoneRightDirect) setAudioParam(headphoneRightDirect.gain, direct * centerAttenuation, now);
-  if (headphoneLeftWidthCross) setAudioParam(headphoneLeftWidthCross.gain, widthCross, now);
-  if (headphoneRightWidthCross) setAudioParam(headphoneRightWidthCross.gain, widthCross, now);
-  if (headphoneLeftCrossfeed) setAudioParam(headphoneLeftCrossfeed.gain, crossfeedGain, now);
-  if (headphoneRightCrossfeed) setAudioParam(headphoneRightCrossfeed.gain, crossfeedGain, now);
-  if (headphoneLeftCrossDelay) setAudioParam(headphoneLeftCrossDelay.delayTime, crossDelay, now);
-  if (headphoneRightCrossDelay) setAudioParam(headphoneRightCrossDelay.delayTime, crossDelay, now);
-  if (headphoneLeftCrossLowpass) setAudioParam(headphoneLeftCrossLowpass.frequency, lowpassHz, now, 0.03);
-  if (headphoneRightCrossLowpass) setAudioParam(headphoneRightCrossLowpass.frequency, lowpassHz, now, 0.03);
-  if (headphoneCenterLeft) setAudioParam(headphoneCenterLeft.gain, centerGain, now);
-  if (headphoneCenterRight) setAudioParam(headphoneCenterRight.gain, centerGain, now);
-  if (headphoneBassShelf) setAudioParam(headphoneBassShelf.gain, bassDb, now);
-}
-
-function applyProcessingSettings() {
-  if (!audioContext || !mediaSourceConnected) return;
-  const now = audioContext.currentTime;
-  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(state.volume), now, 0.012);
-  if (preampGain) setAudioParam(preampGain.gain, state.dspBypass ? 1 : dbToGain(state.preampDb), now);
-  equalizerFilters.forEach((filter, index) => setAudioParam(filter.gain, !state.dspBypass && state.eqEnabled ? Number(state.eqGains[index] || 0) : 0, now));
-  if (normalizerNode) {
-    if (!state.dspBypass && state.normalizationEnabled) {
-      normalizerNode.threshold.value = -20; normalizerNode.knee.value = 18; normalizerNode.ratio.value = 2.6; normalizerNode.attack.value = 0.012; normalizerNode.release.value = 0.28;
-    } else setCompressorBypass(normalizerNode);
+function formatHz(frequency: number) {
+  if (frequency >= 1000) {
+    const value = frequency / 1000;
+    return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}K`;
   }
-  applyHeadphoneSettings(now);
-  if (limiterNode) {
-    if (!state.dspBypass && state.limiterEnabled) {
-      limiterNode.threshold.value = -1.4; limiterNode.knee.value = 0; limiterNode.ratio.value = 20; limiterNode.attack.value = 0.002; limiterNode.release.value = 0.08;
-    } else setCompressorBypass(limiterNode);
-  }
-  emit({ dspStatus: audioContext.state === "running" ? (state.dspBypass ? "bypassed" : "active") : "recovering" });
+  return String(frequency);
 }
 
-function disconnectNode(node: AudioNode | null) { if (!node) return; try { node.disconnect(); } catch { /* already disconnected */ } }
-function releaseGraph() {
-  [mediaSource, masterVolumeGain, preampGain, normalizerNode, headphoneBassShelf, headphoneSplitter, headphoneMerger, headphoneLeftDirect, headphoneRightDirect, headphoneLeftWidthCross, headphoneRightWidthCross, headphoneLeftCrossfeed, headphoneRightCrossfeed, headphoneLeftCrossDelay, headphoneRightCrossDelay, headphoneLeftCrossLowpass, headphoneRightCrossLowpass, headphoneCenterSum, headphoneCenterLeft, headphoneCenterRight, limiterNode, analyserNode, musicGain].forEach(disconnectNode);
-  equalizerFilters.forEach(disconnectNode);
-  mediaSource = null; masterVolumeGain = null; preampGain = null; equalizerFilters = []; normalizerNode = null; headphoneBassShelf = null; headphoneSplitter = null; headphoneMerger = null; headphoneLeftDirect = null; headphoneRightDirect = null; headphoneLeftWidthCross = null; headphoneRightWidthCross = null; headphoneLeftCrossfeed = null; headphoneRightCrossfeed = null; headphoneLeftCrossDelay = null; headphoneRightCrossDelay = null; headphoneLeftCrossLowpass = null; headphoneRightCrossLowpass = null; headphoneCenterSum = null; headphoneCenterLeft = null; headphoneCenterRight = null; limiterNode = null; analyserNode = null; musicGain = null; analyserBuffer = null; mediaSourceConnected = false;
+function PlayerIcon({ name }: { name: IconName }) {
+  if (name === "play") return <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5.4v13.2L19 12 8 5.4Z" /></svg>;
+  if (name === "pause") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z" /></svg>;
+  if (name === "stop") return <svg viewBox="0 0 24 24" aria-hidden><rect x="6" y="6" width="12" height="12" rx="1.6" /></svg>;
+  if (name === "back") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 6h2.5v12H5V6Zm3.8 6 9.7-6v12l-9.7-6Z" /></svg>;
+  if (name === "next") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.5 6H19v12h-2.5V6ZM5.5 6l9.7 6-9.7 6V6Z" /></svg>;
+  if (name === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.8 4.5H20V7.7h-2V6.9l-3.7 3.7-1.4-1.4 3.6-3.6h-.7v-2Zm-12.8 2h3.2c1.6 0 2.7.5 3.7 1.5l6.8 6.8V14H20v5.5h-5.5v-2h1.8l-6.8-6.8c-.6-.6-1.2-.8-2.3-.8H4v-3.4Zm0 11h3.2c1.1 0 1.7-.2 2.3-.8l1.5-1.5 1.4 1.4-1.5 1.5c-1 1-2.1 1.4-3.7 1.4H4v-2Z" /></svg>;
+  if (name === "repeat") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 5h9.3l-1.8-1.8L16 1.8 20.2 6 16 10.2l-1.5-1.4L16.3 7H7a3 3 0 0 0-3 3v1H2v-1a5 5 0 0 1 5-5Zm15 8v1a5 5 0 0 1-5 5H7.7l1.8 1.8L8 22.2 3.8 18 8 13.8l1.5 1.4L7.7 17H17a3 3 0 0 0 3-3v-1h2Z" /></svg>;
+  if (name === "like") return <svg viewBox="0 0 24 24" aria-hidden><path d="M9.2 21H5.5A2.5 2.5 0 0 1 3 18.5v-8A2.5 2.5 0 0 1 5.5 8H9l3.2-5.1A2 2 0 0 1 16 4v4h3.2a2.8 2.8 0 0 1 2.7 3.5l-1.8 7A3.4 3.4 0 0 1 16.8 21H9.2Zm-1.7-2V10H5.5a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h2Zm2 0h7.3a1.4 1.4 0 0 0 1.4-1.1l1.8-7a.8.8 0 0 0-.8-.9H14V4.8l-4.5 7.1V19Z" /></svg>;
+  if (name === "dislike") return <svg viewBox="0 0 24 24" aria-hidden><path d="M14.8 3h3.7A2.5 2.5 0 0 1 21 5.5v8a2.5 2.5 0 0 1-2.5 2.5H15l-3.2 5.1A2 2 0 0 1 8 20v-4H4.8a2.8 2.8 0 0 1-2.7-3.5l1.8-7A3.4 3.4 0 0 1 7.2 3h7.6Zm1.7 2v9h2a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2Zm-2 0H7.2a1.4 1.4 0 0 0-1.4 1.1L4 13.1a.8.8 0 0 0 .8.9H10v5.2l4.5-7.1V5Z" /></svg>;
+  if (name === "guitar") return <svg viewBox="0 0 24 24" aria-hidden><path d="M15.7 2.7 21.3 8.3l-2.1 2.1-1.3-1.3-4.3 4.3c.7 2 .2 4.3-1.5 6-2.5 2.5-6.4 2.7-8.7.4-2.3-2.3-2.1-6.2.4-8.7 1.7-1.7 4-2.2 6-1.5l4.3-4.3-1.3-1.3 2.9-1.3ZM7.1 12.2a2.35 2.35 0 1 0 0 4.7 2.35 2.35 0 0 0 0-4.7Zm4-1.1 1.8 1.8 4.3-4.3-1.8-1.8-4.3 4.3Z" /></svg>;
+  if (name === "equalizer") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h2v18H5V3Zm6 4h2v14h-2V7Zm6-4h2v18h-2V3ZM3 8h6v3H3V8Zm6 5h6v3H9v-3Zm6-4h6v3h-6V9Z" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
 
-function connectMusicGraph() {
-  const audio = ensureAudioElement();
-  const context = getAudioContext();
-  if (!context || mediaSourceConnected) return;
-  try {
-    mediaSource = context.createMediaElementSource(audio);
-    masterVolumeGain = context.createGain();
-    preampGain = context.createGain();
-    equalizerFilters = MUSIC_EQ_FREQUENCIES.map((frequency) => {
-      const filter = context.createBiquadFilter(); filter.type = "peaking"; filter.frequency.value = Math.min(frequency, Math.max(20, context.sampleRate / 2 - 20)); filter.Q.value = 1.05; filter.gain.value = 0; return filter;
+const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
+
+function MusicActivityRta({ playing }: { playing: boolean }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const canvas = canvasRef.current;
+    if (!host || !canvas) return;
+
+    let frame = 0;
+    let lastDraw = 0;
+    let visible = true;
+    const displayed = new Float32Array(10);
+    const peaks = new Float32Array(10);
+    const peakHoldUntil = new Float64Array(10);
+
+    const observer = typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver((entries) => {
+          visible = entries.some((entry) => entry.isIntersecting);
+        }, { threshold: 0.02 })
+      : null;
+    observer?.observe(host);
+
+    const draw = (now: number) => {
+      frame = window.requestAnimationFrame(draw);
+      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 28) return;
+      lastDraw = now;
+
+      const width = Math.max(1, Math.floor(canvas.clientWidth));
+      const height = Math.max(1, Math.floor(canvas.clientHeight));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const compact = width < 520;
+      const plotLeft = compact ? 6 : 34;
+      const plotRight = 6;
+      const plotTop = 8;
+      const plotBottom = 19;
+      const plotWidth = Math.max(1, width - plotLeft - plotRight);
+      const plotHeight = Math.max(1, height - plotTop - plotBottom);
+
+      const background = ctx.createLinearGradient(0, 0, 0, height);
+      background.addColorStop(0, "#061117");
+      background.addColorStop(0.55, "#02090d");
+      background.addColorStop(1, "#010406");
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, width, height);
+
+      const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
+      for (let index = 0; index < 10; index += 1) {
+        const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
+        const shaped = source < 0.018 ? 0 : Math.pow(source, 0.66);
+        const previous = displayed[index];
+        displayed[index] = previous + (shaped - previous) * (shaped > previous ? 0.76 : playing ? 0.16 : 0.40);
+        if (displayed[index] >= peaks[index]) {
+          peaks[index] = displayed[index];
+          peakHoldUntil[index] = now + 520;
+        } else if (now > peakHoldUntil[index]) {
+          peaks[index] = Math.max(displayed[index], peaks[index] - 0.018);
+        }
+      }
+
+      const gridRatios = [0, 0.2, 0.4, 0.6, 0.8, 1];
+      ctx.lineWidth = 1;
+      gridRatios.forEach((ratio, index) => {
+        const y = Math.round(plotTop + plotHeight * ratio) + 0.5;
+        ctx.strokeStyle = index === 0 || index === gridRatios.length - 1
+          ? "rgba(126,203,227,.11)"
+          : "rgba(126,203,227,.065)";
+        ctx.beginPath();
+        ctx.moveTo(plotLeft, y);
+        ctx.lineTo(width - plotRight, y);
+        ctx.stroke();
+      });
+
+      if (!compact) {
+        const dbLabels = ["0", "-12", "-24", "-36", "-48", "-60"];
+        ctx.fillStyle = "rgba(171,205,216,.52)";
+        ctx.font = "800 8px system-ui, sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        dbLabels.forEach((label, index) => {
+          ctx.fillText(label, plotLeft - 7, plotTop + plotHeight * (index / (dbLabels.length - 1)));
+        });
+      }
+
+      const gap = Math.max(compact ? 4 : 8, Math.min(compact ? 7 : 13, plotWidth * 0.0105));
+      const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
+      const barWidth = Math.max(7, slotWidth * (compact ? 0.76 : 0.72));
+      const insetX = (slotWidth - barWidth) / 2;
+
+      for (let band = 0; band < 10; band += 1) {
+        const slotX = plotLeft + band * (slotWidth + gap);
+        const barX = slotX + insetX;
+
+        // Dark meter well. Each band is independent and driven only by FFT energy.
+        const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
+        wellGradient.addColorStop(0, "rgba(37,24,15,.30)");
+        wellGradient.addColorStop(0.20, "rgba(30,38,20,.24)");
+        wellGradient.addColorStop(0.50, "rgba(12,46,48,.28)");
+        wellGradient.addColorStop(1, "rgba(6,30,39,.62)");
+        ctx.fillStyle = wellGradient;
+        ctx.fillRect(slotX, plotTop, slotWidth, plotHeight);
+        ctx.strokeStyle = "rgba(111,195,219,.10)";
+        ctx.strokeRect(Math.round(slotX) + 0.5, Math.round(plotTop) + 0.5, Math.max(1, Math.round(slotWidth) - 1), Math.max(1, Math.round(plotHeight) - 1));
+
+        const level = Math.max(0, Math.min(1, displayed[band]));
+        const activeHeight = Math.max(0, plotHeight * level);
+        if (activeHeight > 0.5) {
+          const activeY = plotTop + plotHeight - activeHeight;
+          const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
+          meterGradient.addColorStop(0, "#0797b8");
+          meterGradient.addColorStop(0.28, "#1cd3e5");
+          meterGradient.addColorStop(0.55, "#43d79e");
+          meterGradient.addColorStop(0.76, "#e3d34d");
+          meterGradient.addColorStop(0.90, "#f1a039");
+          meterGradient.addColorStop(1, "#ef624b");
+
+          ctx.save();
+          ctx.shadowColor = level > 0.82 ? "rgba(242,156,54,.58)" : "rgba(31,203,230,.46)";
+          ctx.shadowBlur = compact ? 5 : 8;
+          ctx.fillStyle = meterGradient;
+          ctx.fillRect(barX, activeY, barWidth, activeHeight);
+          ctx.restore();
+
+          // Very fine meter divisions retain RTA precision without chunky/fake LED blocks.
+          ctx.strokeStyle = "rgba(0,4,7,.34)";
+          ctx.lineWidth = 1;
+          const division = compact ? 5 : 6;
+          for (let y = plotTop + plotHeight - division; y > activeY; y -= division) {
+            ctx.beginPath();
+            ctx.moveTo(barX, Math.round(y) + 0.5);
+            ctx.lineTo(barX + barWidth, Math.round(y) + 0.5);
+            ctx.stroke();
+          }
+        }
+
+        if (playing && peaks[band] > 0.025) {
+          const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peaks[band]));
+          ctx.save();
+          ctx.fillStyle = peaks[band] > 0.84 ? "#ffd15f" : "#e7fbff";
+          ctx.shadowColor = peaks[band] > 0.84 ? "rgba(255,181,58,.72)" : "rgba(105,225,255,.65)";
+          ctx.shadowBlur = compact ? 5 : 7;
+          ctx.fillRect(barX, Math.round(peakY), barWidth, compact ? 1.5 : 2);
+          ctx.restore();
+        }
+      }
+
+    };
+
+    frame = window.requestAnimationFrame(draw);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [playing]);
+
+  return (
+    <div ref={hostRef} className="tr-activityRta tr-activityRta--10band" aria-label="10 band real-time spectrum analyzer">
+      <canvas ref={canvasRef} />
+      <div className="tr-activityRtaLabels" aria-hidden>
+        {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
+      </div>
+    </div>
+  );
+}
+
+export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
+  const player = useMusicPlayer();
+  const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
+  const [eqOpen, setEqOpen] = useState(false);
+  const [queueBusy, setQueueBusy] = useState(false);
+  const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
+  const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
+  const [activeCustomSlot, setActiveCustomSlot] = useState<MusicCustomPresetSlot | null>(
+    isCustomSlot(player.eqPreset) ? player.eqPreset : null
+  );
+  const [profileMessage, setProfileMessage] = useState("");
+  const [discoverMessage, setDiscoverMessage] = useState("");
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
+  const [savePresetName, setSavePresetName] = useState("");
+  const restoredProfileRef = useRef<string>("");
+
+
+  useEffect(() => {
+    const title = document.querySelector<HTMLElement>(".tr-topTitle");
+    const header = title?.parentElement;
+    if (!header) return;
+    const originalActions = Array.from(header.children).find((node) => node !== title && node instanceof HTMLElement) as HTMLElement | undefined;
+    if (!originalActions) return;
+
+    const oldDisplay = originalActions.style.display;
+    originalActions.style.display = "none";
+
+    let mount = header.querySelector<HTMLElement>(".tr-proGlobalActions");
+    if (!mount) {
+      mount = document.createElement("div");
+      mount.className = "tr-proGlobalActions";
+      header.appendChild(mount);
+    }
+    mount.innerHTML = "";
+
+    const makeButton = (label: string, action: () => void, className = "") => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `tr-proHeaderButton ${className}`.trim();
+      button.textContent = label;
+      button.addEventListener("click", action);
+      mount?.appendChild(button);
+      return button;
+    };
+
+    const hasActiveWorkout = Boolean(
+      window.localStorage.getItem("mvp_active_session_id") ||
+      window.localStorage.getItem("mvp_active_workout_id")
+    );
+    if (hasActiveWorkout) makeButton("RESUME", () => navigate("/"), "is-resume");
+    makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"), "is-sound");
+
+    const accountWrap = document.createElement("div");
+    accountWrap.className = "tr-proAccountWrap";
+    const accountButton = document.createElement("button");
+    accountButton.type = "button";
+    accountButton.className = "tr-proHeaderButton tr-proHeaderButton--account";
+    accountButton.textContent = "ACCOUNT ▾";
+    const menu = document.createElement("div");
+    menu.className = "tr-proAccountMenu";
+    menu.hidden = true;
+    const signOut = document.createElement("button");
+    signOut.type = "button";
+    signOut.textContent = "SIGN OUT";
+    signOut.addEventListener("click", () => {
+      const oldSignOut = Array.from(originalActions.querySelectorAll("button")).find((button) => button.textContent?.trim().toUpperCase() === "SIGN OUT") as HTMLButtonElement | undefined;
+      oldSignOut?.click();
     });
-    normalizerNode = context.createDynamicsCompressor();
-    headphoneBassShelf = context.createBiquadFilter(); headphoneBassShelf.type = "lowshelf"; headphoneBassShelf.frequency.value = 110; headphoneBassShelf.gain.value = 0;
-    headphoneSplitter = context.createChannelSplitter(2); headphoneMerger = context.createChannelMerger(2);
-    headphoneLeftDirect = context.createGain(); headphoneRightDirect = context.createGain();
-    headphoneLeftWidthCross = context.createGain(); headphoneRightWidthCross = context.createGain();
-    headphoneLeftCrossfeed = context.createGain(); headphoneRightCrossfeed = context.createGain();
-    headphoneLeftCrossDelay = context.createDelay(0.03); headphoneRightCrossDelay = context.createDelay(0.03);
-    headphoneLeftCrossLowpass = context.createBiquadFilter(); headphoneRightCrossLowpass = context.createBiquadFilter(); headphoneLeftCrossLowpass.type = "lowpass"; headphoneRightCrossLowpass.type = "lowpass";
-    headphoneCenterSum = context.createGain(); headphoneCenterSum.gain.value = 0.5; headphoneCenterLeft = context.createGain(); headphoneCenterRight = context.createGain();
-    limiterNode = context.createDynamicsCompressor(); analyserNode = context.createAnalyser(); analyserNode.fftSize = 4096; analyserNode.smoothingTimeConstant = 0.38; analyserNode.minDecibels = -92; analyserNode.maxDecibels = -10; musicGain = context.createGain(); musicGain.gain.value = 1;
+    menu.appendChild(signOut);
+    accountButton.addEventListener("click", () => { menu.hidden = !menu.hidden; });
+    accountWrap.append(accountButton, menu);
+    mount.appendChild(accountWrap);
 
-    mediaSource.connect(masterVolumeGain); masterVolumeGain.connect(preampGain);
-    let node: AudioNode = preampGain;
-    equalizerFilters.forEach((filter) => { node.connect(filter); node = filter; });
-    node.connect(normalizerNode); normalizerNode.connect(headphoneBassShelf); headphoneBassShelf.connect(headphoneSplitter);
+    return () => {
+      originalActions.style.display = oldDisplay;
+      mount?.remove();
+    };
+  }, [navigate]);
 
-    headphoneSplitter.connect(headphoneLeftDirect, 0); headphoneLeftDirect.connect(headphoneMerger, 0, 0);
-    headphoneSplitter.connect(headphoneRightDirect, 1); headphoneRightDirect.connect(headphoneMerger, 0, 1);
-    headphoneSplitter.connect(headphoneLeftWidthCross, 0); headphoneLeftWidthCross.connect(headphoneMerger, 0, 1);
-    headphoneSplitter.connect(headphoneRightWidthCross, 1); headphoneRightWidthCross.connect(headphoneMerger, 0, 0);
-    headphoneSplitter.connect(headphoneLeftCrossDelay, 0); headphoneLeftCrossDelay.connect(headphoneLeftCrossLowpass); headphoneLeftCrossLowpass.connect(headphoneLeftCrossfeed); headphoneLeftCrossfeed.connect(headphoneMerger, 0, 1);
-    headphoneSplitter.connect(headphoneRightCrossDelay, 1); headphoneRightCrossDelay.connect(headphoneRightCrossLowpass); headphoneRightCrossLowpass.connect(headphoneRightCrossfeed); headphoneRightCrossfeed.connect(headphoneMerger, 0, 0);
-    headphoneSplitter.connect(headphoneCenterSum, 0); headphoneSplitter.connect(headphoneCenterSum, 1); headphoneCenterSum.connect(headphoneCenterLeft); headphoneCenterSum.connect(headphoneCenterRight); headphoneCenterLeft.connect(headphoneMerger, 0, 0); headphoneCenterRight.connect(headphoneMerger, 0, 1);
+  useEffect(() => {
+    const refreshPlaylists = () => {
+      void listMusicPlaylists().then(setPlaylists).catch(() => setPlaylists([]));
+    };
+    void loadMusicLibrary();
+    refreshPlaylists();
+    window.addEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
+    return () => window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
+  }, []);
 
-    headphoneMerger.connect(limiterNode); limiterNode.connect(analyserNode); analyserNode.connect(musicGain); musicGain.connect(context.destination);
-    mediaSourceConnected = true;
-    applyProcessingSettings();
-  } catch (error) {
-    console.warn("Music DSP connection unavailable; browser will use direct audio output.", error);
-    emit({ dspStatus: "unavailable" });
-  }
-}
+  useEffect(() => {
+    let cancelled = false;
+    const current = player.currentTrack;
+    setArtworkUrl(current?.external_artwork_url || null);
+    if (!current) return () => { cancelled = true; };
+    void getMusicArtworkSignedUrl(current)
+      .then((url) => { if (!cancelled) setArtworkUrl(url || current.external_artwork_url || null); })
+      .catch(() => { if (!cancelled) setArtworkUrl(current.external_artwork_url || null); });
+    return () => { cancelled = true; };
+  }, [player.currentTrack?.id, player.currentTrack?.artwork_path, player.currentTrack?.external_artwork_url]);
 
-async function unlockMusicAudio() {
-  connectMusicGraph();
-  const context = getAudioContext();
-  if (context?.state === "suspended") await context.resume();
-  if (mediaSourceConnected) applyProcessingSettings();
-}
-
-function configureMediaSession() {
-  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-  const current = state.currentTrack;
-  try {
-    navigator.mediaSession.metadata = current ? new MediaMetadata({ title: current.title, artist: (current as MusicTrack & { artist?: string | null }).artist || "MVP Trainer Music", album: (current as MusicTrack & { album?: string | null }).album || state.activePlaylistName || "MVP Trainer" }) : null;
-  } catch { /* optional */ }
-  if (current && (current as MusicTrack & { artwork_path?: string | null }).artwork_path) {
-    void getMusicArtworkSignedUrl(current).then((url) => {
-      if (!url || state.currentTrack?.id !== current.id) return;
-      try { navigator.mediaSession.metadata = new MediaMetadata({ title: current.title, artist: (current as any).artist || "MVP Trainer Music", album: (current as any).album || state.activePlaylistName || "MVP Trainer", artwork: [{ src: url, sizes: "512x512" }] }); } catch { /* optional */ }
-    }).catch(() => undefined);
-  }
-  const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [["play", () => void playMusic()], ["pause", pauseMusic], ["previoustrack", () => void previousMusicTrack()], ["nexttrack", () => void nextMusicTrack()], ["stop", stopMusic], ["seekto", (details) => { if (typeof details.seekTime === "number") seekMusic(details.seekTime); }]];
-  actions.forEach(([action, handler]) => { try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* partial support */ } });
-}
-
-function savePlaybackPosition() {
-  if (!audioElement || !state.currentTrack) return;
-  const now = Date.now(); if (now - timeSaveTimer < 1500) return; timeSaveTimer = now;
-  savePlayerSetting(STORAGE_KEYS.currentTime, String(audioElement.currentTime || 0));
-}
-
-function ensureAudioElement() {
-  if (audioElement) return audioElement;
-  const audio = new Audio(); audio.preload = "metadata"; audio.crossOrigin = "anonymous";
-  audio.addEventListener("play", () => {
-    playbackIntent = true; emit({ playing: true, error: null }); configureMediaSession();
-    const trackId = audio.dataset.trackId; const token = trackId ? `${trackId}:${audio.currentSrc || audio.src}` : "";
-    if (trackId && token !== recordedPlayToken) { recordedPlayToken = token; void recordMusicTrackPlayed(trackId).catch(() => undefined); }
-  });
-  audio.addEventListener("pause", () => emit({ playing: false }));
-  audio.addEventListener("loadedmetadata", () => { const duration = Number(audio.duration); emit({ duration: Number.isFinite(duration) ? duration : 0 }); });
-  audio.addEventListener("durationchange", () => { const duration = Number(audio.duration); emit({ duration: Number.isFinite(duration) ? duration : 0 }); });
-  audio.addEventListener("timeupdate", () => { emit({ currentTime: audio.currentTime || 0 }); savePlaybackPosition(); });
-  audio.addEventListener("ended", () => { const finishedId = state.currentTrack?.id; recordedPlayToken = ""; emit({ playing: false, currentTime: 0 }); if (finishedId) void recordMusicTrackCompleted(finishedId).catch(() => undefined); void handleTrackEnded(); });
-  audio.addEventListener("error", () => { if (!state.loading) emit({ playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" }); });
-  audioElement = audio; return audio;
-}
-
-function pruneSignedUrlCache() {
-  const now = Date.now(); for (const [id, entry] of signedUrlCache) if (now - entry.cachedAt > SIGNED_URL_TTL_MS) signedUrlCache.delete(id);
-  while (signedUrlCache.size > 8) { const oldest = [...signedUrlCache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt)[0]; if (!oldest) break; signedUrlCache.delete(oldest[0]); }
-}
-async function resolveTrackUrl(track: MusicTrack, force = false) {
-  pruneSignedUrlCache();
-  if (!force) { const cached = signedUrlCache.get(track.id); if (cached) return cached.url; }
-  if (force) { signedUrlCache.delete(track.id); clearMusicUrlCache(track.id); }
-  const url = await getMusicTrackSignedUrl(track); signedUrlCache.set(track.id, { url, cachedAt: Date.now() }); return url;
-}
-function waitForMediaReady(audio: HTMLAudioElement, timeoutMs = 7000) {
-  return new Promise<void>((resolve, reject) => {
-    if (audio.readyState >= 2) { resolve(); return; }
-    let done = false;
-    const cleanup = () => { audio.removeEventListener("canplay", onReady); audio.removeEventListener("loadeddata", onReady); audio.removeEventListener("error", onError); window.clearTimeout(timer); };
-    const finish = (error?: Error) => { if (done) return; done = true; cleanup(); error ? reject(error) : resolve(); };
-    const onReady = () => finish();
-    const onError = () => finish(new Error("The browser could not decode this audio source."));
-    const timer = window.setTimeout(() => finish(new Error("Audio source did not become ready.")), timeoutMs);
-    audio.addEventListener("canplay", onReady, { once: true }); audio.addEventListener("loadeddata", onReady, { once: true }); audio.addEventListener("error", onError, { once: true });
-  });
-}
-async function assignTrackSource(track: MusicTrack, startAt: number, forceUrl: boolean) {
-  const audio = ensureAudioElement(); const url = await resolveTrackUrl(track, forceUrl);
-  audio.pause(); recordedPlayToken = ""; audio.removeAttribute("src"); audio.load(); audio.src = url; audio.dataset.trackId = track.id; audio.load();
-  await waitForMediaReady(audio);
-  const target = Math.max(0, Number(startAt) || 0);
-  if (target > 0) { try { audio.currentTime = Number.isFinite(audio.duration) ? Math.min(target, Math.max(0, audio.duration - 0.25)) : target; } catch { /* metadata may still settle */ } }
-}
-async function loadTrack(track: MusicTrack, startAt = 0) {
-  loadingTrackId = track.id; emit({ loading: true, error: null, currentTrack: track }); savePlayerSetting(STORAGE_KEYS.currentTrackId, track.id); configureMediaSession();
-  try {
-    try { await assignTrackSource(track, startAt, false); }
-    catch { await assignTrackSource(track, startAt, true); }
-    if (loadingTrackId !== track.id) return;
-    emit({ loading: false, currentTime: startAt, error: null });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not load this song.";
-    emit({ loading: false, playing: false, error: `COULDN'T PLAY THIS TRACK • ${message}` }); throw error;
-  } finally { if (loadingTrackId === track.id) loadingTrackId = null; }
-}
-function getCurrentIndex() { return state.currentTrack ? state.tracks.findIndex((track) => track.id === state.currentTrack?.id) : -1; }
-function nextSequentialIndex(direction: 1 | -1) { const count = state.tracks.length; if (!count) return -1; const current = getCurrentIndex(); if (current < 0) return direction === 1 ? 0 : count - 1; const next = current + direction; if (next >= 0 && next < count) return next; return state.repeat === "all" ? (direction === 1 ? 0 : count - 1) : -1; }
-function nextShuffleIndex() { const count = state.tracks.length; if (count <= 1) return count ? 0 : -1; const current = getCurrentIndex(); let next = current; while (next === current) next = Math.floor(Math.random() * count); return next; }
-async function handleTrackEnded() { if (state.repeat === "one" && state.currentTrack) { await playMusicTrack(state.currentTrack.id, 0); return; } await nextMusicTrack(true); }
-
-async function resolveSavedQueue(libraryTracks: MusicTrack[]) {
-  const savedPlaylistId = readStored(STORAGE_KEYS.activePlaylistId);
-  if (!savedPlaylistId) return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
-  try {
-    const [playlist, links] = await Promise.all([getMusicPlaylist(savedPlaylistId), listMusicPlaylistTrackLinks(savedPlaylistId)]);
-    if (!playlist) throw new Error("Playlist no longer exists.");
-    const byId = new Map(libraryTracks.map((track) => [track.id, track]));
-    const tracks = links.map((link) => byId.get(link.track_id)).filter((track): track is MusicTrack => Boolean(track));
-    if (!tracks.length) throw new Error("Playlist is empty.");
-    return { tracks, playlistId: playlist.id, playlistName: playlist.name };
-  } catch {
-    removePlayerSetting(STORAGE_KEYS.activePlaylistId); removePlayerSetting(STORAGE_KEYS.activePlaylistName);
-    return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
-  }
-}
-
-export async function loadMusicLibrary(force = false) {
-  if (state.loading) return state.libraryTracks;
-  if (state.libraryLoaded && !force) return state.libraryTracks;
-  emit({ loading: true, error: null });
-  try {
-    const libraryTracks = await listMusicTracks(); const queue = await resolveSavedQueue(libraryTracks); const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
-    const currentTrack = queue.tracks.find((track) => track.id === state.currentTrack?.id) ?? queue.tracks.find((track) => track.id === savedTrackId) ?? queue.tracks[0] ?? null;
-    emit({ libraryTracks, tracks: queue.tracks, activePlaylistId: queue.playlistId, activePlaylistName: queue.playlistName, currentTrack, loading: false, libraryLoaded: true, error: null }); configureMediaSession(); return libraryTracks;
-  } catch (error) { emit({ loading: false, libraryLoaded: true, error: error instanceof Error ? error.message : "Could not load your music library." }); return []; }
-}
-
-export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
-  const activeIds = new Set(state.tracks.map((track) => track.id));
-  const tracks = state.activePlaylistId ? libraryTracks.filter((track) => activeIds.has(track.id)) : state.activePlaylistName && !state.activePlaylistId ? state.tracks.map((track) => libraryTracks.find((item) => item.id === track.id)).filter((track): track is MusicTrack => Boolean(track)) : libraryTracks;
-  const currentTrack = state.currentTrack ? tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null : tracks[0] ?? null;
-  if (state.currentTrack && !currentTrack) stopMusic(); emit({ libraryTracks, tracks, currentTrack, libraryLoaded: true }); configureMediaSession();
-}
-
-export function activateAllMusicTracks() {
-  removePlayerSetting(STORAGE_KEYS.activePlaylistId); removePlayerSetting(STORAGE_KEYS.activePlaylistName);
-  const currentTrack = state.libraryTracks.find((track) => track.id === state.currentTrack?.id) ?? state.libraryTracks[0] ?? null;
-  emit({ tracks: [...state.libraryTracks], currentTrack, activePlaylistId: null, activePlaylistName: null, error: null }); configureMediaSession();
-}
-export function activateMusicAdHocQueue(name: string, tracks: MusicTrack[]) {
-  removePlayerSetting(STORAGE_KEYS.activePlaylistId); savePlayerSetting(STORAGE_KEYS.activePlaylistName, name);
-  const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
-  emit({ tracks: [...tracks], currentTrack, activePlaylistId: null, activePlaylistName: name, error: tracks.length ? null : "This collection has no songs." }); configureMediaSession();
-}
-export async function playMusicAdHocQueue(name: string, tracks: MusicTrack[], startTrackId?: string) { activateMusicAdHocQueue(name, tracks); const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0]; if (start) await playMusicTrack(start.id, 0); }
-export function activateMusicPlaylistQueue(playlist: Pick<MusicPlaylist, "id" | "name">, tracks: MusicTrack[]) {
-  savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id); savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
-  const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
-  emit({ tracks: [...tracks], currentTrack, activePlaylistId: playlist.id, activePlaylistName: playlist.name, error: tracks.length ? null : "This playlist has no songs." }); configureMediaSession();
-}
-export async function playMusicPlaylist(playlist: Pick<MusicPlaylist, "id" | "name">, tracks: MusicTrack[], startTrackId?: string) { activateMusicPlaylistQueue(playlist, tracks); const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0]; if (!start) throw new Error("Add songs to this playlist before playing it."); await playMusicTrack(start.id, 0); }
-
-async function performPlayMusicTrack(trackId: string, startAt = 0) {
-  playbackIntent = true; if (!state.libraryLoaded) await loadMusicLibrary();
-  const track = state.tracks.find((item) => item.id === trackId) ?? state.libraryTracks.find((item) => item.id === trackId); if (!track) throw new Error("Song not found in your music library.");
-  if (!state.tracks.some((item) => item.id === trackId)) activateAllMusicTracks();
-  await unlockMusicAudio(); await loadTrack(track, startAt); await ensureAudioElement().play();
-}
-export function playMusicTrack(trackId: string, startAt = 0) { const operation = transportQueue.catch(() => undefined).then(() => performPlayMusicTrack(trackId, startAt)); transportQueue = operation.catch(() => undefined); return operation; }
-export async function playMusic() { playbackIntent = true; await unlockMusicAudio(); if (!state.libraryLoaded) await loadMusicLibrary(); const audio = ensureAudioElement(); const track = state.currentTrack ?? state.tracks[0] ?? null; if (!track) { emit({ error: "Upload music before pressing Play." }); return; } if (audio.dataset.trackId !== track.id || !audio.src) { const saved = Number(readStored(STORAGE_KEYS.currentTime) || 0); await loadTrack(track, Number.isFinite(saved) ? saved : 0); } await audio.play(); }
-export function pauseMusic() { playbackIntent = false; ensureAudioElement().pause(); }
-export function stopMusic() { playbackIntent = false; const audio = ensureAudioElement(); audio.pause(); try { audio.currentTime = 0; } catch { /* mobile */ } savePlayerSetting(STORAGE_KEYS.currentTime, "0"); emit({ playing: false, currentTime: 0 }); }
-export function seekMusic(seconds: number) { const audio = ensureAudioElement(); const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration; const next = Math.max(0, Math.min(Number(seconds) || 0, Math.max(0, duration || 0))); try { audio.currentTime = next; emit({ currentTime: next }); savePlayerSetting(STORAGE_KEYS.currentTime, String(next)); } catch { /* not ready */ } }
-function shouldRecordSkip() { const audio = ensureAudioElement(); const duration = Number.isFinite(audio.duration) ? audio.duration : state.duration; return Boolean(state.currentTrack && audio.currentTime < Math.max(30, (duration || 0) * 0.35)); }
-export async function nextMusicTrack(fromEnded = false) { if (!state.libraryLoaded) await loadMusicLibrary(); if (!fromEnded && shouldRecordSkip() && state.currentTrack) void recordMusicTrackSkipped(state.currentTrack.id).catch(() => undefined); const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1); if (index < 0) { if (fromEnded) stopMusic(); return; } const track = state.tracks[index]; if (track) await playMusicTrack(track.id, 0); }
-export async function previousMusicTrack() { const audio = ensureAudioElement(); if (audio.currentTime > 5) { seekMusic(0); return; } if (!state.libraryLoaded) await loadMusicLibrary(); const index = nextSequentialIndex(-1); if (index < 0) { seekMusic(0); return; } const track = state.tracks[index]; if (track) await playMusicTrack(track.id, 0); }
-export function toggleMusicShuffle() { const shuffle = !state.shuffle; savePlayerSetting(STORAGE_KEYS.shuffle, String(shuffle)); emit({ shuffle }); }
-export function cycleMusicRepeat() { const repeat: MusicRepeatMode = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off"; savePlayerSetting(STORAGE_KEYS.repeat, repeat); emit({ repeat }); }
-
-export function addMusicToQueue(trackId: string) {
-  const track = state.libraryTracks.find((item) => item.id === trackId); if (!track) return;
-  if (state.tracks.some((item) => item.id === trackId)) return;
-  emit({ tracks: [...state.tracks, track] });
-}
-export function playMusicNext(trackId: string) {
-  const track = state.libraryTracks.find((item) => item.id === trackId); if (!track) return;
-  const without = state.tracks.filter((item) => item.id !== trackId); const currentIndex = state.currentTrack ? without.findIndex((item) => item.id === state.currentTrack?.id) : -1; const insertAt = Math.max(0, currentIndex + 1); without.splice(insertAt, 0, track); emit({ tracks: without });
-}
-
-export async function setPlayerMusicPreference(trackId: string, preference: "neutral" | "like" | "play_less") {
-  const updated = await setMusicTrackPreference(trackId, preference);
-  const patchTrack = (track: MusicTrack) => track.id === trackId ? updated : track;
-  emit({ libraryTracks: state.libraryTracks.map(patchTrack), tracks: state.tracks.map(patchTrack), currentTrack: state.currentTrack?.id === trackId ? updated : state.currentTrack });
-  return updated;
-}
-
-export function setMusicVolume(value: number) { const next = Math.max(0, Math.min(1, Number(value) || 0)); savePlayerSetting(STORAGE_KEYS.volume, String(next)); emit({ volume: next }); if (audioContext && mediaSourceConnected && masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(next), audioContext.currentTime, 0.01); else if (audioElement) audioElement.volume = Math.max(0, Math.min(1, next)); }
-export function setMusicEqEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled)); emit({ eqEnabled: enabled }); applyProcessingSettings(); }
-export function applyMusicEqPreset(presetName: MusicEqPreset) {
-  if (presetName === "custom") { savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); emit({ eqPreset: presetName }); return; }
-  const definition = isCustomPresetSlot(presetName) ? readCustomPreset(presetName) : isBuiltInPreset(presetName) ? MUSIC_EQ_PRESETS[presetName] : null;
-  if (!definition) { savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); emit({ eqPreset: presetName }); return; }
-  const gains = [...definition.gains]; savePlayerSetting(STORAGE_KEYS.eqPreset, presetName); savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains)); savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp)); emit({ eqPreset: presetName, eqGains: gains, preampDb: definition.preamp }); applyProcessingSettings();
-}
-export function saveMusicEqCustomPreset(slot: MusicCustomPresetSlot) { const definition: EqDefinition = { label: slot === "custom_1" ? "Custom 1" : slot === "custom_2" ? "Custom 2" : "Custom 3", gains: [...state.eqGains], preamp: state.preampDb }; savePlayerSetting(customPresetStorageKey(slot), JSON.stringify(definition)); savePlayerSetting(STORAGE_KEYS.eqPreset, slot); emit({ eqPreset: slot }); }
-export function setMusicEqBand(index: number, gainDb: number) { if (index < 0 || index >= MUSIC_EQ_FREQUENCIES.length) return; const gains = [...state.eqGains]; gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0)); savePlayerSetting(STORAGE_KEYS.eqPreset, "custom"); savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains)); emit({ eqPreset: "custom", eqGains: gains }); applyProcessingSettings(); }
-export function setMusicPreamp(preampDb: number) { const next = Math.max(-12, Math.min(12, Number(preampDb) || 0)); savePlayerSetting(STORAGE_KEYS.eqPreset, "custom"); savePlayerSetting(STORAGE_KEYS.preampDb, String(next)); emit({ eqPreset: "custom", preampDb: next }); applyProcessingSettings(); }
-export function setMusicCrossfadeSeconds(seconds: number) { const next = Math.max(0, Math.min(8, Number(seconds) || 0)); savePlayerSetting(STORAGE_KEYS.crossfadeSeconds, String(next)); emit({ crossfadeSeconds: next }); }
-export function setMusicNormalizationEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.normalizationEnabled, String(enabled)); emit({ normalizationEnabled: enabled }); applyProcessingSettings(); }
-export function setMusicLimiterEnabled(enabled: boolean) { savePlayerSetting(STORAGE_KEYS.limiterEnabled, String(enabled)); emit({ limiterEnabled: enabled }); applyProcessingSettings(); }
-export function setMusicDuckingStrength(value: MusicDuckingStrength) { savePlayerSetting(STORAGE_KEYS.duckingStrength, value); emit({ duckingStrength: value }); }
-
-export function getNextMusicTrackPreview() {
-  if (!state.tracks.length) return null;
-  if (state.shuffle) return { track: null as MusicTrack | null, label: "Shuffle selection" };
-  const index = nextSequentialIndex(1);
-  return {
-    track: index >= 0 ? state.tracks[index] ?? null : null,
-    label: index >= 0 ? state.tracks[index]?.title ?? "Next track" : "End of queue",
-  };
-}
-
-function applyHeadphoneModeValues(mode: MusicHeadphoneMode) { const values = MUSIC_HEADPHONE_MODES[mode]; savePlayerSetting(STORAGE_KEYS.headphoneMode, mode); savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(values.width)); savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(values.depth)); savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(values.crossfeed)); savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(values.center)); savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(values.bass)); emit({ headphoneMode: mode, headphoneWidth: values.width, headphoneDepth: values.depth, headphoneCrossfeed: values.crossfeed, headphoneCenter: values.center, headphoneBassImpact: values.bass }); applyProcessingSettings(); }
-export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) { applyHeadphoneModeValues(mode); }
-function setHeadphoneValue(key: keyof Pick<MusicPlayerState, "headphoneWidth" | "headphoneDepth" | "headphoneCrossfeed" | "headphoneCenter" | "headphoneBassImpact">, storageKey: string, value: number) { const next = Math.max(0, Math.min(100, Number(value) || 0)); savePlayerSetting(storageKey, String(next)); emit({ [key]: next } as Pick<MusicPlayerState, typeof key>); applyProcessingSettings(); }
-export function setMusicHeadphoneWidth(value: number) { setHeadphoneValue("headphoneWidth", STORAGE_KEYS.headphoneWidth, value); }
-export function setMusicHeadphoneDepth(value: number) { setHeadphoneValue("headphoneDepth", STORAGE_KEYS.headphoneDepth, value); }
-export function setMusicHeadphoneCrossfeed(value: number) { setHeadphoneValue("headphoneCrossfeed", STORAGE_KEYS.headphoneCrossfeed, value); }
-export function setMusicHeadphoneCenter(value: number) { setHeadphoneValue("headphoneCenter", STORAGE_KEYS.headphoneCenter, value); }
-export function setMusicHeadphoneBassImpact(value: number) { setHeadphoneValue("headphoneBassImpact", STORAGE_KEYS.headphoneBassImpact, value); }
-export function setMusicDspBypass(bypassed: boolean) { savePlayerSetting(STORAGE_KEYS.dspBypass, String(bypassed)); emit({ dspBypass: bypassed }); applyProcessingSettings(); }
-export async function recoverMusicDsp() { try { await unlockMusicAudio(); applyProcessingSettings(); } catch { emit({ dspStatus: "unavailable" }); } }
-export async function rebuildMusicAudioEngine() { const track = state.currentTrack; if (!track) return; const wasPlaying = state.playing || playbackIntent; const position = state.currentTime; if (audioElement) { try { audioElement.pause(); audioElement.removeAttribute("src"); audioElement.load(); } catch { /* ignore */ } } releaseGraph(); if (audioContext && audioContext.state !== "closed") { try { await audioContext.close(); } catch { /* ignore */ } } audioContext = null; audioElement = null; await unlockMusicAudio(); await loadTrack(track, position); if (wasPlaying) await ensureAudioElement().play(); }
-
-export function getMusicVisualizerLevels(barCount = 44) {
-  const count = Math.max(8, Math.min(64, Math.floor(barCount)));
-  if (!analyserNode || !state.playing || document.hidden) { for (let i = 0; i < count; i += 1) visualizerEnvelope[i] *= 0.72; return Array.from(visualizerEnvelope.slice(0, count)); }
-  if (!analyserBuffer || analyserBuffer.length !== analyserNode.frequencyBinCount) {
-    const rawBuffer = new ArrayBuffer(analyserNode.frequencyBinCount);
-    const nextFrequencyData: Uint8Array<ArrayBuffer> = new Uint8Array(rawBuffer);
-    analyserBuffer = nextFrequencyData;
-  }
-  analyserNode.getByteFrequencyData(analyserBuffer);
-  const nyquist = (audioContext?.sampleRate ?? 44100) / 2;
-  for (let index = 0; index < count; index += 1) {
-    const lowHz = 28 * Math.pow(18000 / 28, index / count);
-    const highHz = 28 * Math.pow(18000 / 28, (index + 1) / count);
-    const start = Math.max(1, Math.floor((lowHz / nyquist) * analyserBuffer.length));
-    const end = Math.max(start + 1, Math.min(analyserBuffer.length, Math.ceil((highHz / nyquist) * analyserBuffer.length)));
-    let sum = 0; let peak = 0; let samples = 0;
-    for (let bin = start; bin < end; bin += 1) { const value = analyserBuffer[bin]; sum += value; peak = Math.max(peak, value); samples += 1; }
-    const average = samples ? sum / samples : 0; const raw = Math.min(1, (average * 0.72 + peak * 0.28) / 210); const shaped = Math.pow(raw, 0.78);
-    const previous = visualizerEnvelope[index] || 0; visualizerEnvelope[index] = shaped > previous ? previous + (shaped - previous) * 0.72 : previous + (shaped - previous) * 0.24;
-  }
-  return Array.from(visualizerEnvelope.slice(0, count));
-}
-const MUSIC_RTA_CENTERS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
-
-export function getMusicRtaLevels() {
-  const count = MUSIC_RTA_CENTERS.length;
-  if (!analyserNode || !state.playing || typeof document === "undefined" || document.hidden) {
-    for (let index = 0; index < count; index += 1) rtaEnvelope[index] *= 0.62;
-    return Array.from(rtaEnvelope);
-  }
-
-  if (!analyserBuffer || analyserBuffer.length !== analyserNode.frequencyBinCount) {
-    const rawBuffer = new ArrayBuffer(analyserNode.frequencyBinCount);
-    analyserBuffer = new Uint8Array(rawBuffer);
-  }
-  analyserNode.getByteFrequencyData(analyserBuffer);
-
-  const sampleRate = audioContext?.sampleRate ?? 44100;
-  const nyquist = sampleRate / 2;
-  const binHz = nyquist / analyserBuffer.length;
-
-  for (let index = 0; index < count; index += 1) {
-    const center = MUSIC_RTA_CENTERS[index];
-    const previousCenter = index === 0 ? center / Math.SQRT2 : Math.sqrt(MUSIC_RTA_CENTERS[index - 1] * center);
-    const nextCenter = index === count - 1 ? Math.min(nyquist, center * Math.SQRT2) : Math.sqrt(center * MUSIC_RTA_CENTERS[index + 1]);
-    const lowHz = Math.max(binHz, previousCenter);
-    const highHz = Math.min(nyquist, nextCenter);
-    const start = Math.max(1, Math.floor(lowHz / binHz));
-    const end = Math.max(start + 1, Math.min(analyserBuffer.length, Math.ceil(highHz / binHz)));
-
-    let energy = 0;
-    let peak = 0;
-    let samples = 0;
-    let top1 = 0;
-    let top2 = 0;
-    let top3 = 0;
-    let top4 = 0;
-    for (let bin = start; bin < end; bin += 1) {
-      const value = analyserBuffer[bin] / 255;
-      energy += value * value;
-      peak = Math.max(peak, value);
-      samples += 1;
-      if (value >= top1) { top4 = top3; top3 = top2; top2 = top1; top1 = value; }
-      else if (value >= top2) { top4 = top3; top3 = top2; top2 = value; }
-      else if (value >= top3) { top4 = top3; top3 = value; }
-      else if (value > top4) top4 = value;
+  const run = (action: () => void | Promise<void>) => {
+    try {
+      const result = action();
+      if (result instanceof Promise) void result.catch(() => undefined);
+    } catch {
+      // Player state surfaces the useful error.
     }
+  };
 
-    const rms = samples ? Math.sqrt(energy / samples) : 0;
-    const topAverage = samples >= 4 ? (top1 + top2 + top3 + top4) / 4 : peak;
-    // This is measured FFT energy only. Top-bin weighting keeps transients alive without fake/random motion.
-    const measured = Math.min(1, rms * 0.50 + topAverage * 0.38 + peak * 0.28);
-    const shaped = measured < 0.012 ? 0 : Math.pow(measured, 0.62);
-    const previous = rtaEnvelope[index] || 0;
-    const attack = 0.84;
-    const release = 0.14;
-    rtaEnvelope[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
+  useEffect(() => {
+    if (!isCustomSlot(player.eqPreset)) return;
+
+    setActiveCustomSlot(player.eqPreset);
+    const profile = dspProfiles[player.eqPreset];
+    if (!profile) return;
+
+    const restorationKey = `${player.eqPreset}:${profile.savedAt}`;
+    if (restoredProfileRef.current === restorationKey) return;
+    restoredProfileRef.current = restorationKey;
+
+    profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
+    setMusicPreamp(profile.preampDb);
+    setMusicEqEnabled(profile.eqEnabled);
+    setMusicHeadphoneMode(profile.headphoneMode);
+    setMusicHeadphoneWidth(profile.headphoneWidth);
+    setMusicHeadphoneDepth(profile.headphoneDepth);
+    setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
+    setMusicHeadphoneCenter(profile.headphoneCenter);
+    setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
+  }, [player.eqPreset, dspProfiles]);
+
+  async function selectQueue(value: string) {
+    setQueueBusy(true);
+    try {
+      if (value === "all") {
+        const wasPlaying = player.playing;
+        activateAllMusicTracks();
+        if (wasPlaying) await playMusic();
+        return;
+      }
+      const playlist = playlists.find((item) => item.id === value);
+      if (!playlist) return;
+      const links = await listMusicPlaylistTrackLinks(playlist.id);
+      const byId = new Map(player.libraryTracks.map((track) => [track.id, track]));
+      const tracks = links
+        .map((link) => byId.get(link.track_id))
+        .filter((track): track is MusicTrack => Boolean(track));
+      if (player.playing) await playMusicPlaylist(playlist, tracks);
+      else activateMusicPlaylistQueue(playlist, tracks);
+    } finally {
+      setQueueBusy(false);
+    }
   }
 
-  return Array.from(rtaEnvelope);
+  function currentDspSnapshot(name: string): SavedDspProfile {
+    return {
+      name: name.trim() || "Custom DSP",
+      eqEnabled: player.eqEnabled,
+      eqGains: [...player.eqGains],
+      preampDb: player.preampDb,
+      headphoneMode: player.headphoneMode,
+      headphoneWidth: player.headphoneWidth,
+      headphoneDepth: player.headphoneDepth,
+      headphoneCrossfeed: player.headphoneCrossfeed,
+      headphoneCenter: player.headphoneCenter,
+      headphoneBassImpact: player.headphoneBassImpact,
+      savedAt: Date.now(),
+    };
+  }
+
+  function profileMatchesCurrent(profile: SavedDspProfile | null) {
+    if (!profile) return false;
+    if (profile.eqEnabled !== player.eqEnabled) return false;
+    if (profile.headphoneMode !== player.headphoneMode) return false;
+    if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
+    if (!sameDspNumber(profile.headphoneWidth, player.headphoneWidth)) return false;
+    if (!sameDspNumber(profile.headphoneDepth, player.headphoneDepth)) return false;
+    if (!sameDspNumber(profile.headphoneCrossfeed, player.headphoneCrossfeed)) return false;
+    if (!sameDspNumber(profile.headphoneCenter, player.headphoneCenter)) return false;
+    if (!sameDspNumber(profile.headphoneBassImpact, player.headphoneBassImpact)) return false;
+    if (profile.eqGains.length !== player.eqGains.length) return false;
+    return profile.eqGains.every((gain, index) => sameDspNumber(gain, player.eqGains[index] ?? 0));
+  }
+
+  async function runDspMutation(action: () => void, ensureEq = false) {
+    try {
+      if (player.dspBypass) setMusicDspBypass(false);
+      if (player.dspStatus !== "active") await recoverMusicDsp();
+      if (ensureEq && !player.eqEnabled) setMusicEqEnabled(true);
+      action();
+      if (player.dspStatus !== "active") await recoverMusicDsp();
+    } catch {
+      // The player engine owns the useful error state.
+    }
+  }
+
+  async function applySavedDspProfile(slot: MusicCustomPresetSlot) {
+    const profile = dspProfiles[slot];
+    setActiveCustomSlot(slot);
+    if (!profile) {
+      await runDspMutation(() => applyMusicEqPreset(slot), true);
+      setProfileMessage(`${slotFallbackLabel(slot)} has no full DSP profile saved yet.`);
+      return;
+    }
+    await runDspMutation(() => {
+      applyMusicEqPreset(slot);
+      profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
+      setMusicPreamp(profile.preampDb);
+      setMusicEqEnabled(profile.eqEnabled);
+      setMusicHeadphoneMode(profile.headphoneMode);
+      setMusicHeadphoneWidth(profile.headphoneWidth);
+      setMusicHeadphoneDepth(profile.headphoneDepth);
+      setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
+      setMusicHeadphoneCenter(profile.headphoneCenter);
+      setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
+    }, profile.eqEnabled);
+    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
+    setProfileMessage(`${profile.name} loaded • DSP active.`);
+  }
+
+  function handlePresetSelection(value: MusicEqPreset) {
+    if (isCustomSlot(value)) {
+      void applySavedDspProfile(value);
+      return;
+    }
+    setActiveCustomSlot(null);
+    void runDspMutation(() => applyMusicEqPreset(value), true);
+    setProfileMessage("DSP preset applied.");
+  }
+
+  function saveCurrentDspProfile(slot: MusicCustomPresetSlot, name: string) {
+    const profile = currentDspSnapshot(name || slotFallbackLabel(slot));
+    const nextProfiles = { ...dspProfiles, [slot]: profile };
+    saveMusicEqCustomPreset(slot);
+    writeSavedDspProfiles(nextProfiles);
+    setDspProfiles(nextProfiles);
+    setActiveCustomSlot(slot);
+    restoredProfileRef.current = `${slot}:${profile.savedAt}`;
+    setProfileMessage(`${profile.name} saved.`);
+    setSavePresetOpen(false);
+  }
+
+  function openSavePresetDialog(preferredSlot?: MusicCustomPresetSlot) {
+    const firstEmpty = DSP_SLOTS.find((slot) => !dspProfiles[slot]);
+    const slot = preferredSlot ?? firstEmpty ?? activeCustomSlot ?? "custom_1";
+    setSavePresetSlot(slot);
+    setSavePresetName(dspProfiles[slot]?.name ?? "");
+    setSavePresetOpen(true);
+  }
+
+  const track = player.currentTrack;
+  const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
+  const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
+  const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
+  const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
+  const activeProfileDirty = activeSavedProfile ? !profileMatchesCurrent(activeSavedProfile) : false;
+  const presetSelectValue: MusicEqPreset = activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
+  const presetStatusLabel = activeSavedProfile
+    ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
+    : player.eqPreset === "custom" ? "Unsaved custom DSP" : "Built-in preset";
+
+  return (
+    <section
+      className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
+      aria-label="MVP Trainer music console"
+    >
+
+      <div className="tr-playerHero">
+        <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
+          {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
+        </button>
+        <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}>
+          <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
+          <small>{track?.artist || "Unknown Artist"}</small>
+        </button>
+      </div>
+
+      <div className="tr-audioTimeline">
+        <span>{formatMusicTime(currentTime)}</span>
+        <input type="range" min="0" max={Math.max(1, duration)} step="1" value={Math.min(Math.max(1, duration), currentTime)} onChange={(event: ChangeEvent<HTMLInputElement>) => seekMusic(Number(event.target.value))} disabled={!track || !duration} aria-label="Music playback position" />
+        <span>{formatMusicTime(duration)}</span>
+      </div>
+
+      <div className="tr-playerTransportStage" aria-label="Music transport controls">
+        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><span className="tr-audioTransportFace"><PlayerIcon name="back" /></span></button><span>PREVIOUS</span></div>
+        <div className="tr-audioTransportUnit is-primary"><button type="button" className="tr-audioTransportButton tr-audioTransportButton--primary" onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><span className="tr-audioTransportFace"><PlayerIcon name={player.playing ? "pause" : "play"} /></span></button><span>{player.playing ? "PAUSE" : "PLAY"}</span></div>
+        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => stopMusic()} disabled={!track || player.loading || queueBusy} aria-label="Stop music"><span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span></button><span>STOP</span></div>
+        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><span className="tr-audioTransportFace"><PlayerIcon name="next" /></span></button><span>NEXT</span></div>
+      </div>
+
+      <div className="tr-playerModeStage" aria-label="Shuffle and repeat controls">
+        <button type="button" className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span></button>
+        <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
+      </div>
+
+      <MusicActivityRta playing={player.playing} />
+
+      <div className="tr-playerPreferenceStage tr-trackPreference" aria-label="Track preference">
+        <button type="button" className={`tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
+          if (!track) return;
+          void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
+        }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /></button>
+        <button type="button" className={`tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
+          if (!track) return;
+          void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
+        }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /></button>
+        <button type="button" className={`tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover similar music" onClick={() => {
+          if (!track) return;
+          setDiscoverMessage("ADDING…");
+          void discoverMoreFromTrack(track, player.libraryTracks)
+            .then(() => { setDiscoverMessage("✓ ADDED TO DISCOVER"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+            .catch(() => { setDiscoverMessage("DISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
+        }} aria-label="Rediscover similar music"><PlayerIcon name="guitar" /></button>
+      </div>
+
+      <div className="tr-playerUtilityRow">
+        <label className="tr-playerVolume">
+          <span>VOLUME</span>
+          <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const percent = Math.max(0, Math.min(100, Number(event.target.value)));
+            setMusicVolume(percent / 100);
+          }} aria-label="Music volume" />
+          <strong>{volumePercent}%</strong>
+        </label>
+        <div className="tr-playerSourceTools">
+          <label className="tr-audioQueueSelector">
+            <span>PLAYING FROM</span>
+            <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
+              <option value="all">All Uploaded Songs</option>
+              {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+            </select>
+          </label>
+          <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
+            <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
+          </button>
+        </div>
+      </div>
+
+      {discoverMessage ? <div className="tr-discoverToast" role="status">{discoverMessage}</div> : null}
+
+      {eqOpen ? (
+        <section className="tr-audioEqPanel tr-audioEqPanel--pro7">
+          <div className="tr-audioEqHead">
+            <div><strong>31-Band EQ + Headphone DSP</strong></div>
+            <div className="tr-dspAbControls">
+              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.eqEnabled ? "ON" : "FLAT"}</span></label>
+              <button type="button" className={`tr-dspBypassButton ${player.dspBypass ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>A/B {player.dspBypass ? "BYPASSED" : "PROCESSED"}</button>
+            </div>
+            <label className="tr-audioEqPreset"><span>EQ PRESET</span><select value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
+              {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
+              {DSP_SLOTS.map((slot) => <option key={slot} value={slot}>{dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}</option>)}
+              <option value="custom">{activeSavedProfile && activeProfileDirty ? `${activeSavedProfile.name} • Modified` : "Unsaved Custom"}</option>
+            </select></label>
+          </div>
+
+
+          <div className="tr-audioEqScroll" aria-label="31 band equalizer">
+            <div className="tr-audioEqBands tr-audioEqBands--31">
+              {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
+                <label key={frequency} className="tr-audioEqBand">
+                  <span className="tr-audioEqGain">{Number(player.eqGains[index] || 0) > 0 ? "+" : ""}{Number(player.eqGains[index] || 0).toFixed(0)}</span>
+                  <span className="tr-audioEqSliderShell"><input type="range" min="-12" max="12" step="0.5" value={player.eqGains[index] || 0} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqBand(index, Number(event.target.value)), true)} aria-label={`${frequency} hertz equalizer gain`} /></span>
+                  <span>{formatHz(frequency)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
+            
+            <div className="tr-audioEqQuickActions"><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("flat"), true)}>FLAT</button><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("power"), true)}>POWER TRAINING</button></div>
+          </div>
+
+          <div className="tr-dspProfileSave">
+            <div className="tr-dspProfileSaveStatus"><span>DSP PROFILE</span><strong>{presetStatusLabel}</strong>{profileMessage ? <small aria-live="polite">{profileMessage}</small> : null}</div>
+            <div className="tr-dspProfileSaveActions">
+              {activeCustomSlot && activeSavedProfile ? <button type="button" onClick={() => saveCurrentDspProfile(activeCustomSlot, activeSavedProfile.name)}>UPDATE PRESET</button> : null}
+              <button type="button" className="is-primary" onClick={() => openSavePresetDialog()}>{activeCustomSlot ? "SAVE AS NEW" : "SAVE CUSTOM PRESET"}</button>
+            </div>
+          </div>
+
+          <section className="tr-headphoneProcessor">
+            <header><div><strong>Headphone Immersion</strong></div><label><span>MODE</span><select value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
+            <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
+            <div className="tr-headphoneControls">
+              <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneWidth(Number(event.target.value)))} /></label>
+              <label><span>DEPTH <b>{player.headphoneDepth}%</b></span><input type="range" min="0" max="100" value={player.headphoneDepth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneDepth(Number(event.target.value)))} /></label>
+              <label><span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span><input type="range" min="0" max="100" value={player.headphoneCrossfeed} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCrossfeed(Number(event.target.value)))} /></label>
+              <label><span>CENTER <b>{player.headphoneCenter}%</b></span><input type="range" min="0" max="100" value={player.headphoneCenter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCenter(Number(event.target.value)))} /></label>
+              <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneBassImpact(Number(event.target.value)))} /></label>
+            </div>
+          </section>
+        </section>
+      ) : null}
+
+      {savePresetOpen ? (
+        <div className="tr-dspSaveBack" onMouseDown={() => setSavePresetOpen(false)}>
+          <section className="tr-dspSaveDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+            <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
+            <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
+            <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
+          </section>
+        </div>
+      ) : null}
+
+      {player.error ? <div className="tr-audioError">{/no supported source|src_not_supported|media_err_src/i.test(player.error) ? "COULDN’T PLAY THIS TRACK • RETRY" : player.error}</div> : null}
+
+      <style>{`
+        .tr-audioDeck--pro7 .tr-audioDeckTop{display:grid!important;grid-template-columns:52px minmax(0,1fr) minmax(165px,190px) max-content!important;gap:10px!important;align-items:center!important;width:100%!important;min-width:0!important;box-sizing:border-box!important;overflow:visible!important}.tr-audioDeck--pro7 .tr-audioArtwork{min-width:0}.tr-audioDeck--pro7 .tr-audioIdentity{min-width:0!important;max-width:none!important;overflow:hidden}.tr-audioDeck--pro7 .tr-audioIdentity strong,.tr-audioDeck--pro7 .tr-audioIdentity small{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tr-audioDeck--pro7 .tr-audioQueueSelector{min-width:0!important;width:100%!important;max-width:190px!important}.tr-audioDeck--pro7 .tr-audioQueueSelector select{width:100%!important;min-width:0!important}.tr-audioDeck--pro7 .tr-audioTopButtons{display:flex;align-items:center;justify-content:flex-end;gap:7px;min-width:max-content;justify-self:end;overflow:visible}.tr-audioDeck--pro7 .tr-audioEqToggle{flex:0 0 auto;white-space:nowrap}.tr-audioDeck--pro7 .tr-audioLibraryButton{flex:0 0 auto;min-width:76px;min-height:38px;padding:0 12px;border:1px solid rgba(126,193,218,.16);border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.2));color:#dcebf1;font-size:8px;font-weight:1000;letter-spacing:.065em;white-space:nowrap;cursor:pointer}.tr-audioDeck--pro7 .tr-audioLibraryButton:hover{border-color:rgba(75,203,248,.38);color:#9ee7ff}
+        .tr-audioDeck--pro7 .tr-audioArtwork{overflow:hidden;background:linear-gradient(180deg,#111a21,#070b0f)!important;border-color:rgba(132,196,221,.20)!important;box-shadow:0 5px 14px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.055)!important}.tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%;height:100%;object-fit:cover;display:block}.tr-audioDeck--pro7 .tr-audioArtworkFallback{width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(145deg,#132332,#09131c);color:#ffc061}.tr-audioDeck--pro7 .tr-audioArtworkFallback svg{width:28px;height:28px;fill:currentColor}
+        .tr-audioDeck--pro7 .tr-audioTelemetry{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:5px 0 0;padding:6px 10px;border:1px solid rgba(99,177,206,.09);border-radius:9px;background:rgba(4,15,22,.48);color:rgba(177,205,217,.54);font-size:7px;font-weight:950;letter-spacing:.085em}.tr-audioDeck--pro7 .tr-audioTelemetry>span:first-child{display:inline-flex;align-items:center;gap:6px;color:#a9c5cf}.tr-audioDeck--pro7 .tr-audioTelemetry i{width:5px;height:5px;border-radius:50%;background:#435961}.tr-audioDeck--pro7 .tr-audioTelemetry .is-live i,.tr-audioDeck--pro7 .tr-audioTelemetry span.is-live i{background:#59e7aa;box-shadow:0 0 8px rgba(89,231,170,.55)}.tr-audioDeck--pro7 .tr-dspHealth{margin-left:auto;border:0;background:transparent;color:#8fa8b1;font:inherit;cursor:pointer}.tr-audioDeck--pro7 .tr-dspHealth.is-active{color:#58dca5}.tr-audioDeck--pro7 .tr-dspHealth.is-unavailable{color:#ff7777}.tr-audioDeck--pro7 .tr-dspHealth.is-recovering{color:#ffb34d}
+        .tr-audioDeck--pro7 .tr-rta10{margin:8px 0 6px;border:1px solid rgba(77,178,215,.18);border-top-color:rgba(169,226,246,.31);border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(4,16,24,.99),rgba(2,8,13,.995));box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.22)}
+        .tr-audioDeck--pro7 .tr-rta10Head{height:29px;padding:0 11px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(80,177,214,.09);font-size:7px;font-weight:950;letter-spacing:.105em;color:rgba(172,204,217,.5)}.tr-audioDeck--pro7 .tr-rta10Head span:first-child{display:inline-flex;align-items:center;gap:7px;color:#d8f5ff}.tr-audioDeck--pro7 .tr-rta10Head i{width:5px;height:5px;border-radius:50%;background:#40545c;box-shadow:0 0 0 3px rgba(80,110,120,.05)}.tr-audioDeck--pro7 .tr-rta10Head i.is-live{background:#52d7ff;box-shadow:0 0 9px rgba(82,215,255,.44)}
+        .tr-audioDeck--pro7 .tr-rta10Body{display:grid;grid-template-columns:34px minmax(0,1fr);min-height:132px;background:repeating-linear-gradient(0deg,transparent 0,transparent 20px,rgba(92,174,205,.045) 20px,rgba(92,174,205,.045) 21px)}.tr-audioDeck--pro7 .tr-rta10Scale{position:relative;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding:9px 6px 23px 0;border-right:1px solid rgba(79,157,187,.08);color:rgba(137,170,183,.46);font-size:6px;font-weight:850;font-variant-numeric:tabular-nums}.tr-audioDeck--pro7 .tr-rta10Scale small{position:absolute;bottom:5px;right:6px;font-size:5px;letter-spacing:.08em;color:rgba(122,153,165,.38)}
+        .tr-audioDeck--pro7 .tr-rta10Grid{min-width:0;padding:9px 12px 7px;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:7px}.tr-audioDeck--pro7 .tr-rta10Band{min-width:0;display:grid;grid-template-rows:96px 13px;gap:5px;text-align:center}.tr-audioDeck--pro7 .tr-rta10Meter{position:relative;min-width:0;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,rgba(62,102,118,.10),rgba(20,43,52,.18));box-shadow:inset 0 0 0 1px rgba(94,173,201,.07)}
+        .tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{position:absolute;inset:3px 5px;transform-origin:bottom;-webkit-mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px);mask-image:repeating-linear-gradient(to top,#000 0,#000 3px,transparent 3px,transparent 5px)}.tr-audioDeck--pro7 .tr-rta10Inactive{background:rgba(80,124,141,.13)}.tr-audioDeck--pro7 .tr-rta10Fill{background:linear-gradient(to top,#42c8ed 0 70%,#72deb9 70% 88%,#e5b457 88% 96%,#ef765b 96% 100%);box-shadow:0 0 8px rgba(65,194,228,.15);transition:transform .08s linear}.tr-audioDeck--pro7 .tr-rta10Peak{position:absolute;left:18%;right:18%;height:1px;background:#eefbff;box-shadow:0 0 5px rgba(213,248,255,.44);transition:bottom .1s linear}.tr-audioDeck--pro7 .tr-rta10Band strong{align-self:end;color:rgba(181,211,222,.64);font-size:6px;font-weight:950;letter-spacing:.035em;font-variant-numeric:tabular-nums}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;margin:3px 0 10px}.tr-audioDeck--pro7 .tr-mainPreamp{min-width:0;display:grid;grid-template-columns:54px minmax(100px,1fr) 62px;gap:8px;align-items:center;padding:8px 11px;border:1px solid rgba(80,172,207,.12);border-radius:9px;background:rgba(5,16,23,.64)}.tr-audioDeck--pro7 .tr-mainPreamp span{font-size:7px;font-weight:950;letter-spacing:.09em;color:#8da8b3}.tr-audioDeck--pro7 .tr-mainPreamp strong{text-align:right;font-size:9px;color:#f3fbff}.tr-audioDeck--pro7 .tr-mainPreamp input{width:100%;accent-color:#ff9e2d}.tr-audioDeck--pro7 .tr-trackPreference{display:flex;gap:6px}.tr-audioDeck--pro7 .tr-trackPreference button{height:38px;min-width:82px;padding:0 10px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(107,164,186,.16);border-radius:9px;background:linear-gradient(180deg,#0b1720,#071017);color:#b9cbd3;font-size:7px;font-weight:950;letter-spacing:.06em}.tr-audioDeck--pro7 .tr-trackPreference svg{width:14px;height:14px;fill:currentColor}.tr-audioDeck--pro7 .tr-trackPreference button.is-liked{color:#5ee3a7;border-color:rgba(69,219,153,.38);background:rgba(22,76,57,.22)}.tr-audioDeck--pro7 .tr-trackPreference button.is-disliked{color:#ff8585;border-color:rgba(255,105,105,.36);background:rgba(91,29,31,.20)}
+        .tr-audioDeck--pro7 .tr-audioTransportButton--primary::before{background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(95,30,0,.10))!important}.tr-audioDeck--pro7 .tr-audioTransportButton--primary::after,.tr-audioDeck--pro7 .tr-audioTransportFace::before,.tr-audioDeck--pro7 .tr-audioTransportFace::after{display:none!important;content:none!important}.tr-audioDeck--pro7 .tr-audioTransportButton--primary svg{filter:none!important}
+        .tr-audioEqPanel--pro7{overflow:hidden}.tr-audioEqPanel--pro7 .tr-dspAbControls{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.tr-audioEqPanel--pro7 .tr-dspBypassButton{height:34px;padding:0 12px;border:1px solid rgba(95,190,224,.22);border-radius:8px;background:#07131a;color:#b8d5df;font-size:8px;font-weight:900;letter-spacing:.06em}.tr-audioEqPanel--pro7 .tr-dspBypassButton.is-active{border-color:rgba(255,176,73,.5);color:#ffb34d;background:rgba(91,54,12,.2)}
+        .tr-audioEqPanel--pro7 .tr-audioDspSignalPath{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:3px 0 10px;padding:8px 10px;border:1px solid rgba(82,164,195,.09);border-radius:8px;background:rgba(4,13,19,.44);color:#75939f;font-size:6px;font-weight:950;letter-spacing:.08em}.tr-audioEqPanel--pro7 .tr-audioDspSignalPath i{width:16px;height:1px;background:rgba(86,194,231,.25)}
+        .tr-audioEqScroll{width:100%;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0 8px;scrollbar-width:thin;scrollbar-color:rgba(83,199,240,.35) rgba(255,255,255,.04)}.tr-audioEqBands--31{display:grid!important;grid-template-columns:repeat(31,minmax(42px,1fr))!important;gap:6px!important;min-width:1380px!important}.tr-audioEqBands--31 .tr-audioEqBand{min-width:42px!important;padding:8px 4px!important}.tr-audioEqBands--31 .tr-audioEqBand>span:last-child{font-size:7px!important;white-space:nowrap}.tr-audioEqBands--31 .tr-audioEqGain{font-size:8px!important}.tr-audioEqFooter--pro7{margin-top:5px}.tr-audioEqQuickActions{display:flex;gap:6px;align-items:center}.tr-audioEqQuickActions button{min-height:32px;padding:0 10px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;cursor:pointer}
+        .tr-dspProfileSave{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px;padding:10px 0 1px;border-top:1px solid rgba(118,204,236,.09)}.tr-dspProfileSaveStatus{display:grid;gap:3px;min-width:0}.tr-dspProfileSaveStatus>span{color:rgba(183,209,222,.50);font-size:7px;font-weight:1000;letter-spacing:.14em}.tr-dspProfileSaveStatus>strong{color:#eef7fb;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspProfileSaveStatus>small{color:#7edfb2;font-size:8px}.tr-dspProfileSaveActions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}.tr-dspProfileSaveActions button,.tr-headphoneModes button{min-height:32px;padding:0 11px;border:1px solid rgba(124,195,220,.14);border-radius:9px;color:rgba(232,244,250,.78);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.18));font-size:8px;font-weight:1000;letter-spacing:.07em;cursor:pointer}.tr-dspProfileSaveActions button.is-primary{border-color:rgba(255,190,89,.34);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18)}
+        .tr-headphoneProcessor{margin-top:12px;padding:13px;border:1px solid rgba(71,186,229,.20);border-radius:14px;background:linear-gradient(180deg,rgba(11,27,38,.88),rgba(5,13,19,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}.tr-headphoneProcessor header{display:grid;grid-template-columns:minmax(0,1fr) 190px;align-items:end;gap:12px}.tr-headphoneProcessor header>div{display:grid;gap:3px}.tr-headphoneProcessor header strong{color:#f4f9fc;font-size:12px}.tr-headphoneProcessor header label{display:grid;gap:4px}.tr-headphoneProcessor header label>span{color:rgba(180,204,217,.52);font-size:7px;font-weight:1000;letter-spacing:.14em}.tr-headphoneProcessor select{min-height:35px;border:1px solid rgba(125,198,224,.16);border-radius:9px;color:#f2f8fb;background:#081119;padding:0 10px;font-weight:900}.tr-headphoneModes{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.tr-headphoneModes button.is-active{border-color:rgba(65,199,248,.52);color:#9de5ff;background:rgba(0,158,223,.11);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}.tr-headphoneControls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:11px}.tr-headphoneControls label{display:grid;gap:6px;padding:9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(0,0,0,.15)}.tr-headphoneControls label>span{display:flex;justify-content:space-between;gap:6px;color:rgba(184,208,220,.55);font-size:7px;font-weight:1000;letter-spacing:.08em}.tr-headphoneControls b{color:#91defb}.tr-headphoneControls input{width:100%}
+        .tr-dspSaveBack{position:fixed;inset:0;z-index:7000;display:grid;place-items:center;padding:16px;background:rgba(0,4,7,.86);backdrop-filter:blur(8px)}.tr-dspSaveDialog{width:min(560px,100%);overflow:hidden;border:1px solid rgba(78,196,236,.30);border-radius:16px;background:linear-gradient(180deg,#0b202a,#050d12);box-shadow:0 30px 80px rgba(0,0,0,.66)}.tr-dspSaveDialog header{padding:15px 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(91,170,199,.12)}.tr-dspSaveDialog header small,.tr-dspSaveName>span,.tr-dspSaveSlots>span,.tr-dspSaveIncludes>span{color:#5bd3f5;font-size:7px;font-weight:1000;letter-spacing:.12em}.tr-dspSaveDialog h3{margin:4px 0 0;font-size:18px}.tr-dspSaveDialog header>button{width:34px;height:34px;border:1px solid rgba(123,174,193,.16);border-radius:9px;background:#071219;color:#dce9ed;font-size:20px}.tr-dspSaveName{padding:13px 17px 7px;display:grid;gap:6px}.tr-dspSaveName input{height:42px;border:1px solid rgba(116,198,228,.20);border-radius:10px;padding:0 12px;color:#f5f9fb;background:#060d12;outline:none;font:inherit;font-weight:850}.tr-dspSaveSlots{display:grid;gap:7px;padding:9px 17px}.tr-dspSaveSlots>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tr-dspSaveSlots button{min-height:60px;display:grid;align-content:center;gap:4px;padding:8px;border:1px solid rgba(255,255,255,.07);border-radius:10px;color:#d8e7ee;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.15));cursor:pointer;text-align:left}.tr-dspSaveSlots button b{font-size:9px}.tr-dspSaveSlots button small{color:rgba(184,205,216,.50);font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr-dspSaveSlots button.is-active{border-color:rgba(65,200,248,.52);background:rgba(0,158,223,.10)}.tr-dspSaveIncludes{display:grid;gap:5px;margin:7px 17px 0;padding:11px;border:1px solid rgba(255,255,255,.055);border-radius:10px;background:rgba(0,0,0,.13)}.tr-dspSaveIncludes p{margin:0;color:rgba(212,227,235,.62);font-size:9px;line-height:1.45}.tr-dspSaveDialog footer{display:flex;justify-content:flex-end;gap:8px;padding:15px 17px 17px}.tr-dspSaveDialog footer button{min-height:38px;padding:0 16px;border:1px solid rgba(120,193,220,.14);border-radius:10px;color:#dceaf1;background:#0b151c;font-size:9px;font-weight:1000;cursor:pointer}.tr-dspSaveDialog footer button.is-primary{border-color:rgba(255,190,89,.42);color:#171006;background:linear-gradient(180deg,#ffc762,#f09a18)}
+        @media(max-width:900px){.tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:50px minmax(0,1fr) minmax(150px,175px) max-content!important;gap:8px!important}.tr-audioDeck--pro7 .tr-audioLibraryButton{min-width:70px;padding:0 9px}.tr-audioDeck--pro7 .tr-audioEqToggle{padding-left:8px!important;padding-right:8px!important}}
+        @media(max-width:700px){.tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:48px minmax(0,1fr)!important;gap:8px!important}.tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/-1;max-width:none!important}.tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:1/-1;width:100%;display:grid;grid-template-columns:1fr 1fr;min-width:0;justify-self:stretch}.tr-audioDeck--pro7 .tr-audioLibraryButton{min-height:42px;min-width:0}.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr);min-height:112px}.tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 5px 6px;gap:3px}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:80px 12px;gap:4px}.tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{inset:2px}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5px}.tr-audioDeck--pro7 .tr-rta10Scale{padding-right:4px;font-size:5px}.tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none}.tr-audioDeck--pro7 .tr-mainAudioTuning{grid-template-columns:1fr}.tr-audioDeck--pro7 .tr-trackPreference button{flex:1}.tr-audioDeck--pro7 .tr-mainPreamp{grid-template-columns:47px minmax(80px,1fr) 56px}.tr-audioEqBands--31{grid-template-columns:repeat(31,44px)!important;min-width:1530px!important}.tr-headphoneProcessor header{grid-template-columns:1fr}.tr-headphoneControls{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-dspProfileSave{align-items:flex-start;flex-direction:column}.tr-dspSaveSlots>div{grid-template-columns:1fr}}
+
+        /* FINAL PRO RESPONSIVE PASS: presentation only, player behavior untouched */
+        .tr-audioDeck--pro7 .tr-audioDeckTop{
+          grid-template-columns:52px minmax(180px,1fr) minmax(170px,196px) auto!important;
+          column-gap:9px!important;
+          padding-right:12px!important;
+          overflow:hidden!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioTopButtons{
+          min-width:0!important;
+          max-width:192px;
+          display:grid!important;
+          grid-template-columns:82px 96px;
+          gap:7px!important;
+          justify-self:end!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioEqToggle,
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{
+          width:100%!important;
+          min-width:0!important;
+          height:40px!important;
+          min-height:40px!important;
+          box-sizing:border-box!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          padding:0 10px!important;
+          border:1px solid rgba(91,187,219,.28)!important;
+          border-radius:8px!important;
+          background:
+            linear-gradient(180deg,rgba(18,39,49,.96),rgba(5,15,21,.98))!important;
+          color:#e4f6fb!important;
+          font-size:7px!important;
+          font-weight:1000!important;
+          letter-spacing:.12em!important;
+          text-shadow:0 1px 0 rgba(0,0,0,.85);
+          box-shadow:
+            inset 0 1px rgba(255,255,255,.045),
+            inset 0 -1px rgba(0,0,0,.65),
+            0 3px 10px rgba(0,0,0,.18)!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          left:12px;
+          right:12px;
+          top:0;
+          height:1px;
+          background:linear-gradient(90deg,transparent,rgba(92,216,249,.58),transparent);
+        }
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:hover,
+        .tr-audioDeck--pro7 .tr-audioLibraryButton:focus-visible{
+          border-color:rgba(91,210,247,.56)!important;
+          color:#fff!important;
+          background:linear-gradient(180deg,rgba(16,53,67,.98),rgba(6,24,32,.98))!important;
+        }
+
+        @media(max-width:900px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{
+            grid-template-columns:50px minmax(150px,1fr) minmax(145px,176px) auto!important;
+            gap:7px!important;
+            padding-right:10px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTopButtons{
+            grid-template-columns:74px 86px;
+            max-width:167px;
+            gap:6px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{font-size:6.5px!important;letter-spacing:.09em!important}
+        }
+
+        @media(max-width:700px){
+          .tr-audioDeck--pro7{
+            overflow:hidden!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioDeckTop{
+            grid-template-columns:48px minmax(0,1fr)!important;
+            grid-auto-rows:auto;
+            gap:8px!important;
+            padding:10px!important;
+            overflow:hidden!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioArtwork{
+            grid-column:1;
+            grid-row:1;
+            width:48px!important;
+            height:48px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity{
+            grid-column:2;
+            grid-row:1;
+            width:100%!important;
+            min-width:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{
+            font-size:14px!important;
+            line-height:1.12!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioIdentity small{
+            font-size:8px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{
+            grid-column:1/-1!important;
+            grid-row:2;
+            max-width:none!important;
+            width:100%!important;
+            margin:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTopButtons{
+            grid-column:1/-1!important;
+            grid-row:3;
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            display:grid!important;
+            grid-template-columns:1fr 1fr!important;
+            gap:8px!important;
+            justify-self:stretch!important;
+            margin:0!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioEqToggle,
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:42px!important;
+            min-height:42px!important;
+            justify-content:center!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioLibraryButton{
+            font-size:7.5px!important;
+            letter-spacing:.13em!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTelemetry{
+            margin-top:0!important;
+            display:grid!important;
+            grid-template-columns:repeat(3,minmax(0,1fr));
+            gap:5px!important;
+          }
+          .tr-audioDeck--pro7 .tr-dspHealth{
+            grid-column:1/-1;
+            justify-self:stretch!important;
+            text-align:center!important;
+            min-height:30px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioControls{
+            grid-template-columns:1fr!important;
+            gap:10px!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioModeButton{
+            width:100%!important;
+            justify-content:center!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTransport{
+            grid-row:1;
+            width:100%;
+            justify-content:space-between!important;
+          }
+        }
+
+        @media(max-width:430px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{padding:9px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:13px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head{padding-left:8px!important;padding-right:8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head strong{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:72px 12px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{gap:2px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{gap:8px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-width:0!important;width:100%!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:5.5px!important}
+        }
+
+        /* FINAL PRO AUDIO PASS: true rack-style RTA, audible DSP controls, high contrast */
+        .tr-audioDeck--pro7 .tr-audioEqToggle{min-height:38px!important;padding:0 13px!important;border:1px solid rgba(78,209,249,.36)!important;border-radius:8px!important;background:linear-gradient(180deg,#0a2c3a,#06171f)!important;color:#f5fcff!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.075em!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 5px 14px rgba(0,0,0,.24)!important}.tr-audioDeck--pro7 .tr-audioEqToggle.is-active{border-color:rgba(74,216,255,.70)!important;background:linear-gradient(180deg,#0b4053,#072631)!important;box-shadow:inset 0 -2px #46d7fb,0 0 18px rgba(58,200,242,.12)!important}.tr-audioDeck--pro7 .tr-audioLibraryButton{color:#f3fbfe!important}.tr-audioDeck--pro7 button{color:#f2faff}.tr-audioDeck--pro7 button:disabled{color:rgba(220,235,241,.40)!important}.tr-audioDeck--pro7 .tr-rta10{border-radius:8px!important;border-color:rgba(111,175,197,.20)!important;background:#02080c!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.015),inset 0 -32px 70px rgba(0,0,0,.32)!important}.tr-audioDeck--pro7 .tr-rta10Head{height:31px!important;background:linear-gradient(180deg,#07131a,#030a0e)!important;border-bottom-color:rgba(119,177,198,.13)!important;color:#91aab4!important}.tr-audioDeck--pro7 .tr-rta10Head span:first-child{color:#eefaff!important}.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:38px minmax(0,1fr)!important;min-height:150px!important;background:linear-gradient(to top,rgba(112,174,196,.052) 1px,transparent 1px)!important;background-size:100% 20%!important}.tr-audioDeck--pro7 .tr-rta10Scale{padding:9px 7px 26px 0!important;border-right-color:rgba(112,176,199,.12)!important;color:#7e98a2!important;font-size:6px!important}.tr-audioDeck--pro7 .tr-rta10Grid{padding:10px 12px 7px!important;gap:8px!important}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:104px 12px 10px!important;gap:3px!important}.tr-audioDeck--pro7 .tr-rta10Meter{border-radius:3px!important;background:linear-gradient(180deg,rgba(45,69,78,.22),rgba(8,20,26,.44))!important;box-shadow:inset 0 0 0 1px rgba(122,183,204,.10),inset 0 0 18px rgba(0,0,0,.44)!important}.tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{inset:3px 4px!important;-webkit-mask-image:none!important;mask-image:none!important;border-radius:1px!important}.tr-audioDeck--pro7 .tr-rta10Inactive{background:linear-gradient(to top,rgba(61,108,125,.10),rgba(102,147,163,.055))!important}.tr-audioDeck--pro7 .tr-rta10Fill{background:linear-gradient(to top,#1e9fc5 0%,#3bc8e8 70%,#d8b452 89%,#e75f51 100%)!important;box-shadow:0 0 5px rgba(49,189,225,.13)!important;transition:transform 48ms linear!important}.tr-audioDeck--pro7 .tr-rta10Peak{left:9%!important;right:9%!important;height:2px!important;background:#f5fdff!important;box-shadow:0 0 4px rgba(225,250,255,.54)!important}.tr-audioDeck--pro7 .tr-rta10Band strong{color:#dbeaf0!important;font-size:6.4px!important}.tr-audioDeck--pro7 .tr-rta10Band>small{color:#718891!important;font-size:5px!important;font-weight:800!important;font-variant-numeric:tabular-nums}.tr-audioDeck--pro7 .tr-dspStatus button,.tr-audioDeck--pro7 .tr-audioEqQuickActions button,.tr-audioDeck--pro7 .tr-dspProfileSaveActions button,.tr-audioDeck--pro7 .tr-headphoneModes button{color:#f6fcff!important;border-color:rgba(96,181,211,.22)!important}.tr-audioDeck--pro7 .tr-headphoneModes button.is-active{color:#fff!important;border-color:rgba(69,214,253,.55)!important;background:#0a3443!important}.tr-audioDeck--pro7 .tr-headphoneProcessor input[type=range],.tr-audioDeck--pro7 .tr-audioEqPanel input[type=range]{accent-color:#55d5f7}.tr-audioDeck--pro7 .tr-dspStatus span{color:#fff!important}
+        /* Active-workout coach decision gets one dominant, unmistakable action. */
+        .tr-previousPerformance .tr-progressionCell--action{grid-column:1/-1!important;padding:16px 18px!important;border:1px solid rgba(81,199,237,.28)!important;border-radius:10px!important;background:linear-gradient(180deg,rgba(10,42,54,.92),rgba(4,18,25,.98))!important;box-shadow:inset 4px 0 #46d1f5!important}.tr-previousPerformance .tr-progressionCell--action .tr-kicker{color:#8edff7!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.14em!important}.tr-previousPerformance .tr-progressionAction{display:block!important;margin-top:5px!important;color:#fff!important;font-size:clamp(22px,3vw,34px)!important;line-height:1.04!important;font-weight:1000!important;letter-spacing:-.025em!important;text-shadow:0 2px 12px rgba(0,0,0,.55)!important}.tr-previousPerformance--increase .tr-progressionCell--action{border-color:rgba(75,224,155,.38)!important;box-shadow:inset 4px 0 #4bdf9b!important}.tr-previousPerformance--review .tr-progressionCell--action{border-color:rgba(255,174,76,.40)!important;box-shadow:inset 4px 0 #f1aa4e!important}.tr-previousPerformance--repeat .tr-progressionCell--action{border-color:rgba(80,200,239,.36)!important;box-shadow:inset 4px 0 #50c8ef!important}.tr-previousPerformance button,.tr-progressionActions button{color:#fff!important;font-weight:950!important}.tr-progressionGrid strong,.tr-progressionGrid p{color:#eef9fd!important}
+        @media(max-width:700px){.tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:30px minmax(0,1fr)!important;min-height:124px!important}.tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:78px 11px 9px!important}.tr-audioDeck--pro7 .tr-rta10Grid{gap:3px!important;padding:8px 5px 5px!important}.tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5.2px!important}.tr-audioDeck--pro7 .tr-rta10Band>small{font-size:4.5px!important}.tr-previousPerformance .tr-progressionCell--action{padding:13px!important}.tr-previousPerformance .tr-progressionAction{font-size:22px!important}.tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{min-height:42px!important;color:#fff!important}}
+        /* AUG 9 COMPACT PLAYER + TRUE SEGMENTED RTA */
+        .tr-audioDeck--pro7{min-width:0!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:46px minmax(0,1fr) minmax(142px,168px) max-content!important;gap:8px!important;padding:8px 10px!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioArtwork{width:46px!important;height:46px!important;min-width:46px!important;min-height:46px!important;max-width:46px!important;max-height:46px!important;border-radius:8px!important;overflow:hidden!important;align-self:center!important}
+        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity{padding:0!important;align-self:center!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity .tr-audioEyebrow{font-size:6.5px!important;line-height:1.1!important;letter-spacing:.12em!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity strong{margin-top:2px!important;color:#fff!important;font-size:13px!important;line-height:1.15!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity small{margin-top:2px!important;color:#afc5ce!important;font-size:7.5px!important;line-height:1.2!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector{max-width:168px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector>span{font-size:6px!important;color:#8aa7b2!important;letter-spacing:.1em!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:32px!important;min-height:32px!important;padding:0 28px 0 9px!important;color:#f8fdff!important;font-size:8px!important;font-weight:900!important;border-radius:7px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector small{display:none!important}
+        .tr-audioDeck--pro7 .tr-audioTopButtons{gap:6px!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{height:34px!important;min-height:34px!important;border-radius:7px!important;padding:0 10px!important;font-size:7.5px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.075em!important;color:#fff!important;background:linear-gradient(180deg,#0b2834,#06151d)!important;border:1px solid rgba(86,196,232,.34)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 4px 12px rgba(0,0,0,.25)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:14px!important;height:14px!important}
+        .tr-audioDeck--pro7 .tr-audioLibraryButton{min-width:78px!important;background:linear-gradient(180deg,#101d25,#071117)!important;border-color:rgba(170,213,228,.25)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle:hover,.tr-audioDeck--pro7 .tr-audioLibraryButton:hover{border-color:rgba(92,219,255,.64)!important;background:linear-gradient(180deg,#0d3a4a,#08222c)!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle.is-active{background:linear-gradient(180deg,#0d465a,#082c39)!important;border-color:rgba(86,222,255,.75)!important;box-shadow:inset 0 -2px #50d9fb,0 0 14px rgba(66,204,241,.12)!important}
+        .tr-audioDeck--pro7 .tr-audioTelemetry{margin:3px 10px 0!important;padding:5px 8px!important;min-height:27px!important;gap:9px!important;font-size:6.5px!important}
+        .tr-audioDeck--pro7 .tr-dspHealth{min-height:24px!important;font-size:6.5px!important;color:#d7e9ef!important}
+        .tr-audioDeck--pro7 .tr-rta10{margin:6px 10px 5px!important;border-radius:7px!important}
+        .tr-audioDeck--pro7 .tr-rta10Head{height:26px!important;padding:0 9px!important;font-size:6.5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:35px minmax(0,1fr)!important;min-height:126px!important;background:linear-gradient(to top,rgba(116,178,199,.055) 1px,transparent 1px)!important;background-size:100% 20%!important}
+        .tr-audioDeck--pro7 .tr-rta10Scale{padding:7px 6px 24px 0!important;font-size:5.7px!important;color:#849ba4!important}
+        .tr-audioDeck--pro7 .tr-rta10Grid{padding:8px 9px 6px!important;gap:5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:82px 11px 9px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Meter{position:relative!important;padding:4px!important;border-radius:3px!important;background:#03090d!important;border:1px solid rgba(116,175,196,.13)!important;box-shadow:inset 0 0 16px rgba(0,0,0,.68)!important;overflow:visible!important}
+        .tr-audioDeck--pro7 .tr-rta10Inactive,.tr-audioDeck--pro7 .tr-rta10Fill{display:none!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments{height:100%!important;display:flex!important;flex-direction:column-reverse!important;justify-content:space-between!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i{display:block!important;flex:1 1 0!important;min-height:1px!important;border-radius:1px!important;background:#0a1820!important;border:1px solid rgba(105,162,182,.055)!important;box-shadow:none!important;transition:background 54ms linear,box-shadow 54ms linear,border-color 54ms linear!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-normal{background:#25b9df!important;border-color:rgba(85,223,255,.38)!important;box-shadow:0 0 5px rgba(45,191,228,.18)!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-warm{background:#dfa73e!important;border-color:rgba(255,207,105,.38)!important;box-shadow:0 0 5px rgba(223,167,62,.18)!important}
+        .tr-audioDeck--pro7 .tr-rta10Segments>i.is-on.is-hot{background:#e86155!important;border-color:rgba(255,125,110,.44)!important;box-shadow:0 0 5px rgba(232,97,85,.22)!important}
+        .tr-audioDeck--pro7 .tr-rta10Peak{left:8%!important;right:8%!important;height:1px!important;background:#f7fdff!important;opacity:.85!important;box-shadow:0 0 4px rgba(222,250,255,.45)!important;transition:bottom 64ms linear!important}
+        .tr-audioDeck--pro7 .tr-rta10Band strong{color:#e3f0f4!important;font-size:6.1px!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-rta10Band>small{color:#8298a1!important;font-size:5px!important;font-weight:850!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{margin:3px 10px!important;min-height:25px!important}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:2px 10px!important;padding:6px 0!important}
+        .tr-audioDeck--pro7 .tr-audioControls{margin:2px 10px 8px!important;gap:8px!important}
+        .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.9)!important}
+
+        @media(max-width:700px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:44px minmax(0,1fr) 72px 82px!important;grid-template-rows:44px 34px!important;gap:6px!important;padding:7px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{grid-column:1!important;grid-row:1!important;width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;max-width:44px!important;max-height:44px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2/5!important;grid-row:1!important;align-self:center!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:12.5px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity small{font-size:7.4px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/3!important;grid-row:2!important;max-width:none!important;width:100%!important;align-self:center!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector>span{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:34px!important;min-height:34px!important;font-size:7.6px!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:3/5!important;grid-row:2!important;width:100%!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:5px!important;min-width:0!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle,.tr-audioDeck--pro7 .tr-audioLibraryButton{width:100%!important;min-width:0!important;height:34px!important;min-height:34px!important;padding:0 5px!important;font-size:6.5px!important;letter-spacing:.055em!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:12px!important;height:12px!important}
+          .tr-audioDeck--pro7 .tr-audioTelemetry{margin:3px 7px 0!important;display:flex!important;flex-wrap:wrap!important;gap:5px 8px!important;padding:5px 7px!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-dspHealth{margin-left:auto!important;min-height:20px!important;font-size:5.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10{margin:5px 7px 4px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head{height:24px!important;padding:0 7px!important;font-size:5.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Head span:last-child{display:none!important}
+          .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:27px minmax(0,1fr)!important;min-height:98px!important}
+          .tr-audioDeck--pro7 .tr-rta10Scale{padding:6px 4px 22px 0!important;font-size:4.8px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{padding:6px 4px 4px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:62px 10px 8px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Meter{padding:3px 2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Segments{gap:1px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:5.1px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band>small{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{margin:2px 7px!important;min-height:22px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:1px 7px!important;padding:4px 0!important}
+          .tr-audioDeck--pro7 .tr-audioControls{margin:1px 7px 6px!important;grid-template-columns:auto minmax(0,1fr) auto!important;gap:5px!important}
+          .tr-audioDeck--pro7 .tr-audioModeButton{width:auto!important;min-width:54px!important;padding:0 7px!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-audioTransport{grid-row:auto!important;gap:3px!important}
+          .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.82)!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:5px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-height:31px!important;font-size:6.2px!important}
+        }
+        @media(max-width:360px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:42px minmax(0,1fr)!important;grid-template-rows:42px 34px 34px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;max-width:42px!important;max-height:42px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/-1!important;grid-row:2!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:1/-1!important;grid-row:3!important}
+        }
+        /* Global chrome cleanup: the mini player itself links to Music. */
+        .tr-appHeaderButton.is-music{display:none!important}
+        .tr-appHeaderButton{color:#fff!important;font-weight:900!important}
+
+        /* AUG 9 FINAL COMPACT PLAYER + READABILITY */
+        .tr-audioDeck--pro7{overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:58px minmax(170px,1fr) minmax(160px,190px) 108px!important;grid-template-rows:58px!important;align-items:center!important;gap:10px!important;padding:9px 10px 7px!important}
+        .tr-audioDeck--pro7 .tr-audioArtwork{width:58px!important;height:58px!important;min-width:58px!important;min-height:58px!important;max-width:58px!important;max-height:58px!important;border-radius:9px!important;overflow:hidden!important}
+        .tr-audioDeck--pro7 .tr-audioArtworkImage{width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity{min-width:0!important;overflow:hidden!important;padding:0 2px!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity strong{display:block!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;font-size:16px!important;line-height:1.15!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioIdentity small{display:block!important;max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;margin-top:5px!important;font-size:11px!important;line-height:1.2!important;color:#c7d8df!important}
+        .tr-audioDeck--pro7 .tr-audioEyebrow{margin-bottom:4px!important;font-size:9px!important;color:#79dfff!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector{width:100%!important;max-width:190px!important;gap:4px!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector>span{font-size:9px!important;color:#a9c4ce!important;letter-spacing:.08em!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelector select{width:100%!important;height:38px!important;min-height:38px!important;padding:0 30px 0 10px!important;border-radius:9px!important;color:#fff!important;font-size:11px!important;font-weight:900!important}
+        .tr-audioDeck--pro7 .tr-audioTopButtons{display:block!important;min-width:0!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle{width:100%!important;min-width:0!important;height:40px!important;min-height:40px!important;padding:0 12px!important;border-radius:9px!important;font-size:11px!important;letter-spacing:.05em!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioEqToggle svg{width:16px!important;height:16px!important}
+        .tr-audioDeck--pro7 .tr-rta10{margin:4px 10px 3px!important;border-radius:8px!important}
+        .tr-audioDeck--pro7 .tr-rta10Head{display:none!important}
+        .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:32px minmax(0,1fr)!important;min-height:100px!important;background-size:100% 20%!important}
+        .tr-audioDeck--pro7 .tr-rta10Scale{padding:6px 5px 18px 0!important;font-size:8px!important;color:#9db2bb!important}
+        .tr-audioDeck--pro7 .tr-rta10Grid{padding:7px 8px 5px!important;gap:5px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:67px 14px 10px!important;gap:2px!important}
+        .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:8px!important;color:#f2f8fa!important}
+        .tr-audioDeck--pro7 .tr-rta10Band>small{font-size:7px!important;color:#9aadb5!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{margin:2px 10px!important;min-height:28px!important;font-size:10px!important;color:#dce9ee!important}
+        .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:1px 10px!important;padding:4px 0 5px!important;gap:10px!important}
+        .tr-audioDeck--pro7 .tr-mainPreamp>span{font-size:9px!important;color:#c5d8df!important}
+        .tr-audioDeck--pro7 .tr-mainPreamp>strong{font-size:11px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-trackPreference button{min-height:35px!important;font-size:10px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioControls{margin:0 10px 7px!important;gap:7px!important}
+        .tr-audioDeck--pro7 .tr-audioModeButton{min-height:36px!important;font-size:9px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:8px!important;color:#dce8ed!important}
+        @media(max-width:700px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:50px minmax(0,1fr) 96px!important;grid-template-rows:50px 38px!important;gap:7px!important;padding:7px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{grid-column:1!important;grid-row:1!important;width:50px!important;height:50px!important;min-width:50px!important;min-height:50px!important;max-width:50px!important;max-height:50px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity{grid-column:2/4!important;grid-row:1!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity strong{font-size:14px!important}
+          .tr-audioDeck--pro7 .tr-audioIdentity small{font-size:10px!important;margin-top:3px!important}
+          .tr-audioDeck--pro7 .tr-audioEyebrow{font-size:8px!important;margin-bottom:2px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector{grid-column:1/3!important;grid-row:2!important;max-width:none!important;display:grid!important;grid-template-columns:auto minmax(0,1fr)!important;align-items:center!important;gap:7px!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector>span{display:block!important;font-size:8px!important;white-space:nowrap!important}
+          .tr-audioDeck--pro7 .tr-audioQueueSelector select{height:36px!important;min-height:36px!important;font-size:10px!important}
+          .tr-audioDeck--pro7 .tr-audioTopButtons{grid-column:3!important;grid-row:2!important;width:100%!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle{height:36px!important;min-height:36px!important;padding:0 7px!important;font-size:9px!important}
+          .tr-audioDeck--pro7 .tr-rta10{margin:4px 7px 2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Body{grid-template-columns:24px minmax(0,1fr)!important;min-height:79px!important}
+          .tr-audioDeck--pro7 .tr-rta10Scale{padding:4px 3px 17px 0!important;font-size:6px!important}
+          .tr-audioDeck--pro7 .tr-rta10Grid{padding:5px 3px 3px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band{grid-template-rows:49px 12px!important;gap:2px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band strong{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-rta10Band>small{display:none!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{margin:1px 7px!important;min-height:25px!important;font-size:9px!important}
+          .tr-audioDeck--pro7 .tr-mainAudioTuning{margin:0 7px!important;padding:3px 0!important;grid-template-columns:minmax(0,1fr) auto!important}
+          .tr-audioDeck--pro7 .tr-mainPreamp>span{font-size:8px!important}.tr-audioDeck--pro7 .tr-mainPreamp>strong{font-size:10px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button{min-height:32px!important;font-size:8px!important;padding:0 7px!important}
+          .tr-audioDeck--pro7 .tr-audioControls{margin:0 7px 5px!important;gap:4px!important}
+          .tr-audioDeck--pro7 .tr-audioModeButton{min-width:50px!important;min-height:33px!important;padding:0 5px!important;font-size:7.5px!important}
+          .tr-audioDeck--pro7 .tr-audioTransportButton{transform:scale(.78)!important}
+          .tr-audioDeck--pro7 .tr-audioTransportUnit>span{font-size:6.5px!important}
+        }
+        @media(max-width:390px){
+          .tr-audioDeck--pro7 .tr-audioDeckTop{grid-template-columns:48px minmax(0,1fr) 88px!important;grid-template-rows:48px 36px!important}
+          .tr-audioDeck--pro7 .tr-audioArtwork{width:48px!important;height:48px!important;min-width:48px!important;min-height:48px!important;max-width:48px!important;max-height:48px!important}
+          .tr-audioDeck--pro7 .tr-audioEqToggle{font-size:8px!important}
+          .tr-audioDeck--pro7 .tr-trackPreference button span{display:none!important}
+        }
+
+        /* FINAL PRO PLAYER / MOBILE SYSTEM */
+        .tr-playerHero{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:18px 12px 9px;text-align:center;min-width:0}
+        .tr-playerHero .tr-audioArtwork{position:relative;width:118px!important;height:118px!important;min-width:118px!important;min-height:118px!important;max-width:118px!important;max-height:118px!important;border-radius:14px!important;overflow:hidden!important;border:1px solid rgba(130,204,228,.25)!important;background:#061018!important;box-shadow:0 16px 40px rgba(0,0,0,.35),inset 0 1px rgba(255,255,255,.05)!important}
+        .tr-playerHero .tr-audioArtworkImage{display:block;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-playerHero .tr-audioIdentity{display:block;max-width:min(760px,calc(100% - 20px));min-width:0;padding:0!important;text-align:center!important;background:transparent!important;border:0!important}
+        .tr-playerHero .tr-audioIdentity strong{display:block!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff!important;font-size:clamp(20px,2vw,28px)!important;line-height:1.08!important;font-weight:1000!important;letter-spacing:-.025em!important}
+        .tr-playerHero .tr-audioIdentity small{display:block!important;margin-top:5px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c3d6de!important;font-size:clamp(12px,1.1vw,15px)!important;font-weight:800!important}
+        .tr-activityRta{position:relative;margin:4px auto 8px;width:calc(100% - 24px);height:102px;overflow:hidden;border:1px solid rgba(111,184,210,.17);border-radius:10px;background:linear-gradient(180deg,#02080c,#041018);box-shadow:inset 0 0 30px rgba(0,0,0,.44)}
+        .tr-activityRta canvas{display:block;width:100%;height:82px}
+        .tr-activityRtaLabels{position:absolute;left:7px;right:7px;bottom:4px;display:flex;justify-content:space-between;color:#849da7;font-size:8px;font-weight:900;letter-spacing:.04em;pointer-events:none}
+        .tr-playerControlStage{display:flex;align-items:center;justify-content:center;gap:10px;margin:3px 12px 8px;min-width:0;flex-wrap:wrap}
+        .tr-playerControlStage .tr-audioTransport{display:flex;align-items:flex-end;justify-content:center;gap:10px}
+        .tr-playerControlStage .tr-trackPreference{display:flex;gap:6px}
+        .tr-playerControlStage .tr-trackPreference button,.tr-playerControlStage .tr-audioModeButton{min-height:36px;padding:0 10px;border-radius:8px;color:#fff!important;font-size:9px!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 24px)!important;margin:4px auto 7px!important;min-height:30px!important;color:#e4eff3!important;font-size:10px!important}
+        .tr-playerUtilityRow{display:grid;grid-template-columns:minmax(210px,1fr) minmax(330px,auto);align-items:end;gap:16px;width:calc(100% - 24px);margin:0 auto 10px;min-width:0}
+        .tr-playerVolume{display:grid;grid-template-columns:auto minmax(90px,240px) 42px;align-items:center;justify-content:center;gap:8px;min-width:0}
+        .tr-playerVolume>span{color:#aec5cf;font-size:9px;font-weight:1000;letter-spacing:.08em}.tr-playerVolume>strong{color:#fff;font-size:11px;font-variant-numeric:tabular-nums}
+        .tr-playerVolume input[type=range]{width:100%;accent-color:#4dd5f6}
+        .tr-playerSourceTools{display:grid;grid-template-columns:minmax(190px,270px) 112px;align-items:end;justify-content:end;gap:8px;min-width:0}
+        .tr-playerSourceTools .tr-audioQueueSelector{display:grid!important;grid-template-columns:1fr!important;gap:4px!important;max-width:none!important;min-width:0!important}
+        .tr-playerSourceTools .tr-audioQueueSelector>span{color:#a9c2cc!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.08em!important}
+        .tr-playerSourceTools .tr-audioQueueSelector select{width:100%!important;height:38px!important;min-height:38px!important;padding:0 30px 0 11px!important;border-radius:8px!important;border:1px solid rgba(98,183,214,.24)!important;background:linear-gradient(180deg,#071a23,#041016)!important;color:#fff!important;font-size:10px!important;font-weight:900!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr-playerSourceTools .tr-audioEqToggle{width:112px!important;min-width:112px!important;height:38px!important;min-height:38px!important;padding:0 10px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;white-space:nowrap!important;border-radius:8px!important;color:#fff!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.055em!important}
+        .tr-playerSourceTools .tr-audioEqToggle svg{width:15px!important;height:15px!important;flex:0 0 auto!important}
+        .tr-proGlobalActions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.tr-proHeaderButton{min-height:36px;padding:0 11px;border:1px solid rgba(111,189,218,.24);border-radius:9px;background:linear-gradient(180deg,#0a1b23,#061016);color:#fff;font-size:10px;font-weight:950;letter-spacing:.035em;cursor:pointer}.tr-proHeaderButton:hover{border-color:rgba(77,212,251,.52);background:#0a2935}.tr-proAccountWrap{position:relative}.tr-proAccountMenu{position:absolute;right:0;top:calc(100% + 6px);z-index:500;width:130px;padding:5px;border:1px solid rgba(105,184,212,.25);border-radius:9px;background:#071218;box-shadow:0 16px 34px rgba(0,0,0,.45)}.tr-proAccountMenu button{width:100%;min-height:36px;border:0;border-radius:6px;background:transparent;color:#fff;font-size:10px;font-weight:950;cursor:pointer}.tr-proAccountMenu button:hover{background:#102631}
+        @media(max-width:700px){
+          .tr-playerHero{gap:7px;padding:12px 8px 6px}.tr-playerHero .tr-audioArtwork{width:92px!important;height:92px!important;min-width:92px!important;min-height:92px!important;max-width:92px!important;max-height:92px!important;border-radius:12px!important}.tr-playerHero .tr-audioIdentity strong{font-size:20px!important}.tr-playerHero .tr-audioIdentity small{font-size:12px!important;margin-top:3px!important}
+          .tr-activityRta{width:calc(100% - 14px);height:78px;margin:3px auto 6px}.tr-activityRta canvas{height:61px}.tr-activityRtaLabels{font-size:6.5px;bottom:3px}
+          .tr-playerControlStage{gap:5px;margin:2px 7px 5px;display:grid;grid-template-columns:42px minmax(0,1fr) 42px;align-items:center}.tr-playerControlStage .tr-audioTransport{gap:4px}.tr-playerControlStage .tr-trackPreference{grid-column:1/-1;justify-content:center}.tr-playerControlStage .tr-trackPreference button{min-height:31px;font-size:8px!important;padding:0 8px}.tr-playerControlStage .tr-audioModeButton{min-width:42px!important;width:42px!important;min-height:32px!important;padding:0 3px!important;font-size:0!important}.tr-playerControlStage .tr-audioModeButton svg{width:16px;height:16px}.tr-playerControlStage .tr-audioTransportButton{transform:scale(.82)!important}.tr-playerControlStage .tr-audioTransportUnit>span{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 14px)!important;margin:2px auto 5px!important;font-size:9px!important}
+          .tr-playerUtilityRow{grid-template-columns:1fr;width:calc(100% - 14px);gap:7px;margin-bottom:8px}.tr-playerVolume{grid-template-columns:48px minmax(0,1fr) 38px;gap:6px}.tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 96px;gap:6px;justify-content:stretch}.tr-playerSourceTools .tr-audioEqToggle{width:96px!important;min-width:96px!important;padding:0 6px!important;font-size:8px!important}.tr-playerSourceTools .tr-audioQueueSelector select{font-size:9px!important;padding-left:8px!important}.tr-playerSourceTools .tr-audioQueueSelector>span{font-size:8px!important}
+          .tr-proGlobalActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.tr-proHeaderButton{width:100%;min-width:0;padding:0 6px;font-size:9px}.tr-proAccountWrap{width:100%}.tr-proAccountWrap>.tr-proHeaderButton{width:100%}.tr-proAccountMenu{right:0;left:0;width:auto}
+        }
+
+        /* AUG 9 FINAL PLAYER + GLOBAL MOBILE POLISH */
+        .tr-audioDeck--pro7{overflow:hidden!important}
+        .tr-playerHero{padding-top:16px!important}
+        .tr-playerHero .tr-audioArtwork{width:132px!important;height:132px!important;min-width:132px!important;min-height:132px!important;max-width:132px!important;max-height:132px!important}
+        .tr-playerHero .tr-audioIdentity{max-width:min(820px,calc(100% - 28px))!important}
+        .tr-playerHero .tr-audioIdentity strong{font-size:clamp(23px,2.2vw,31px)!important}
+        .tr-playerHero .tr-audioIdentity small{font-size:clamp(13px,1.2vw,16px)!important}
+        .tr-activityRta{height:108px!important;margin:5px 14px 8px!important}
+        .tr-playerControlStage{max-width:820px!important;margin-inline:auto!important}
+        .tr-audioTimeline{max-width:860px!important;margin-inline:auto!important}
+        .tr-playerUtilityRow{max-width:860px!important;margin:8px auto 12px!important;grid-template-columns:minmax(170px,250px) minmax(0,1fr)!important;align-items:end!important}
+        .tr-playerVolume{min-width:0!important}
+        .tr-playerVolume input{width:100%!important}
+        .tr-playerSourceTools{min-width:0!important;display:grid!important;grid-template-columns:minmax(180px,1fr) 112px!important;gap:8px!important;align-items:end!important}
+        .tr-audioQueueSelector{max-width:none!important;width:100%!important;min-width:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+        .tr-audioQueueSelector>span{display:block!important;margin:0 0 5px 2px!important;color:#9ec0cd!important;font-size:9px!important;font-weight:950!important;letter-spacing:.09em!important}
+        .tr-audioQueueSelector select{height:40px!important;width:100%!important;min-width:0!important;padding:0 34px 0 12px!important;border:1px solid rgba(105,186,215,.22)!important;border-radius:9px!important;background:#07161e!important;color:#fff!important;font-size:11px!important;font-weight:900!important;box-shadow:inset 0 1px rgba(255,255,255,.03)!important}
+        .tr-audioEqToggle{width:112px!important;min-width:112px!important;max-width:112px!important;height:40px!important;min-height:40px!important;padding:0 10px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;white-space:nowrap!important;border-radius:9px!important;color:#fff!important;font-size:10px!important;letter-spacing:.03em!important}
+        .tr-audioEqToggle svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
+        .tr-proHeaderButton.is-resume{border-color:rgba(78,221,156,.48)!important;background:linear-gradient(180deg,#0b3a2b,#082319)!important;color:#fff!important}
+        .tr-audioError{max-width:860px!important;margin:7px auto 10px!important;color:#ffd8da!important;font-size:12px!important;font-weight:900!important}
+        @media(max-width:650px){
+          html,body,#root{max-width:100%!important;overflow-x:hidden!important}
+          .tr-shellInner{max-width:100%!important;overflow-x:hidden!important}
+          .tr-audioDeck--pro7{width:100%!important;max-width:100%!important;border-radius:12px!important}
+          .tr-playerHero{padding:11px 7px 5px!important;gap:6px!important}
+          .tr-playerHero .tr-audioArtwork{width:104px!important;height:104px!important;min-width:104px!important;min-height:104px!important;max-width:104px!important;max-height:104px!important}
+          .tr-playerHero .tr-audioIdentity{max-width:calc(100% - 14px)!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:21px!important;line-height:1.1!important}
+          .tr-playerHero .tr-audioIdentity small{font-size:13px!important}
+          .tr-activityRta{height:72px!important;margin:4px 7px 6px!important;border-radius:8px!important}
+          .tr-activityRtaLabels{font-size:6px!important;padding-inline:3px!important}
+          .tr-playerControlStage{padding:0 5px!important;gap:5px!important}
+          .tr-audioTransport{gap:4px!important}
+          .tr-audioTransportUnit>span,.tr-audioModeButton span,.tr-trackPreference span{font-size:7px!important}
+          .tr-audioTimeline{margin:4px 8px!important;grid-template-columns:34px minmax(0,1fr) 34px!important;gap:5px!important}
+          .tr-audioTimeline>span{font-size:8px!important}
+          .tr-playerUtilityRow{margin:6px 7px 9px!important;grid-template-columns:1fr!important;gap:7px!important}
+          .tr-playerVolume{display:grid!important;grid-template-columns:48px minmax(0,1fr) 38px!important;align-items:center!important;gap:7px!important}
+          .tr-playerVolume>span{margin:0!important;font-size:8px!important}
+          .tr-playerVolume>strong{font-size:9px!important;text-align:right!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 96px!important;gap:6px!important}
+          .tr-audioQueueSelector>span{font-size:7.5px!important;margin-bottom:4px!important}
+          .tr-audioQueueSelector select{height:38px!important;font-size:10px!important;padding-left:9px!important}
+          .tr-audioEqToggle{width:96px!important;min-width:96px!important;max-width:96px!important;height:38px!important;min-height:38px!important;font-size:9px!important;padding:0 7px!important}
+          .tr-audioEqToggle svg{width:14px!important;height:14px!important;flex-basis:14px!important}
+          .tr-audioEqPanel{max-width:100%!important;overflow:hidden!important}
+          .tr-audioEqScroll{max-width:100%!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+          .tr-proGlobalActions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .tr-proHeaderButton{min-height:40px!important;font-size:9px!important}
+        }
+
+        /* AUG 9 LOCKED PRO PLAYER: authoritative layout + no clipping */
+        .tr-audioDeck--pro7{background:radial-gradient(circle at 50% -10%,rgba(26,78,98,.16),transparent 36%),linear-gradient(180deg,#091219 0%,#050a0e 54%,#030608 100%)!important;border:1px solid rgba(91,190,226,.18)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 18px 55px rgba(0,0,0,.34)!important}
+        .tr-playerHero{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow:visible!important}
+        .tr-playerHero .tr-audioArtwork{width:148px!important;height:148px!important;min-width:148px!important;min-height:148px!important;max-width:148px!important;max-height:148px!important;border-radius:16px!important;overflow:hidden!important;box-shadow:0 14px 36px rgba(0,0,0,.45),0 0 0 1px rgba(119,211,245,.14)!important}
+        .tr-playerHero .tr-audioArtwork img{width:100%!important;height:100%!important;object-fit:cover!important;display:block!important}
+        .tr-playerHero .tr-audioIdentity{display:flex!important;flex-direction:column!important;align-items:center!important;width:min(920px,calc(100% - 28px))!important;max-width:min(920px,calc(100% - 28px))!important;height:auto!important;min-height:0!important;overflow:visible!important;padding:4px 4px 8px!important;white-space:normal!important}
+        .tr-playerHero .tr-audioIdentity strong{display:block!important;overflow:visible!important;text-overflow:clip!important;width:100%!important;max-width:100%!important;height:auto!important;max-height:none!important;padding:3px 0 7px!important;margin:0!important;font-size:clamp(23px,2.35vw,32px)!important;line-height:1.22!important;letter-spacing:-.025em!important;color:#fff!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:normal!important}
+        .tr-playerHero .tr-audioIdentity small{display:block!important;width:100%!important;padding:0 0 2px!important;overflow:visible!important;font-size:clamp(13px,1.25vw,16px)!important;line-height:1.35!important;color:#b9d0da!important;white-space:normal!important;word-break:break-word!important}
+        .tr-activityRta{background:linear-gradient(180deg,#040a0e,#020507)!important;border:1px solid rgba(91,184,216,.13)!important;box-shadow:inset 0 1px 16px rgba(0,0,0,.55)!important}
+        .tr-playerControlStage{display:flex!important;flex-wrap:wrap!important;align-items:center!important;justify-content:center!important;gap:10px 12px!important;width:min(980px,calc(100% - 24px))!important;max-width:980px!important;margin:8px auto 6px!important;padding:0!important}
+        .tr-playerControlStage>.tr-audioModeButton{flex:0 0 auto!important;align-self:center!important}
+        .tr-playerControlStage .tr-audioTransport{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;flex:0 1 auto!important;margin:0!important}
+        .tr-playerControlStage .tr-audioTransportUnit{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;margin:0!important}
+        .tr-playerControlStage .tr-audioTransportButton{margin:0!important}
+        .tr-trackPreference{display:flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;flex-wrap:wrap!important;margin:0!important}
+        .tr-trackPreference button{height:38px!important;min-height:38px!important;padding:0 12px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;border-radius:9px!important;font-size:9px!important;font-weight:1000!important;line-height:1!important;white-space:nowrap!important;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease!important}
+        .tr-trackPreference button svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
+        .tr-trackPreference .tr-prefLike{color:#ffd84d!important;border-color:rgba(255,216,77,.36)!important;background:linear-gradient(180deg,rgba(69,55,8,.55),rgba(20,16,4,.76))!important}
+        .tr-trackPreference .tr-prefLike.is-liked{color:#fff!important;border-color:#46e394!important;background:linear-gradient(180deg,#15975f,#087746)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 0 0 1px rgba(70,227,148,.22),0 0 18px rgba(36,210,127,.25)!important}
+        .tr-trackPreference .tr-prefLess{color:#ff6b74!important;border-color:rgba(255,85,95,.38)!important;background:linear-gradient(180deg,rgba(71,15,20,.58),rgba(24,7,9,.8))!important}
+        .tr-trackPreference .tr-prefLess.is-disliked{color:#fff!important;border-color:#ff5360!important;background:linear-gradient(180deg,#c52e3a,#8f1420)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 0 0 1px rgba(255,83,96,.18),0 0 18px rgba(224,42,57,.24)!important}
+        .tr-trackPreference .tr-prefDiscover{color:#ffd879!important;border-color:rgba(255,197,79,.34)!important;background:linear-gradient(180deg,rgba(69,48,9,.48),rgba(24,15,3,.78))!important}
+        .tr-trackPreference .tr-prefDiscover:active{transform:translateY(1px) scale(.985)!important;background:linear-gradient(180deg,#b56f10,#744207)!important;color:#fff!important}
+        .tr-discoverToast{width:max-content;max-width:calc(100% - 24px);margin:4px auto 7px;padding:7px 11px;border:1px solid rgba(255,203,91,.32);border-radius:999px;background:#171106;color:#ffe4a1;font-size:9px;font-weight:1000;letter-spacing:.06em}
+        .tr-playerSourceTools .tr-audioEqToggle{overflow:visible!important;position:relative!important;border-color:rgba(61,195,242,.34)!important;background:linear-gradient(180deg,#09202a,#061118)!important;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease,transform .2s ease!important}
+        .tr-playerSourceTools .tr-audioEqToggle:hover{border-color:rgba(71,214,255,.64)!important;background:linear-gradient(180deg,#0d3442,#07202a)!important}
+        .tr-playerSourceTools .tr-audioEqToggle.is-active{color:#fff!important;border-color:#55d9ff!important;background:linear-gradient(180deg,#087da4,#07546e)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(85,217,255,.18),0 0 20px rgba(50,195,239,.26)!important;animation:trEqOpenPulse .2s ease-out 1!important}
+        @keyframes trEqOpenPulse{0%{transform:scale(.96);filter:brightness(.85)}100%{transform:scale(1);filter:brightness(1)}}
+        .tr-proGlobalActions{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:6px!important;flex-wrap:nowrap!important;width:auto!important}
+        .tr-proHeaderButton{min-height:34px!important;height:34px!important;padding:0 10px!important;font-size:9px!important;white-space:nowrap!important}
+        @media(max-width:650px){
+          .tr-playerHero .tr-audioArtwork{width:108px!important;height:108px!important;min-width:108px!important;min-height:108px!important;max-width:108px!important;max-height:108px!important;border-radius:13px!important}
+          .tr-playerHero .tr-audioIdentity{width:calc(100% - 12px)!important;max-width:calc(100% - 12px)!important;padding:3px 4px 5px!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:20px!important;line-height:1.22!important;padding-bottom:5px!important}
+          .tr-playerHero .tr-audioIdentity small{font-size:12.5px!important;line-height:1.3!important}
+          .tr-activityRta{height:66px!important;margin:3px 6px 5px!important}
+          .tr-playerControlStage{display:flex!important;width:calc(100% - 10px)!important;gap:6px!important;margin:5px auto!important}
+          .tr-playerControlStage .tr-audioTransport{order:1;width:100%!important;gap:8px!important}
+          .tr-playerControlStage>.tr-audioModeButton{order:2!important;width:42px!important;min-width:42px!important;height:34px!important;min-height:34px!important}
+          .tr-trackPreference{order:3!important;width:100%!important;gap:5px!important}
+          .tr-trackPreference button{height:34px!important;min-height:34px!important;padding:0 8px!important;font-size:7.7px!important;gap:5px!important}
+          .tr-trackPreference button svg{width:14px!important;height:14px!important;flex-basis:14px!important}
+          .tr-playerUtilityRow{grid-template-columns:1fr!important;margin:5px 6px 8px!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 92px!important;gap:6px!important}
+          .tr-playerSourceTools .tr-audioEqToggle{width:92px!important;min-width:92px!important;max-width:92px!important;font-size:8px!important}
+          .tr-proGlobalActions{display:flex!important;width:auto!important;max-width:calc(100% - 8px)!important;gap:4px!important;flex-wrap:nowrap!important}
+          .tr-proHeaderButton{width:auto!important;min-width:0!important;height:31px!important;min-height:31px!important;padding:0 7px!important;font-size:7.5px!important;letter-spacing:.025em!important}
+          .tr-proHeaderButton.is-sound{font-size:0!important;width:36px!important;padding:0!important}
+          .tr-proHeaderButton.is-sound:after{content:"♪";font-size:16px!important;color:#fff!important}
+          .tr-proHeaderButton--account{font-size:0!important;width:36px!important;padding:0!important}
+          .tr-proHeaderButton--account:after{content:"●";font-size:12px!important;color:#9fdff4!important}
+          .tr-proAccountWrap{width:auto!important}
+          .tr-proAccountWrap>.tr-proHeaderButton{width:36px!important}
+          .tr-proAccountMenu{right:0!important;left:auto!important;width:116px!important}
+        }
+
+
+        /* AUG 9 FINAL PRO POLISH: full-width media stage, true 10-band RTA, responsive controls */
+        .tr-audioDeck--pro7{overflow:hidden!important}
+        .tr-playerHero{
+          position:relative!important;
+          display:grid!important;
+          grid-template-columns:clamp(180px,22vw,260px) minmax(0,1fr)!important;
+          align-items:stretch!important;
+          gap:0!important;
+          width:100%!important;
+          min-height:clamp(190px,24vw,260px)!important;
+          margin:0!important;
+          padding:0!important;
+          overflow:hidden!important;
+          border-bottom:1px solid rgba(102,196,224,.10)!important;
+          background-color:#050b0f!important;
+          background-size:cover!important;
+          background-position:center!important;
+          background-repeat:no-repeat!important;
+          text-align:left!important;
+        }
+        .tr-playerHero::after{
+          content:"";position:absolute;inset:0;pointer-events:none;
+          background:linear-gradient(180deg,rgba(255,255,255,.025),transparent 35%,rgba(0,0,0,.18));
+        }
+        .tr-playerHero .tr-audioArtwork{
+          position:relative!important;z-index:2!important;
+          width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+          aspect-ratio:auto!important;border:0!important;border-radius:0!important;margin:0!important;padding:0!important;
+          overflow:hidden!important;background:#071116!important;box-shadow:none!important;
+        }
+        .tr-playerHero .tr-audioArtworkImage{width:100%!important;height:100%!important;display:block!important;object-fit:cover!important}
+        .tr-playerHero .tr-audioIdentity{
+          position:relative!important;z-index:2!important;
+          width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;
+          padding:clamp(22px,3vw,40px)!important;margin:0!important;
+          display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;
+          text-align:left!important;overflow:visible!important;white-space:normal!important;
+        }
+        .tr-audioNowLabel{display:block;color:#55d8f7;font-size:10px;line-height:1;font-weight:1000;letter-spacing:.16em;margin-bottom:11px}
+        .tr-playerHero .tr-audioIdentity strong{
+          display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;
+          width:100%!important;max-width:100%!important;min-height:0!important;height:auto!important;max-height:none!important;
+          margin:0!important;padding:1px 0 7px!important;overflow:hidden!important;text-overflow:ellipsis!important;
+          color:#fff!important;font-size:clamp(27px,3.2vw,44px)!important;line-height:1.11!important;font-weight:1000!important;letter-spacing:-.038em!important;
+          overflow-wrap:anywhere!important;word-break:normal!important;
+        }
+        .tr-playerHero .tr-audioIdentity small{width:100%!important;color:#d1e2e9!important;font-size:clamp(14px,1.4vw,18px)!important;line-height:1.3!important;font-weight:850!important;white-space:normal!important;overflow-wrap:anywhere!important}
+        .tr-playerHero .tr-audioIdentity em{display:block;margin-top:7px;color:#82a2ae;font-size:clamp(11px,1vw,14px);line-height:1.35;font-style:normal;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+
+        .tr-activityRta--10band{position:relative!important;height:154px!important;margin:10px 12px 6px!important;border:1px solid rgba(93,199,226,.17)!important;border-radius:12px!important;background:linear-gradient(180deg,#03090d,#010405)!important;box-shadow:inset 0 0 24px rgba(0,0,0,.72),inset 0 1px 0 rgba(255,255,255,.025)!important;overflow:hidden!important}
+        .tr-activityRta--10band canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+        .tr-activityRta--10band .tr-activityRtaLabels{position:absolute!important;left:30px!important;right:4px!important;bottom:4px!important;height:13px!important;display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:clamp(4px,.9vw,11px)!important;align-items:end!important;pointer-events:none!important}
+        .tr-activityRta--10band .tr-activityRtaLabels span{min-width:0!important;color:rgba(185,219,229,.64)!important;font-size:8px!important;line-height:1!important;font-weight:900!important;letter-spacing:.02em!important;text-align:center!important;white-space:nowrap!important;overflow:visible!important}
+
+        .tr-playerControlStage{display:grid!important;grid-template-columns:auto minmax(310px,auto) auto minmax(0,auto)!important;align-items:center!important;justify-content:center!important;gap:10px!important;width:100%!important;max-width:none!important;margin:8px auto 6px!important;padding:0 12px!important}
+        .tr-trackPreference{display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;flex-wrap:nowrap!important;min-width:0!important}
+        .tr-trackPreference button,.tr-playerControlStage>.tr-audioModeButton{
+          min-height:38px!important;height:38px!important;border:1px solid rgba(143,174,187,.18)!important;border-radius:9px!important;
+          background:linear-gradient(180deg,#101b21,#071015)!important;color:#eaf5f8!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+          white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;
+        }
+        .tr-trackPreference button{padding:0 11px!important;font-size:9px!important}
+        .tr-trackPreference button svg{color:inherit!important;fill:currentColor!important}
+        .tr-trackPreference .tr-prefLike,.tr-trackPreference .tr-prefLess,.tr-trackPreference .tr-prefDiscover{color:#eaf5f8!important;border-color:rgba(143,174,187,.18)!important;background:linear-gradient(180deg,#101b21,#071015)!important}
+        .tr-trackPreference .tr-prefLike.is-liked{color:#fff!important;border-color:#44e398!important;background:linear-gradient(180deg,#159b63,#087748)!important;box-shadow:0 0 0 1px rgba(68,227,152,.18),0 0 18px rgba(35,207,126,.22)!important}
+        .tr-trackPreference .tr-prefLess.is-disliked{color:#fff!important;border-color:#ff5d69!important;background:linear-gradient(180deg,#c73541,#8f1822)!important;box-shadow:0 0 0 1px rgba(255,93,105,.16),0 0 18px rgba(226,48,62,.20)!important}
+        .tr-trackPreference .tr-prefDiscover.is-confirming{color:#fff8df!important;border-color:#ffc55b!important;background:linear-gradient(180deg,#a96812,#704006)!important;box-shadow:0 0 17px rgba(240,161,49,.20)!important}
+
+        @media(max-width:900px){
+          .tr-playerControlStage{grid-template-columns:auto 1fr auto!important;grid-template-areas:"shuffle transport repeat" "prefs prefs prefs"!important;gap:8px!important}
+          .tr-playerControlStage>.tr-audioModeButton:first-child{grid-area:shuffle!important}.tr-playerControlStage>.tr-audioModeButton:nth-of-type(2){grid-area:repeat!important}
+          .tr-playerControlStage .tr-audioTransport{grid-area:transport!important}.tr-playerControlStage .tr-trackPreference{grid-area:prefs!important}
+        }
+        @media(max-width:650px){
+          .tr-playerHero{grid-template-columns:minmax(112px,38vw) minmax(0,1fr)!important;min-height:138px!important}
+          .tr-playerHero .tr-audioArtwork{width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;border-radius:0!important}
+          .tr-playerHero .tr-audioIdentity{width:100%!important;max-width:none!important;padding:14px 12px!important;align-items:flex-start!important;text-align:left!important}
+          .tr-audioNowLabel{font-size:7.5px!important;margin-bottom:7px!important;letter-spacing:.12em!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:clamp(19px,6.2vw,25px)!important;line-height:1.12!important;padding:0 0 5px!important;-webkit-line-clamp:2!important}
+          .tr-playerHero .tr-audioIdentity small{font-size:12px!important;line-height:1.25!important}
+          .tr-playerHero .tr-audioIdentity em{font-size:9.5px!important;margin-top:5px!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:1!important;overflow:hidden!important}
+          .tr-activityRta--10band{height:112px!important;margin:7px 6px 5px!important;border-radius:9px!important}
+          .tr-activityRta--10band .tr-activityRtaLabels{left:4px!important;right:4px!important;gap:4px!important}
+          .tr-activityRta--10band .tr-activityRtaLabels span{font-size:6.3px!important;letter-spacing:-.02em!important}
+          .tr-playerControlStage{width:100%!important;padding:0 6px!important;grid-template-columns:38px minmax(0,1fr) 38px!important;gap:5px!important}
+          .tr-playerControlStage>.tr-audioModeButton{width:38px!important;min-width:38px!important;height:36px!important;min-height:36px!important;padding:0!important;font-size:0!important}
+          .tr-playerControlStage>.tr-audioModeButton svg{width:17px!important;height:17px!important}
+          .tr-playerControlStage .tr-audioTransport{width:100%!important;display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:4px!important}
+          .tr-playerControlStage .tr-audioTransportUnit{min-width:0!important}
+          .tr-playerControlStage .tr-audioTransportButton{width:100%!important;min-width:0!important}
+          .tr-playerControlStage .tr-audioTransportUnit>span{font-size:6.5px!important;white-space:nowrap!important}
+          .tr-trackPreference{width:100%!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important}
+          .tr-trackPreference button{width:100%!important;min-width:0!important;height:38px!important;min-height:38px!important;padding:0 5px!important;font-size:7.3px!important;gap:4px!important;white-space:normal!important;line-height:1.05!important;text-align:center!important}
+          .tr-trackPreference button svg{width:14px!important;height:14px!important;flex:0 0 14px!important}
+          .tr-playerUtilityRow{margin:5px 6px 8px!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 88px!important}
+          .tr-playerSourceTools .tr-audioEqToggle{width:88px!important;min-width:88px!important;max-width:88px!important;overflow:visible!important}
+        }
+        @media(max-width:385px){
+          .tr-playerHero{grid-template-columns:112px minmax(0,1fr)!important}
+          .tr-playerHero .tr-audioIdentity{padding:11px 9px!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:18px!important}
+          .tr-trackPreference button{font-size:8.8px!important;padding:0 3px!important}
+        }
+
+        /* FINAL NO-CUTOFF PLAYER TEXT + LEGIBLE MOBILE ACTIONS */
+        .tr-playerHero .tr-audioIdentity strong{
+          display:block!important;-webkit-line-clamp:unset!important;-webkit-box-orient:initial!important;
+          overflow:visible!important;text-overflow:clip!important;white-space:normal!important;max-height:none!important;
+        }
+        .tr-playerHero .tr-audioIdentity em{display:block!important;overflow:visible!important;-webkit-line-clamp:unset!important;white-space:normal!important}
+        @media(max-width:650px){
+          .tr-playerHero{height:auto!important;min-height:148px!important}
+          .tr-playerHero .tr-audioIdentity{height:auto!important;min-height:148px!important}
+          .tr-playerHero .tr-audioArtwork{min-height:148px!important}
+          .tr-trackPreference button{font-size:9px!important;line-height:1.12!important;font-weight:1000!important}
+          .tr-trackPreference button span{display:inline!important;visibility:visible!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+          .tr-playerControlStage .tr-audioTransportUnit>span{font-size:8px!important;line-height:1.1!important;white-space:normal!important}
+          .tr-playerSourceTools .tr-audioQueueSelector>span{font-size:8.5px!important}
+          .tr-playerSourceTools .tr-audioQueueSelector select{font-size:10px!important}
+          .tr-playerSourceTools .tr-audioEqToggle{font-size:9px!important}
+        }
+
+
+        /* AUG 9 AUTHORITATIVE MUSIC PLAYER V3: exact requested order, zero dead-space hero */
+        .tr-audioDeck--pro7{overflow:hidden!important;background:linear-gradient(180deg,#071118 0%,#03080c 100%)!important}
+        .tr-playerHero{
+          display:grid!important;grid-template-columns:clamp(220px,30%,310px) minmax(0,1fr)!important;
+          width:100%!important;min-width:0!important;height:auto!important;min-height:0!important;
+          margin:0!important;padding:0!important;gap:0!important;align-items:stretch!important;
+          overflow:hidden!important;text-align:left!important;background:#050c11!important;border-bottom:1px solid rgba(91,194,225,.13)!important;
+        }
+        .tr-playerHero .tr-audioArtwork{
+          position:relative!important;width:100%!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+          aspect-ratio:1/1!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;overflow:hidden!important;background:#071116!important;box-shadow:none!important;
+        }
+        .tr-playerHero .tr-audioArtworkImage{display:block!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-playerHero .tr-audioArtworkFallback{width:100%!important;height:100%!important;display:grid!important;place-items:center!important}.tr-playerHero .tr-audioArtworkFallback svg{width:34%!important;height:34%!important}
+        .tr-playerHero .tr-audioIdentity{
+          width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;min-height:0!important;
+          margin:0!important;padding:clamp(22px,3.2vw,42px)!important;display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;
+          border:0!important;background:linear-gradient(120deg,#0a1820 0%,#071117 62%,#04090d 100%)!important;text-align:left!important;overflow:hidden!important;
+        }
+        .tr-playerHero .tr-audioIdentity strong{
+          display:block!important;width:100%!important;max-width:100%!important;margin:0!important;padding:0!important;color:#fff!important;
+          font-size:clamp(30px,4vw,52px)!important;line-height:1.04!important;font-weight:1000!important;letter-spacing:-.042em!important;
+          white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;
+        }
+        .tr-playerHero .tr-audioIdentity small{
+          display:block!important;width:100%!important;margin-top:10px!important;padding:0!important;color:#b9d0da!important;
+          font-size:clamp(15px,1.55vw,20px)!important;line-height:1.25!important;font-weight:800!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
+        }
+        .tr-playerHero .tr-audioIdentity em,.tr-playerHero .tr-audioNowLabel{display:none!important}
+
+        .tr-audioDeck--pro7 .tr-audioTimeline{
+          width:calc(100% - 20px)!important;max-width:none!important;margin:8px auto 6px!important;padding:0!important;min-height:28px!important;
+          display:grid!important;grid-template-columns:42px minmax(0,1fr) 42px!important;gap:8px!important;align-items:center!important;color:#dbe9ee!important;font-size:10px!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioTimeline>span:first-child{text-align:left!important}.tr-audioDeck--pro7 .tr-audioTimeline>span:last-child{text-align:right!important}.tr-audioDeck--pro7 .tr-audioTimeline input{width:100%!important;accent-color:#ffad31!important}
+
+        .tr-playerTransportStage{
+          width:min(860px,calc(100% - 20px))!important;margin:4px auto 6px!important;padding:0!important;
+          display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:9px!important;align-items:start!important;justify-content:center!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportUnit{display:grid!important;grid-template-rows:auto 14px!important;gap:5px!important;min-width:0!important;align-items:center!important;justify-items:stretch!important;margin:0!important}
+        .tr-playerTransportStage .tr-audioTransportButton{
+          width:100%!important;height:54px!important;min-width:0!important;min-height:54px!important;max-width:none!important;margin:0!important;padding:0!important;transform:none!important;
+          border:1px solid rgba(130,179,197,.22)!important;border-radius:12px!important;background:linear-gradient(180deg,#102029,#071116)!important;color:#eff9fc!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 5px 14px rgba(0,0,0,.20)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton:hover{border-color:rgba(89,209,247,.48)!important;background:linear-gradient(180deg,#12303d,#081922)!important}
+        .tr-playerTransportStage .tr-audioTransportButton--primary{border-color:rgba(255,181,66,.62)!important;background:linear-gradient(180deg,#ffbc45,#e98a13)!important;color:#130d05!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.40),0 0 20px rgba(238,147,22,.20)!important}
+        .tr-playerTransportStage .tr-audioTransportFace{display:grid!important;place-items:center!important;width:100%!important;height:100%!important}.tr-playerTransportStage .tr-audioTransportFace svg{width:24px!important;height:24px!important;fill:currentColor!important}
+        .tr-playerTransportStage .tr-audioTransportUnit>span{display:block!important;color:#9fb5be!important;font-size:8px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.09em!important;text-align:center!important;white-space:nowrap!important}
+        .tr-playerTransportStage .tr-audioTransportUnit.is-primary>span{color:#ffc25f!important}
+
+        .tr-playerModeStage{
+          width:calc(100% - 20px)!important;margin:0 auto 7px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;
+        }
+        .tr-playerModeStage .tr-audioModeButton{
+          width:auto!important;min-width:108px!important;height:34px!important;min-height:34px!important;padding:0 13px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;
+          border:1px solid rgba(135,177,193,.19)!important;border-radius:9px!important;background:linear-gradient(180deg,#0d1a21,#061015)!important;color:#d9e9ee!important;font-size:8.5px!important;font-weight:1000!important;letter-spacing:.05em!important;
+        }
+        .tr-playerModeStage .tr-audioModeButton svg{width:15px!important;height:15px!important;fill:currentColor!important}.tr-playerModeStage .tr-audioModeButton.is-active{border-color:rgba(78,210,250,.58)!important;background:#0a3443!important;color:#a7ebff!important;box-shadow:inset 0 -2px #48d3f6!important}
+
+        .tr-activityRta--10band{
+          position:relative!important;width:calc(100% - 20px)!important;height:126px!important;margin:0 auto 7px!important;border:1px solid rgba(97,193,221,.21)!important;border-radius:10px!important;
+          overflow:hidden!important;background:#010507!important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.015),inset 0 0 26px rgba(0,0,0,.70),0 6px 18px rgba(0,0,0,.15)!important;
+        }
+        .tr-activityRta--10band canvas{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important}
+        .tr-activityRta--10band .tr-activityRtaLabels{position:absolute!important;left:34px!important;right:6px!important;bottom:4px!important;height:12px!important;display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:clamp(7px,1vw,12px)!important;align-items:end!important;pointer-events:none!important}
+        .tr-activityRta--10band .tr-activityRtaLabels span{min-width:0!important;color:#b9d1d9!important;font-size:8px!important;line-height:1!important;font-weight:950!important;text-align:center!important;white-space:nowrap!important}
+
+        .tr-playerPreferenceStage{
+          width:calc(100% - 20px)!important;margin:0 auto 7px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important;
+        }
+        .tr-playerPreferenceStage button{
+          width:100%!important;height:38px!important;min-height:38px!important;min-width:0!important;padding:0!important;display:grid!important;place-items:center!important;
+          border:1px solid rgba(135,177,193,.19)!important;border-radius:9px!important;background:linear-gradient(180deg,#0e1a21,#061015)!important;color:#eaf5f8!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+        }
+        .tr-playerPreferenceStage button svg{width:19px!important;height:19px!important;fill:currentColor!important}.tr-playerPreferenceStage button:hover{border-color:rgba(91,209,246,.48)!important;background:#0b2631!important}
+        .tr-playerPreferenceStage .tr-prefLike.is-liked{color:#fff!important;border-color:#41e394!important;background:linear-gradient(180deg,#169b63,#087649)!important;box-shadow:0 0 16px rgba(43,211,133,.20)!important}
+        .tr-playerPreferenceStage .tr-prefLess.is-disliked{color:#fff!important;border-color:#ff5a67!important;background:linear-gradient(180deg,#c43340,#8e1721)!important;box-shadow:0 0 16px rgba(225,51,65,.18)!important}
+        .tr-playerPreferenceStage .tr-prefDiscover.is-confirming{color:#fff7db!important;border-color:#ffc45b!important;background:linear-gradient(180deg,#a86812,#6d3e06)!important;box-shadow:0 0 16px rgba(239,161,48,.18)!important}
+
+        .tr-playerUtilityRow{width:calc(100% - 20px)!important;max-width:none!important;margin:0 auto 9px!important;padding:0!important;grid-template-columns:minmax(190px,.75fr) minmax(310px,1.25fr)!important;gap:12px!important}
+        .tr-discoverToast{margin:3px auto 7px!important}
+
+        @media(max-width:650px){
+          .tr-playerHero{grid-template-columns:112px minmax(0,1fr)!important;width:100%!important;min-height:112px!important}
+          .tr-playerHero .tr-audioArtwork{width:112px!important;height:112px!important;min-width:112px!important;min-height:112px!important;max-width:112px!important;max-height:112px!important;aspect-ratio:1/1!important}
+          .tr-playerHero .tr-audioIdentity{height:112px!important;min-height:112px!important;padding:12px 11px!important;justify-content:center!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:clamp(18px,5.6vw,23px)!important;line-height:1.08!important;letter-spacing:-.025em!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:2!important;overflow:hidden!important}
+          .tr-playerHero .tr-audioIdentity small{margin-top:6px!important;font-size:11.5px!important;line-height:1.2!important;display:-webkit-box!important;-webkit-box-orient:vertical!important;-webkit-line-clamp:1!important;overflow:hidden!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 12px)!important;margin:6px auto 4px!important;grid-template-columns:32px minmax(0,1fr) 32px!important;gap:5px!important;min-height:24px!important;font-size:8px!important}
+          .tr-playerTransportStage{width:calc(100% - 12px)!important;margin:2px auto 4px!important;gap:5px!important}
+          .tr-playerTransportStage .tr-audioTransportButton{height:43px!important;min-height:43px!important;border-radius:9px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:20px!important;height:20px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:auto 11px!important;gap:3px!important}.tr-playerTransportStage .tr-audioTransportUnit>span{font-size:7.5px!important;letter-spacing:.03em!important}
+          .tr-playerModeStage{width:calc(100% - 12px)!important;margin-bottom:5px!important;gap:6px!important}.tr-playerModeStage .tr-audioModeButton{min-width:92px!important;height:31px!important;min-height:31px!important;padding:0 10px!important;font-size:7.5px!important}.tr-playerModeStage .tr-audioModeButton svg{width:14px!important;height:14px!important}
+          .tr-activityRta--10band{width:calc(100% - 12px)!important;height:78px!important;margin:0 auto 5px!important;border-radius:8px!important}
+          .tr-activityRta--10band .tr-activityRtaLabels{left:6px!important;right:6px!important;gap:4px!important;bottom:3px!important}.tr-activityRta--10band .tr-activityRtaLabels span{font-size:6.8px!important;letter-spacing:-.015em!important}
+          .tr-playerPreferenceStage{width:calc(100% - 12px)!important;margin-bottom:6px!important;gap:5px!important}.tr-playerPreferenceStage button{height:34px!important;min-height:34px!important;border-radius:8px!important}.tr-playerPreferenceStage button svg{width:17px!important;height:17px!important}
+          .tr-playerUtilityRow{width:calc(100% - 12px)!important;margin:0 auto 8px!important;grid-template-columns:1fr!important;gap:6px!important}.tr-playerVolume{grid-template-columns:44px minmax(0,1fr) 34px!important;gap:6px!important}.tr-playerVolume>span{font-size:8px!important}.tr-playerVolume>strong{font-size:9px!important}.tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 84px!important;gap:5px!important}.tr-playerSourceTools .tr-audioQueueSelector>span{font-size:8px!important}.tr-playerSourceTools .tr-audioQueueSelector select{height:34px!important;min-height:34px!important;font-size:9.5px!important}.tr-playerSourceTools .tr-audioEqToggle{width:84px!important;min-width:84px!important;max-width:84px!important;height:34px!important;min-height:34px!important;font-size:8.5px!important;padding:0 5px!important}
+        }
+        @media(max-width:380px){
+          .tr-playerHero{grid-template-columns:102px minmax(0,1fr)!important;min-height:102px!important}.tr-playerHero .tr-audioArtwork{width:102px!important;height:102px!important;min-width:102px!important;min-height:102px!important;max-width:102px!important;max-height:102px!important}.tr-playerHero .tr-audioIdentity{height:102px!important;min-height:102px!important;padding:9px 8px!important}.tr-playerHero .tr-audioIdentity strong{font-size:17px!important}.tr-playerHero .tr-audioIdentity small{font-size:10.5px!important}
+          .tr-playerTransportStage .tr-audioTransportButton{height:40px!important;min-height:40px!important}.tr-playerTransportStage .tr-audioTransportFace svg{width:18px!important;height:18px!important}.tr-playerTransportStage .tr-audioTransportUnit>span{font-size:7px!important}
+        }
+      `}</style>
+    </section>
+  );
 }
-
-export const MUSIC_RTA_FREQUENCIES = MUSIC_RTA_CENTERS;
-
-function duckTargetForStrength(strength: MusicDuckingStrength) { return strength === "off" ? 1 : strength === "light" ? 0.5 : strength === "strong" ? 0.08 : 0.18; }
-function fadeOutputTo(target: number, milliseconds: number) { if (!musicGain || !audioContext) return Promise.resolve(); const now = audioContext.currentTime; const seconds = Math.max(0.03, milliseconds / 1000); musicGain.gain.cancelScheduledValues(now); musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), now); musicGain.gain.linearRampToValueAtTime(Math.max(0.0001, target), now + seconds); return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds + 20)); }
-export async function playWithMusicDucked(playAlert: () => Promise<void>) { const audio = ensureAudioElement(); const wasPlaying = !audio.paused && !audio.ended && Boolean(audio.src); if (!wasPlaying || state.duckingStrength === "off") { await playAlert(); return; } await unlockMusicAudio(); if (musicGain && audioContext) { const original = Math.max(0.0001, musicGain.gain.value || 1); try { await fadeOutputTo(duckTargetForStrength(state.duckingStrength), 180); await playAlert(); } finally { await fadeOutputTo(original, 360); } return; } const original = audio.volume; try { audio.volume = Math.min(original, duckTargetForStrength(state.duckingStrength)); await playAlert(); } finally { audio.volume = original; } }
-
-export function formatMusicTime(value: number) { const total = Math.max(0, Math.floor(Number(value) || 0)); return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`; }
-function subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); }
-function getSnapshot() { return state; }
-export function useMusicPlayer() { return useSyncExternalStore(subscribe, getSnapshot, getSnapshot); }
