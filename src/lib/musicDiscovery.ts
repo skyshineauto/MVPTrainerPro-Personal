@@ -71,6 +71,8 @@ type LibraryTrackPayload = {
 const STORAGE_KEY = "mvp_music_discovery_v2";
 const LEGACY_STORAGE_KEY = "mvp_music_discovery_v1";
 const PREFERENCE_STORAGE_KEY = "mvp_music_discovery_preferences_v1";
+const DELETED_STORAGE_KEY = "mvp_music_discovery_deleted_v1";
+const DELETED_TTL_MS = 30 * 86400000;
 const EVENT = "mvp:music-discovery-changed";
 const CLOUD_TABLE = "music_discovery_seeds";
 const HISTORY_TABLE = "music_discovery_history";
@@ -168,6 +170,51 @@ function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
   };
 }
 
+type DeletedSeedTombstone = { seedId: string; deletedAt: number };
+
+function readDeletedSeedTombstones(): DeletedSeedTombstone[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(DELETED_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const cutoff = Date.now() - DELETED_TTL_MS;
+    return parsed
+      .map((row) => ({ seedId: clean(row?.seedId), deletedAt: Number(row?.deletedAt) || 0 }))
+      .filter((row) => row.seedId && row.deletedAt >= cutoff);
+  } catch {
+    return [];
+  }
+}
+
+function writeDeletedSeedTombstones(rows: DeletedSeedTombstone[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const cutoff = Date.now() - DELETED_TTL_MS;
+    const deduped = new Map<string, DeletedSeedTombstone>();
+    for (const row of rows) {
+      if (!row.seedId || row.deletedAt < cutoff) continue;
+      const current = deduped.get(row.seedId);
+      if (!current || row.deletedAt > current.deletedAt) deduped.set(row.seedId, row);
+    }
+    window.localStorage.setItem(DELETED_STORAGE_KEY, JSON.stringify([...deduped.values()]));
+  } catch {
+    // Deletion still works through Supabase even when localStorage is unavailable.
+  }
+}
+
+function markSeedDeleted(seedId: string) {
+  writeDeletedSeedTombstones([{ seedId, deletedAt: Date.now() }, ...readDeletedSeedTombstones()]);
+}
+
+function clearSeedDeleted(seedId: string) {
+  writeDeletedSeedTombstones(readDeletedSeedTombstones().filter((row) => row.seedId !== seedId));
+}
+
+function locallyDeletedSeedIds() {
+  return new Set(readDeletedSeedTombstones().map((row) => row.seedId));
+}
+
 function parseLocalStorageKey(key: string): MusicDiscoverySeed[] {
   if (typeof window === "undefined") return [];
   try {
@@ -181,9 +228,10 @@ function parseLocalStorageKey(key: string): MusicDiscoverySeed[] {
 }
 
 function safeParse(): MusicDiscoverySeed[] {
-  const current = parseLocalStorageKey(STORAGE_KEY);
+  const deleted = locallyDeletedSeedIds();
+  const current = parseLocalStorageKey(STORAGE_KEY).filter((seed) => !deleted.has(seed.id));
   if (current.length) return current;
-  const legacy = parseLocalStorageKey(LEGACY_STORAGE_KEY);
+  const legacy = parseLocalStorageKey(LEGACY_STORAGE_KEY).filter((seed) => !deleted.has(seed.id));
   if (legacy.length) saveLocal(legacy);
   return legacy;
 }
@@ -191,9 +239,10 @@ function safeParse(): MusicDiscoverySeed[] {
 function saveLocal(seeds: MusicDiscoverySeed[]) {
   if (typeof window === "undefined") return;
   try {
+    const deleted = locallyDeletedSeedIds();
     const deduped = new Map<string, MusicDiscoverySeed>();
     for (const seed of [...seeds].sort((a, b) => b.refreshedAt - a.refreshedAt)) {
-      if (!deduped.has(seed.id)) deduped.set(seed.id, seed);
+      if (!deleted.has(seed.id) && !deduped.has(seed.id)) deduped.set(seed.id, seed);
     }
     const next = [...deduped.values()].slice(0, MAX_LOCAL_SEEDS);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -204,6 +253,7 @@ function saveLocal(seeds: MusicDiscoverySeed[]) {
 }
 
 function replaceLocalSeed(seed: MusicDiscoverySeed) {
+  clearSeedDeleted(seed.id);
   const existing = safeParse();
   saveLocal([seed, ...existing.filter((item) => item.id !== seed.id)]);
 }
@@ -285,6 +335,7 @@ async function currentUserId() {
 
 async function persistSeedToCloud(seed: MusicDiscoverySeed) {
   try {
+    if (locallyDeletedSeedIds().has(seed.id)) return;
     const userId = await currentUserId();
     if (!userId) return;
     await supabase.from(CLOUD_TABLE).upsert({
@@ -298,6 +349,7 @@ async function persistSeedToCloud(seed: MusicDiscoverySeed) {
       created_at: new Date(seed.createdAt).toISOString(),
       refreshed_at: new Date(seed.refreshedAt).toISOString(),
       recommendations: seed.recommendations,
+      deleted_at: null,
     }, { onConflict: "user_id,seed_id" });
   } catch {
     // Cloud persistence is best-effort; local state stays usable.
@@ -314,12 +366,14 @@ export async function hydrateMusicDiscoveryFromCloud() {
         .from(CLOUD_TABLE)
         .select("seed_id,track_id,track_title,track_artist,artwork_url,seed_year,created_at,refreshed_at,recommendations")
         .eq("user_id", userId)
+        .is("deleted_at", null)
         .order("refreshed_at", { ascending: false })
         .limit(CLOUD_LIMIT);
       if (error || !Array.isArray(data)) return;
+      const deleted = locallyDeletedSeedIds();
       const cloudSeeds = (data as CloudSeedRow[])
         .map(cloudRowToSeed)
-        .filter((seed): seed is MusicDiscoverySeed => Boolean(seed));
+        .filter((seed): seed is MusicDiscoverySeed => seed !== null && !deleted.has(seed.id));
       // Once the signed-in cloud table is reachable it becomes authoritative. This deliberately
       // removes old device-only Rediscover results so mobile and desktop show the same account data.
       saveLocal(cloudSeeds);
@@ -393,6 +447,7 @@ async function strictBrowserFallback(track: MusicTrack, libraryTracks: MusicTrac
 
 export async function discoverMoreFromTrack(track: MusicTrack, libraryTracks: MusicTrack[]) {
   rememberDiscoveryPreference(track);
+  clearSeedDeleted(`seed:${track.id}`);
 
   const source = track as MusicTrack & {
     artist?: string | null;
@@ -475,17 +530,34 @@ export function setDiscoveryRecommendationState(
   }
 }
 
-export function removeDiscoverySeed(seedId: string) {
+export async function removeDiscoverySeed(seedId: string) {
+  markSeedDeleted(seedId);
   saveLocal(safeParse().filter((seed) => seed.id !== seedId));
-  void (async () => {
-    try {
-      const userId = await currentUserId();
-      if (!userId) return;
-      await supabase.from(CLOUD_TABLE).delete().eq("user_id", userId).eq("seed_id", seedId);
-    } catch {
-      // Local removal still succeeds offline.
-    }
-  })();
+
+  try {
+    const userId = await currentUserId();
+    if (!userId) return true;
+
+    const { error: tombstoneError } = await supabase
+      .from(CLOUD_TABLE)
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("seed_id", seedId);
+
+    if (!tombstoneError) return true;
+
+    // Backward-compatible fallback if the migration has not reached a device yet.
+    const { error: deleteError } = await supabase
+      .from(CLOUD_TABLE)
+      .delete()
+      .eq("user_id", userId)
+      .eq("seed_id", seedId);
+
+    return !deleteError;
+  } catch {
+    // The local tombstone prevents the deleted seed from immediately resurrecting.
+    return false;
+  }
 }
 
 export function refreshDiscoveryLibraryFlags(libraryTracks: MusicTrack[]) {
