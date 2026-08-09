@@ -280,7 +280,7 @@ function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return `${date.getMonth() + 1}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
 }
 
 function e1rm(weight: number, reps: number) {
@@ -374,9 +374,9 @@ function coachingDecision(
 
 function decisionTone(decision: Decision): Tone {
   if (decision === "INCREASE") return "green";
-  if (decision === "REDUCE") return "amber";
+  if (decision === "REDUCE") return "red";
   if (decision === "HOLD") return "blue";
-  return "neutral";
+  return "amber";
 }
 
 function programTypeLabel(program: ProgramBlockRow | null) {
@@ -1071,7 +1071,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
       {msg ? <div className="co-error">{msg}</div> : null}
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--brief">
         <SectionTitle title="Today's Coaching Brief" />
         <div className="co-briefingGrid">
           {recommendations.map((recommendation, index) => (
@@ -1088,7 +1088,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--next">
         <SectionTitle
           title="Next Workout Coaching"
           right={nextScheduled ? <button className="co-primaryAction" type="button" onClick={() => navigate(`/workout/${nextScheduled.id}`)}>OPEN WORKOUT</button> : null}
@@ -1123,7 +1123,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         ) : <div className="co-empty">No upcoming scheduled workout. Your current program remains intact.</div>}
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--review">
         <SectionTitle title="Program Review" subtitle={activeProgramName} />
         <div className="co-reviewGrid">
           <article className={`co-overall is-${programReview.tone}`}><span>OVERALL</span><strong>{programReview.overall}</strong></article>
@@ -1134,7 +1134,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         <div className="co-assessment"><span>COACH ASSESSMENT</span><p>{programReview.assessment}</p></div>
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--nutrition">
         <SectionTitle title="Nutrition Coach" subtitle="Targets tied to your current training goal." />
         <div className="co-nutritionGrid">
           <article><span>CURRENT GOAL</span><strong>{activeProgramName}</strong></article>
@@ -1143,7 +1143,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--tips">
         <SectionTitle title="Coach Tips" subtitle="Training, recovery, nutrition, sleep, mobility, hydration and habits." />
         <div className="co-tipTabs" role="tablist" aria-label="Coach tip categories">
           {COACH_TIP_CATEGORIES.map((category) => (
@@ -1160,7 +1160,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         </article>
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--history">
         <SectionTitle title="Recommendation History" subtitle="Recent coaching calls, kept concise." />
         <div className="co-historyList">
           {recommendationHistory.slice(0, 8).map((row) => (
@@ -1170,7 +1170,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       </section>
 
-      <section className="co-surface co-section">
+      <section className="co-surface co-section co-section--control">
         <SectionTitle title="Program Control" subtitle="Manage programs without exposing database IDs." />
         <div className="co-programControl">
           <div><span>ACTIVE PROGRAM</span><strong>{activeProgramName}</strong><small>{activeProgramMeta}</small></div>
@@ -1280,6 +1280,47 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           .co-nutritionGrid{grid-template-columns:1fr!important}.co-programControl{padding:13px!important}.co-programControl strong{font-size:19px!important}.co-controlButtons{grid-template-columns:1fr!important}
           .co-manageRows article{grid-template-columns:28px minmax(0,1fr)!important}.co-manageRows article>button,.co-manageRows article>b{grid-column:2!important;width:100%!important}
           .co-primaryAction,.co-sectionRight button{width:100%!important;min-height:43px!important;font-size:12px!important}
+        }
+
+        /* AUG 9 FLAGSHIP SEMANTIC SURFACE PASS */
+        .co-page{--violet:#b79cff;--neutral:#0a1117}
+        .co-surface{
+          border-color:rgba(255,255,255,.085)!important;
+          border-top-color:rgba(255,255,255,.14)!important;
+          background:linear-gradient(155deg,#0c1319 0%,#070c11 58%,#05090d 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 16px 42px rgba(0,0,0,.28)!important;
+        }
+        .co-section{position:relative;overflow:hidden}
+        .co-section::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:2px;border-radius:99px;background:rgba(126,220,255,.34);pointer-events:none}
+        .co-section--brief::before{background:var(--violet)!important}.co-section--brief .co-sectionAccent{background:var(--violet)!important}
+        .co-section--next::before{background:var(--c)!important}.co-section--next .co-sectionAccent{background:var(--c)!important}
+        .co-section--review::before{background:var(--g)!important}.co-section--review .co-sectionAccent{background:var(--g)!important}
+        .co-section--nutrition::before{background:var(--a)!important}.co-section--nutrition .co-sectionAccent{background:var(--a)!important}
+        .co-section--tips::before{background:var(--violet)!important}.co-section--tips .co-sectionAccent{background:var(--violet)!important}
+        .co-section--history::before{background:#8ba0aa!important}.co-section--history .co-sectionAccent{background:#8ba0aa!important}
+        .co-section--control::before{background:#6f8cf5!important}.co-section--control .co-sectionAccent{background:#6f8cf5!important}
+        .co-builder::before{background:#6f8cf5!important}.co-builder .co-sectionAccent{background:#6f8cf5!important}
+        .co-briefCard{background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(255,255,255,.006))!important;border-color:rgba(255,255,255,.075)!important}
+        .co-briefCard.is-green{background:linear-gradient(145deg,rgba(44,190,119,.075),rgba(255,255,255,.008))!important}
+        .co-briefCard.is-amber{background:linear-gradient(145deg,rgba(231,167,65,.075),rgba(255,255,255,.008))!important}
+        .co-briefCard.is-red{border-left-color:var(--r)!important;background:linear-gradient(145deg,rgba(255,92,101,.072),rgba(255,255,255,.008))!important}
+        .co-nextWorkoutHead>div{background:linear-gradient(145deg,rgba(255,255,255,.028),rgba(255,255,255,.008))!important;border-color:rgba(255,255,255,.08)!important}
+        .co-decisionRow{background:linear-gradient(145deg,rgba(255,255,255,.024),rgba(255,255,255,.006))!important;border-color:rgba(255,255,255,.075)!important}
+        .co-decisionRow.is-red{border-left-color:var(--r)!important}.co-decisionRow.is-red .co-decisionCommand>span,.co-decisionRow.is-red .co-decisionCommand>strong{color:#ff969b!important}
+        .co-decisionRow.is-amber{border-left-color:var(--a)!important}.co-decisionRow.is-amber .co-decisionCommand>span,.co-decisionRow.is-amber .co-decisionCommand>strong{color:#ffd18a!important}
+        .co-decisionRow.is-blue{border-left-color:var(--c)!important}.co-decisionRow.is-blue .co-decisionCommand>span,.co-decisionRow.is-blue .co-decisionCommand>strong{color:#94e6ff!important}
+        .co-decisionRow.is-green{border-left-color:var(--g)!important}.co-decisionRow.is-green .co-decisionCommand>span,.co-decisionRow.is-green .co-decisionCommand>strong{color:#9ff0bd!important}
+        .co-reviewGrid article,.co-assessment,.co-programControl,.co-featuredTip,.co-manageRows article{background:rgba(255,255,255,.018)!important}
+        .co-sectionTitle h2,.co-programName,.co-nextWorkoutHead strong{color:#f8fbfd!important}
+        .co-page p,.co-page small,.co-page span{max-width:100%}
+        .co-page button{overflow:visible;text-overflow:clip}
+        @media(max-width:900px){.co-page{width:calc(100% - 18px)!important}.co-nextWorkoutHead,.co-decisionRow{min-width:0!important}.co-decisionRow>button{grid-column:auto!important}}
+        @media(max-width:650px){
+          .co-surface{border-radius:15px!important}
+          .co-section::before{top:12px;bottom:12px}
+          .co-sectionTitle,.co-nextWorkoutHead,.co-briefCard,.co-decisionRow,.co-reviewGrid article,.co-programControl,.co-featuredTip{min-width:0!important;max-width:100%!important}
+          .co-sectionTitle h2,.co-briefCard h3,.co-programName,.co-nextWorkoutHead strong,.co-decisionExercise strong,.co-decisionCommand strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:normal!important;overflow-wrap:anywhere!important}
+          .co-decisionExercise span,.co-decisionCommand small,.co-sectionTitleText p{white-space:normal!important;overflow:visible!important}
         }
       `}</style>
     </div>
