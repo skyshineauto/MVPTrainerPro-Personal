@@ -1257,6 +1257,15 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-decisionCommand small{font-size:13px!important;color:#b9ced6!important}
         .co-decisionExercise strong{font-size:17px!important}
         .co-decisionExercise span{font-size:12px!important;color:#b1c6ce!important}
+        /* FINAL NO-CLIP / PRO MOBILE GUARANTEE */
+        .co-page,.co-page *{min-width:0}
+        .co-page h1,.co-page h2,.co-page h3,.co-page strong,.co-page span,.co-page small,.co-page p,.co-page b,.co-page button,.co-page label{overflow-wrap:anywhere;word-break:normal}
+        .co-page button{white-space:normal;line-height:1.25;min-height:40px}
+        .co-sectionTitleText,.co-nextWorkoutHead>div,.co-decisionExercise,.co-decisionCommand,.co-programControl>div{min-width:0;overflow:visible}
+        .co-decisionExercise strong,.co-decisionCommand strong,.co-nextWorkoutHead strong{line-height:1.2;padding-bottom:2px;overflow:visible}
+        .co-nextWorkoutHead{overflow:hidden}
+        .co-nextWorkoutHead>div{overflow:hidden}
+        .co-nextWorkoutHead small{white-space:normal}
         @media(max-width:650px){
           .co-page{width:calc(100% - 10px)!important;max-width:100%!important;margin-bottom:116px!important;overflow-x:hidden!important}
           .co-hero{padding:16px 13px!important;gap:12px!important}
