@@ -162,7 +162,7 @@ function buildPrograms(blocks: ProgramBlockRow[]) {
     return (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
   });
   const purposeCounts = new Map<string, number>();
-  return ordered.map((block, index): ProgramView => {
+  return ordered.map((block): ProgramView => {
     const purpose = programPurpose(block);
     const ordinal = (purposeCounts.get(purpose) ?? 0) + 1;
     purposeCounts.set(purpose, ordinal);
