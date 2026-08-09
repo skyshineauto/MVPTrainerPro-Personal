@@ -57,6 +57,8 @@ import {
   removeDiscoverySeed,
   setDiscoveryRecommendationState,
   subscribeMusicDiscovery,
+  type MusicDiscoveryCategory,
+  type MusicDiscoveryRecommendation,
   type MusicDiscoverySeed,
 } from "../../lib/musicDiscovery";
 
@@ -193,6 +195,31 @@ function buildDraftMap(rows: MusicTrack[]): DraftMap {
   return Object.fromEntries(rows.map((track) => [track.id, {
     title: track.title, artist: track.artist || "", album: track.album || "", releaseYear: track.release_year ? String(track.release_year) : "", genre: track.genre || "",
   }]));
+}
+
+
+const DISCOVERY_SECTIONS: Array<{ key: MusicDiscoveryCategory; title: string; subtitle: string; tone: string }> = [
+  { key: "new_upcoming", title: "New & Upcoming Artists", subtitle: "Newer artists carrying this sound forward", tone: "new" },
+  { key: "same_era", title: "Similar From That Era", subtitle: "Strong matches from the seed song's musical era", tone: "era" },
+  { key: "hidden_era", title: "Hidden Gems From That Era", subtitle: "Deeper cuts and less-obvious songs you may have missed", tone: "hidden" },
+];
+
+function DiscoveryCard({ seedId, item }: { seedId: string; item: MusicDiscoveryRecommendation; key?: string }) {
+  return <article className={item.inLibrary ? "is-owned" : ""}>
+    {item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}
+    <div>
+      <small>{item.year ? `TRACK • ${item.year}` : "TRACK"}</small>
+      <strong>{item.title}</strong>
+      <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
+      <p>{item.reason}</p>
+    </div>
+    <footer>
+      {item.inLibrary
+        ? <b>✓ IN YOUR LIBRARY</b>
+        : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seedId,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}
+      <button onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}>NOT INTERESTED</button>
+    </footer>
+  </article>;
 }
 
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
@@ -796,8 +823,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               const reorderIndex = libraryOrderIndex.get(track.id) ?? -1;
               return <article className={`tr10-row ${current ? "is-current" : ""}`} key={track.id}>
                 <div className="tr10-orderCell" aria-label="Reorder song">
-                  <button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}>↑</button>
-                  <button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}>↓</button>
+                  <button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}>▲</button>
+                  <button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}>▼</button>
                 </div>
                 <label className="tr10-check"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label>
                 <div className="tr10-trackCell">
@@ -826,7 +853,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "playlists" ? <div className="tr10-playlistLayout">
           <aside><div className="tr10-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="New playlist" /><button onClick={() => void createPlaylist()}>+</button></div>{regularPlaylists.map((playlist) => <button key={playlist.id} className={selectedPlaylistId === playlist.id ? "is-active" : ""} onClick={() => setSelectedPlaylistId(playlist.id)}><strong>{playlist.name}</strong><span>{(playlistTrackIds[playlist.id] || []).length} SONGS</span></button>)}</aside>
-          <section className="tr10-playlistConsole">{selectedPlaylist ? <><header><div><small>PLAYLIST</small><h2>{selectedPlaylist.name}</h2></div><div><button className="is-primary" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button><button className="is-danger" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE</button></div></header><div className="tr10-playlistSongs">{selectedPlaylistTracks.map((track,index) => <article key={track.id}><b>{String(index+1).padStart(2,"0")}</b><TrackArtwork track={track} /><div><strong>{track.title}</strong><span>{artistLabel(track)}</span></div><button onClick={() => void playSelectedPlaylist(track.id)}>▶</button><button disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}>↑</button><button disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}>↓</button><button className="is-danger" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></article>)}</div><button className="tr10-addSelected" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED SONGS</button></> : <div className="tr10-empty">Create a playlist to get started.</div>}</section>
+          <section className="tr10-playlistConsole">{selectedPlaylist ? <><header><div><small>PLAYLIST</small><h2>{selectedPlaylist.name}</h2></div><div><button className="is-primary" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button><button className="is-danger" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE</button></div></header><div className="tr10-playlistSongs">{selectedPlaylistTracks.map((track,index) => <article key={track.id}><b>{String(index+1).padStart(2,"0")}</b><TrackArtwork track={track} /><div><strong>{track.title}</strong><span>{artistLabel(track)}</span></div><button onClick={() => void playSelectedPlaylist(track.id)}>▶</button><button disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}>▲</button><button disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}>▼</button><button className="is-danger" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></article>)}</div><button className="tr10-addSelected" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED SONGS</button></> : <div className="tr10-empty">Create a playlist to get started.</div>}</section>
         </div> : null}
 
         {tab === "smart" ? <section className="tr10-smart">
@@ -836,8 +863,22 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section> : null}
 
         {tab === "discover" ? <section className="tr10-discover">
-          <header className="tr10-discoverHead"><div><span>DISCOVER</span><h2>Music saved for later</h2><p>Press Discover More in the player. Recommendations collect here without interrupting playback.</p></div><b>{discoverySeeds.reduce((sum,seed)=>sum+seed.recommendations.filter((item)=>!item.dismissed).length,0)} IDEAS</b></header>
-          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press DISCOVER MORE in the player.</div> : discoverySeeds.map((seed) => <section className="tr10-discoverSeed" key={seed.id}><header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}</p></div><button onClick={() => removeDiscoverySeed(seed.id)}>REMOVE</button></header><div className="tr10-discoverGrid">{seed.recommendations.filter((item)=>!item.dismissed).length ? seed.recommendations.filter((item)=>!item.dismissed).map((item)=><article key={item.id} className={item.inLibrary ? "is-owned" : ""}>{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}<div><small>TRACK</small><strong>{item.title}</strong><span>{item.artist}{item.album && item.album!==item.title ? ` • ${item.album}` : ""}</span><p>{item.reason}</p></div><footer>{item.inLibrary ? <b>✓ IN YOUR LIBRARY</b> : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}<button onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{dismissed:true})}>NOT INTERESTED</button></footer></article>) : <div className="tr10-discoverConfidence">No confident related tracks were found for this seed yet. Press DISCOVER MORE again later to refresh.</div>}</div></section>)}
+          <header className="tr10-discoverHead"><div><span>REDISCOVER</span><h2>Find music you have not heard yet</h2><p>Every seed is split into newer artists, same-era matches, and hidden gems from that era.</p></div><b>{discoverySeeds.reduce((sum,seed)=>sum+seed.recommendations.filter((item)=>!item.dismissed).length,0)} IDEAS</b></header>
+          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : discoverySeeds.map((seed) => {
+            const visible = seed.recommendations.filter((item)=>!item.dismissed);
+            return <section className="tr10-discoverSeed" key={seed.id}>
+              <header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p></div><button onClick={() => removeDiscoverySeed(seed.id)}>REMOVE</button></header>
+              {visible.length ? <div className="tr10-discoverSections">
+                {DISCOVERY_SECTIONS.map((section) => {
+                  const items = visible.filter((item) => item.category === section.key);
+                  return <section className={`tr10-discoverCategory is-${section.tone}`} key={section.key}>
+                    <header><div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b></header>
+                    {items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to widen this lane.</div>}
+                  </section>;
+                })}
+              </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to widen the search.</div>}
+            </section>;
+          })}
         </section> : null}
       </section>
 
@@ -1713,6 +1754,20 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-trackCell>.tr10-artwork,.tr10-trackCell>.tr10-art--row,.tr10-trackCell>.tr10-art{width:40px!important;height:40px!important;min-width:40px!important;min-height:40px!important;max-width:40px!important;max-height:40px!important}
           .tr10-trackText strong{font-size:11.5px!important}.tr10-trackText span{font-size:8.5px!important}
           .tr10-actions{grid-template-columns:repeat(3,minmax(0,1fr))!important}.tr10-actions button,.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{font-size:7px!important;height:29px!important;min-height:29px!important;padding:0 2px!important}
+        }
+
+        /* AUG 9 REDISCOVER LANES + CLEAN MOBILE REORDER */
+        .tr10-discoverSections{display:grid;gap:12px;margin-top:11px}
+        .tr10-discoverCategory{overflow:hidden;border:1px solid rgba(153,177,187,.13);border-radius:11px;background:linear-gradient(180deg,#0a1419,#050b0e)}
+        .tr10-discoverCategory>header{min-height:52px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(153,177,187,.10);background:#091116}
+        .tr10-discoverCategory>header>div{display:grid;gap:3px}.tr10-discoverCategory>header span{color:#fff;font-size:12px;font-weight:1000}.tr10-discoverCategory>header small{color:#8fa5ae;font-size:8px;line-height:1.3}.tr10-discoverCategory>header b{min-width:28px;height:28px;display:grid;place-items:center;border-radius:999px;background:#101b20;color:#d9e9ee;font-size:9px}
+        .tr10-discoverCategory.is-new{border-top:2px solid #53d69a}.tr10-discoverCategory.is-new>header span{color:#7fe8b2}.tr10-discoverCategory.is-era{border-top:2px solid #54cff3}.tr10-discoverCategory.is-era>header span{color:#7adcf7}.tr10-discoverCategory.is-hidden{border-top:2px solid #f1b352}.tr10-discoverCategory.is-hidden>header span{color:#ffd17f}
+        .tr10-discoverCategory .tr10-discoverGrid{margin:0!important;padding:8px!important}.tr10-discoverLaneEmpty{padding:14px;color:#8fa7b0;font-size:9px;text-align:center}
+        @media(max-width:650px){
+          .tr10-orderCell{border:0!important;background:transparent!important;padding:1px!important;grid-template-rows:25px 25px!important;gap:3px!important;align-content:start!important}
+          .tr10-orderCell button{width:24px!important;height:25px!important;min-height:25px!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#dff8ff!important;font-size:15px!important;line-height:1!important;text-shadow:0 0 8px rgba(81,210,247,.22)!important}
+          .tr10-orderCell button:active:not(:disabled){transform:scale(.88)!important;color:#62dbfb!important}.tr10-orderCell button:disabled{opacity:.18!important}
+          .tr10-discoverCategory>header{min-height:48px!important;padding:9px 10px!important}.tr10-discoverCategory>header span{font-size:11px!important}.tr10-discoverCategory>header small{font-size:7.5px!important}.tr10-discoverCategory .tr10-discoverGrid{padding:6px!important}
         }
       `}</style>
     </main>
