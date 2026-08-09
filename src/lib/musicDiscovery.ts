@@ -416,7 +416,7 @@ function safeSavedSongsParse(): MusicDiscoverySavedSong[] {
     if (!Array.isArray(parsed)) return [];
     memorySavedSongs = parsed
       .map(sanitizeSavedSong)
-      .filter((song): song is MusicDiscoverySavedSong => Boolean(song) && !deleted.has(song.id))
+      .filter((song): song is MusicDiscoverySavedSong => song !== null && !deleted.has(song.id))
       .sort((a, b) => b.savedAt - a.savedAt);
     return memorySavedSongs;
   } catch {
