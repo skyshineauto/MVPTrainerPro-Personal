@@ -279,6 +279,7 @@ function resolveMedia(item: any): { gif?: string; video?: string; poster?: strin
 
 function MediaOrFallback({ item, exerciseId }: { item: any; exerciseId?: string }) {
   const { gif, video, poster } = resolveMedia(item);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const goUpload = () => {
     const exId = exerciseId || item?.id || item?.exercise_id;
@@ -324,7 +325,19 @@ function MediaOrFallback({ item, exerciseId }: { item: any; exerciseId?: string 
             <div className={`tr-mediaMount tr-mediaMount--${mediaKind}`}>
               <div className="tr-mediaMountGlow" aria-hidden />
               <div className="tr-mediaMountPlate" aria-hidden />
-              <div className="tr-mediaMountInner">
+              <div
+                className="tr-mediaMountInner tr-mediaPreviewTrigger"
+                role="button"
+                tabIndex={0}
+                aria-label="Open exercise media full screen"
+                onClick={() => setPreviewOpen(true)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setPreviewOpen(true);
+                  }
+                }}
+              >
                 {video ? (
                   <video
                     className="tr-mediaAsset"
@@ -357,6 +370,53 @@ function MediaOrFallback({ item, exerciseId }: { item: any; exerciseId?: string 
           )}
         </div>
       </div>
+
+      {previewOpen && has && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="tr-mediaFullscreenOverlay"
+              role="presentation"
+              onClick={() => setPreviewOpen(false)}
+            >
+              <div
+                className="tr-mediaFullscreenDialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${item?.name ?? "Exercise"} media preview`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="tr-mediaFullscreenClose"
+                  onClick={() => setPreviewOpen(false)}
+                  aria-label="Close media preview"
+                >
+                  CLOSE ×
+                </button>
+
+                {video ? (
+                  <video
+                    className="tr-mediaFullscreenAsset"
+                    src={video}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    controls
+                    preload="metadata"
+                  />
+                ) : (
+                  <img
+                    className="tr-mediaFullscreenAsset"
+                    src={gif || poster}
+                    alt={`${item?.name ?? "Exercise"} demo`}
+                  />
+                )}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
@@ -2138,6 +2198,7 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [items, setItems] = useState<WorkoutExerciseRow[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [mobileProgressExpanded, setMobileProgressExpanded] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -2187,6 +2248,10 @@ export function WorkoutPlayerPage({ params }: any) {
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
+
+  useEffect(() => {
+    setMobileProgressExpanded(false);
+  }, [activeIdx]);
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen) return;
@@ -3176,7 +3241,11 @@ export function WorkoutPlayerPage({ params }: any) {
               <span style={{ width: `${progressPercent}%` }} />
             </div>
 
-            <div className="tr-exerciseProgressGrid">
+            <div
+              className={`tr-exerciseProgressGrid ${
+                mobileProgressExpanded ? "is-mobile-expanded" : "is-mobile-collapsed"
+              }`}
+            >
               {items.map((row, index) => {
                 const isSelected = index === activeIdx;
                 const status = row.completed_at
@@ -3205,7 +3274,7 @@ export function WorkoutPlayerPage({ params }: any) {
                     type="button"
                     className={`tr-exerciseProgressCard is-${status} ${
                       isSelected ? "is-selected" : ""
-                    }`}
+                    } ${isSelected || status === "next" ? "is-mobile-priority" : ""}`}
                     onClick={() => setActiveIdx(index)}
                     aria-current={isSelected ? "step" : undefined}
                   >
@@ -3220,22 +3289,38 @@ export function WorkoutPlayerPage({ params }: any) {
                 );
               })}
             </div>
+
+            {items.length > 2 ? (
+              <button
+                type="button"
+                className="tr-exerciseProgressToggle"
+                onClick={() => setMobileProgressExpanded((value) => !value)}
+                aria-expanded={mobileProgressExpanded}
+              >
+                {mobileProgressExpanded
+                  ? "SHOW CURRENT + NEXT"
+                  : `VIEW ALL ${items.length} EXERCISES`}
+                <span aria-hidden="true">{mobileProgressExpanded ? "↑" : "↓"}</span>
+              </button>
+            ) : null}
           </section>
         </Card>
       </div>
 
       {current && currentRunnerItem ? (
-        <ExerciseRunner
-          workoutExercise={current}
-          item={currentRunnerItem}
-          onChanged={reloadWorkoutExercisesKeepIndex}
-          onExerciseCompleted={handleExerciseCompleted}
-          showToast={showToast}
-          exerciseIndex={activeIdx + 1}
-          totalExercises={items.length}
-          sessionComplete={sessionComplete}
-          onStartRest={restTimer.start}
-        />
+        <div className="tr-activeExerciseRunner">
+          <ExerciseRunner
+            workoutExercise={current}
+            item={currentRunnerItem}
+            onChanged={reloadWorkoutExercisesKeepIndex}
+            onExerciseCompleted={handleExerciseCompleted}
+            showToast={showToast}
+            exerciseIndex={activeIdx + 1}
+            totalExercises={items.length}
+            sessionComplete={sessionComplete}
+            onStartRest={restTimer.start}
+          />
+        </div>
       ) : (
         <Card title="Workout">No exercises yet. Use Edit to add.</Card>
       )}
