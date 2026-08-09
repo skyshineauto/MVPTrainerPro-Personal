@@ -11,7 +11,6 @@ import {
   listMusicTracks,
   removeMusicArtwork,
   removeMusicTrack,
-  setMusicTrackPreference,
   updateMusicTrack,
   uploadMusicArtwork,
   uploadMusicTrack,
@@ -51,10 +50,19 @@ import {
   setPlayerMusicPreference,
   useMusicPlayer,
 } from "../../lib/musicPlayer";
+import {
+  getDiscoverPreferenceBoost,
+  listMusicDiscoverySeeds,
+  refreshDiscoveryLibraryFlags,
+  removeDiscoverySeed,
+  setDiscoveryRecommendationState,
+  subscribeMusicDiscovery,
+  type MusicDiscoverySeed,
+} from "../../lib/musicDiscovery";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
-type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart";
+type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "discover";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
 type SongSort =
@@ -82,6 +90,14 @@ type ReviewItem = { trackId: string; candidates: MusicMetadataCandidate[] };
 type EnrichmentState = { running: boolean; current: number; total: number; matched: number; review: number; notFound: number; label: string; serviceMessage: string };
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
+const SMART_MIX_NAMES: Record<SmartIntensity, string> = {
+  high: "Smart Mix • High",
+  balanced: "Smart Mix • Balanced",
+  recovery: "Smart Mix • Recovery",
+};
+function isSmartMixPlaylist(playlist: MusicPlaylist) {
+  return Object.values(SMART_MIX_NAMES).includes(playlist.name);
+}
 
 function formatFileSize(bytes: number | null) {
   if (!bytes) return "";
@@ -133,6 +149,7 @@ function smartMixScore(track: MusicTrack, intensity: SmartIntensity) {
   score += Math.min(18, track.completed_play_count * 1.6);
   score -= Math.min(30, track.skip_count * 4.2);
   score += Math.max(0, 8 - track.play_count * 0.28);
+  score += getDiscoverPreferenceBoost(track);
   if (track.last_played_at) {
     const ageHours = (Date.now() - new Date(track.last_played_at).getTime()) / 3600000;
     if (ageHours < 12) score -= 17;
@@ -219,6 +236,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [reviewSkippedIds, setReviewSkippedIds] = useState<Set<string>>(new Set());
   const [smartMinutes, setSmartMinutes] = useState(60);
   const [smartIntensity, setSmartIntensity] = useState<SmartIntensity>("high");
+  const [discoverySeeds, setDiscoverySeeds] = useState<MusicDiscoverySeed[]>(() => listMusicDiscoverySeeds());
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -235,6 +253,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const reviewCount = useMemo(() => tracks.filter((track) => track.metadata_status === "review").length, [tracks]);
   const libraryOrderedTracks = useMemo(() => [...tracks].sort((a, b) => a.sort_order - b.sort_order), [tracks]);
   const libraryOrderIndex = useMemo(() => new Map(libraryOrderedTracks.map((track, index) => [track.id, index] as const)), [libraryOrderedTracks]);
+  const regularPlaylists = useMemo(() => playlists.filter((playlist) => !isSmartMixPlaylist(playlist)), [playlists]);
+  const smartMixPlaylists = useMemo(() => playlists.filter(isSmartMixPlaylist), [playlists]);
 
   const detailTrack = useMemo(() => tracks.find((track) => track.id === detailTrackId) || null, [tracks, detailTrackId]);
   const detailDraft = detailTrack ? drafts[detailTrack.id] : null;
@@ -328,11 +348,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     const rows = await listMusicPlaylists();
     const entries = await Promise.all(rows.map(async (playlist) => [playlist.id, (await listMusicPlaylistTrackLinks(playlist.id)).map((link) => link.track_id)] as const));
     setPlaylists(rows); setPlaylistTrackIds(Object.fromEntries(entries));
-    setSelectedPlaylistId((current) => preferredId && rows.some((p) => p.id === preferredId) ? preferredId : current && rows.some((p) => p.id === current) ? current : rows[0]?.id || null);
+    const regularRows = rows.filter((playlist) => !isSmartMixPlaylist(playlist));
+    setSelectedPlaylistId((current) => preferredId && regularRows.some((p) => p.id === preferredId) ? preferredId : current && regularRows.some((p) => p.id === current) ? current : regularRows[0]?.id || null);
   }
   useEffect(() => {
     void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary(true)]).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your music library.")).finally(() => setLoading(false));
   }, []);
+  useEffect(() => {
+    const refreshDiscovery = () => setDiscoverySeeds(listMusicDiscoverySeeds());
+    const unsubscribe = subscribeMusicDiscovery(refreshDiscovery);
+    refreshDiscovery();
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    refreshDiscoveryLibraryFlags(tracks);
+  }, [tracks]);
 
   function replaceTrackLocally(updated: MusicTrack) {
     setTracks((current) => { const next = current.map((track) => track.id === updated.id ? updated : track); replaceMusicLibrary(next); return next; });
@@ -388,7 +418,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }
   async function changePreference(track: MusicTrack, preference: "like" | "play_less" | "neutral") {
     try {
-      const updated = await setMusicTrackPreference(track.id, preference); replaceTrackLocally(updated); await setPlayerMusicPreference(track.id, preference);
+      const updated = await setPlayerMusicPreference(track.id, preference);
+      replaceTrackLocally(updated);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update preference."); }
   }
   async function setEnergy(track: MusicTrack, energy: MusicEnergyLevel) {
@@ -633,7 +664,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   function openPlaylistModal(trackIds: string[]) {
     const ids = Array.from(new Set(trackIds)); if (!ids.length) return;
     const selected = new Set<string>();
-    playlists.forEach((playlist) => { const existing = new Set(playlistTrackIds[playlist.id] || []); if (ids.every((id) => existing.has(id))) selected.add(playlist.id); });
+    regularPlaylists.forEach((playlist) => { const existing = new Set(playlistTrackIds[playlist.id] || []); if (ids.every((id) => existing.has(id))) selected.add(playlist.id); });
     setPlaylistModalTrackIds(ids); setPlaylistModalSelections(selected); setPlaylistModalName("");
   }
   async function savePlaylistMemberships() {
@@ -642,7 +673,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try {
       let preferred: string | null = null;
       if (playlistModalName.trim()) { const created = await createMusicPlaylist(playlistModalName.trim()); preferred = created.id; await replaceMusicPlaylistTracks(created.id, playlistModalTrackIds); }
-      for (const playlist of playlists) {
+      for (const playlist of regularPlaylists) {
         const current = playlistTrackIds[playlist.id] || []; const chosen = playlistModalSelections.has(playlist.id); const targets = new Set(playlistModalTrackIds);
         const next = chosen ? Array.from(new Set([...current, ...playlistModalTrackIds])) : current.filter((id) => !targets.has(id));
         if (next.join("|") !== current.join("|")) await replaceMusicPlaylistTracks(playlist.id, next);
@@ -662,7 +693,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete playlist."); }
   }
 
-  const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
+  const selectedPlaylist = regularPlaylists.find((playlist) => playlist.id === selectedPlaylistId) || null;
   const selectedPlaylistTracks = selectedPlaylist ? (playlistTrackIds[selectedPlaylist.id] || []).map((id) => tracks.find((track) => track.id === id)).filter((track): track is MusicTrack => Boolean(track)) : [];
   async function savePlaylistOrder(next: MusicTrack[]) {
     if (!selectedPlaylist) return;
@@ -676,11 +707,28 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try { await playMusicPlaylist(selectedPlaylist, selectedPlaylistTracks, trackId); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not play playlist."); }
   }
-  async function buildAndPlaySmartMix() {
-    const mix = buildSmartMix(tracks, smartMinutes, smartIntensity);
+  async function buildAndPlaySmartMix(mode: SmartIntensity = smartIntensity) {
+    const mix = buildSmartMix(tracks, smartMinutes, mode);
     if (!mix.length) { setError("Upload songs before building a Smart Mix."); return; }
-    await playMusicAdHocQueue(`Smart Mix • ${smartIntensity === "high" ? "High Energy" : smartIntensity === "recovery" ? "Recovery" : "Balanced"}`, mix);
-    setMessage(`Smart Mix started with ${mix.length} songs.`);
+    const name = SMART_MIX_NAMES[mode];
+    try {
+      let playlist = playlists.find((item) => item.name === name) || null;
+      if (!playlist) playlist = await createMusicPlaylist(name);
+      await replaceMusicPlaylistTracks(playlist.id, mix.map((track) => track.id));
+      await refreshPlaylists(playlist.id);
+      window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT));
+      await playMusicPlaylist(playlist, mix);
+      setMessage(`${name} rebuilt and playing • ${mix.length} songs.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not build Smart Mix.");
+    }
+  }
+  async function playSavedSmartMix(playlist: MusicPlaylist) {
+    const ids = playlistTrackIds[playlist.id] || [];
+    const mixTracks = ids.map((id) => tracks.find((track) => track.id === id)).filter((track): track is MusicTrack => Boolean(track));
+    if (!mixTracks.length) { setError("Rebuild this Smart Mix before playing it."); return; }
+    try { await playMusicPlaylist(playlist, mixTracks); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Could not play Smart Mix."); }
   }
 
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
@@ -718,7 +766,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{label}</button>)}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
@@ -747,9 +795,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               const missingArt = trackNeedsArtwork(track);
               const reorderIndex = libraryOrderIndex.get(track.id) ?? -1;
               return <article className={`tr10-row ${current ? "is-current" : ""}`} key={track.id}>
-                <div className="tr10-orderCell" aria-label={`Order position ${reorderIndex + 1}`}>
+                <div className="tr10-orderCell" aria-label="Reorder song">
                   <button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}>↑</button>
-                  <b>{String(reorderIndex + 1).padStart(2,"0")}</b>
                   <button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}>↓</button>
                 </div>
                 <label className="tr10-check"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label>
@@ -762,9 +809,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span><b className="tr10-energySegments" aria-hidden><i /><i /><i /></b></button>
                 <div className="tr10-actions">
-                  <button className={track.favorite ? "is-liked" : ""} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title="Like">👍</button>
-                  <button className={track.play_less ? "is-down" : ""} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎</button>
-                  <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ LIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
+                  <button className={`tr10-likeAction ${track.favorite ? "is-liked" : ""}`} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title={track.favorite ? "Liked" : "Like"}>👍<span>{track.favorite ? "LIKED" : "LIKE"}</span></button>
+                  <button className={`tr10-lessAction ${track.play_less ? "is-down" : ""}`} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎<span>PLAY LESS</span></button>
+                  <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ PLAYLIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
                 </div>
               </article>;
             })}
@@ -778,11 +825,20 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "albums" ? <div className="tr10-cardGrid">{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div><button onClick={() => void playMusicAdHocQueue(group.album,group.tracks)}>▶ PLAY</button></article>)}</div> : null}
 
         {tab === "playlists" ? <div className="tr10-playlistLayout">
-          <aside><div className="tr10-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="New playlist" /><button onClick={() => void createPlaylist()}>+</button></div>{playlists.map((playlist) => <button key={playlist.id} className={selectedPlaylistId === playlist.id ? "is-active" : ""} onClick={() => setSelectedPlaylistId(playlist.id)}><strong>{playlist.name}</strong><span>{(playlistTrackIds[playlist.id] || []).length} SONGS</span></button>)}</aside>
+          <aside><div className="tr10-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="New playlist" /><button onClick={() => void createPlaylist()}>+</button></div>{regularPlaylists.map((playlist) => <button key={playlist.id} className={selectedPlaylistId === playlist.id ? "is-active" : ""} onClick={() => setSelectedPlaylistId(playlist.id)}><strong>{playlist.name}</strong><span>{(playlistTrackIds[playlist.id] || []).length} SONGS</span></button>)}</aside>
           <section className="tr10-playlistConsole">{selectedPlaylist ? <><header><div><small>PLAYLIST</small><h2>{selectedPlaylist.name}</h2></div><div><button className="is-primary" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button><button className="is-danger" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE</button></div></header><div className="tr10-playlistSongs">{selectedPlaylistTracks.map((track,index) => <article key={track.id}><b>{String(index+1).padStart(2,"0")}</b><TrackArtwork track={track} /><div><strong>{track.title}</strong><span>{artistLabel(track)}</span></div><button onClick={() => void playSelectedPlaylist(track.id)}>▶</button><button disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}>↑</button><button disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}>↓</button><button className="is-danger" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></article>)}</div><button className="tr10-addSelected" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED SONGS</button></> : <div className="tr10-empty">Create a playlist to get started.</div>}</section>
         </div> : null}
 
-        {tab === "smart" ? <section className="tr10-smart"><div className="tr10-smartBuild"><span>SMART WORKOUT MIX</span><h2>Build a workout-length queue</h2><p>Uses energy, likes, completed plays, skips and recent playback. Songs marked Play Less are excluded.</p><label><span>WORKOUT LENGTH</span><input type="number" min={15} max={240} step={5} value={smartMinutes} onChange={(event) => setSmartMinutes(Math.max(15,Math.min(240,Number(event.target.value)||60)))} /><b>MINUTES</b></label><div className="tr10-intensity">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}>{value.toUpperCase()}</button>)}</div><button className="tr10-smartLaunch" onClick={() => void buildAndPlaySmartMix()}>BUILD & PLAY SMART MIX</button></div><div className="tr10-smartCollections"><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("high_rotation");}}>LIKED TRACKS <b>{likedCount}</b></button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("most_played");}}>MOST PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("recently_played");}}>RECENTLY PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("high_rotation");}}>HIGH ROTATION</button><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("least_played");}}>REDISCOVER</button></div></section> : null}
+        {tab === "smart" ? <section className="tr10-smart">
+          <div className="tr10-smartBuild"><span>SMART WORKOUT MIX</span><h2>Build or refresh a saved Smart Mix</h2><p>Uses energy, likes, completed plays, skips and recent playback. Play Less tracks are excluded. Your current queue stays stable until you rebuild it.</p><label><span>WORKOUT LENGTH</span><input type="number" min={15} max={240} step={5} value={smartMinutes} onChange={(event) => setSmartMinutes(Math.max(15,Math.min(240,Number(event.target.value)||60)))} /><b>MINUTES</b></label><div className="tr10-intensity">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}>{value.toUpperCase()}</button>)}</div><button className="tr10-smartLaunch" onClick={() => void buildAndPlaySmartMix(smartIntensity)}>BUILD & PLAY {smartIntensity.toUpperCase()}</button></div>
+          <div className="tr10-savedMixes"><div className="tr10-savedMixHead"><span>YOUR SMART MIXES</span><b>{smartMixPlaylists.length}</b></div>{(["high","balanced","recovery"] as SmartIntensity[]).map((mode) => { const name=SMART_MIX_NAMES[mode]; const playlist=smartMixPlaylists.find((item)=>item.name===name); const ids=playlist ? playlistTrackIds[playlist.id] || [] : []; const duration=ids.reduce((sum,id)=>{ const found=tracks.find((track)=>track.id===id); return sum+(found ? trackDuration(found) : 0); },0); return <article key={mode} className={player.activePlaylistId===playlist?.id ? "is-playing" : ""}><div><small>{mode.toUpperCase()}</small><h3>{name}</h3><p>{playlist ? `${ids.length} songs • ${formatLongDuration(duration)}` : "Not built yet"}</p></div><div>{playlist ? <><button className="is-primary" onClick={() => void playSavedSmartMix(playlist)}>▶ PLAY</button><button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>REBUILD</button></> : <button onClick={() => {setSmartIntensity(mode);}}>SELECT</button>}</div></article>; })}</div>
+          <div className="tr10-smartCollections"><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("high_rotation");}}>LIKED TRACKS <b>{likedCount}</b></button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("most_played");}}>MOST PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("recently_played");}}>RECENTLY PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("high_rotation");}}>HIGH ROTATION</button><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("least_played");}}>REDISCOVER</button></div>
+        </section> : null}
+
+        {tab === "discover" ? <section className="tr10-discover">
+          <header className="tr10-discoverHead"><div><span>DISCOVER</span><h2>Music saved for later</h2><p>Press Discover More in the player. Recommendations collect here without interrupting playback.</p></div><b>{discoverySeeds.reduce((sum,seed)=>sum+seed.recommendations.filter((item)=>!item.dismissed).length,0)} IDEAS</b></header>
+          {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press DISCOVER MORE in the player.</div> : discoverySeeds.map((seed) => <section className="tr10-discoverSeed" key={seed.id}><header><div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}</p></div><button onClick={() => removeDiscoverySeed(seed.id)}>REMOVE</button></header><div className="tr10-discoverGrid">{seed.recommendations.filter((item)=>!item.dismissed).map((item)=><article key={item.id} className={item.inLibrary ? "is-owned" : ""}>{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}<div><small>{item.kind.toUpperCase()}</small><strong>{item.title}</strong><span>{item.artist}{item.album && item.album!==item.title ? ` • ${item.album}` : ""}</span><p>{item.reason}</p></div><footer>{item.inLibrary ? <b>✓ IN YOUR LIBRARY</b> : <button className={item.toAdd ? "is-toAdd" : ""} onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{toAdd:!item.toAdd})}>{item.toAdd ? "✓ TO ADD" : "MARK TO ADD"}</button>}<button onClick={() => setDiscoveryRecommendationState(seed.id,item.id,{dismissed:true})}>NOT INTERESTED</button></footer></article>)}</div></section>)}
+        </section> : null}
       </section>
 
       {enrichment.running ? <div className="tr10-modalBack tr10-analysisBack"><section className="tr10-analysisModal" role="dialog" aria-modal="true" aria-live="polite">
@@ -820,7 +876,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <footer><button onClick={skipReview}>SKIP</button><button disabled={!reviewSelectedCandidate || busyId === `match-${reviewTrack.id}`} onClick={() => void saveReviewCandidate(false)}>SAVE</button><button className="is-primary" disabled={!reviewSelectedCandidate || busyId === `match-${reviewTrack.id}`} onClick={() => void saveReviewCandidate(true)}>SAVE & NEXT</button></footer>
       </section></div> : null}
 
-      {playlistModalTrackIds.length ? <div className="tr10-modalBack" onMouseDown={() => setPlaylistModalTrackIds([])}><section className="tr10-picker" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}><header><div><span>PLAYLIST ROUTING</span><h2>{playlistModalTrackIds.length} song{playlistModalTrackIds.length===1 ? "" : "s"}</h2></div><button onClick={() => setPlaylistModalTrackIds([])}>×</button></header><div>{playlists.map((playlist) => <label key={playlist.id}><input type="checkbox" checked={playlistModalSelections.has(playlist.id)} onChange={() => setPlaylistModalSelections((current) => {const next=new Set(current);next.has(playlist.id)?next.delete(playlist.id):next.add(playlist.id);return next;})} /><span><strong>{playlist.name}</strong><small>{playlistTrackIds[playlist.id]?.length || 0} songs</small></span></label>)}</div><label className="tr10-newRoute"><span>CREATE NEW PLAYLIST</span><input value={playlistModalName} onChange={(event) => setPlaylistModalName(event.target.value)} placeholder="Playlist name" /></label><footer><button onClick={() => setPlaylistModalTrackIds([])}>CANCEL</button><button className="is-primary" disabled={busyId === "playlist-route"} onClick={() => void savePlaylistMemberships()}>SAVE PLAYLISTS</button></footer></section></div> : null}
+      {playlistModalTrackIds.length ? <div className="tr10-modalBack" onMouseDown={() => setPlaylistModalTrackIds([])}><section className="tr10-picker" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}><header><div><span>PLAYLIST ROUTING</span><h2>{playlistModalTrackIds.length} song{playlistModalTrackIds.length===1 ? "" : "s"}</h2></div><button onClick={() => setPlaylistModalTrackIds([])}>×</button></header><div>{regularPlaylists.map((playlist) => <label key={playlist.id}><input type="checkbox" checked={playlistModalSelections.has(playlist.id)} onChange={() => setPlaylistModalSelections((current) => {const next=new Set(current);next.has(playlist.id)?next.delete(playlist.id):next.add(playlist.id);return next;})} /><span><strong>{playlist.name}</strong><small>{playlistTrackIds[playlist.id]?.length || 0} songs</small></span></label>)}</div><label className="tr10-newRoute"><span>CREATE NEW PLAYLIST</span><input value={playlistModalName} onChange={(event) => setPlaylistModalName(event.target.value)} placeholder="Playlist name" /></label><footer><button onClick={() => setPlaylistModalTrackIds([])}>CANCEL</button><button className="is-primary" disabled={busyId === "playlist-route"} onClick={() => void savePlaylistMemberships()}>SAVE PLAYLISTS</button></footer></section></div> : null}
 
       <style>{`
         .tr10-page{width:min(1180px,calc(100% - 32px));margin:0 auto 120px;color:#eef8fc;font-family:inherit;min-width:0}.tr10-page *{box-sizing:border-box}.tr10-page button,.tr10-page input,.tr10-page select{font:inherit}.tr10-page button{cursor:pointer}.tr10-page button:disabled{cursor:not-allowed;opacity:.42}
@@ -1492,6 +1548,26 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-orderCell b{font-size:7px!important}
         }
         @media(max-width:380px){.tr10-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tr10-trackCell{grid-template-columns:32px 42px minmax(0,1fr)!important}.tr10-artwork,.tr10-artwork img{width:42px!important;height:42px!important;min-width:42px!important;max-width:42px!important}}
+
+        /* AUG 9 LOCKED LIBRARY / SMART MIX / DISCOVER */
+        .tr10-stats{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+        .tr10-tabs{display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:0!important}
+        .tr10-tabs button{min-width:0!important;white-space:normal!important;line-height:1.15!important;padding:11px 6px!important;color:#d8eef6!important;font-size:9px!important}
+        .tr10-orderCell{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;width:28px!important;min-width:28px!important}
+        .tr10-orderCell b{display:none!important}
+        .tr10-orderCell button{width:24px!important;height:22px!important;min-height:22px!important;padding:0!important;border-radius:6px!important;font-size:13px!important;line-height:1!important;color:#e7f8ff!important;background:#0a202a!important;border:1px solid rgba(83,194,232,.28)!important}
+        .tr10-energy{min-width:84px!important;max-width:100%!important;overflow:visible!important;white-space:nowrap!important}
+        .tr10-energy.is-low{border-color:rgba(57,218,137,.48)!important;color:#8cf0b7!important;background:linear-gradient(180deg,rgba(11,74,48,.72),rgba(5,35,23,.9))!important}.tr10-energy.is-low .tr10-energyLed,.tr10-energy.is-low .tr10-energySegments i{background:#45e491!important}
+        .tr10-energy.is-medium{border-color:rgba(71,204,242,.5)!important;color:#9ce9ff!important;background:linear-gradient(180deg,rgba(8,66,88,.74),rgba(4,31,43,.92))!important}.tr10-energy.is-medium .tr10-energyLed,.tr10-energy.is-medium .tr10-energySegments i{background:#49d6fa!important}
+        .tr10-energy.is-high{border-color:rgba(255,180,65,.52)!important;color:#ffd18a!important;background:linear-gradient(180deg,rgba(92,54,9,.76),rgba(43,25,4,.94))!important}.tr10-energy.is-high .tr10-energyLed,.tr10-energy.is-high .tr10-energySegments i{background:#ffb548!important}
+        .tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;min-width:72px!important;white-space:nowrap!important}.tr10-actions .tr10-likeAction span,.tr10-actions .tr10-lessAction span{font-size:7px!important;font-weight:1000!important}
+        .tr10-actions .tr10-likeAction{color:#ffd84d!important;border-color:rgba(255,216,77,.30)!important}.tr10-actions .tr10-likeAction.is-liked{color:#fff!important;border-color:#45e394!important;background:linear-gradient(180deg,#13945c,#087044)!important;box-shadow:0 0 14px rgba(49,218,137,.2)!important}
+        .tr10-actions .tr10-lessAction{color:#ff747c!important;border-color:rgba(255,83,96,.3)!important}.tr10-actions .tr10-lessAction.is-down{color:#fff!important;border-color:#ff5360!important;background:linear-gradient(180deg,#c42d39,#8c1520)!important;box-shadow:0 0 14px rgba(230,50,64,.18)!important}
+        .tr10-savedMixes{display:grid;gap:8px}.tr10-savedMixHead{display:flex;align-items:center;justify-content:space-between}.tr10-savedMixHead span{font-size:9px;font-weight:1000;letter-spacing:.12em;color:#6ed9fa}.tr10-savedMixHead b{font-size:11px;color:#f7ca75}.tr10-savedMixes article{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px;border:1px solid rgba(83,169,201,.16);border-radius:12px;background:linear-gradient(180deg,#081923,#050d12)}.tr10-savedMixes article.is-playing{border-color:rgba(71,215,255,.5);box-shadow:inset 3px 0 #42d7ff}.tr10-savedMixes article h3{margin:3px 0;font-size:16px;color:#fff}.tr10-savedMixes article p{margin:0;color:#8da8b3;font-size:10px}.tr10-savedMixes article>div:last-child{display:flex;gap:7px;flex-wrap:wrap}.tr10-savedMixes article button{min-height:34px;padding:0 11px;border:1px solid rgba(80,174,208,.22);border-radius:8px;background:#07151c;color:#fff;font-size:8px;font-weight:1000}.tr10-savedMixes article button.is-primary{border-color:rgba(255,183,72,.48);background:linear-gradient(180deg,#f2a534,#b96910);color:#171006}
+        .tr10-discover{padding:15px;display:grid;gap:14px}.tr10-discoverHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.tr10-discoverHead span,.tr10-discoverSeed header small{font-size:8px;font-weight:1000;letter-spacing:.14em;color:#6ed9fa}.tr10-discoverHead h2{margin:4px 0;font-size:22px}.tr10-discoverHead p,.tr10-discoverSeed header p{margin:0;color:#8da5af;font-size:10px}.tr10-discoverHead>b{padding:7px 10px;border:1px solid rgba(255,193,81,.25);border-radius:999px;color:#ffd383;background:#171106;font-size:8px}.tr10-discoverSeed{border-top:1px solid rgba(98,177,205,.12);padding-top:13px}.tr10-discoverSeed>header{display:flex;justify-content:space-between;gap:12px;align-items:center}.tr10-discoverSeed h3{margin:3px 0;font-size:18px}.tr10-discoverSeed>header button{min-height:30px;padding:0 9px;border:1px solid rgba(255,95,105,.22);border-radius:8px;background:#1a090b;color:#ff9298;font-size:7px;font-weight:1000}.tr10-discoverGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}.tr10-discoverGrid article{display:grid;grid-template-columns:68px minmax(0,1fr);gap:10px;padding:10px;border:1px solid rgba(91,169,197,.15);border-radius:11px;background:#061118;min-width:0}.tr10-discoverGrid article>img,.tr10-discoverArt{width:68px;height:68px;object-fit:cover;border-radius:8px;background:#0b1a21;display:grid;place-items:center}.tr10-discoverGrid article>div{min-width:0;display:grid;align-content:start;gap:2px}.tr10-discoverGrid article strong{font-size:12px;color:#fff;line-height:1.25;white-space:normal;word-break:break-word}.tr10-discoverGrid article span{font-size:9px;color:#b6cdd6;white-space:normal;word-break:break-word}.tr10-discoverGrid article p{margin:3px 0 0;font-size:8px;color:#7895a0}.tr10-discoverGrid article footer{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}.tr10-discoverGrid article footer button,.tr10-discoverGrid article footer b{min-height:30px;padding:0 9px;display:inline-flex;align-items:center;border:1px solid rgba(96,175,203,.17);border-radius:8px;background:#08151b;color:#e8f6fa;font-size:7px;font-weight:1000}.tr10-discoverGrid article footer button.is-toAdd{border-color:rgba(255,191,77,.44);color:#ffd37f;background:#241705}.tr10-discoverGrid article footer b{border-color:rgba(68,211,149,.35);color:#8ee9b7;background:#092319}
+        @media(max-width:650px){
+          .tr10-page{width:calc(100% - 12px)!important;margin-bottom:112px!important}.tr10-hero{padding:13px 12px!important}.tr10-hero h1{font-size:28px!important}.tr10-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}.tr10-stats>div{min-height:62px!important}.tr10-stats strong{font-size:19px!important}.tr10-tabs{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}.tr10-tabs button{font-size:8px!important;min-height:42px!important;padding:7px 4px!important;overflow:visible!important}.tr10-healthRail{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tr10-healthRail button{height:38px!important;font-size:7px!important}.tr10-healthRail button span{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;line-height:1.1!important}.tr10-healthRail button:first-child{grid-column:1/-1!important}.tr10-toolbar{grid-template-columns:1fr 1fr!important}.tr10-toolbar label:first-child{grid-column:1/-1!important}.tr10-tableHead{display:none!important}.tr10-row{display:grid!important;grid-template-columns:30px 24px minmax(0,1fr)!important;grid-template-areas:"order check track" "order . duration" "energy energy energy" "actions actions actions"!important;gap:7px 8px!important;padding:11px 9px!important;align-items:start!important}.tr10-orderCell{grid-area:order!important;align-self:start!important;width:26px!important;min-width:26px!important;gap:4px!important}.tr10-orderCell button{width:24px!important;height:23px!important}.tr10-check{grid-area:check!important;padding-top:6px!important}.tr10-trackCell{grid-area:track!important;grid-template-columns:36px 48px minmax(0,1fr)!important;gap:7px!important;min-width:0!important}.tr10-trackText strong{font-size:12px!important;line-height:1.25!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important}.tr10-trackText span,.tr10-trackText small{font-size:8px!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:break-word!important}.tr10-duration{grid-area:duration!important;justify-self:start!important;margin-left:91px!important;font-size:9px!important}.tr10-energy{grid-area:energy!important;justify-self:start!important;width:auto!important;min-width:98px!important;min-height:32px!important}.tr10-actions{grid-area:actions!important;display:flex!important;flex-wrap:wrap!important;gap:5px!important;min-width:0!important}.tr10-actions button{min-height:34px!important;padding:0 8px!important;font-size:7px!important;white-space:nowrap!important}.tr10-actions .tr10-likeAction,.tr10-actions .tr10-lessAction{min-width:82px!important}.tr10-headActions{flex-wrap:wrap!important;justify-content:flex-end!important}.tr10-headActions button{min-height:36px!important}.tr10-smart{grid-template-columns:1fr!important}.tr10-savedMixes article{align-items:flex-start!important;flex-direction:column!important}.tr10-discover{padding:10px!important}.tr10-discoverHead{flex-direction:column!important}.tr10-discoverGrid{grid-template-columns:1fr!important}.tr10-playlistLayout{grid-template-columns:1fr!important}.tr10-playlistLayout aside{max-height:none!important}.tr10-playlistSongs article{grid-template-columns:34px 42px minmax(0,1fr) repeat(2,34px)!important}.tr10-playlistSongs article>.is-danger{grid-column:3/-1!important;justify-self:start!important}.tr10-picker,.tr10-inspector,.tr10-reviewModal,.tr10-analysisModal{max-height:calc(100dvh - 18px)!important;width:calc(100% - 12px)!important;overflow:auto!important}
+        }
       `}</style>
     </main>
   );
