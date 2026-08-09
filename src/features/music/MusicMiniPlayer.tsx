@@ -69,6 +69,7 @@ type IconName =
   | "like"
   | "dislike"
   | "guitar"
+  | "discover"
   | "music";
 
 type SavedDspProfile = {
@@ -143,6 +144,7 @@ function PlayerIcon({ name }: { name: IconName }) {
   if (name === "like") return <svg viewBox="0 0 24 24" aria-hidden><path d="M9.2 21H5.5A2.5 2.5 0 0 1 3 18.5v-8A2.5 2.5 0 0 1 5.5 8H9l3.2-5.1A2 2 0 0 1 16 4v4h3.2a2.8 2.8 0 0 1 2.7 3.5l-1.8 7A3.4 3.4 0 0 1 16.8 21H9.2Zm-1.7-2V10H5.5a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h2Zm2 0h7.3a1.4 1.4 0 0 0 1.4-1.1l1.8-7a.8.8 0 0 0-.8-.9H14V4.8l-4.5 7.1V19Z" /></svg>;
   if (name === "dislike") return <svg viewBox="0 0 24 24" aria-hidden><path d="M14.8 3h3.7A2.5 2.5 0 0 1 21 5.5v8a2.5 2.5 0 0 1-2.5 2.5H15l-3.2 5.1A2 2 0 0 1 8 20v-4H4.8a2.8 2.8 0 0 1-2.7-3.5l1.8-7A3.4 3.4 0 0 1 7.2 3h7.6Zm1.7 2v9h2a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2Zm-2 0H7.2a1.4 1.4 0 0 0-1.4 1.1L4 13.1a.8.8 0 0 0 .8.9H10v5.2l4.5-7.1V5Z" /></svg>;
   if (name === "guitar") return <svg viewBox="0 0 24 24" aria-hidden><path d="M15.7 2.7 21.3 8.3l-2.1 2.1-1.3-1.3-4.3 4.3c.7 2 .2 4.3-1.5 6-2.5 2.5-6.4 2.7-8.7.4-2.3-2.3-2.1-6.2.4-8.7 1.7-1.7 4-2.2 6-1.5l4.3-4.3-1.3-1.3 2.9-1.3ZM7.1 12.2a2.35 2.35 0 1 0 0 4.7 2.35 2.35 0 0 0 0-4.7Zm4-1.1 1.8 1.8 4.3-4.3-1.8-1.8-4.3 4.3Z" /></svg>;
+  if (name === "discover") return <svg viewBox="0 0 24 24" aria-hidden><path d="m12 1.7 2.05 5.25L19.3 9 14.05 11.05 12 16.3l-2.05-5.25L4.7 9l5.25-2.05L12 1.7Zm6.2 11.6 1.15 2.95 2.95 1.15-2.95 1.15-1.15 2.95-1.15-2.95-2.95-1.15 2.95-1.15 1.15-2.95ZM5.1 14.6l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z" /></svg>;
   if (name === "equalizer") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h2v18H5V3Zm6 4h2v14h-2V7Zm6-4h2v18h-2V3ZM3 8h6v3H3V8Zm6 5h6v3H9v-3Zm6-4h6v3h-6V9Z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
@@ -174,12 +176,12 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 28) return;
+      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 30) return;
       lastDraw = now;
 
       const width = Math.max(1, Math.floor(canvas.clientWidth));
       const height = Math.max(1, Math.floor(canvas.clientHeight));
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(1.6, window.devicePixelRatio || 1);
       const pixelWidth = Math.floor(width * dpr);
       const pixelHeight = Math.floor(height * dpr);
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -195,29 +197,32 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       const compact = width < 520;
       const plotLeft = compact ? 6 : 34;
       const plotRight = 6;
-      const plotTop = 8;
+      const plotTop = 7;
       const plotBottom = 19;
       const plotWidth = Math.max(1, width - plotLeft - plotRight);
       const plotHeight = Math.max(1, height - plotTop - plotBottom);
 
       const background = ctx.createLinearGradient(0, 0, 0, height);
-      background.addColorStop(0, "#061117");
-      background.addColorStop(0.55, "#02090d");
-      background.addColorStop(1, "#010406");
+      background.addColorStop(0, "#09141a");
+      background.addColorStop(0.36, "#040b0f");
+      background.addColorStop(1, "#010405");
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, width, height);
 
       const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
       for (let index = 0; index < 10; index += 1) {
         const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
-        const shaped = source < 0.018 ? 0 : Math.pow(source, 0.66);
+        const opened = source < 0.018 ? 0 : Math.min(1, (source - 0.018) / 0.94);
+        const shaped = Math.pow(opened, 0.88);
         const previous = displayed[index];
-        displayed[index] = previous + (shaped - previous) * (shaped > previous ? 0.76 : playing ? 0.16 : 0.40);
-        if (displayed[index] >= peaks[index]) {
+        const attack = 0.88;
+        const release = playing ? 0.22 : 0.48;
+        displayed[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
+        if (displayed[index] >= peaks[index] - 0.006) {
           peaks[index] = displayed[index];
-          peakHoldUntil[index] = now + 520;
+          peakHoldUntil[index] = now + 430;
         } else if (now > peakHoldUntil[index]) {
-          peaks[index] = Math.max(displayed[index], peaks[index] - 0.018);
+          peaks[index] = Math.max(displayed[index], peaks[index] - 0.032);
         }
       }
 
@@ -226,8 +231,8 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       gridRatios.forEach((ratio, index) => {
         const y = Math.round(plotTop + plotHeight * ratio) + 0.5;
         ctx.strokeStyle = index === 0 || index === gridRatios.length - 1
-          ? "rgba(126,203,227,.11)"
-          : "rgba(126,203,227,.065)";
+          ? "rgba(127,207,231,.13)"
+          : "rgba(127,207,231,.072)";
         ctx.beginPath();
         ctx.moveTo(plotLeft, y);
         ctx.lineTo(width - plotRight, y);
@@ -236,7 +241,7 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
       if (!compact) {
         const dbLabels = ["0", "-12", "-24", "-36", "-48", "-60"];
-        ctx.fillStyle = "rgba(171,205,216,.52)";
+        ctx.fillStyle = "rgba(181,212,222,.56)";
         ctx.font = "800 8px system-ui, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
@@ -245,68 +250,87 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
         });
       }
 
-      const gap = Math.max(compact ? 4 : 8, Math.min(compact ? 7 : 13, plotWidth * 0.0105));
+      const gap = Math.max(compact ? 4 : 7, Math.min(compact ? 7 : 12, plotWidth * 0.0105));
       const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
-      const barWidth = Math.max(7, slotWidth * (compact ? 0.76 : 0.72));
+      const barWidth = Math.max(7, slotWidth * (compact ? 0.70 : 0.68));
       const insetX = (slotWidth - barWidth) / 2;
+
+      const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
+      wellGradient.addColorStop(0, "rgba(34,23,14,.27)");
+      wellGradient.addColorStop(0.20, "rgba(26,34,19,.22)");
+      wellGradient.addColorStop(0.55, "rgba(8,34,38,.35)");
+      wellGradient.addColorStop(1, "rgba(3,18,25,.76)");
+
+      const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
+      meterGradient.addColorStop(0, "#057f9d");
+      meterGradient.addColorStop(0.20, "#0fb6d0");
+      meterGradient.addColorStop(0.42, "#25d4db");
+      meterGradient.addColorStop(0.62, "#55d58a");
+      meterGradient.addColorStop(0.78, "#d6d64a");
+      meterGradient.addColorStop(0.90, "#f0a43e");
+      meterGradient.addColorStop(1, "#f26f54");
 
       for (let band = 0; band < 10; band += 1) {
         const slotX = plotLeft + band * (slotWidth + gap);
         const barX = slotX + insetX;
 
-        // Dark meter well. Each band is independent and driven only by FFT energy.
-        const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
-        wellGradient.addColorStop(0, "rgba(37,24,15,.30)");
-        wellGradient.addColorStop(0.20, "rgba(30,38,20,.24)");
-        wellGradient.addColorStop(0.50, "rgba(12,46,48,.28)");
-        wellGradient.addColorStop(1, "rgba(6,30,39,.62)");
         ctx.fillStyle = wellGradient;
         ctx.fillRect(slotX, plotTop, slotWidth, plotHeight);
-        ctx.strokeStyle = "rgba(111,195,219,.10)";
+        ctx.fillStyle = "rgba(255,255,255,.025)";
+        ctx.fillRect(slotX + 1, plotTop + 1, 1, plotHeight - 2);
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        ctx.fillRect(slotX + slotWidth - 2, plotTop + 1, 1, plotHeight - 2);
+        ctx.strokeStyle = "rgba(110,195,219,.105)";
         ctx.strokeRect(Math.round(slotX) + 0.5, Math.round(plotTop) + 0.5, Math.max(1, Math.round(slotWidth) - 1), Math.max(1, Math.round(plotHeight) - 1));
 
         const level = Math.max(0, Math.min(1, displayed[band]));
         const activeHeight = Math.max(0, plotHeight * level);
         if (activeHeight > 0.5) {
           const activeY = plotTop + plotHeight - activeHeight;
-          const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
-          meterGradient.addColorStop(0, "#0797b8");
-          meterGradient.addColorStop(0.28, "#1cd3e5");
-          meterGradient.addColorStop(0.55, "#43d79e");
-          meterGradient.addColorStop(0.76, "#e3d34d");
-          meterGradient.addColorStop(0.90, "#f1a039");
-          meterGradient.addColorStop(1, "#ef624b");
-
-          ctx.save();
-          ctx.shadowColor = level > 0.82 ? "rgba(242,156,54,.58)" : "rgba(31,203,230,.46)";
-          ctx.shadowBlur = compact ? 5 : 8;
           ctx.fillStyle = meterGradient;
           ctx.fillRect(barX, activeY, barWidth, activeHeight);
-          ctx.restore();
 
-          // Very fine meter divisions retain RTA precision without chunky/fake LED blocks.
-          ctx.strokeStyle = "rgba(0,4,7,.34)";
-          ctx.lineWidth = 1;
-          const division = compact ? 5 : 6;
+          // Narrow luminous core creates depth without an expensive full-canvas blur.
+          const coreWidth = Math.max(1, barWidth * 0.30);
+          ctx.fillStyle = level > 0.82 ? "rgba(255,236,170,.23)" : "rgba(198,249,255,.17)";
+          ctx.fillRect(barX + (barWidth - coreWidth) / 2, activeY, coreWidth, activeHeight);
+          ctx.fillStyle = "rgba(255,255,255,.17)";
+          ctx.fillRect(barX + 1, activeY, 1, activeHeight);
+          ctx.fillStyle = "rgba(0,0,0,.22)";
+          ctx.fillRect(barX + barWidth - 2, activeY, 1, activeHeight);
+
+          const division = compact ? 6 : 7;
+          ctx.strokeStyle = "rgba(0,5,8,.28)";
           for (let y = plotTop + plotHeight - division; y > activeY; y -= division) {
             ctx.beginPath();
             ctx.moveTo(barX, Math.round(y) + 0.5);
             ctx.lineTo(barX + barWidth, Math.round(y) + 0.5);
             ctx.stroke();
           }
+
+          if (level > 0.72) {
+            const hotHeight = Math.min(activeHeight, plotHeight * 0.16);
+            ctx.fillStyle = "rgba(255,184,65,.10)";
+            ctx.fillRect(barX, activeY, barWidth, hotHeight);
+          }
         }
 
         if (playing && peaks[band] > 0.025) {
           const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peaks[band]));
           ctx.save();
-          ctx.fillStyle = peaks[band] > 0.84 ? "#ffd15f" : "#e7fbff";
-          ctx.shadowColor = peaks[band] > 0.84 ? "rgba(255,181,58,.72)" : "rgba(105,225,255,.65)";
-          ctx.shadowBlur = compact ? 5 : 7;
-          ctx.fillRect(barX, Math.round(peakY), barWidth, compact ? 1.5 : 2);
+          ctx.fillStyle = peaks[band] > 0.82 ? "#ffd66e" : "#dffaff";
+          ctx.shadowColor = peaks[band] > 0.82 ? "rgba(255,183,61,.58)" : "rgba(97,226,255,.48)";
+          ctx.shadowBlur = compact ? 3 : 4;
+          ctx.fillRect(barX - 1, Math.round(peakY), barWidth + 2, compact ? 1.5 : 2);
           ctx.restore();
         }
       }
 
+      const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.55);
+      glass.addColorStop(0, "rgba(255,255,255,.035)");
+      glass.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = glass;
+      ctx.fillRect(plotLeft, plotTop, plotWidth, plotHeight * 0.55);
     };
 
     frame = window.requestAnimationFrame(draw);
@@ -628,18 +652,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
           if (!track) return;
           void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
-        }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /></button>
+        }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /><span>Like</span></button>
         <button type="button" className={`tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
           if (!track) return;
           void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
-        }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /></button>
-        <button type="button" className={`tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover similar music" onClick={() => {
+        }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /><span>Play Less</span></button>
+        <button type="button" className={`tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
           if (!track) return;
-          setDiscoverMessage("ADDING…");
+          setDiscoverMessage("SEARCHING…");
           void discoverMoreFromTrack(track, player.libraryTracks)
-            .then(() => { setDiscoverMessage("✓ ADDED TO DISCOVER"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
-            .catch(() => { setDiscoverMessage("DISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
-        }} aria-label="Rediscover similar music"><PlayerIcon name="guitar" /></button>
+            .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+            .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
+        }} aria-label="Rediscover music"><PlayerIcon name="discover" /><span>Rediscover</span></button>
       </div>
 
       <div className="tr-playerUtilityRow">
@@ -1461,6 +1485,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         @media(max-width:380px){
           .tr-playerHero{grid-template-columns:102px minmax(0,1fr)!important;min-height:102px!important}.tr-playerHero .tr-audioArtwork{width:102px!important;height:102px!important;min-width:102px!important;min-height:102px!important;max-width:102px!important;max-height:102px!important}.tr-playerHero .tr-audioIdentity{height:102px!important;min-height:102px!important;padding:9px 8px!important}.tr-playerHero .tr-audioIdentity strong{font-size:17px!important}.tr-playerHero .tr-audioIdentity small{font-size:10.5px!important}
           .tr-playerTransportStage .tr-audioTransportButton{height:40px!important;min-height:40px!important}.tr-playerTransportStage .tr-audioTransportFace svg{width:18px!important;height:18px!important}.tr-playerTransportStage .tr-audioTransportUnit>span{font-size:7px!important}
+        }
+
+        /* AUG 9 REDISCOVER + RTA PREMIUM PASS */
+        .tr-playerPreferenceStage button{display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;padding:0 12px!important}
+        .tr-playerPreferenceStage button svg{flex:0 0 auto!important}
+        .tr-playerPreferenceStage button>span{display:block!important;min-width:0!important;color:inherit!important;font-size:10px!important;line-height:1!important;font-weight:950!important;letter-spacing:.025em!important;white-space:nowrap!important}
+        .tr-activityRta--10band{background:radial-gradient(120% 90% at 50% 0%,rgba(42,112,132,.11),transparent 55%),#010507!important;border-color:rgba(108,199,226,.26)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),inset 0 -18px 26px rgba(0,0,0,.40),0 6px 18px rgba(0,0,0,.16)!important}
+        @media(max-width:650px){
+          .tr-playerPreferenceStage{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px 6px!important;align-items:center!important}
+          .tr-playerPreferenceStage button{height:32px!important;min-height:32px!important;padding:0 9px!important;gap:5px!important}
+          .tr-playerPreferenceStage button svg{width:15px!important;height:15px!important}
+          .tr-playerPreferenceStage button>span{font-size:9px!important;letter-spacing:.01em!important}
+          .tr-playerPreferenceStage .tr-prefDiscover{grid-column:1/-1!important;width:min(56%,180px)!important;justify-self:center!important}
         }
       `}</style>
     </section>
