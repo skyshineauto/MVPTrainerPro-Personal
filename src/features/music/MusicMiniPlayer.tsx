@@ -19,7 +19,7 @@ import {
   applyMusicEqPreset,
   cycleMusicRepeat,
   formatMusicTime,
-  getMusicRtaLevels,
+  getMusicVisualizerLevels,
   loadMusicLibrary,
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
@@ -42,6 +42,7 @@ import {
   setMusicHeadphoneMode,
   setMusicHeadphoneWidth,
   setMusicPreamp,
+  setMusicVolume,
   setPlayerMusicPreference,
   stopMusic,
   toggleMusicShuffle,
@@ -50,6 +51,7 @@ import {
   type MusicEqPreset,
   type MusicHeadphoneMode,
 } from "../../lib/musicPlayer";
+import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
@@ -143,20 +145,6 @@ function PlayerIcon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
 
-function normalizeTenBands(values: number[]) {
-  if (!values.length) return Array(10).fill(0);
-  if (values.length === 10) return values.map((v) => Math.max(0, Math.min(1, Number(v) || 0)));
-  return Array.from({ length: 10 }, (_, index) => {
-    const position = (index / 9) * Math.max(0, values.length - 1);
-    const left = Math.floor(position);
-    const right = Math.min(values.length - 1, left + 1);
-    const ratio = position - left;
-    const value = (Number(values[left]) || 0) * (1 - ratio) + (Number(values[right]) || 0) * ratio;
-    return Math.max(0, Math.min(1, value));
-  });
-}
-
-
 const ACTIVITY_RTA_BARS = 44;
 
 function MusicActivityRta({ playing }: { playing: boolean }) {
@@ -184,7 +172,7 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (!visible || document.hidden || now - lastDraw < 40) return; // ~25 FPS
+      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 40) return; // ~25 FPS
       lastDraw = now;
 
       const width = Math.max(1, Math.floor(canvas.clientWidth));
@@ -202,22 +190,12 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      const raw = playing ? normalizeTenBands(getMusicRtaLevels()) : Array(10).fill(0);
-      const hasLiveSignal = raw.some((value) => value > 0.018);
+      const raw = playing ? getMusicVisualizerLevels(ACTIVITY_RTA_BARS) : [];
       for (let index = 0; index < ACTIVITY_RTA_BARS; index += 1) {
-        const position = (index / (ACTIVITY_RTA_BARS - 1)) * 9;
-        const left = Math.floor(position);
-        const right = Math.min(9, left + 1);
-        const mix = position - left;
-        const liveSource = (raw[left] || 0) * (1 - mix) + (raw[right] || 0) * mix;
-        // If a browser temporarily starves the analyser, keep a tiny deterministic
-        // activity pattern while playback is running so the visualizer never looks frozen.
-        const phase = now * 0.0042 + index * 0.61;
-        const fallback = 0.16 + 0.30 * Math.abs(Math.sin(phase)) + 0.16 * Math.abs(Math.sin(phase * 0.43 + index));
-        const source = hasLiveSignal ? liveSource : playing ? Math.min(0.72, fallback) : 0;
-        const shaped = playing ? Math.min(1, Math.pow(Math.max(0, source), 0.58) * 1.2) : 0;
+        const source = playing ? Math.max(0, Math.min(1, Number(raw[index]) || 0)) : 0;
+        const shaped = playing ? Math.min(1, Math.pow(source, 0.72) * 1.08) : 0;
         const previous = levels[index];
-        const rate = shaped > previous ? 0.72 : playing ? 0.19 : 0.34;
+        const rate = shaped > previous ? 0.78 : playing ? 0.23 : 0.40;
         levels[index] = previous + (shaped - previous) * rate;
 
         if (levels[index] >= peaks[index]) {
@@ -290,6 +268,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     isCustomSlot(player.eqPreset) ? player.eqPreset : null
   );
   const [profileMessage, setProfileMessage] = useState("");
+  const [discoverMessage, setDiscoverMessage] = useState("");
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
@@ -328,9 +307,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       window.localStorage.getItem("mvp_active_session_id") ||
       window.localStorage.getItem("mvp_active_workout_id")
     );
-    makeButton(hasActiveWorkout ? "RESUME WORKOUT" : "PROGRESS", () => navigate(hasActiveWorkout ? "/" : "/progress"), hasActiveWorkout ? "is-resume" : "");
-    makeButton("COACH", () => navigate("/coach"));
-    makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"));
+    if (hasActiveWorkout) makeButton("RESUME", () => navigate("/"), "is-resume");
+    makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"), "is-sound");
 
     const accountWrap = document.createElement("div");
     accountWrap.className = "tr-proAccountWrap";
@@ -533,7 +511,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const track = player.currentTrack;
   const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
   const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
-  const volumePercent = Math.max(0, Math.min(100, Math.round(((player.preampDb + 12) / 24) * 100)));
+  const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile ? !profileMatchesCurrent(activeSavedProfile) : false;
   const presetSelectValue: MusicEqPreset = activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
@@ -569,15 +547,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div>
         <button type="button" className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span></button>
         <div className="tr-trackPreference" aria-label="Track preference">
-          <button type="button" className={track?.play_less ? "is-disliked" : ""} disabled={!track} onClick={() => {
+          <button type="button" className={`tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} onClick={() => {
             if (!track) return;
-            const next = track.play_less ? "neutral" : "play_less";
-            void setPlayerMusicPreference(track.id, next).then(() => { if (next === "play_less") void nextMusicTrack(); });
-          }} aria-label="Play this song less"><PlayerIcon name="dislike" /><span>PLAY LESS</span></button>
-          <button type="button" className={track?.favorite ? "is-liked" : ""} disabled={!track} onClick={() => {
+            void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
+          }} aria-label="Play this song less"><PlayerIcon name="dislike" /><span>{track?.play_less ? "PLAY LESS ✓" : "PLAY LESS"}</span></button>
+          <button type="button" className={`tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} onClick={() => {
             if (!track) return;
             void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
           }} aria-label="Like this song"><PlayerIcon name="like" /><span>{track?.favorite ? "LIKED" : "LIKE"}</span></button>
+          <button type="button" className="tr-prefDiscover" disabled={!track} onClick={() => {
+            if (!track) return;
+            setDiscoverMessage("ADDING…");
+            void discoverMoreFromTrack(track, player.libraryTracks)
+              .then(() => { setDiscoverMessage("✓ ADDED TO DISCOVER"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+              .catch(() => { setDiscoverMessage("DISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
+          }} aria-label="Discover more music like this"><span>✦</span><span>DISCOVER MORE</span></button>
         </div>
       </div>
 
@@ -591,9 +575,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <label className="tr-playerVolume">
           <span>VOLUME</span>
           <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const percent = Number(event.target.value);
-            const db = -12 + (Math.max(0, Math.min(100, percent)) / 100) * 24;
-            void runDspMutation(() => setMusicPreamp(db), true);
+            const percent = Math.max(0, Math.min(100, Number(event.target.value)));
+            setMusicVolume(percent / 100);
           }} aria-label="Music volume" />
           <strong>{volumePercent}%</strong>
         </label>
@@ -610,6 +593,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </button>
         </div>
       </div>
+
+      {discoverMessage ? <div className="tr-discoverToast" role="status">{discoverMessage}</div> : null}
 
       {eqOpen ? (
         <section className="tr-audioEqPanel tr-audioEqPanel--pro7">
@@ -1118,6 +1103,62 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioEqScroll{max-width:100%!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
           .tr-proGlobalActions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
           .tr-proHeaderButton{min-height:40px!important;font-size:9px!important}
+        }
+
+        /* AUG 9 LOCKED PRO PLAYER: authoritative layout + no clipping */
+        .tr-audioDeck--pro7{background:radial-gradient(circle at 50% -10%,rgba(26,78,98,.16),transparent 36%),linear-gradient(180deg,#091219 0%,#050a0e 54%,#030608 100%)!important;border:1px solid rgba(91,190,226,.18)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 18px 55px rgba(0,0,0,.34)!important}
+        .tr-playerHero{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;text-align:center!important;overflow:visible!important}
+        .tr-playerHero .tr-audioArtwork{width:148px!important;height:148px!important;min-width:148px!important;min-height:148px!important;max-width:148px!important;max-height:148px!important;border-radius:16px!important;overflow:hidden!important;box-shadow:0 14px 36px rgba(0,0,0,.45),0 0 0 1px rgba(119,211,245,.14)!important}
+        .tr-playerHero .tr-audioArtwork img{width:100%!important;height:100%!important;object-fit:cover!important;display:block!important}
+        .tr-playerHero .tr-audioIdentity{display:flex!important;flex-direction:column!important;align-items:center!important;width:min(920px,calc(100% - 28px))!important;max-width:min(920px,calc(100% - 28px))!important;height:auto!important;min-height:0!important;overflow:visible!important;padding:4px 4px 8px!important;white-space:normal!important}
+        .tr-playerHero .tr-audioIdentity strong{display:block!important;overflow:visible!important;text-overflow:clip!important;width:100%!important;max-width:100%!important;height:auto!important;max-height:none!important;padding:3px 0 7px!important;margin:0!important;font-size:clamp(23px,2.35vw,32px)!important;line-height:1.22!important;letter-spacing:-.025em!important;color:#fff!important;white-space:normal!important;overflow-wrap:anywhere!important;word-break:normal!important}
+        .tr-playerHero .tr-audioIdentity small{display:block!important;width:100%!important;padding:0 0 2px!important;overflow:visible!important;font-size:clamp(13px,1.25vw,16px)!important;line-height:1.35!important;color:#b9d0da!important;white-space:normal!important;word-break:break-word!important}
+        .tr-activityRta{background:linear-gradient(180deg,#040a0e,#020507)!important;border:1px solid rgba(91,184,216,.13)!important;box-shadow:inset 0 1px 16px rgba(0,0,0,.55)!important}
+        .tr-playerControlStage{display:flex!important;flex-wrap:wrap!important;align-items:center!important;justify-content:center!important;gap:10px 12px!important;width:min(980px,calc(100% - 24px))!important;max-width:980px!important;margin:8px auto 6px!important;padding:0!important}
+        .tr-playerControlStage>.tr-audioModeButton{flex:0 0 auto!important;align-self:center!important}
+        .tr-playerControlStage .tr-audioTransport{display:flex!important;align-items:center!important;justify-content:center!important;gap:12px!important;flex:0 1 auto!important;margin:0!important}
+        .tr-playerControlStage .tr-audioTransportUnit{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;margin:0!important}
+        .tr-playerControlStage .tr-audioTransportButton{margin:0!important}
+        .tr-trackPreference{display:flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;flex-wrap:wrap!important;margin:0!important}
+        .tr-trackPreference button{height:38px!important;min-height:38px!important;padding:0 12px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;border-radius:9px!important;font-size:9px!important;font-weight:1000!important;line-height:1!important;white-space:nowrap!important;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease!important}
+        .tr-trackPreference button svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
+        .tr-trackPreference .tr-prefLike{color:#ffd84d!important;border-color:rgba(255,216,77,.36)!important;background:linear-gradient(180deg,rgba(69,55,8,.55),rgba(20,16,4,.76))!important}
+        .tr-trackPreference .tr-prefLike.is-liked{color:#fff!important;border-color:#46e394!important;background:linear-gradient(180deg,#15975f,#087746)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 0 0 1px rgba(70,227,148,.22),0 0 18px rgba(36,210,127,.25)!important}
+        .tr-trackPreference .tr-prefLess{color:#ff6b74!important;border-color:rgba(255,85,95,.38)!important;background:linear-gradient(180deg,rgba(71,15,20,.58),rgba(24,7,9,.8))!important}
+        .tr-trackPreference .tr-prefLess.is-disliked{color:#fff!important;border-color:#ff5360!important;background:linear-gradient(180deg,#c52e3a,#8f1420)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 0 0 1px rgba(255,83,96,.18),0 0 18px rgba(224,42,57,.24)!important}
+        .tr-trackPreference .tr-prefDiscover{color:#ffd879!important;border-color:rgba(255,197,79,.34)!important;background:linear-gradient(180deg,rgba(69,48,9,.48),rgba(24,15,3,.78))!important}
+        .tr-trackPreference .tr-prefDiscover:active{transform:translateY(1px) scale(.985)!important;background:linear-gradient(180deg,#b56f10,#744207)!important;color:#fff!important}
+        .tr-discoverToast{width:max-content;max-width:calc(100% - 24px);margin:4px auto 7px;padding:7px 11px;border:1px solid rgba(255,203,91,.32);border-radius:999px;background:#171106;color:#ffe4a1;font-size:9px;font-weight:1000;letter-spacing:.06em}
+        .tr-playerSourceTools .tr-audioEqToggle{overflow:visible!important;position:relative!important;border-color:rgba(61,195,242,.34)!important;background:linear-gradient(180deg,#09202a,#061118)!important;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease,transform .2s ease!important}
+        .tr-playerSourceTools .tr-audioEqToggle:hover{border-color:rgba(71,214,255,.64)!important;background:linear-gradient(180deg,#0d3442,#07202a)!important}
+        .tr-playerSourceTools .tr-audioEqToggle.is-active{color:#fff!important;border-color:#55d9ff!important;background:linear-gradient(180deg,#087da4,#07546e)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 0 0 1px rgba(85,217,255,.18),0 0 20px rgba(50,195,239,.26)!important;animation:trEqOpenPulse .2s ease-out 1!important}
+        @keyframes trEqOpenPulse{0%{transform:scale(.96);filter:brightness(.85)}100%{transform:scale(1);filter:brightness(1)}}
+        .tr-proGlobalActions{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:6px!important;flex-wrap:nowrap!important;width:auto!important}
+        .tr-proHeaderButton{min-height:34px!important;height:34px!important;padding:0 10px!important;font-size:9px!important;white-space:nowrap!important}
+        @media(max-width:650px){
+          .tr-playerHero .tr-audioArtwork{width:108px!important;height:108px!important;min-width:108px!important;min-height:108px!important;max-width:108px!important;max-height:108px!important;border-radius:13px!important}
+          .tr-playerHero .tr-audioIdentity{width:calc(100% - 12px)!important;max-width:calc(100% - 12px)!important;padding:3px 4px 5px!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:20px!important;line-height:1.22!important;padding-bottom:5px!important}
+          .tr-playerHero .tr-audioIdentity small{font-size:12.5px!important;line-height:1.3!important}
+          .tr-activityRta{height:66px!important;margin:3px 6px 5px!important}
+          .tr-playerControlStage{display:flex!important;width:calc(100% - 10px)!important;gap:6px!important;margin:5px auto!important}
+          .tr-playerControlStage .tr-audioTransport{order:1;width:100%!important;gap:8px!important}
+          .tr-playerControlStage>.tr-audioModeButton{order:2!important;width:42px!important;min-width:42px!important;height:34px!important;min-height:34px!important}
+          .tr-trackPreference{order:3!important;width:100%!important;gap:5px!important}
+          .tr-trackPreference button{height:34px!important;min-height:34px!important;padding:0 8px!important;font-size:7.7px!important;gap:5px!important}
+          .tr-trackPreference button svg{width:14px!important;height:14px!important;flex-basis:14px!important}
+          .tr-playerUtilityRow{grid-template-columns:1fr!important;margin:5px 6px 8px!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 92px!important;gap:6px!important}
+          .tr-playerSourceTools .tr-audioEqToggle{width:92px!important;min-width:92px!important;max-width:92px!important;font-size:8px!important}
+          .tr-proGlobalActions{display:flex!important;width:auto!important;max-width:calc(100% - 8px)!important;gap:4px!important;flex-wrap:nowrap!important}
+          .tr-proHeaderButton{width:auto!important;min-width:0!important;height:31px!important;min-height:31px!important;padding:0 7px!important;font-size:7.5px!important;letter-spacing:.025em!important}
+          .tr-proHeaderButton.is-sound{font-size:0!important;width:36px!important;padding:0!important}
+          .tr-proHeaderButton.is-sound:after{content:"♪";font-size:16px!important;color:#fff!important}
+          .tr-proHeaderButton--account{font-size:0!important;width:36px!important;padding:0!important}
+          .tr-proHeaderButton--account:after{content:"●";font-size:12px!important;color:#9fdff4!important}
+          .tr-proAccountWrap{width:auto!important}
+          .tr-proAccountWrap>.tr-proHeaderButton{width:36px!important}
+          .tr-proAccountMenu{right:0!important;left:auto!important;width:116px!important}
         }
       `}</style>
     </section>
