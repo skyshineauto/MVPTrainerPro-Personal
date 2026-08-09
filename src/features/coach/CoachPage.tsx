@@ -251,17 +251,18 @@ function prettyMuscle(value: string) {
 }
 
 function cleanWorkoutName(value: string | null | undefined) {
-  const source = titleCase(value).replace(/\s+/g, " ").trim();
-  if (!source) return "Workout";
-  const canonical = source.match(/\b(Upper|Lower)\s*([12])\b/i);
+  const raw = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return "Workout";
+  const canonical = raw.match(/\b(upper|lower)\s*([12])\b/i);
   if (canonical) return `${titleCase(canonical[1])} ${canonical[2]}`;
-  const pieces = source
+  const pieces = raw
     .split(/\s*[•|/]\s*/)
     .map((piece) => piece.trim())
     .filter(Boolean)
-    .filter((piece) => !/^\d{4}-\d{2}-\d{2}/.test(piece))
-    .filter((piece) => !/^(future|scheduled|session)$/i.test(piece));
-  return unique(pieces)[0] || source;
+    .filter((piece) => !/\d{4}-\d{2}-\d{2}/.test(piece))
+    .filter((piece) => !/^(future|past|scheduled|completed|active|session)$/i.test(piece));
+  const deduped = pieces.filter((piece, index) => pieces.findIndex((candidate) => candidate.toLowerCase() === piece.toLowerCase()) === index);
+  return deduped[0] ? titleCase(deduped[0]) : "Workout";
 }
 
 function formatWeight(value: number | null | undefined) {
@@ -779,9 +780,13 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
   const activeProgramName = useMemo(() => {
     if (!activeProgram) return "No Active Program";
-    return programTypeLabel(activeProgram) === "Targeted Program"
-      ? symptomLabel(activeSymptom(activeIntake) || activeProgram.goal)
-      : goalLabel(activeProgram.goal);
+    const goalName = goalLabel(activeProgram.goal);
+    const symptomKey = activeSymptom(activeIntake);
+    const targetName = symptomKey ? symptomLabel(symptomKey) : "";
+    if (goalName && goalName !== "Training" && targetName && goalName.toLowerCase() !== targetName.toLowerCase()) {
+      return `${goalName} + ${targetName}`;
+    }
+    return targetName || goalName || "Training";
   }, [activeIntake, activeProgram]);
 
   const activeProgramMeta = useMemo(
@@ -1060,7 +1065,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         <div className="co-heroStatus">
           <span>COACHING STATUS</span>
           <strong>{loading ? "ANALYZING…" : `${recommendations.length} ACTIONS READY`}</strong>
-          <small>{nextTemplate ? `Next: ${cleanWorkoutName(nextTemplate.name)}` : "No scheduled workout waiting"}</small>
+          <small>{activeProgram ? "Current active program only" : "No active program"}</small>
         </div>
       </section>
 
@@ -1086,13 +1091,12 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       <section className="co-surface co-section">
         <SectionTitle
           title="Next Workout Coaching"
-          subtitle={activeProgramName}
           right={nextScheduled ? <button className="co-primaryAction" type="button" onClick={() => navigate(`/workout/${nextScheduled.id}`)}>OPEN WORKOUT</button> : null}
         />
         {nextScheduled && nextTemplate ? (
           <>
             <div className="co-nextWorkoutHead">
-              <div><span>NEXT WORKOUT</span><strong>{cleanWorkoutName(nextTemplate.name)}</strong><small>{activeProgramName}</small></div>
+              <div><span>NEXT WORKOUT</span><strong>{cleanWorkoutName(nextTemplate.name)}</strong></div>
               <div><span>EXERCISES</span><strong>{nextWorkoutExercises.length}</strong><small>{nextTemplate.estimated_minutes ? `${nextTemplate.estimated_minutes} min planned` : "Ready"}</small></div>
             </div>
             <div className="co-decisionRows">
@@ -1243,6 +1247,31 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         /* FINAL COACH READABILITY PASS */
         .co-sectionTitleText p,.co-heroStatus span,.co-briefTop span,.co-reviewGrid span,.co-assessment span,.co-programControl span,.co-featuredTip>div>span,.co-tipEvidence span,.co-nextWorkoutHead span{font-size:11px;line-height:1.35}.co-heroStatus small,.co-decisionExercise span,.co-decisionCommand small{font-size:13px;line-height:1.45}.co-briefCard h3{font-size:20px}.co-briefCard p{font-size:14px;line-height:1.55}.co-briefAction{font-size:14px}.co-briefCard button,.co-decisionRow>button,.co-controlButtons button,.co-manageHead button,.co-builderActions button,.co-builder .co-sectionRight button,.co-featuredTip>button{font-size:12px;color:#fff}.co-decisionExercise strong{font-size:17px}.co-decisionCommand>span{font-size:12px}.co-decisionCommand>strong{font-size:23px}.co-reviewGrid strong{font-size:22px}.co-programControl small{font-size:13px}.co-manageRows article strong{font-size:15px}.co-manageRows article span,.co-manageRows article small{font-size:12px}.co-manageRows article>button,.co-manageRows article>b{font-size:11px}.co-choiceRow button,.co-choiceGrid button{font-size:13px;color:#fff}.co-field span{font-size:11px}.co-field input{font-size:14px}.co-confirmModal>span,.co-confirmModal button{font-size:12px}
         @media(max-width:650px){.co-page{width:calc(100% - 12px)}.co-hero{padding:17px 15px}.co-hero h1{font-size:34px}.co-programName{font-size:26px}.co-programMetaLine{font-size:14px}.co-heroStatus strong{font-size:20px}.co-section{padding:14px}.co-sectionTitle h2{font-size:24px}.co-sectionTitleText p{font-size:13px}.co-nextWorkoutHead{grid-template-columns:1fr}.co-nextWorkoutHead strong{font-size:22px}.co-nextWorkoutHead small{font-size:13px}.co-decisionRow{padding:15px}.co-decisionExercise strong{font-size:18px}.co-decisionExercise span{font-size:13px}.co-decisionCommand>span{font-size:12px}.co-decisionCommand>strong{font-size:24px}.co-decisionCommand small{font-size:13px}.co-decisionRow>button{min-height:43px;font-size:13px}.co-reviewGrid strong{font-size:24px}.co-controlButtons button{min-height:44px;font-size:13px}.co-manageRows article{padding:13px}.co-choiceRow button,.co-choiceGrid button{min-height:46px;font-size:13px}}
+
+        /* AUG 9 FINAL COACH ACTIVE-PROGRAM + MOBILE */
+        .co-programName{overflow-wrap:anywhere!important;line-height:1.08!important}
+        .co-nextWorkoutHead>div:first-child{display:grid!important;align-content:center!important}
+        .co-nextWorkoutHead>div:first-child strong{font-size:24px!important}
+        .co-decisionCommand>span{font-size:12px!important;color:#a9eaff!important}
+        .co-decisionCommand>strong{font-size:24px!important}
+        .co-decisionCommand small{font-size:13px!important;color:#b9ced6!important}
+        .co-decisionExercise strong{font-size:17px!important}
+        .co-decisionExercise span{font-size:12px!important;color:#b1c6ce!important}
+        @media(max-width:650px){
+          .co-page{width:calc(100% - 10px)!important;max-width:100%!important;margin-bottom:116px!important;overflow-x:hidden!important}
+          .co-hero{padding:16px 13px!important;gap:12px!important}
+          .co-hero h1{font-size:34px!important}.co-programName{font-size:25px!important}.co-programMetaLine{font-size:13px!important}
+          .co-heroStatus{padding:13px!important}.co-heroStatus strong{font-size:18px!important}.co-heroStatus small{font-size:12px!important}
+          .co-section{padding:13px 11px!important}
+          .co-sectionTitle{gap:10px!important;margin-bottom:12px!important}.co-sectionTitle h2{font-size:23px!important}.co-sectionTitleText p{font-size:12px!important}
+          .co-briefingGrid{grid-template-columns:1fr!important;gap:7px!important}.co-briefCard{min-height:0!important;padding:14px!important}.co-briefCard h3{font-size:19px!important}.co-briefCard p{font-size:13px!important}.co-briefAction{font-size:15px!important;padding-top:10px!important}
+          .co-nextWorkoutHead{grid-template-columns:1fr!important;gap:7px!important}.co-nextWorkoutHead>div{padding:13px!important}.co-nextWorkoutHead strong{font-size:22px!important}
+          .co-decisionRows{gap:7px!important}.co-decisionRow{grid-template-columns:1fr!important;gap:8px!important;padding:13px!important}.co-decisionExercise strong{font-size:18px!important}.co-decisionExercise span{font-size:12px!important}.co-decisionCommand>span{font-size:11px!important}.co-decisionCommand>strong{font-size:23px!important}.co-decisionCommand small{font-size:12.5px!important;line-height:1.45!important}.co-decisionRow>button{width:100%!important;min-height:42px!important;font-size:12px!important}
+          .co-reviewGrid{grid-template-columns:1fr!important}.co-reviewGrid article{min-height:0!important;padding:13px!important}.co-reviewGrid strong{font-size:22px!important}
+          .co-nutritionGrid{grid-template-columns:1fr!important}.co-programControl{padding:13px!important}.co-programControl strong{font-size:19px!important}.co-controlButtons{grid-template-columns:1fr!important}
+          .co-manageRows article{grid-template-columns:28px minmax(0,1fr)!important}.co-manageRows article>button,.co-manageRows article>b{grid-column:2!important;width:100%!important}
+          .co-primaryAction,.co-sectionRight button{width:100%!important;min-height:43px!important;font-size:12px!important}
+        }
       `}</style>
     </div>
   );
