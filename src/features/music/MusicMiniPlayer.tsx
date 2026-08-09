@@ -24,7 +24,6 @@ import {
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
   MUSIC_HEADPHONE_MODES,
-  MUSIC_RTA_FREQUENCIES,
   nextMusicTrack,
   pauseMusic,
   playMusic,
@@ -157,117 +156,124 @@ function normalizeTenBands(values: number[]) {
   });
 }
 
-function rtaRawToDb(rawValue: number) {
-  const raw = Math.max(0, Math.min(1, Number(rawValue) || 0));
-  if (raw <= 0.002) return -72;
 
-  // The engine returns a normalized per-band amplitude. Shape each band
-  // independently so normal music has real headroom instead of pinning all
-  // ten columns near the ceiling. This does not normalize bands against one
-  // another and never introduces synthetic/random movement.
-  // Convert the real normalized analyser amplitude to a display dB value.
-  // The extra display headroom keeps mastered music from pinning every band
-  // near the ceiling while preserving the real relationship between bands.
-  const db = 20 * Math.log10(Math.max(raw, 0.00025)) - 18;
-  return Math.max(-72, Math.min(-4, db));
-}
+const ACTIVITY_RTA_BARS = 44;
 
-function rtaDbToMeter(db: number) {
-  return Math.max(0, Math.min(1, (db + 72) / 72));
-}
-
-const RTA_SEGMENTS = 18;
-
-function TenBandRta({ playing }: { playing: boolean }) {
+function MusicActivityRta({ playing }: { playing: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [visible, setVisible] = useState(true);
-  const [levels, setLevels] = useState<number[]>(() => Array(10).fill(0));
-  const [peaks, setPeaks] = useState<number[]>(() => Array(10).fill(0));
-  const peakHoldUntilRef = useRef<number[]>(Array(10).fill(0));
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
-      { threshold: 0.05 }
-    );
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, []);
+    const canvas = canvasRef.current;
+    if (!host || !canvas) return;
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const raw = playing && visible
-        ? normalizeTenBands(getMusicRtaLevels())
-        : Array(10).fill(0);
-      const targets = raw.map((value) => rtaDbToMeter(rtaRawToDb(value)));
+    let frame = 0;
+    let lastDraw = 0;
+    let visible = true;
+    const levels = new Float32Array(ACTIVITY_RTA_BARS);
+    const peaks = new Float32Array(ACTIVITY_RTA_BARS);
+    const peakHold = new Float64Array(ACTIVITY_RTA_BARS);
 
-      setLevels((current) =>
-        targets.map((target, index) => {
-          const previous = current[index] || 0;
-          const coefficient = target > previous ? 0.7 : playing ? 0.12 : 0.24;
-          const next = previous + (target - previous) * coefficient;
-          return next < 0.012 ? 0 : next;
-        })
-      );
-    }, 64);
-    return () => window.clearInterval(timer);
-  }, [playing, visible]);
+    const observer = typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver((entries) => {
+          visible = entries.some((entry) => entry.isIntersecting);
+        }, { threshold: 0.02 })
+      : null;
+    observer?.observe(host);
 
-  useEffect(() => {
-    const now = performance.now();
-    setPeaks((current) =>
-      levels.map((value, index) => {
-        const previous = current[index] || 0;
-        if (value >= previous) {
-          peakHoldUntilRef.current[index] = now + 760;
-          return value;
+    const draw = (now: number) => {
+      frame = window.requestAnimationFrame(draw);
+      if (!visible || document.hidden || now - lastDraw < 40) return; // ~25 FPS
+      lastDraw = now;
+
+      const width = Math.max(1, Math.floor(canvas.clientWidth));
+      const height = Math.max(1, Math.floor(canvas.clientHeight));
+      const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+      const pixelWidth = Math.floor(width * dpr);
+      const pixelHeight = Math.floor(height * dpr);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const raw = playing ? normalizeTenBands(getMusicRtaLevels()) : Array(10).fill(0);
+      const hasLiveSignal = raw.some((value) => value > 0.018);
+      for (let index = 0; index < ACTIVITY_RTA_BARS; index += 1) {
+        const position = (index / (ACTIVITY_RTA_BARS - 1)) * 9;
+        const left = Math.floor(position);
+        const right = Math.min(9, left + 1);
+        const mix = position - left;
+        const liveSource = (raw[left] || 0) * (1 - mix) + (raw[right] || 0) * mix;
+        // If a browser temporarily starves the analyser, keep a tiny deterministic
+        // activity pattern while playback is running so the visualizer never looks frozen.
+        const phase = now * 0.0042 + index * 0.61;
+        const fallback = 0.16 + 0.30 * Math.abs(Math.sin(phase)) + 0.16 * Math.abs(Math.sin(phase * 0.43 + index));
+        const source = hasLiveSignal ? liveSource : playing ? Math.min(0.72, fallback) : 0;
+        const shaped = playing ? Math.min(1, Math.pow(Math.max(0, source), 0.58) * 1.2) : 0;
+        const previous = levels[index];
+        const rate = shaped > previous ? 0.72 : playing ? 0.19 : 0.34;
+        levels[index] = previous + (shaped - previous) * rate;
+
+        if (levels[index] >= peaks[index]) {
+          peaks[index] = levels[index];
+          peakHold[index] = now + 260;
+        } else if (now > peakHold[index]) {
+          peaks[index] = Math.max(levels[index], peaks[index] - 0.035);
         }
-        if (now < (peakHoldUntilRef.current[index] || 0)) return previous;
-        return Math.max(value, Math.max(0, previous - (playing ? 0.018 : 0.07)));
-      })
-    );
-  }, [levels, playing]);
+      }
 
-  const labels = MUSIC_RTA_FREQUENCIES.length === 10
-    ? MUSIC_RTA_FREQUENCIES.map(formatHz)
-    : ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"];
+      ctx.strokeStyle = "rgba(126,190,211,.075)";
+      ctx.lineWidth = 1;
+      for (let line = 1; line < 4; line += 1) {
+        const y = Math.round((height * line) / 4) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+
+      const gap = Math.max(1.5, width * 0.0026);
+      const barWidth = Math.max(2, (width - gap * (ACTIVITY_RTA_BARS - 1)) / ACTIVITY_RTA_BARS);
+      const gradient = ctx.createLinearGradient(0, height, 0, 0);
+      gradient.addColorStop(0, "#0a5d76");
+      gradient.addColorStop(0.48, "#16c6e8");
+      gradient.addColorStop(0.78, "#f0a33d");
+      gradient.addColorStop(1, "#fff07a");
+      ctx.fillStyle = gradient;
+
+      for (let index = 0; index < ACTIVITY_RTA_BARS; index += 1) {
+        const x = index * (barWidth + gap);
+        const levelHeight = Math.max(1, levels[index] * (height - 5));
+        const y = height - levelHeight;
+        ctx.fillRect(x, y, barWidth, levelHeight);
+
+        if (playing && peaks[index] > 0.08) {
+          const peakY = Math.max(1, height - peaks[index] * (height - 5));
+          ctx.fillStyle = "rgba(255,245,160,.88)";
+          ctx.fillRect(x, peakY, barWidth, 1.5);
+          ctx.fillStyle = gradient;
+        }
+      }
+    };
+
+    frame = window.requestAnimationFrame(draw);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [playing]);
 
   return (
-    <div ref={hostRef} className="tr-rta10 tr-rta10--restored tr-rta10--segmented" aria-label="10 band real-time audio analyzer">
-      <div className="tr-rta10Body" aria-hidden>
-        <div className="tr-rta10Scale">
-          <span>0</span><span>-12</span><span>-24</span><span>-36</span><span>-48</span><span>-60</span><small>dB</small>
-        </div>
-        <div className="tr-rta10Grid">
-          {levels.map((level, index) => {
-            const value = Math.max(0, Math.min(1, level));
-            const peak = Math.max(value, Math.min(1, peaks[index] || 0));
-            const db = -72 + value * 72;
-            return (
-              <div className="tr-rta10Band" key={labels[index] || index}>
-                <div className="tr-rta10Meter">
-                  <div className="tr-rta10Segments">
-                    {Array.from({ length: RTA_SEGMENTS }, (_, segmentIndex) => {
-                      const threshold = (segmentIndex + 1) / RTA_SEGMENTS;
-                      const zone = segmentIndex >= 16 ? "hot" : segmentIndex >= 13 ? "warm" : "normal";
-                      return (
-                        <i
-                          key={segmentIndex}
-                          className={`${value + 0.002 >= threshold ? "is-on" : ""} is-${zone}`}
-                        />
-                      );
-                    })}
-                  </div>
-                  <span className="tr-rta10Peak" style={{ bottom: `${Math.max(1, peak * 100)}%` }} />
-                </div>
-                <strong>{labels[index] || index + 1}</strong>
-                <small>{playing && value > 0.012 ? `${Math.max(-72, db).toFixed(0)} dB` : "—"}</small>
-              </div>
-            );
-          })}
-        </div>
+    <div ref={hostRef} className="tr-activityRta" aria-label="Music activity visualizer">
+      <canvas ref={canvasRef} />
+      <div className="tr-activityRtaLabels" aria-hidden>
+        <span>31</span><span>125</span><span>500</span><span>2K</span><span>8K</span><span>16K</span>
       </div>
     </div>
   );
@@ -288,6 +294,70 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
   const restoredProfileRef = useRef<string>("");
+
+
+  useEffect(() => {
+    const title = document.querySelector<HTMLElement>(".tr-topTitle");
+    const header = title?.parentElement;
+    if (!header) return;
+    const originalActions = Array.from(header.children).find((node) => node !== title && node instanceof HTMLElement) as HTMLElement | undefined;
+    if (!originalActions) return;
+
+    const oldDisplay = originalActions.style.display;
+    originalActions.style.display = "none";
+
+    let mount = header.querySelector<HTMLElement>(".tr-proGlobalActions");
+    if (!mount) {
+      mount = document.createElement("div");
+      mount.className = "tr-proGlobalActions";
+      header.appendChild(mount);
+    }
+    mount.innerHTML = "";
+
+    const makeButton = (label: string, action: () => void, className = "") => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `tr-proHeaderButton ${className}`.trim();
+      button.textContent = label;
+      button.addEventListener("click", action);
+      mount?.appendChild(button);
+      return button;
+    };
+
+    const hasActiveWorkout = Boolean(
+      window.localStorage.getItem("mvp_active_session_id") ||
+      window.localStorage.getItem("mvp_active_workout_id")
+    );
+    makeButton(hasActiveWorkout ? "RESUME WORKOUT" : "PROGRESS", () => navigate(hasActiveWorkout ? "/" : "/progress"), hasActiveWorkout ? "is-resume" : "");
+    makeButton("COACH", () => navigate("/coach"));
+    makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"));
+
+    const accountWrap = document.createElement("div");
+    accountWrap.className = "tr-proAccountWrap";
+    const accountButton = document.createElement("button");
+    accountButton.type = "button";
+    accountButton.className = "tr-proHeaderButton tr-proHeaderButton--account";
+    accountButton.textContent = "ACCOUNT ▾";
+    const menu = document.createElement("div");
+    menu.className = "tr-proAccountMenu";
+    menu.hidden = true;
+    const signOut = document.createElement("button");
+    signOut.type = "button";
+    signOut.textContent = "SIGN OUT";
+    signOut.addEventListener("click", () => {
+      const oldSignOut = Array.from(originalActions.querySelectorAll("button")).find((button) => button.textContent?.trim().toUpperCase() === "SIGN OUT") as HTMLButtonElement | undefined;
+      oldSignOut?.click();
+    });
+    menu.appendChild(signOut);
+    accountButton.addEventListener("click", () => { menu.hidden = !menu.hidden; });
+    accountWrap.append(accountButton, menu);
+    mount.appendChild(accountWrap);
+
+    return () => {
+      originalActions.style.display = oldDisplay;
+      mount?.remove();
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const refreshPlaylists = () => {
@@ -476,49 +546,28 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
       aria-label="MVP Trainer music console"
     >
-      <div className="tr-audioDeckTop">
-        <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open My Music">
+
+      <div className="tr-playerHero">
+        <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
-
-        <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}> 
+        <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}>
           <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
-          {track ? <small>{[track.artist || "Unknown Artist", track.album].filter(Boolean).join(" • ")}</small> : null}
+          <small>{track?.artist || "Unknown Artist"}</small>
         </button>
-
-        <div className="tr-audioQueueSelector">
-          <span>PLAYING FROM</span>
-          <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
-            <option value="all">All Uploaded Songs</option>
-            {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
-          </select>
-        </div>
-
-        <div className="tr-audioTopButtons">
-          <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
-            <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
-          </button>
-        </div>
       </div>
 
-      <TenBandRta playing={player.playing} />
+      <MusicActivityRta playing={player.playing} />
 
-      <div className="tr-audioTimeline">
-        <span>{formatMusicTime(currentTime)}</span>
-        <input type="range" min="0" max={Math.max(1, duration)} step="1" value={Math.min(Math.max(1, duration), currentTime)} onChange={(event: ChangeEvent<HTMLInputElement>) => seekMusic(Number(event.target.value))} disabled={!track || !duration} aria-label="Music playback position" />
-        <span>{formatMusicTime(duration)}</span>
-      </div>
-
-      <div className="tr-mainAudioTuning">
-        <label className="tr-mainPreamp">
-          <span>VOLUME</span>
-          <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const percent = Number(event.target.value);
-            const db = -12 + (Math.max(0, Math.min(100, percent)) / 100) * 24;
-            void runDspMutation(() => setMusicPreamp(db), true);
-          }} aria-label="Music volume" />
-          <strong>{volumePercent}%</strong>
-        </label>
+      <div className="tr-playerControlStage">
+        <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
+        <div className="tr-audioTransport" aria-label="Music transport controls">
+          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><span className="tr-audioTransportFace"><PlayerIcon name="back" /></span></button><span>PREVIOUS</span></div>
+          <div className="tr-audioTransportUnit is-primary"><button type="button" className="tr-audioTransportButton tr-audioTransportButton--primary" onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><span className="tr-audioTransportFace"><PlayerIcon name={player.playing ? "pause" : "play"} /></span></button><span>{player.playing ? "PAUSE" : "PLAY"}</span></div>
+          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => stopMusic()} disabled={!track || player.loading || queueBusy} aria-label="Stop music"><span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span></button><span>STOP</span></div>
+          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><span className="tr-audioTransportFace"><PlayerIcon name="next" /></span></button><span>NEXT</span></div>
+        </div>
+        <button type="button" className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span></button>
         <div className="tr-trackPreference" aria-label="Track preference">
           <button type="button" className={track?.play_less ? "is-disliked" : ""} disabled={!track} onClick={() => {
             if (!track) return;
@@ -532,15 +581,34 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div>
       </div>
 
-      <div className="tr-audioControls">
-        <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
-        <div className="tr-audioTransport" aria-label="Music transport controls">
-          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><span className="tr-audioTransportFace"><PlayerIcon name="back" /></span></button><span>PREVIOUS</span></div>
-          <div className="tr-audioTransportUnit is-primary"><button type="button" className="tr-audioTransportButton tr-audioTransportButton--primary" onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><span className="tr-audioTransportFace"><PlayerIcon name={player.playing ? "pause" : "play"} /></span></button><span>{player.playing ? "PAUSE" : "PLAY"}</span></div>
-          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => stopMusic()} disabled={!track || player.loading || queueBusy} aria-label="Stop music"><span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span></button><span>STOP</span></div>
-          <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><span className="tr-audioTransportFace"><PlayerIcon name="next" /></span></button><span>NEXT</span></div>
+      <div className="tr-audioTimeline">
+        <span>{formatMusicTime(currentTime)}</span>
+        <input type="range" min="0" max={Math.max(1, duration)} step="1" value={Math.min(Math.max(1, duration), currentTime)} onChange={(event: ChangeEvent<HTMLInputElement>) => seekMusic(Number(event.target.value))} disabled={!track || !duration} aria-label="Music playback position" />
+        <span>{formatMusicTime(duration)}</span>
+      </div>
+
+      <div className="tr-playerUtilityRow">
+        <label className="tr-playerVolume">
+          <span>VOLUME</span>
+          <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const percent = Number(event.target.value);
+            const db = -12 + (Math.max(0, Math.min(100, percent)) / 100) * 24;
+            void runDspMutation(() => setMusicPreamp(db), true);
+          }} aria-label="Music volume" />
+          <strong>{volumePercent}%</strong>
+        </label>
+        <div className="tr-playerSourceTools">
+          <label className="tr-audioQueueSelector">
+            <span>PLAYING FROM</span>
+            <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
+              <option value="all">All Uploaded Songs</option>
+              {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+            </select>
+          </label>
+          <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
+            <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
+          </button>
         </div>
-        <button type="button" className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span></button>
       </div>
 
       {eqOpen ? (
@@ -572,7 +640,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </div>
 
           <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
-            <label className="tr-audioPreamp"><span>VOLUME</span><input type="range" min="0" max="100" step="1" value={Math.round(((player.preampDb + 12) / 24) * 100)} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp((Number(event.target.value) / 100) * 24 - 12), true)} /><strong>{Math.round(((player.preampDb + 12) / 24) * 100)}%</strong></label>
+            
             <div className="tr-audioEqQuickActions"><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("flat"), true)}>FLAT</button><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("power"), true)}>POWER TRAINING</button></div>
           </div>
 
@@ -604,13 +672,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
             <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
-            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>31-band EQ • Preamp • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
           </section>
         </div>
       ) : null}
 
-      {player.error ? <div className="tr-audioError">{player.error}</div> : null}
+      {player.error ? <div className="tr-audioError">{/no supported source|src_not_supported|media_err_src/i.test(player.error) ? "COULDN’T PLAY THIS TRACK • RETRY" : player.error}</div> : null}
 
       <style>{`
         .tr-audioDeck--pro7 .tr-audioDeckTop{display:grid!important;grid-template-columns:52px minmax(0,1fr) minmax(165px,190px) max-content!important;gap:10px!important;align-items:center!important;width:100%!important;min-width:0!important;box-sizing:border-box!important;overflow:visible!important}.tr-audioDeck--pro7 .tr-audioArtwork{min-width:0}.tr-audioDeck--pro7 .tr-audioIdentity{min-width:0!important;max-width:none!important;overflow:hidden}.tr-audioDeck--pro7 .tr-audioIdentity strong,.tr-audioDeck--pro7 .tr-audioIdentity small{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tr-audioDeck--pro7 .tr-audioQueueSelector{min-width:0!important;width:100%!important;max-width:190px!important}.tr-audioDeck--pro7 .tr-audioQueueSelector select{width:100%!important;min-width:0!important}.tr-audioDeck--pro7 .tr-audioTopButtons{display:flex;align-items:center;justify-content:flex-end;gap:7px;min-width:max-content;justify-self:end;overflow:visible}.tr-audioDeck--pro7 .tr-audioEqToggle{flex:0 0 auto;white-space:nowrap}.tr-audioDeck--pro7 .tr-audioLibraryButton{flex:0 0 auto;min-width:76px;min-height:38px;padding:0 12px;border:1px solid rgba(126,193,218,.16);border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.2));color:#dcebf1;font-size:8px;font-weight:1000;letter-spacing:.065em;white-space:nowrap;cursor:pointer}.tr-audioDeck--pro7 .tr-audioLibraryButton:hover{border-color:rgba(75,203,248,.38);color:#9ee7ff}
@@ -963,6 +1031,93 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioDeck--pro7 .tr-audioArtwork{width:48px!important;height:48px!important;min-width:48px!important;min-height:48px!important;max-width:48px!important;max-height:48px!important}
           .tr-audioDeck--pro7 .tr-audioEqToggle{font-size:8px!important}
           .tr-audioDeck--pro7 .tr-trackPreference button span{display:none!important}
+        }
+
+        /* FINAL PRO PLAYER / MOBILE SYSTEM */
+        .tr-playerHero{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:18px 12px 9px;text-align:center;min-width:0}
+        .tr-playerHero .tr-audioArtwork{position:relative;width:118px!important;height:118px!important;min-width:118px!important;min-height:118px!important;max-width:118px!important;max-height:118px!important;border-radius:14px!important;overflow:hidden!important;border:1px solid rgba(130,204,228,.25)!important;background:#061018!important;box-shadow:0 16px 40px rgba(0,0,0,.35),inset 0 1px rgba(255,255,255,.05)!important}
+        .tr-playerHero .tr-audioArtworkImage{display:block;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important}
+        .tr-playerHero .tr-audioIdentity{display:block;max-width:min(760px,calc(100% - 20px));min-width:0;padding:0!important;text-align:center!important;background:transparent!important;border:0!important}
+        .tr-playerHero .tr-audioIdentity strong{display:block!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff!important;font-size:clamp(20px,2vw,28px)!important;line-height:1.08!important;font-weight:1000!important;letter-spacing:-.025em!important}
+        .tr-playerHero .tr-audioIdentity small{display:block!important;margin-top:5px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c3d6de!important;font-size:clamp(12px,1.1vw,15px)!important;font-weight:800!important}
+        .tr-activityRta{position:relative;margin:4px auto 8px;width:calc(100% - 24px);height:102px;overflow:hidden;border:1px solid rgba(111,184,210,.17);border-radius:10px;background:linear-gradient(180deg,#02080c,#041018);box-shadow:inset 0 0 30px rgba(0,0,0,.44)}
+        .tr-activityRta canvas{display:block;width:100%;height:82px}
+        .tr-activityRtaLabels{position:absolute;left:7px;right:7px;bottom:4px;display:flex;justify-content:space-between;color:#849da7;font-size:8px;font-weight:900;letter-spacing:.04em;pointer-events:none}
+        .tr-playerControlStage{display:flex;align-items:center;justify-content:center;gap:10px;margin:3px 12px 8px;min-width:0;flex-wrap:wrap}
+        .tr-playerControlStage .tr-audioTransport{display:flex;align-items:flex-end;justify-content:center;gap:10px}
+        .tr-playerControlStage .tr-trackPreference{display:flex;gap:6px}
+        .tr-playerControlStage .tr-trackPreference button,.tr-playerControlStage .tr-audioModeButton{min-height:36px;padding:0 10px;border-radius:8px;color:#fff!important;font-size:9px!important;font-weight:950!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 24px)!important;margin:4px auto 7px!important;min-height:30px!important;color:#e4eff3!important;font-size:10px!important}
+        .tr-playerUtilityRow{display:grid;grid-template-columns:minmax(210px,1fr) minmax(330px,auto);align-items:end;gap:16px;width:calc(100% - 24px);margin:0 auto 10px;min-width:0}
+        .tr-playerVolume{display:grid;grid-template-columns:auto minmax(90px,240px) 42px;align-items:center;justify-content:center;gap:8px;min-width:0}
+        .tr-playerVolume>span{color:#aec5cf;font-size:9px;font-weight:1000;letter-spacing:.08em}.tr-playerVolume>strong{color:#fff;font-size:11px;font-variant-numeric:tabular-nums}
+        .tr-playerVolume input[type=range]{width:100%;accent-color:#4dd5f6}
+        .tr-playerSourceTools{display:grid;grid-template-columns:minmax(190px,270px) 112px;align-items:end;justify-content:end;gap:8px;min-width:0}
+        .tr-playerSourceTools .tr-audioQueueSelector{display:grid!important;grid-template-columns:1fr!important;gap:4px!important;max-width:none!important;min-width:0!important}
+        .tr-playerSourceTools .tr-audioQueueSelector>span{color:#a9c2cc!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.08em!important}
+        .tr-playerSourceTools .tr-audioQueueSelector select{width:100%!important;height:38px!important;min-height:38px!important;padding:0 30px 0 11px!important;border-radius:8px!important;border:1px solid rgba(98,183,214,.24)!important;background:linear-gradient(180deg,#071a23,#041016)!important;color:#fff!important;font-size:10px!important;font-weight:900!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr-playerSourceTools .tr-audioEqToggle{width:112px!important;min-width:112px!important;height:38px!important;min-height:38px!important;padding:0 10px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;white-space:nowrap!important;border-radius:8px!important;color:#fff!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.055em!important}
+        .tr-playerSourceTools .tr-audioEqToggle svg{width:15px!important;height:15px!important;flex:0 0 auto!important}
+        .tr-proGlobalActions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.tr-proHeaderButton{min-height:36px;padding:0 11px;border:1px solid rgba(111,189,218,.24);border-radius:9px;background:linear-gradient(180deg,#0a1b23,#061016);color:#fff;font-size:10px;font-weight:950;letter-spacing:.035em;cursor:pointer}.tr-proHeaderButton:hover{border-color:rgba(77,212,251,.52);background:#0a2935}.tr-proAccountWrap{position:relative}.tr-proAccountMenu{position:absolute;right:0;top:calc(100% + 6px);z-index:500;width:130px;padding:5px;border:1px solid rgba(105,184,212,.25);border-radius:9px;background:#071218;box-shadow:0 16px 34px rgba(0,0,0,.45)}.tr-proAccountMenu button{width:100%;min-height:36px;border:0;border-radius:6px;background:transparent;color:#fff;font-size:10px;font-weight:950;cursor:pointer}.tr-proAccountMenu button:hover{background:#102631}
+        @media(max-width:700px){
+          .tr-playerHero{gap:7px;padding:12px 8px 6px}.tr-playerHero .tr-audioArtwork{width:92px!important;height:92px!important;min-width:92px!important;min-height:92px!important;max-width:92px!important;max-height:92px!important;border-radius:12px!important}.tr-playerHero .tr-audioIdentity strong{font-size:20px!important}.tr-playerHero .tr-audioIdentity small{font-size:12px!important;margin-top:3px!important}
+          .tr-activityRta{width:calc(100% - 14px);height:78px;margin:3px auto 6px}.tr-activityRta canvas{height:61px}.tr-activityRtaLabels{font-size:6.5px;bottom:3px}
+          .tr-playerControlStage{gap:5px;margin:2px 7px 5px;display:grid;grid-template-columns:42px minmax(0,1fr) 42px;align-items:center}.tr-playerControlStage .tr-audioTransport{gap:4px}.tr-playerControlStage .tr-trackPreference{grid-column:1/-1;justify-content:center}.tr-playerControlStage .tr-trackPreference button{min-height:31px;font-size:8px!important;padding:0 8px}.tr-playerControlStage .tr-audioModeButton{min-width:42px!important;width:42px!important;min-height:32px!important;padding:0 3px!important;font-size:0!important}.tr-playerControlStage .tr-audioModeButton svg{width:16px;height:16px}.tr-playerControlStage .tr-audioTransportButton{transform:scale(.82)!important}.tr-playerControlStage .tr-audioTransportUnit>span{font-size:6.5px!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 14px)!important;margin:2px auto 5px!important;font-size:9px!important}
+          .tr-playerUtilityRow{grid-template-columns:1fr;width:calc(100% - 14px);gap:7px;margin-bottom:8px}.tr-playerVolume{grid-template-columns:48px minmax(0,1fr) 38px;gap:6px}.tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 96px;gap:6px;justify-content:stretch}.tr-playerSourceTools .tr-audioEqToggle{width:96px!important;min-width:96px!important;padding:0 6px!important;font-size:8px!important}.tr-playerSourceTools .tr-audioQueueSelector select{font-size:9px!important;padding-left:8px!important}.tr-playerSourceTools .tr-audioQueueSelector>span{font-size:7px!important}
+          .tr-proGlobalActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.tr-proHeaderButton{width:100%;min-width:0;padding:0 6px;font-size:9px}.tr-proAccountWrap{width:100%}.tr-proAccountWrap>.tr-proHeaderButton{width:100%}.tr-proAccountMenu{right:0;left:0;width:auto}
+        }
+
+        /* AUG 9 FINAL PLAYER + GLOBAL MOBILE POLISH */
+        .tr-audioDeck--pro7{overflow:hidden!important}
+        .tr-playerHero{padding-top:16px!important}
+        .tr-playerHero .tr-audioArtwork{width:132px!important;height:132px!important;min-width:132px!important;min-height:132px!important;max-width:132px!important;max-height:132px!important}
+        .tr-playerHero .tr-audioIdentity{max-width:min(820px,calc(100% - 28px))!important}
+        .tr-playerHero .tr-audioIdentity strong{font-size:clamp(23px,2.2vw,31px)!important}
+        .tr-playerHero .tr-audioIdentity small{font-size:clamp(13px,1.2vw,16px)!important}
+        .tr-activityRta{height:108px!important;margin:5px 14px 8px!important}
+        .tr-playerControlStage{max-width:820px!important;margin-inline:auto!important}
+        .tr-audioTimeline{max-width:860px!important;margin-inline:auto!important}
+        .tr-playerUtilityRow{max-width:860px!important;margin:8px auto 12px!important;grid-template-columns:minmax(170px,250px) minmax(0,1fr)!important;align-items:end!important}
+        .tr-playerVolume{min-width:0!important}
+        .tr-playerVolume input{width:100%!important}
+        .tr-playerSourceTools{min-width:0!important;display:grid!important;grid-template-columns:minmax(180px,1fr) 112px!important;gap:8px!important;align-items:end!important}
+        .tr-audioQueueSelector{max-width:none!important;width:100%!important;min-width:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+        .tr-audioQueueSelector>span{display:block!important;margin:0 0 5px 2px!important;color:#9ec0cd!important;font-size:9px!important;font-weight:950!important;letter-spacing:.09em!important}
+        .tr-audioQueueSelector select{height:40px!important;width:100%!important;min-width:0!important;padding:0 34px 0 12px!important;border:1px solid rgba(105,186,215,.22)!important;border-radius:9px!important;background:#07161e!important;color:#fff!important;font-size:11px!important;font-weight:900!important;box-shadow:inset 0 1px rgba(255,255,255,.03)!important}
+        .tr-audioEqToggle{width:112px!important;min-width:112px!important;max-width:112px!important;height:40px!important;min-height:40px!important;padding:0 10px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;white-space:nowrap!important;border-radius:9px!important;color:#fff!important;font-size:10px!important;letter-spacing:.03em!important}
+        .tr-audioEqToggle svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
+        .tr-proHeaderButton.is-resume{border-color:rgba(78,221,156,.48)!important;background:linear-gradient(180deg,#0b3a2b,#082319)!important;color:#fff!important}
+        .tr-audioError{max-width:860px!important;margin:7px auto 10px!important;color:#ffd8da!important;font-size:12px!important;font-weight:900!important}
+        @media(max-width:650px){
+          html,body,#root{max-width:100%!important;overflow-x:hidden!important}
+          .tr-shellInner{max-width:100%!important;overflow-x:hidden!important}
+          .tr-audioDeck--pro7{width:100%!important;max-width:100%!important;border-radius:12px!important}
+          .tr-playerHero{padding:11px 7px 5px!important;gap:6px!important}
+          .tr-playerHero .tr-audioArtwork{width:104px!important;height:104px!important;min-width:104px!important;min-height:104px!important;max-width:104px!important;max-height:104px!important}
+          .tr-playerHero .tr-audioIdentity{max-width:calc(100% - 14px)!important}
+          .tr-playerHero .tr-audioIdentity strong{font-size:21px!important;line-height:1.1!important}
+          .tr-playerHero .tr-audioIdentity small{font-size:13px!important}
+          .tr-activityRta{height:72px!important;margin:4px 7px 6px!important;border-radius:8px!important}
+          .tr-activityRtaLabels{font-size:6px!important;padding-inline:3px!important}
+          .tr-playerControlStage{padding:0 5px!important;gap:5px!important}
+          .tr-audioTransport{gap:4px!important}
+          .tr-audioTransportUnit>span,.tr-audioModeButton span,.tr-trackPreference span{font-size:7px!important}
+          .tr-audioTimeline{margin:4px 8px!important;grid-template-columns:34px minmax(0,1fr) 34px!important;gap:5px!important}
+          .tr-audioTimeline>span{font-size:8px!important}
+          .tr-playerUtilityRow{margin:6px 7px 9px!important;grid-template-columns:1fr!important;gap:7px!important}
+          .tr-playerVolume{display:grid!important;grid-template-columns:48px minmax(0,1fr) 38px!important;align-items:center!important;gap:7px!important}
+          .tr-playerVolume>span{margin:0!important;font-size:8px!important}
+          .tr-playerVolume>strong{font-size:9px!important;text-align:right!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 96px!important;gap:6px!important}
+          .tr-audioQueueSelector>span{font-size:7.5px!important;margin-bottom:4px!important}
+          .tr-audioQueueSelector select{height:38px!important;font-size:10px!important;padding-left:9px!important}
+          .tr-audioEqToggle{width:96px!important;min-width:96px!important;max-width:96px!important;height:38px!important;min-height:38px!important;font-size:9px!important;padding:0 7px!important}
+          .tr-audioEqToggle svg{width:14px!important;height:14px!important;flex-basis:14px!important}
+          .tr-audioEqPanel{max-width:100%!important;overflow:hidden!important}
+          .tr-audioEqScroll{max-width:100%!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+          .tr-proGlobalActions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .tr-proHeaderButton{min-height:40px!important;font-size:9px!important}
         }
       `}</style>
     </section>
