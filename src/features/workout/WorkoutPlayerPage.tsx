@@ -1819,6 +1819,115 @@ function calculatePlateLoad(targetWeight: number, barWeight: number): PlateLoad 
   };
 }
 
+
+type TrainingToolKind =
+  | "barbell"
+  | "plate_loaded"
+  | "dumbbell"
+  | "cable_machine"
+  | "bodyweight"
+  | "general";
+
+type TrainingToolProfile = {
+  kind: TrainingToolKind;
+  title: string;
+  inputLabel: string;
+  showTool: boolean;
+  showBarSelector: boolean;
+  showPlateLoading: boolean;
+  plateTitle: string;
+  helper: string;
+};
+
+function resolveTrainingToolProfile(item: any): TrainingToolProfile {
+  const name = String(item?.name ?? item?.title ?? "").toLowerCase();
+  const equipment = Array.isArray(item?.equipment)
+    ? item.equipment.map((value: any) => String(value ?? "").toLowerCase())
+    : [];
+  const text = [name, ...equipment].join(" ");
+
+  const bodyweight =
+    /body\s*weight|bodyweight|calisthenic|no equipment/.test(text) ||
+    (/push[- ]?up|pull[- ]?up|chin[- ]?up|plank|crunch|sit[- ]?up/.test(name) &&
+      !/weighted|cable|machine|dumbbell|barbell/.test(text));
+
+  if (bodyweight) {
+    return {
+      kind: "bodyweight",
+      title: "Bodyweight Preparation",
+      inputLabel: "WORKING LOAD",
+      showTool: false,
+      showBarSelector: false,
+      showPlateLoading: false,
+      plateTitle: "",
+      helper: "No loading calculator is needed for this exercise.",
+    };
+  }
+
+  if (/barbell|olympic bar|ez[- ]?bar|curl bar/.test(text)) {
+    return {
+      kind: "barbell",
+      title: "Warm-up + Barbell Plate Calculator",
+      inputLabel: "WORKING WEIGHT",
+      showTool: true,
+      showBarSelector: true,
+      showPlateLoading: true,
+      plateTitle: "PLATES PER SIDE",
+      helper: "Warm-up and plate-loading guidance only. Nothing here is logged.",
+    };
+  }
+
+  if (/plate[- ]?loaded|leg press|hack squat|plate press|plate row|lever machine/.test(text)) {
+    return {
+      kind: "plate_loaded",
+      title: "Warm-up + Plate Loading Guidance",
+      inputLabel: "WORKING / ADDED LOAD",
+      showTool: true,
+      showBarSelector: false,
+      showPlateLoading: true,
+      plateTitle: "PLATES PER SIDE",
+      helper: "Guidance only. Plate-loaded machine carriage weight can vary and nothing here is logged.",
+    };
+  }
+
+  if (/dumbbell|dumbbells/.test(text)) {
+    return {
+      kind: "dumbbell",
+      title: "Dumbbell Warm-up Guidance",
+      inputLabel: "WORKING WEIGHT",
+      showTool: true,
+      showBarSelector: false,
+      showPlateLoading: false,
+      plateTitle: "",
+      helper: "Warm-up guidance only. Nothing here is logged to your workout.",
+    };
+  }
+
+  if (/cable|selectorized|machine|pec deck|pulldown|lat pull|leg curl|leg extension|adductor|abductor|smith/.test(text)) {
+    return {
+      kind: "cable_machine",
+      title: "Working Weight Warm-up Guidance",
+      inputLabel: "WORKING WEIGHT",
+      showTool: true,
+      showBarSelector: false,
+      showPlateLoading: false,
+      plateTitle: "",
+      helper: "Warm-up guidance only. Nothing here is logged to your workout.",
+    };
+  }
+
+  return {
+    kind: "general",
+    title: "Warm-up Guidance",
+    inputLabel: "WORKING WEIGHT",
+    showTool: true,
+    showBarSelector: false,
+    showPlateLoading: false,
+    plateTitle: "",
+    helper: "Optional preparation guidance only. Nothing here is logged.",
+  };
+}
+
 function SessionCompleteOverlay({
   open,
   onReview,
@@ -5295,8 +5404,10 @@ const unlock = async () => {
 
   const pColor = painColor(pain);
   const pct = Math.round((pain / 10) * 100);
+  const trainingTool = resolveTrainingToolProfile(item);
   const warmupPlan = buildWarmupPlan(calculatorWeight);
-  const plateLoad = calculatePlateLoad(calculatorWeight, barWeight);
+  const plateBaseWeight = trainingTool.kind === "plate_loaded" ? 0 : barWeight;
+  const plateLoad = calculatePlateLoad(calculatorWeight, plateBaseWeight);
 
   return (
     <Card
@@ -5317,17 +5428,11 @@ const unlock = async () => {
         </div>
       }
     >
-      <div className="tr-exerciseTopMeta">
-        <div className="tr-exerciseSummaryLine">
-          {timed ? (
-            <>Duration {prescribedMins} min</>
-          ) : (
-            <>
-              {setsTarget} sets • {repMin}-{repMax} reps • Rest {restSeconds}s
-            </>
-          )}
+      {timed ? (
+        <div className="tr-exerciseTopMeta">
+          <div className="tr-exerciseSummaryLine">Duration {prescribedMins} min</div>
         </div>
-      </div>
+      ) : null}
 
       <div className="tr-exerciseConsole">
         <div className="tr-exerciseConsoleMedia">
@@ -5449,7 +5554,7 @@ const unlock = async () => {
               <div className="tr-workingSetsHeader">
                 <div>
                   <div className="tr-kicker">WORKING SETS</div>
-                  <div className="tr-workingSetsTitle">{setsTarget} × {repMin}-{repMax} REPS • 60 SEC REST</div>
+                  <div className="tr-workingSetsTitle">{setsTarget} SETS • {repMin}-{repMax} REPS • {restSeconds} SEC REST</div>
                 </div>
 
                 <div className="tr-workingSetsHeaderActions">
@@ -5714,6 +5819,7 @@ const unlock = async () => {
                               label=""
                               value={Number(set.weight ?? 0)}
                               step={5}
+                              allowDecimal
                               disabled={isDone}
                               onChange={(value) => upsertSet(index, { weight: value })}
                             />
@@ -5787,91 +5893,107 @@ const unlock = async () => {
                 </div>
               </section>
 
-              <div className={`tr-trainingCalculator ${calculatorOpen ? "is-open" : ""}`}>
-                <button
-                  type="button"
-                  className="tr-trainingCalculatorToggle"
-                  onClick={() => setCalculatorOpen((value) => !value)}
-                >
-                  <span>
-                    <span className="tr-kicker">TRAINING TOOLS</span>
-                    <strong>Warm-up + Barbell Plate Calculator</strong>
-                  </span>
-                  <span>{calculatorOpen ? "CLOSE" : "OPEN"}</span>
-                </button>
+              {trainingTool.showTool ? (
+                <div className={`tr-trainingCalculator ${calculatorOpen ? "is-open" : ""} is-${trainingTool.kind}`}>
+                  <button
+                    type="button"
+                    className="tr-trainingCalculatorToggle"
+                    onClick={() => setCalculatorOpen((value) => !value)}
+                  >
+                    <span>
+                      <span className="tr-kicker">TRAINING TOOLS</span>
+                      <strong>{trainingTool.title}</strong>
+                      <small className="tr-trainingToolGuidanceTag">GUIDANCE ONLY • NOT LOGGED</small>
+                    </span>
+                    <span>{calculatorOpen ? "CLOSE" : "OPEN"}</span>
+                  </button>
 
-                {calculatorOpen ? (
-                  <div className="tr-trainingCalculatorBody">
-                    <div className="tr-calculatorControls">
-                      <label>
-                        <span className="tr-kicker">WORKING WEIGHT</span>
-                        <input
-                          value={calculatorWeight || ""}
-                          inputMode="decimal"
-                          onChange={(event: any) => {
-                            const value = Number(event.target.value.replace(/[^\d.]/g, ""));
-                            setCalculatorWeight(Number.isFinite(value) ? Math.max(0, value) : 0);
-                          }}
-                          placeholder="Enter weight"
-                        />
-                      </label>
+                  {calculatorOpen ? (
+                    <div className="tr-trainingCalculatorBody">
+                      <div className={`tr-calculatorControls ${trainingTool.showBarSelector ? "has-bar-selector" : "is-single"}`}>
+                        <label>
+                          <span className="tr-kicker">{trainingTool.inputLabel}</span>
+                          <input
+                            value={calculatorWeight || ""}
+                            inputMode="decimal"
+                            onChange={(event: any) => {
+                              const raw = event.target.value.replace(/[^\d.]/g, "");
+                              const value = Number(raw);
+                              setCalculatorWeight(Number.isFinite(value) ? Math.max(0, value) : 0);
+                            }}
+                            placeholder="Enter weight"
+                          />
+                        </label>
 
-                      <label>
-                        <span className="tr-kicker">BAR WEIGHT</span>
-                        <select value={barWeight} onChange={(event: any) => setBarWeight(Number(event.target.value))}>
-                          <option value={45}>45 lb bar</option>
-                          <option value={35}>35 lb bar</option>
-                          <option value={15}>15 lb training bar</option>
-                          <option value={0}>No bar / machine</option>
-                        </select>
-                      </label>
-                    </div>
+                        {trainingTool.showBarSelector ? (
+                          <label>
+                            <span className="tr-kicker">BAR WEIGHT</span>
+                            <select value={barWeight} onChange={(event: any) => setBarWeight(Number(event.target.value))}>
+                              <option value={45}>45 lb bar</option>
+                              <option value={35}>35 lb bar</option>
+                              <option value={15}>15 lb training bar</option>
+                              <option value={0}>Specialty / no bar weight</option>
+                            </select>
+                          </label>
+                        ) : null}
+                      </div>
 
-                    <div className="tr-calculatorGrid">
-                      <div className="tr-calculatorPanel">
-                        <div className="tr-kicker">SUGGESTED WARM-UP SETS</div>
-                        {warmupPlan.length ? (
-                          <div className="tr-warmupRows">
-                            {warmupPlan.map((row) => (
-                              <div key={`${row.label}-${row.weight}`} className="tr-warmupRow">
-                                <span>{row.label}</span>
-                                <strong>{formatLoggedWeight(row.weight)} lb × {row.reps}</strong>
+                      <div className={`tr-calculatorGrid ${trainingTool.showPlateLoading ? "has-plate-loading" : "is-warmup-only"}`}>
+                        <div className="tr-calculatorPanel">
+                          <div className="tr-kicker">SUGGESTED WARM-UP SETS</div>
+                          {warmupPlan.length ? (
+                            <div className="tr-warmupRows">
+                              {warmupPlan.map((row) => (
+                                <div key={`${row.label}-${row.weight}`} className="tr-warmupRow">
+                                  <span>{row.label}</span>
+                                  <strong>{formatLoggedWeight(row.weight)} lb × {row.reps}</strong>
+                                </div>
+                              ))}
+                              <div className="tr-warmupRow is-working">
+                                <span>Working sets</span>
+                                <strong>{formatLoggedWeight(calculatorWeight)} lb • {repMin}-{repMax} reps</strong>
                               </div>
-                            ))}
-                            <div className="tr-warmupRow is-working">
-                              <span>Working sets</span>
-                              <strong>{formatLoggedWeight(calculatorWeight)} lb • {repMin}-{repMax} reps</strong>
                             </div>
+                          ) : (
+                            <div className="tr-sub">Enter today's working weight to build the warm-up ladder.</div>
+                          )}
+                        </div>
+
+                        {trainingTool.showPlateLoading ? (
+                          <div className="tr-calculatorPanel">
+                            <div className="tr-kicker">{trainingTool.plateTitle}</div>
+                            {calculatorWeight > plateBaseWeight ? (
+                              <>
+                                <div className="tr-plateLoadValue">
+                                  {plateLoad.perSide.length
+                                    ? plateLoad.perSide.map((row) => `${row.count}×${row.plate}`).join(" + ")
+                                    : "No plates required"}
+                                </div>
+                                <div className="tr-sub">
+                                  {trainingTool.kind === "plate_loaded"
+                                    ? `Added plate load: ${formatLoggedWeight(plateLoad.loadedWeight)} lb`
+                                    : `Loaded total: ${formatLoggedWeight(plateLoad.loadedWeight)} lb`}
+                                  {plateLoad.remainder > 0.01
+                                    ? ` • ${formatLoggedWeight(plateLoad.remainder)} lb below target with available plates`
+                                    : " • exact load"}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="tr-sub">
+                                {trainingTool.kind === "barbell"
+                                  ? "Working weight must be above the selected bar weight."
+                                  : "Enter the plate load you want to prepare."}
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="tr-sub">Enter today's working weight to build the warm-up ladder.</div>
-                        )}
+                        ) : null}
                       </div>
 
-                      <div className="tr-calculatorPanel">
-                        <div className="tr-kicker">PLATES PER SIDE</div>
-                        {calculatorWeight > barWeight ? (
-                          <>
-                            <div className="tr-plateLoadValue">
-                              {plateLoad.perSide.length
-                                ? plateLoad.perSide.map((row) => `${row.count}×${row.plate}`).join(" + ")
-                                : "No plates required"}
-                            </div>
-                            <div className="tr-sub">
-                              Loaded total: {formatLoggedWeight(plateLoad.loadedWeight)} lb
-                              {plateLoad.remainder > 0.01
-                                ? ` • ${formatLoggedWeight(plateLoad.remainder)} lb below target with available plates`
-                                : " • exact load"}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="tr-sub">Working weight must be above the selected bar weight.</div>
-                        )}
-                      </div>
+                      <div className="tr-trainingToolGuidanceNote">{trainingTool.helper}</div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
+              ) : null}
 
             </div>
           )}
@@ -6608,7 +6730,7 @@ const unlock = async () => {
 }
 
 .tr-proCoach{
-  position:relative; --coach-accent:#63dcff;
+  position:relative; --coach-decision:#63dcff;
   overflow:hidden;
   margin-top:16px;
   border-radius:22px;
@@ -6631,9 +6753,11 @@ const unlock = async () => {
   background:linear-gradient(180deg,rgba(0,215,255,.95),rgba(0,120,255,.18));
   box-shadow:0 0 18px rgba(0,190,255,.35);
 }
-.tr-proCoach--baseline{--coach-accent:#b7c3ff;}.tr-proCoach--hold{--coach-accent:#63dcff;}.tr-proCoach--progress{--coach-accent:#59f3a8;}.tr-proCoach--progress::before{background:linear-gradient(180deg,#59f3a8,rgba(22,184,112,.18));}
-.tr-proCoach--monitor{--coach-accent:#f0c760;}.tr-proCoach--monitor::before{background:linear-gradient(180deg,#f0c760,rgba(193,148,44,.18));}.tr-proCoach--hold::before{background:linear-gradient(180deg,#63dcff,rgba(0,150,220,.18));}
-.tr-proCoach--deload{--coach-accent:#ffad55;}.tr-proCoach--deload::before{background:linear-gradient(180deg,#ffad55,rgba(224,124,31,.18));}.tr-proCoach--baseline::before{background:linear-gradient(180deg,#b7c3ff,rgba(112,129,220,.18));}
+.tr-proCoach--baseline{--coach-decision:#f5fbff;}
+.tr-proCoach--hold{--coach-decision:#63dcff;}
+.tr-proCoach--progress{--coach-decision:#59f3a8;}
+.tr-proCoach--monitor{--coach-decision:#f0c760;}
+.tr-proCoach--deload{--coach-decision:#ffad55;}
 .tr-proCoachHeader{
   width:100%;
   min-height:72px;
@@ -6699,12 +6823,12 @@ const unlock = async () => {
   justify-content:center;
   border:1px solid rgba(0,190,255,.46);
   background:rgba(0,170,255,.11);
-  color:var(--coach-accent);
+  color:var(--coach-decision);
   font-size:10px;font-family:inherit;
   font-weight:900;
   letter-spacing:.14em;
 }
-.tr-proCoachDecision.is-baseline{border-color:rgba(183,195,255,.44);background:rgba(126,143,235,.11);color:#cbd3ff;}.tr-proCoachDecision.is-hold{border-color:rgba(99,220,255,.52);background:rgba(0,170,255,.13);color:#8cecff;}.tr-proCoachDecision.is-progress{border-color:rgba(74,235,155,.52);background:rgba(40,205,130,.13);color:#8dffc2;box-shadow:0 0 16px rgba(40,205,130,.10);}
+.tr-proCoachDecision.is-baseline{border-color:rgba(99,220,255,.34);background:rgba(0,170,255,.07);color:#dff8ff;}.tr-proCoachDecision.is-hold{border-color:rgba(99,220,255,.52);background:rgba(0,170,255,.13);color:#8cecff;}.tr-proCoachDecision.is-progress{border-color:rgba(74,235,155,.52);background:rgba(40,205,130,.13);color:#8dffc2;box-shadow:0 0 16px rgba(40,205,130,.10);}
 .tr-proCoachDecision.is-monitor{border-color:rgba(240,199,96,.50);background:rgba(205,165,65,.12);color:#ffe09a;box-shadow:0 0 16px rgba(205,165,65,.09);}
 .tr-proCoachDecision.is-deload{border-color:rgba(255,173,85,.54);background:rgba(224,124,31,.13);color:#ffc47e;box-shadow:0 0 16px rgba(224,124,31,.10);}
 .tr-proCoachMinimize{
@@ -6731,8 +6855,10 @@ const unlock = async () => {
   justify-content:space-between;
   gap:14px;
 }
-.tr-proCoach.is-collapsed .tr-proCoachTitle{color:var(--coach-accent);text-shadow:0 0 14px currentColor;}.tr-proCoach.is-collapsed .tr-proCoachIcon{color:var(--coach-accent);border-color:currentColor;}.tr-proCoachCollapsedSummary strong{
-  color:var(--coach-accent);
+.tr-proCoach.is-collapsed .tr-proCoachTitle{color:rgba(250,253,255,.98);text-shadow:none;}
+.tr-proCoach.is-collapsed .tr-proCoachIcon{color:rgba(202,245,255,.98);border-color:rgba(0,190,255,.42);}
+.tr-proCoachCollapsedSummary strong{
+  color:var(--coach-decision);
   font-size:14px;
   letter-spacing:.045em;font-weight:900;text-shadow:0 0 14px currentColor;
 }
@@ -6771,7 +6897,7 @@ const unlock = async () => {
 }
 .tr-proCoachHeroAction{
   margin-top:8px;
-  color:var(--coach-accent);
+  color:var(--coach-decision);
   font-size:clamp(24px,3vw,36px);
   line-height:1.04;
   font-weight:900;font-family:inherit;
@@ -7084,33 +7210,44 @@ const unlock = async () => {
 .tr-effortSelectorHead em{color:rgba(147,177,190,.48);font-size:8px;font-style:normal;}
 .tr-effortOptions{
   display:grid;
-  grid-template-columns:repeat(6,minmax(0,1fr));
-  gap:7px;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
   margin-top:11px;
 }
 .tr-effortOptions button{
   position:relative;
-  min-height:58px;
-  padding:8px 6px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.085);
-  background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(0,0,0,.15));
-  color:rgba(200,221,231,.78);
+  min-height:66px;
+  padding:10px 7px 9px;
+  border-radius:13px;
+  border:1px solid rgba(255,255,255,.12);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.025) 34%,rgba(0,0,0,.18)),
+    linear-gradient(180deg,rgba(12,19,27,.98),rgba(4,8,13,.99));
+  color:rgba(229,242,248,.90);
   display:grid;
   align-content:center;
-  gap:4px;
+  gap:5px;
   cursor:pointer;
-  transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.075),
+    inset 0 -1px 0 rgba(0,0,0,.72),
+    0 2px 2px rgba(0,0,0,.62),
+    0 10px 22px rgba(0,0,0,.28);
+  transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease,color .14s ease;
 }
-.tr-effortOptions button:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(0,190,255,.38);}
-.tr-effortOptions button strong{font-size:9px;line-height:1.15;}
-.tr-effortOptions button span{font-size:7px;color:rgba(155,184,197,.58);line-height:1.15;}
+.tr-effortOptions button:hover:not(:disabled){
+  transform:translateY(-1px);
+  border-color:rgba(0,190,255,.38);
+  color:rgba(246,252,255,.98);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 3px 3px rgba(0,0,0,.62),0 13px 26px rgba(0,0,0,.32);
+}
+.tr-effortOptions button strong{font-size:10px;font-weight:900;line-height:1.12;letter-spacing:.01em;}
+.tr-effortOptions button span{font-size:8px;font-weight:750;color:rgba(184,207,218,.72);line-height:1.18;}
 .tr-effortOptions button.is-target::after{
   content:"TARGET";
   position:absolute;
-  top:-7px;
-  left:50%;
-  transform:translateX(-50%);
+  top:5px;
+  right:6px;
   padding:2px 5px;
   border-radius:999px;
   border:1px solid rgba(221,194,119,.35);
@@ -7128,14 +7265,13 @@ const unlock = async () => {
 }
 .tr-effortOptions button.is-selected span{color:rgba(199,235,247,.79);}
 .tr-effortExplanation{
-  margin-top:9px;
-  min-height:38px;
-  padding:9px 11px;
-  border-radius:11px;
-  border:1px solid rgba(255,255,255,.06);
-  background:rgba(0,0,0,.15);
+  margin-top:10px;
+  min-height:30px;
+  padding:6px 2px 0;
+  border:0;
+  background:transparent;
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   gap:9px;
 }
 .tr-effortExplanation strong{color:rgba(228,245,252,.92);font-size:9px;white-space:nowrap;}
@@ -7231,12 +7367,12 @@ const unlock = async () => {
   .tr-effortSelectorHead small{font-size:7px;}
   .tr-effortSelectorHead em{display:none;}
   .tr-effortOptions{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:9px;}
-  .tr-effortOptions button{min-height:49px;padding:7px 4px;border-radius:10px;}
-  .tr-effortOptions button strong{font-size:7.5px;}
-  .tr-effortOptions button span{font-size:6px;}
-  .tr-effortExplanation{min-height:34px;padding:7px 8px;gap:6px;align-items:flex-start;}
-  .tr-effortExplanation strong{font-size:7px;}
-  .tr-effortExplanation span{font-size:7px;}
+  .tr-effortOptions button{min-height:60px;padding:9px 6px;border-radius:11px;}
+  .tr-effortOptions button strong{font-size:9px;}
+  .tr-effortOptions button span{font-size:7.5px;}
+  .tr-effortExplanation{min-height:30px;padding:7px 1px 0;gap:7px;align-items:flex-start;}
+  .tr-effortExplanation strong{font-size:8px;}
+  .tr-effortExplanation span{font-size:8px;}
   .tr-workingSetComplete{min-height:51px;margin-top:11px;border-radius:13px;}
   .tr-workingSetComplete span{font-size:10px;}
   .tr-workingSetComplete small{font-size:7px;}
@@ -7598,15 +7734,34 @@ function Qty({
   label,
   value,
   step,
+  allowDecimal = false,
   disabled,
   onChange,
 }: {
   label: string;
   value: number;
   step: number;
+  allowDecimal?: boolean;
   disabled: boolean;
   onChange: (v: number) => void;
 }) {
+  const [draft, setDraft] = useState(() => String(value ?? 0));
+
+  useEffect(() => {
+    setDraft(String(value ?? 0));
+  }, [value]);
+
+  const commitDraft = () => {
+    const normalized = draft.trim().replace(/^\./, "0.");
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      onChange(allowDecimal ? parsed : Math.floor(parsed));
+      setDraft(String(allowDecimal ? parsed : Math.floor(parsed)));
+      return;
+    }
+    setDraft(String(value ?? 0));
+  };
+
   return (
     <div className="tr-qtyBlock">
       {label ? <div className="tr-kicker">{label}</div> : null}
@@ -7623,13 +7778,28 @@ function Qty({
 
         <input
           className="tr-bigInput tr-opInput"
-          value={String(value ?? 0)}
+          value={draft}
           disabled={disabled}
-          inputMode="decimal"
+          inputMode={allowDecimal ? "decimal" : "numeric"}
           onChange={(e) => {
-            const cleaned = e.target.value.replace(/[^\d.]/g, "");
-            const n = Number(cleaned);
-            onChange(Number.isFinite(n) ? n : 0);
+            const raw = e.target.value;
+            const cleaned = allowDecimal
+              ? raw.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1")
+              : raw.replace(/[^\d]/g, "");
+            setDraft(cleaned);
+
+            if (!cleaned || cleaned === "." || cleaned.endsWith(".")) return;
+            const parsed = Number(cleaned);
+            if (Number.isFinite(parsed) && parsed >= 0) {
+              onChange(allowDecimal ? parsed : Math.floor(parsed));
+            }
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitDraft();
+              e.currentTarget.blur();
+            }
           }}
         />
 
