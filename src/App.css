@@ -10641,8 +10641,15 @@ body{
 .tr-activeExerciseRunner .tr-workingSetsTitle{
   font-family: inherit !important;
   font-size: 16px !important;
-  font-weight: 1050 !important;
-  letter-spacing: .02em !important;
+  font-weight: 900 !important;
+  letter-spacing: .045em !important;
+}
+
+.tr-activeExerciseRunner .tr-workingSetsHeader .tr-kicker{
+  font-family: inherit !important;
+  font-size: 9px !important;
+  font-weight: 900 !important;
+  letter-spacing: .16em !important;
 }
 
 .tr-activeExerciseRunner .tr-proCoach{
@@ -10676,7 +10683,7 @@ body{
 
 .tr-activeExerciseRunner .tr-workingSetActiveHead > div:first-child strong{
   font-family: inherit !important;
-  font-weight: 1100 !important;
+  font-weight: 900 !important;
 }
 
 .tr-activeExerciseRunner .tr-workingSetComplete{
@@ -10686,6 +10693,72 @@ body{
     0 3px 3px rgba(0,0,0,.62),
     0 15px 30px rgba(0,0,0,.34),
     0 0 22px rgba(0,195,255,.10) !important;
+}
+
+/* ---------- Guidance tools: contextual, secondary, never logged ---------- */
+.tr-activeExerciseRunner .tr-trainingCalculator{
+  border-color: rgba(255,255,255,.075) !important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.025),rgba(0,0,0,.10)),
+    rgba(2,7,12,.46) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 26px rgba(0,0,0,.22) !important;
+}
+
+.tr-activeExerciseRunner .tr-trainingCalculator.is-open{
+  border-color: rgba(0,190,255,.18) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 15px 30px rgba(0,0,0,.26) !important;
+}
+
+.tr-activeExerciseRunner .tr-trainingCalculatorToggle strong{
+  color: rgba(241,249,253,.94) !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  letter-spacing: .015em !important;
+}
+
+.tr-activeExerciseRunner .tr-trainingCalculatorToggle > span:first-child{
+  gap: 3px !important;
+}
+
+.tr-activeExerciseRunner .tr-trainingToolGuidanceTag{
+  display: block;
+  margin-top: 2px;
+  color: rgba(137,181,200,.62);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.tr-activeExerciseRunner .tr-calculatorControls.is-single{
+  grid-template-columns: minmax(0,1fr) !important;
+}
+
+.tr-activeExerciseRunner .tr-calculatorGrid.is-warmup-only{
+  grid-template-columns: minmax(0,1fr) !important;
+}
+
+.tr-activeExerciseRunner .tr-trainingToolGuidanceNote{
+  padding-top: 2px;
+  color: rgba(150,184,199,.62);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+/* ---------- Effort controls: tactile primary controls, readable at rest ---------- */
+.tr-activeExerciseRunner .tr-effortSelectorHead span{
+  font-family: inherit !important;
+  font-weight: 900 !important;
+  letter-spacing: .08em !important;
+}
+
+.tr-activeExerciseRunner .tr-effortOptions button strong{
+  font-family: inherit !important;
+  font-weight: 900 !important;
+}
+
+.tr-activeExerciseRunner .tr-effortOptions button span{
+  font-family: inherit !important;
 }
 
 /* ---------- Session/current typography ---------- */
@@ -10899,6 +10972,10 @@ body{
   .tr-activeExerciseRunner .tr-workingSetsTitle{
     font-size: 12px !important;
     white-space: normal !important;
+  }
+
+  .tr-activeExerciseRunner .tr-workingSetsHeader .tr-kicker{
+    font-size: 8px !important;
   }
 
   .tr-activeExerciseRunner .tr-proCoach{
