@@ -8,6 +8,8 @@ import {
 import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
+  getMusicTrackSignedUrl,
+  MUSIC_BUCKET,
   listMusicTracks,
   removeMusicArtwork,
   removeMusicTrack,
@@ -65,6 +67,7 @@ import {
   type MusicDiscoverySavedSong,
   type MusicDiscoverySeed,
 } from "../../lib/musicDiscovery";
+import { supabase } from "../../lib/supabase";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -97,6 +100,54 @@ type DetailMode = "edit" | "info_results" | "artwork_results";
 type DetailSaveState = "idle" | "searching" | "saving" | "changed" | "error";
 type ReviewItem = { trackId: string; candidates: MusicMetadataCandidate[] };
 type EnrichmentState = { running: boolean; current: number; total: number; matched: number; review: number; notFound: number; label: string; serviceMessage: string };
+type BurnMode = "mp3" | "audio";
+type BurnDisc = { number: number; tracks: MusicTrack[]; bytes: number; seconds: number };
+
+const MP3_CD_CAPACITY_BYTES = 700 * 1024 * 1024;
+const AUDIO_CD_CAPACITY_SECONDS = 80 * 60;
+
+function burnTrackSeconds(track: MusicTrack) {
+  const seconds = Number(track.duration_seconds || 0);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 210;
+}
+function burnTrackBytes(track: MusicTrack) {
+  const bytes = Number(track.file_size_bytes || 0);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+}
+function splitBurnDiscs(tracks: MusicTrack[], mode: BurnMode): BurnDisc[] {
+  if (!tracks.length) return [];
+  const limit = mode === "mp3" ? MP3_CD_CAPACITY_BYTES : AUDIO_CD_CAPACITY_SECONDS;
+  const discs: BurnDisc[] = [];
+  let current: BurnDisc = { number: 1, tracks: [], bytes: 0, seconds: 0 };
+
+  for (const track of tracks) {
+    const bytes = burnTrackBytes(track);
+    const seconds = burnTrackSeconds(track);
+    const value = mode === "mp3" ? bytes : seconds;
+    const currentValue = mode === "mp3" ? current.bytes : current.seconds;
+    if (current.tracks.length && currentValue + value > limit) {
+      discs.push(current);
+      current = { number: discs.length + 1, tracks: [], bytes: 0, seconds: 0 };
+    }
+    current.tracks.push(track);
+    current.bytes += bytes;
+    current.seconds += seconds;
+  }
+  if (current.tracks.length) discs.push(current);
+  return discs;
+}
+function formatBurnClock(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+function formatBurnMb(bytes: number) {
+  return `${(Math.max(0, bytes) / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+}
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const SMART_MIX_NAMES: Record<SmartIntensity, string> = {
@@ -403,6 +454,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [burnOpen, setBurnOpen] = useState(false);
+  const [burnMode, setBurnMode] = useState<BurnMode>("mp3");
+  const [burnBusy, setBurnBusy] = useState(false);
+  const [burnStatus, setBurnStatus] = useState("");
+  const [burnLaunchUrl, setBurnLaunchUrl] = useState("");
+  const [burnManifestPath, setBurnManifestPath] = useState("");
   const [enrichment, setEnrichment] = useState<EnrichmentState>({ running: false, current: 0, total: 0, matched: 0, review: 0, notFound: 0, label: "", serviceMessage: "" });
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
@@ -607,6 +664,18 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   async function playTrackOnce(track: MusicTrack) {
     const current = player.currentTrack?.id === track.id;
+
+    // Recently Added is displayed newest -> oldest. Its playback queue must
+    // use that same visible order so the newest song continues into the next
+    // newest instead of landing at the end of the underlying library queue.
+    if (songSort === "recently_added") {
+      const recentQueueActive = !player.activePlaylistId && player.activePlaylistName === "Recently Added";
+      if (current && recentQueueActive && player.playing) { pauseMusic(); return; }
+      if (current && recentQueueActive) { await playMusic(); return; }
+      await playMusicAdHocQueue("Recently Added", filteredTracks, track.id);
+      return;
+    }
+
     if (current && player.playing) { pauseMusic(); return; }
     if (current) { await playMusic(); return; }
     activateAllMusicTracks();
@@ -622,10 +691,19 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       // uploaded tracks whose first signed/source URL was stale or incomplete.
       try {
         clearMusicUrlCache(track.id);
-        await refreshTracks();
+        const refreshed = await refreshTracks();
         await loadMusicLibrary(true);
-        activateAllMusicTracks();
-        await playMusicTrack(track.id, 0);
+
+        if (songSort === "recently_added") {
+          const visibleIds = new Set(filteredTracks.map((item) => item.id));
+          const refreshedQueue = refreshed
+            .filter((item) => visibleIds.has(item.id))
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          await playMusicAdHocQueue("Recently Added", refreshedQueue, track.id);
+        } else {
+          activateAllMusicTracks();
+          await playMusicTrack(track.id, 0);
+        }
       } catch {
         setPlaybackErrors((current) => ({ ...current, [track.id]: "COULDN’T PLAY THIS TRACK • RETRY" }));
       }
@@ -922,6 +1000,120 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try { await playMusicPlaylist(selectedPlaylist, selectedPlaylistTracks, trackId); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not play playlist."); }
   }
+
+  const selectedPlaylistBurnSeconds = selectedPlaylistTracks.reduce((sum, track) => sum + burnTrackSeconds(track), 0);
+  const selectedPlaylistBurnBytes = selectedPlaylistTracks.reduce((sum, track) => sum + burnTrackBytes(track), 0);
+  const burnDiscs = splitBurnDiscs(selectedPlaylistTracks, burnMode);
+
+  function openBurnStudio() {
+    if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
+    setBurnMode("mp3");
+    setBurnStatus("");
+    setBurnLaunchUrl("");
+    setBurnManifestPath("");
+    setBurnOpen(true);
+  }
+
+  function closeBurnStudio() {
+    if (burnBusy) return;
+    setBurnOpen(false);
+    setBurnStatus("");
+    setBurnLaunchUrl("");
+    setBurnManifestPath("");
+  }
+
+  async function prepareWindowsBurn() {
+    if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
+    setBurnBusy(true);
+    setBurnStatus("PREPARING SECURE WINDOWS BURN PACKAGE…");
+    setBurnLaunchUrl("");
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!authData.user) throw new Error("Sign in before preparing a disc.");
+
+      const signedTracks = await Promise.all(
+        selectedPlaylistTracks.map(async (track, index) => ({
+          id: track.id,
+          order: index + 1,
+          title: track.title,
+          artist: artistLabel(track),
+          album: track.album || "",
+          originalName: track.original_name,
+          mimeType: track.mime_type || "",
+          bytes: burnTrackBytes(track),
+          seconds: burnTrackSeconds(track),
+          url: await getMusicTrackSignedUrl(track),
+        }))
+      );
+
+      const manifest = {
+        version: 1,
+        source: "MVP Trainer Pro",
+        createdAt: new Date().toISOString(),
+        mode: burnMode,
+        playlist: {
+          id: selectedPlaylist.id,
+          name: selectedPlaylist.name,
+          trackCount: selectedPlaylistTracks.length,
+          bytes: selectedPlaylistBurnBytes,
+          seconds: selectedPlaylistBurnSeconds,
+        },
+        capacity: burnMode === "mp3"
+          ? { type: "data", bytes: MP3_CD_CAPACITY_BYTES, label: "700 MB CD-R" }
+          : { type: "audio", seconds: AUDIO_CD_CAPACITY_SECONDS, label: "80 minute audio CD" },
+        discs: burnDiscs.map((disc) => ({
+          number: disc.number,
+          bytes: disc.bytes,
+          seconds: disc.seconds,
+          trackIds: disc.tracks.map((track) => track.id),
+        })),
+        tracks: signedTracks,
+      };
+
+      const manifestPath = `${authData.user.id}/burn-manifests/${Date.now()}-${crypto.randomUUID()}.json`;
+      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+      const { error: uploadError } = await supabase.storage
+        .from(MUSIC_BUCKET)
+        .upload(manifestPath, manifestBlob, { upsert: false, contentType: "application/json", cacheControl: "21600" });
+      if (uploadError) throw uploadError;
+
+      const { data: signedManifest, error: signedError } = await supabase.storage
+        .from(MUSIC_BUCKET)
+        .createSignedUrl(manifestPath, 6 * 60 * 60);
+      if (signedError) throw signedError;
+      if (!signedManifest?.signedUrl) throw new Error("Could not create the Windows burn handoff.");
+
+      setBurnManifestPath(manifestPath);
+      setBurnLaunchUrl(`mvptrainerburn://burn?manifest=${encodeURIComponent(signedManifest.signedUrl)}`);
+      setBurnStatus("READY • OPEN WINDOWS BURNER");
+    } catch (caught) {
+      setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare this disc.");
+    } finally {
+      setBurnBusy(false);
+    }
+  }
+
+  function launchWindowsBurner() {
+    if (!burnLaunchUrl) return;
+    setBurnStatus("OPENING WINDOWS BURNER…");
+    const link = document.createElement("a");
+    link.href = burnLaunchUrl;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    // The helper downloads the manifest immediately. Remove the tiny temporary
+    // manifest later so burn handoffs do not accumulate in storage.
+    if (burnManifestPath) {
+      const path = burnManifestPath;
+      window.setTimeout(() => {
+        void supabase.storage.from(MUSIC_BUCKET).remove([path]);
+      }, 6 * 60 * 60 * 1000);
+    }
+  }
   async function buildAndPlaySmartMix(mode: SmartIntensity = smartIntensity) {
     const mix = buildSmartMix(tracks, smartMinutes, mode);
     if (!mix.length) { setError("Upload songs before building a Smart Mix."); return; }
@@ -1144,7 +1336,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "playlists" ? <div className="tr10-playlistLayout">
           <aside><div className="tr10-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="New playlist" /><button onClick={() => void createPlaylist()}>+</button></div>{regularPlaylists.map((playlist) => <button key={playlist.id} className={selectedPlaylistId === playlist.id ? "is-active" : ""} onClick={() => setSelectedPlaylistId(playlist.id)}><strong>{playlist.name}</strong><span>{(playlistTrackIds[playlist.id] || []).length} SONGS</span></button>)}</aside>
-          <section className="tr10-playlistConsole">{selectedPlaylist ? <><header><div><small>PLAYLIST</small><h2>{selectedPlaylist.name}</h2></div><div><button className="is-primary" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button><button className="is-danger" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE</button></div></header><div className="tr10-playlistSongs">{selectedPlaylistTracks.map((track,index) => <article key={track.id}><b>{String(index+1).padStart(2,"0")}</b><TrackArtwork track={track} /><div><strong>{track.title}</strong><span>{artistLabel(track)}</span></div><button onClick={() => void playSelectedPlaylist(track.id)}>▶</button><button disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}>▲</button><button disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}>▼</button><button className="is-danger" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></article>)}</div><button className="tr10-addSelected" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED SONGS</button></> : <div className="tr10-empty">Create a playlist to get started.</div>}</section>
+          <section className="tr10-playlistConsole">{selectedPlaylist ? <><header><div><small>PLAYLIST</small><h2>{selectedPlaylist.name}</h2></div><div><button className="is-primary" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}>▶ PLAY</button><button className="is-burn" disabled={!selectedPlaylistTracks.length} onClick={openBurnStudio}>◉ BURN / EXPORT CD</button><button className="is-danger" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE</button></div></header><div className="tr10-playlistSongs">{selectedPlaylistTracks.map((track,index) => <article key={track.id}><b>{String(index+1).padStart(2,"0")}</b><TrackArtwork track={track} /><div><strong>{track.title}</strong><span>{artistLabel(track)}</span></div><button onClick={() => void playSelectedPlaylist(track.id)}>▶</button><button disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}>▲</button><button disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}>▼</button><button className="is-danger" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></article>)}</div><button className="tr10-addSelected" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED SONGS</button></> : <div className="tr10-empty">Create a playlist to get started.</div>}</section>
         </div> : null}
 
         {tab === "smart" ? <section className="tr10-smart">
@@ -1256,6 +1448,79 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
       {playlistModalTrackIds.length ? <div className="tr10-modalBack" onMouseDown={() => setPlaylistModalTrackIds([])}><section className="tr10-picker" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}><header><div><span>PLAYLIST ROUTING</span><h2>{playlistModalTrackIds.length} song{playlistModalTrackIds.length===1 ? "" : "s"}</h2></div><button onClick={() => setPlaylistModalTrackIds([])}>×</button></header><div>{regularPlaylists.map((playlist) => <label key={playlist.id}><input type="checkbox" checked={playlistModalSelections.has(playlist.id)} onChange={() => setPlaylistModalSelections((current) => {const next=new Set(current);next.has(playlist.id)?next.delete(playlist.id):next.add(playlist.id);return next;})} /><span><strong>{playlist.name}</strong><small>{playlistTrackIds[playlist.id]?.length || 0} songs</small></span></label>)}</div><label className="tr10-newRoute"><span>CREATE NEW PLAYLIST</span><input value={playlistModalName} onChange={(event) => setPlaylistModalName(event.target.value)} placeholder="Playlist name" /></label><footer><button onClick={() => setPlaylistModalTrackIds([])}>CANCEL</button><button className="is-primary" disabled={busyId === "playlist-route"} onClick={() => void savePlaylistMemberships()}>SAVE PLAYLISTS</button></footer></section></div> : null}
 
+      {burnOpen && selectedPlaylist ? (
+        <div className="tr10-modalBack tr10-burnBack" onMouseDown={closeBurnStudio}>
+          <section className="tr10-burnStudio" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
+            <header>
+              <div>
+                <span>CD BURN STUDIO</span>
+                <h2>{selectedPlaylist.name}</h2>
+                <p>Prepare this playlist in its current song order and hand it to Windows.</p>
+              </div>
+              <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>×</button>
+            </header>
+
+            <div className="tr10-burnBody">
+              <div className="tr10-burnModes">
+                <button type="button" className={burnMode === "mp3" ? "is-active" : ""} onClick={() => { setBurnMode("mp3"); setBurnLaunchUrl(""); setBurnStatus(""); }}>
+                  <b>MP3 DISC</b>
+                  <span>700 MB DATA CD</span>
+                  <small>Keeps the original music files for compatible car stereos, computers, and players.</small>
+                </button>
+                <button type="button" className={burnMode === "audio" ? "is-active" : ""} onClick={() => { setBurnMode("audio"); setBurnLaunchUrl(""); setBurnStatus(""); }}>
+                  <b>STANDARD AUDIO CD</b>
+                  <span>80 MINUTE CD</span>
+                  <small>Prepares the ordered playlist and opens the Windows Media Player Burn workflow.</small>
+                </button>
+              </div>
+
+              <div className="tr10-burnStats">
+                <div><span>TRACKS</span><strong>{selectedPlaylistTracks.length}</strong></div>
+                <div><span>PLAY TIME</span><strong>{formatBurnClock(selectedPlaylistBurnSeconds)}</strong></div>
+                <div><span>FILE SIZE</span><strong>{formatBurnMb(selectedPlaylistBurnBytes)}</strong></div>
+                <div><span>DISCS</span><strong>{burnDiscs.length || 1}</strong></div>
+              </div>
+
+              <section className="tr10-burnMap">
+                <header><span>DISC PLAN</span><small>Playlist order preserved</small></header>
+                {burnDiscs.map((disc) => {
+                  const first = selectedPlaylistTracks.findIndex((track) => track.id === disc.tracks[0]?.id) + 1;
+                  const last = selectedPlaylistTracks.findIndex((track) => track.id === disc.tracks[disc.tracks.length - 1]?.id) + 1;
+                  const used = burnMode === "mp3"
+                    ? Math.min(100, (disc.bytes / MP3_CD_CAPACITY_BYTES) * 100)
+                    : Math.min(100, (disc.seconds / AUDIO_CD_CAPACITY_SECONDS) * 100);
+                  return (
+                    <article key={disc.number}>
+                      <div><b>DISC {disc.number}</b><span>Tracks {first}–{last}</span></div>
+                      <div className="tr10-burnMeter"><i style={{ width: `${used}%` }} /></div>
+                      <strong>{burnMode === "mp3" ? formatBurnMb(disc.bytes) : formatBurnClock(disc.seconds)}</strong>
+                    </article>
+                  );
+                })}
+              </section>
+
+              <div className="tr10-burnHelperNote">
+                <b>WINDOWS HELPER</b>
+                <span>Install the included MVP Trainer Burn Helper once on this PC. After that, OPEN WINDOWS BURNER hands the selected disc plan to Windows.</span>
+              </div>
+
+              {burnStatus ? <div className={`tr10-burnStatus ${burnLaunchUrl ? "is-ready" : ""}`}>{burnStatus}</div> : null}
+            </div>
+
+            <footer>
+              <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>CANCEL</button>
+              {!burnLaunchUrl ? (
+                <button type="button" className="is-primary" disabled={burnBusy || !selectedPlaylistTracks.length} onClick={() => void prepareWindowsBurn()}>
+                  {burnBusy ? "PREPARING…" : burnMode === "mp3" ? "PREPARE MP3 DISC" : "PREPARE AUDIO CD"}
+                </button>
+              ) : (
+                <button type="button" className="is-primary is-ready" onClick={launchWindowsBurner}>OPEN WINDOWS BURNER</button>
+              )}
+            </footer>
+          </section>
+        </div>
+      ) : null}
+
       <style>{`
         .tr10-page{width:min(1180px,calc(100% - 32px));margin:0 auto 120px;color:#eef8fc;font-family:inherit;min-width:0}.tr10-page *{box-sizing:border-box}.tr10-page button,.tr10-page input,.tr10-page select{font:inherit}.tr10-page button{cursor:pointer}.tr10-page button:disabled{cursor:not-allowed;opacity:.42}
         .tr10-hero,.tr10-console{border:1px solid rgba(70,181,222,.24);border-top-color:rgba(149,222,248,.33);border-radius:18px;background:linear-gradient(180deg,rgba(12,31,42,.97),rgba(4,13,19,.99));box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 14px 32px rgba(0,0,0,.24)}.tr10-hero{padding:24px 28px;display:flex;justify-content:space-between;gap:22px;align-items:flex-start}.tr10-hero span,.tr10-sectionHead span,.tr10-inspector header span,.tr10-reviewModal header span,.tr10-picker header span,.tr10-smart span{font-size:9px;font-weight:1000;letter-spacing:.15em;color:#5bcdf2}.tr10-hero h1{font-size:36px;line-height:1;margin:8px 0 9px;letter-spacing:-.04em}.tr10-hero p{max-width:800px;margin:0;color:#8fa5af;font-weight:650;font-size:11px}.tr10-hero>button{height:38px;padding:0 18px;border:1px solid rgba(130,170,185,.18);border-radius:10px;background:#071219;color:#c8dce4;font-size:8px;font-weight:1000}
@@ -1271,14 +1536,22 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-actions{display:flex;justify-content:flex-end;gap:5px}.tr10-actions button,.tr10-order button{height:30px;padding:0 8px;border:1px solid rgba(75,147,172,.13);border-radius:7px;background:#061118;color:#879da6;font-size:7px;font-weight:950}.tr10-actions button.is-liked{color:#5fe2a6;border-color:rgba(66,211,151,.32);background:rgba(18,76,55,.28)}.tr10-actions button.is-down{color:#ff8d93;border-color:rgba(255,90,99,.3);background:rgba(83,20,25,.27)}.tr10-actions .is-edit{color:#d9f5fd;border-color:rgba(71,197,238,.28);background:#082733}.tr10-order{position:absolute;right:9px;bottom:3px;display:none;gap:3px}.tr10-row:hover .tr10-order{display:flex}.tr10-order button{height:19px;padding:0 5px;font-size:7px}
         .tr10-pager{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;background:#050b0f}.tr10-pager>span{color:#5d7580;font-size:7px;font-weight:1000}.tr10-pager>div{display:flex;gap:7px;align-items:center}.tr10-pager button{height:30px;padding:0 10px;border:1px solid rgba(76,148,173,.14);border-radius:7px;background:#061118;color:#8fa6af;font-size:7px;font-weight:1000}.tr10-pager b{min-width:55px;text-align:center;font-size:8px}
         .tr10-cardGrid{padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:9px}.tr10-collectionCard{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid rgba(79,145,169,.11);border-radius:12px;background:linear-gradient(180deg,#07141a,#050c10)}.tr10-collectionCard small{color:#56ceef;font-size:6px;font-weight:1000}.tr10-collectionCard h3{margin:4px 0 2px;font-size:15px}.tr10-collectionCard p{margin:0;color:#6f8791;font-size:7px;font-weight:800}.tr10-collectionCard>button{height:34px;padding:0 10px;border:1px solid rgba(70,196,236,.25);border-radius:8px;background:#082633;color:#cceef8;font-size:7px;font-weight:1000}
-        .tr10-playlistLayout{display:grid;grid-template-columns:230px 1fr;min-height:430px}.tr10-playlistLayout>aside{padding:10px;border-right:1px solid rgba(78,143,166,.1);background:#050b0f}.tr10-createPlaylist{display:grid;grid-template-columns:1fr 35px;gap:5px;margin-bottom:9px}.tr10-createPlaylist input{min-width:0;height:35px;padding:0 9px;border:1px solid rgba(75,149,175,.14);border-radius:8px;background:#071219;color:#d7e7ed}.tr10-createPlaylist button{height:35px;border:1px solid rgba(70,194,234,.24);border-radius:8px;background:#082734;color:#d9f7ff;font-weight:1000}.tr10-playlistLayout>aside>button{width:100%;min-height:52px;padding:9px 10px;display:grid;gap:2px;text-align:left;border:0;border-radius:8px;background:transparent;color:#91a7af}.tr10-playlistLayout>aside>button.is-active{background:linear-gradient(90deg,rgba(10,63,81,.58),rgba(7,25,33,.3));color:#e3f7fc}.tr10-playlistLayout>aside>button span{font-size:6px;color:#607984}.tr10-playlistConsole>header{padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(77,144,168,.09)}.tr10-playlistConsole>header h2{margin:3px 0 0}.tr10-playlistConsole>header>div:last-child{display:flex;gap:6px}.tr10-playlistConsole button{height:33px;padding:0 9px;border:1px solid rgba(75,148,174,.14);border-radius:7px;background:#061218;color:#91aab3;font-size:7px;font-weight:1000}.tr10-playlistConsole button.is-primary{color:#d9f7ff;border-color:rgba(69,198,239,.32);background:#092c3a}.tr10-playlistConsole button.is-danger{color:#ff9fa4;border-color:rgba(255,82,91,.23);background:rgba(71,17,21,.25)}.tr10-playlistSongs{padding:9px}.tr10-playlistSongs article{display:grid;grid-template-columns:25px auto minmax(0,1fr) repeat(4,auto);gap:7px;align-items:center;padding:7px;border-bottom:1px solid rgba(75,136,158,.08)}.tr10-playlistSongs article>b{font-size:7px;color:#586f79}.tr10-playlistSongs strong{display:block;font-size:10px}.tr10-playlistSongs span{display:block;font-size:7px;color:#677f89}.tr10-addSelected{margin:0 12px 12px}
+        .tr10-playlistLayout{display:grid;grid-template-columns:230px 1fr;min-height:430px}.tr10-playlistLayout>aside{padding:10px;border-right:1px solid rgba(78,143,166,.1);background:#050b0f}.tr10-createPlaylist{display:grid;grid-template-columns:1fr 35px;gap:5px;margin-bottom:9px}.tr10-createPlaylist input{min-width:0;height:35px;padding:0 9px;border:1px solid rgba(75,149,175,.14);border-radius:8px;background:#071219;color:#d7e7ed}.tr10-createPlaylist button{height:35px;border:1px solid rgba(70,194,234,.24);border-radius:8px;background:#082734;color:#d9f7ff;font-weight:1000}.tr10-playlistLayout>aside>button{width:100%;min-height:52px;padding:9px 10px;display:grid;gap:2px;text-align:left;border:0;border-radius:8px;background:transparent;color:#91a7af}.tr10-playlistLayout>aside>button.is-active{background:linear-gradient(90deg,rgba(10,63,81,.58),rgba(7,25,33,.3));color:#e3f7fc}.tr10-playlistLayout>aside>button span{font-size:6px;color:#607984}.tr10-playlistConsole>header{padding:12px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(77,144,168,.09)}.tr10-playlistConsole>header h2{margin:3px 0 0}.tr10-playlistConsole>header>div:last-child{display:flex;gap:6px}.tr10-playlistConsole button{height:33px;padding:0 9px;border:1px solid rgba(75,148,174,.14);border-radius:7px;background:#061218;color:#91aab3;font-size:7px;font-weight:1000}.tr10-playlistConsole button.is-primary{color:#d9f7ff;border-color:rgba(69,198,239,.32);background:#092c3a}.tr10-playlistConsole button.is-burn{color:#ffe2a5;border-color:rgba(242,174,61,.34);background:linear-gradient(180deg,rgba(92,58,12,.52),rgba(37,24,8,.56));box-shadow:inset 0 1px rgba(255,255,255,.04),0 7px 18px rgba(0,0,0,.22)}.tr10-playlistConsole button.is-burn:hover{border-color:rgba(255,194,82,.62);color:#fff0c8}.tr10-playlistConsole button.is-danger{color:#ff9fa4;border-color:rgba(255,82,91,.23);background:rgba(71,17,21,.25)}.tr10-playlistSongs{padding:9px}.tr10-playlistSongs article{display:grid;grid-template-columns:25px auto minmax(0,1fr) repeat(4,auto);gap:7px;align-items:center;padding:7px;border-bottom:1px solid rgba(75,136,158,.08)}.tr10-playlistSongs article>b{font-size:7px;color:#586f79}.tr10-playlistSongs strong{display:block;font-size:10px}.tr10-playlistSongs span{display:block;font-size:7px;color:#677f89}.tr10-addSelected{margin:0 12px 12px}
         .tr10-smart{display:grid;grid-template-columns:1fr 300px;min-height:430px}.tr10-smartBuild{padding:23px}.tr10-smartBuild h2{margin:6px 0;font-size:26px}.tr10-smartBuild p{margin:0 0 18px;color:#788f99;font-size:10px}.tr10-smartBuild label{display:grid;grid-template-columns:auto 100px auto;gap:8px;align-items:center;padding:10px;border:1px solid rgba(76,145,169,.1);border-radius:10px;background:#061118}.tr10-smartBuild label input{height:35px;padding:0 9px;border:1px solid rgba(74,148,174,.13);border-radius:8px;background:#07151c;color:#d6e8ee}.tr10-intensity{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px}.tr10-intensity button{height:36px;border:1px solid rgba(74,149,175,.13);border-radius:8px;background:#07151c;color:#748d97;font-size:8px;font-weight:1000}.tr10-intensity button.is-active{color:#dff7ff;border-color:rgba(73,206,246,.38);background:#0a3040}.tr10-smartLaunch{width:100%;height:46px;margin-top:10px;border:1px solid rgba(72,203,244,.42);border-radius:10px;background:linear-gradient(180deg,#0c4c62,#082d3b);color:#e2f9ff;font-size:9px;font-weight:1000}.tr10-smartCollections{padding:12px;border-left:1px solid rgba(75,141,164,.09);background:#050b0f}.tr10-smartCollections button{width:100%;min-height:54px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;border:0;border-bottom:1px solid rgba(73,132,153,.07);background:transparent;color:#9fb5bd;font-size:8px;font-weight:1000;text-align:left}
         .tr10-reviewDock{position:fixed;right:18px;bottom:88px;z-index:6500;min-height:42px;padding:0 15px;border:1px solid rgba(255,185,77,.42);border-radius:10px;background:linear-gradient(180deg,#d98a21,#9b540c);color:#180e04;font-size:8px;font-weight:1000;box-shadow:0 12px 32px rgba(0,0,0,.36)}
         .tr10-modalBack{position:fixed;inset:0;z-index:9000;padding:18px 12px;display:grid;place-items:center;background:rgba(0,4,7,.89);backdrop-filter:blur(10px)}.tr10-inspector,.tr10-reviewModal,.tr10-picker{width:min(900px,100%);max-height:calc(100dvh - 36px);overflow:hidden;border:1px solid rgba(80,206,246,.34);border-radius:17px;background:linear-gradient(180deg,#0b202b,#050d12);box-shadow:0 34px 90px rgba(0,0,0,.68)}.tr10-inspector{height:min(760px,calc(100dvh - 36px));display:grid;grid-template-rows:auto minmax(0,1fr) auto}.tr10-inspector>header,.tr10-reviewModal>header,.tr10-picker>header{padding:14px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(82,157,184,.12);background:#081922}.tr10-inspector>header>button,.tr10-reviewModal>header>button,.tr10-picker>header>button{width:35px;height:35px;border:1px solid rgba(105,159,178,.17);border-radius:9px;background:#071219;color:#d8e8ed;font-size:20px}.tr10-inspectIdentity{display:flex;gap:12px;align-items:center;min-width:0}.tr10-inspectIdentity h2{margin:4px 0 2px;font-size:23px}.tr10-inspectIdentity p{margin:0;color:#7a919b;font-size:9px}.tr10-editState{display:block;margin-top:5px;color:#65808b;font-size:6px;font-weight:1000;letter-spacing:.1em}.tr10-editState.is-dirty{color:#f0b75f}.tr10-editState.is-changed{color:#6ae3aa}.tr10-inspectorScroll{min-height:0;overflow:auto;overscroll-behavior:contain}.tr10-inspectCommands{position:sticky;top:0;z-index:3;padding:9px 13px;display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid rgba(80,153,180,.1);background:rgba(6,18,25,.97)}.tr10-inspectCommands button,.tr10-artControls button{height:34px;padding:0 10px;border:1px solid rgba(73,181,219,.19);border-radius:8px;background:#07141b;color:#cbe5ee;font-size:7px;font-weight:1000}.tr10-inspectCommands button.is-liked{color:#61e3a6}.tr10-inspectCommands button.is-down{color:#ff9191}.tr10-detailStatus{margin:10px 13px 0;padding:9px 11px;border:1px solid rgba(77,171,205,.17);border-radius:8px;background:#07141b;color:#9ec0cd;font-size:8px}.tr10-detailStatus.is-changed{border-color:rgba(67,208,147,.32);color:#8ce8ba}.tr10-detailStatus.is-error{border-color:rgba(255,92,99,.38);color:#ffb1b5}.tr10-inspectGrid{padding:13px;display:grid;grid-template-columns:1fr 1fr;gap:9px}.tr10-inspectGrid label{display:grid;gap:5px}.tr10-inspectGrid label>span,.tr10-artControls>span{font-size:6px;font-weight:1000;letter-spacing:.11em;color:#617b85}.tr10-inspectGrid input{height:39px;padding:0 10px;border:1px solid rgba(75,151,178,.15);border-radius:8px;background:#06131a;color:#e8f5f9}.tr10-artControls{display:flex;align-items:end;gap:6px}.tr10-artControls>span{margin-right:auto;margin-bottom:10px}.tr10-artControls .is-danger{color:#ff969c}.tr10-meta{display:grid;grid-template-columns:repeat(3,1fr);margin:0;padding:0 13px 13px}.tr10-meta>div{min-width:0;padding:10px;border:1px solid rgba(85,146,167,.09)}.tr10-meta dt{font-size:6px;font-weight:1000;color:#617b85}.tr10-meta dd{margin:4px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:8px}.tr10-inspector>footer,.tr10-detailLookupFooter,.tr10-reviewModal>footer,.tr10-picker>footer{padding:11px 13px;display:flex;justify-content:flex-end;align-items:center;gap:7px;border-top:1px solid rgba(82,157,184,.12);background:#061117}.tr10-inspector>footer button,.tr10-detailLookupFooter button,.tr10-reviewModal>footer button,.tr10-picker>footer button{height:38px;padding:0 12px;border:1px solid rgba(83,168,199,.18);border-radius:9px;background:#07131a;color:#d1e3e9;font-size:7px;font-weight:1000}.tr10-inspector>footer .is-primary,.tr10-detailLookupFooter .is-primary,.tr10-reviewModal>footer .is-primary,.tr10-picker>footer .is-primary{border-color:rgba(61,205,255,.5);background:linear-gradient(180deg,#0d4559,#092e3c);color:#e1f9ff}.tr10-inspector>footer .is-danger{color:#ff9da3}.tr10-saveButton.is-changed{border-color:rgba(72,221,155,.58)!important;background:linear-gradient(180deg,rgba(25,115,78,.8),rgba(16,70,49,.88))!important;color:#b3f5d2!important}
         .tr10-detailLookup{min-height:0;overflow:auto}.tr10-detailLookupHead{position:sticky;top:0;z-index:4;padding:12px 13px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;border-bottom:1px solid rgba(75,148,174,.12);background:rgba(6,19,26,.98)}.tr10-detailLookupHead>button{height:34px;padding:0 10px;border:1px solid rgba(77,164,196,.2);border-radius:8px;background:#07141b;color:#bdd5de;font-size:7px;font-weight:1000}.tr10-detailLookupHead h3{margin:3px 0 2px;font-size:20px}.tr10-detailLookupHead p{margin:0;color:#78909a;font-size:8px}.tr10-detailCandidates,.tr10-candidates{padding:10px 12px 18px;display:grid;gap:7px;max-height:470px;overflow:auto}.tr10-detailCandidates>button,.tr10-candidates>button{width:100%;display:grid;grid-template-columns:58px minmax(0,1fr) 120px 26px;gap:10px;align-items:center;text-align:left;padding:9px;border:1px solid rgba(78,143,166,.12);border-radius:10px;background:linear-gradient(180deg,rgba(7,19,26,.96),rgba(4,12,17,.97));color:#edf7fb}.tr10-detailCandidates>button.is-selected,.tr10-candidates>button.is-selected{border-color:rgba(73,210,252,.66);background:linear-gradient(90deg,rgba(10,65,83,.68),rgba(5,20,27,.96));box-shadow:inset 3px 0 #42d3fb}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:58px;height:58px;border-radius:8px;object-fit:cover}.tr10-candidateArt{display:grid;place-items:center;background:#09202a;color:#7cdff7}.tr10-detailCandidates strong,.tr10-candidates strong{display:block;font-size:10px}.tr10-detailCandidates span,.tr10-detailCandidates small,.tr10-candidates span,.tr10-candidates small{display:block;margin-top:2px;color:#738a94;font-size:7px}.tr10-matchTier{justify-self:end;display:grid;gap:2px;text-align:right;font-style:normal;font-size:6px;font-weight:1000;color:#8299a2}.tr10-matchTier b{font-size:13px;color:#78dff9}.tr10-matchTier.is-exact-match,.tr10-matchTier.is-exact-match b{color:#69e9ad}.tr10-matchTier.is-possible-match b{color:#efc372}.tr10-selectMark{width:24px;height:24px;display:grid;place-items:center;border:1px solid rgba(83,153,179,.19);border-radius:50%;font-style:normal;color:#70eab0}.tr10-detailCandidates>button.is-selected .tr10-selectMark,.tr10-candidates>button.is-selected .tr10-selectMark{border-color:rgba(83,229,174,.48);background:rgba(26,100,73,.31)}.tr10-detailLookupFooter{z-index:5}.tr10-detailLookupFooter>div{min-width:0;margin-right:auto;display:grid;gap:2px}.tr10-detailLookupFooter strong{font-size:8px;color:#b9d5df}.tr10-detailLookupFooter small{font-size:6px;color:#607984}.tr10-reviewLoading,.tr10-empty{padding:24px;text-align:center;color:#68808a;font-size:8px;font-weight:800}
         .tr10-analysisBack{z-index:7600}.tr10-analysisModal{width:min(610px,100%);overflow:hidden;border:1px solid rgba(72,202,245,.38);border-radius:16px;background:linear-gradient(180deg,#0b202a,#050d12);box-shadow:0 30px 90px rgba(0,0,0,.72),inset 0 1px rgba(255,255,255,.025)}.tr10-analysisModal>header{padding:17px 18px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:15px;border-bottom:1px solid rgba(82,157,184,.12);background:linear-gradient(180deg,rgba(11,39,51,.96),rgba(7,23,31,.96))}.tr10-analysisModal>header span{color:#59d5f7;font-size:7px;font-weight:1000;letter-spacing:.14em}.tr10-analysisModal>header h2{margin:5px 0 3px;font-size:20px}.tr10-analysisModal>header p{margin:0;color:#79919b;font-size:8px}.tr10-analysisCounter{min-width:72px;padding:8px 10px;display:grid;justify-items:center;border:1px solid rgba(75,190,229,.16);border-radius:9px;background:rgba(0,0,0,.18)}.tr10-analysisCounter strong{font-size:21px;line-height:1;color:#e7f8fd;font-variant-numeric:tabular-nums}.tr10-analysisCounter span{margin-top:3px;color:#66828d!important;font-size:6px!important}.tr10-analysisProgress{height:4px;background:rgba(75,158,188,.08);overflow:hidden}.tr10-analysisProgress i{display:block;width:100%;height:100%;transform-origin:left;background:linear-gradient(90deg,#2db8df,#6fe5ff);box-shadow:0 0 9px rgba(65,210,249,.3);transition:transform .25s ease}.tr10-analysisStats{padding:13px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tr10-analysisStats>div{min-height:59px;display:grid;place-content:center;text-align:center;border:1px solid rgba(76,151,178,.11);border-radius:8px;background:rgba(4,13,18,.7)}.tr10-analysisStats span{color:#627d88;font-size:6px;font-weight:1000;letter-spacing:.1em}.tr10-analysisStats strong{margin-top:3px;color:#d9edf4;font-size:18px;font-variant-numeric:tabular-nums}.tr10-analysisStats>div:nth-child(1) strong{color:#72e0aa}.tr10-analysisStats>div:nth-child(2) strong{color:#76dbf4}.tr10-analysisStats>div:nth-child(3) strong{color:#e9b16a}.tr10-analysisSweep{height:66px;padding:10px 18px 11px;display:grid;grid-template-columns:repeat(10,1fr);gap:5px;align-items:end;border-top:1px solid rgba(75,145,170,.07);border-bottom:1px solid rgba(75,145,170,.07);background:repeating-linear-gradient(0deg,transparent 0,transparent 9px,rgba(78,158,187,.035) 10px)}.tr10-analysisSweep i{height:54%;border-radius:2px 2px 0 0;background:linear-gradient(180deg,#70e2ff,#29afd4);opacity:.35;animation:tr10Analyze 1.05s ease-in-out infinite alternate}.tr10-analysisSweep i:nth-child(2){animation-delay:.08s;height:78%}.tr10-analysisSweep i:nth-child(3){animation-delay:.16s;height:62%}.tr10-analysisSweep i:nth-child(4){animation-delay:.24s;height:88%}.tr10-analysisSweep i:nth-child(5){animation-delay:.32s;height:70%}.tr10-analysisSweep i:nth-child(6){animation-delay:.4s;height:82%}.tr10-analysisSweep i:nth-child(7){animation-delay:.48s;height:58%}.tr10-analysisSweep i:nth-child(8){animation-delay:.56s;height:72%}.tr10-analysisSweep i:nth-child(9){animation-delay:.64s;height:48%}.tr10-analysisSweep i:nth-child(10){animation-delay:.72s;height:63%}@keyframes tr10Analyze{from{transform:scaleY(.32);opacity:.25}to{transform:scaleY(1);opacity:.82}}.tr10-analysisModal>footer{padding:12px 16px 14px;display:grid;gap:3px}.tr10-analysisModal>footer span{color:#75dca9;font-size:7px;font-weight:1000;letter-spacing:.11em}.tr10-analysisModal>footer small{color:#69818b;font-size:7px}.tr10-reviewModal{width:min(850px,100%);display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto}.tr10-reviewHeader h2{margin:4px 0 2px}.tr10-reviewHeader p{margin:0;color:#738a94;font-size:8px}.tr10-reviewProgress{position:relative;padding:10px 13px;border-bottom:1px solid rgba(80,151,177,.1);overflow:hidden}.tr10-reviewProgress>div{display:flex;justify-content:space-between;gap:12px;color:#7d99a3;font-size:7px}.tr10-reviewProgress strong{color:#d8edf4}.tr10-reviewProgress>i{position:absolute;left:0;right:0;bottom:0;height:2px;transform-origin:left;background:#4dd7f8}.tr10-reviewInstruction{padding:10px 13px;border-bottom:1px solid rgba(80,151,177,.08);background:#061219}.tr10-reviewInstruction span{font-size:7px;font-weight:1000;color:#6edbf7}.tr10-reviewInstruction p{margin:4px 0 0;color:#7b929c;font-size:8px}.tr10-reviewModal .tr10-candidates{max-height:none;min-height:0}.tr10-picker{width:min(520px,100%)}.tr10-picker>div{max-height:330px;overflow:auto;padding:9px}.tr10-picker>div>label{min-height:52px;display:grid;grid-template-columns:28px 1fr;align-items:center;padding:8px;border-bottom:1px solid rgba(80,145,169,.08)}.tr10-picker>div strong{display:block;font-size:9px}.tr10-picker>div small{font-size:7px;color:#677f89}.tr10-newRoute{display:grid;gap:5px;padding:10px 13px}.tr10-newRoute span{font-size:6px;font-weight:1000;color:#617b85}.tr10-newRoute input{height:38px;padding:0 10px;border:1px solid rgba(75,151,178,.15);border-radius:8px;background:#06131a;color:#e8f5f9}
+        .tr10-burnStudio{width:min(760px,100%);max-height:calc(100dvh - 32px);overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto;border:1px solid rgba(85,196,232,.34);border-radius:18px;background:linear-gradient(180deg,#0b1b24,#050c11);box-shadow:0 38px 110px rgba(0,0,0,.78),inset 0 1px rgba(255,255,255,.05)}
+        .tr10-burnStudio>header{padding:15px 17px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(93,166,192,.12);background:linear-gradient(180deg,#0c202a,#08151c)}.tr10-burnStudio>header span{color:#f5bd60;font-size:7px;font-weight:1000;letter-spacing:.15em}.tr10-burnStudio>header h2{margin:4px 0 2px;color:#f4fbfd;font-size:22px}.tr10-burnStudio>header p{margin:0;color:#79919b;font-size:8px}.tr10-burnStudio>header>button{width:36px;height:36px;border:1px solid rgba(112,165,184,.18);border-radius:10px;background:#071219;color:#dcecf1;font-size:20px}
+        .tr10-burnBody{min-height:0;overflow:auto;padding:13px;display:grid;gap:11px}.tr10-burnModes{display:grid;grid-template-columns:1fr 1fr;gap:9px}.tr10-burnModes>button{min-height:104px;padding:12px;display:grid;align-content:start;gap:4px;text-align:left;border:1px solid rgba(104,166,187,.14);border-radius:12px;background:linear-gradient(180deg,#09161d,#050c10);color:#a6bac2}.tr10-burnModes>button b{font-size:12px;color:#e4f0f4}.tr10-burnModes>button span{font-size:7px;font-weight:1000;letter-spacing:.09em;color:#718b95}.tr10-burnModes>button small{margin-top:4px;font-size:8px;line-height:1.4;color:#758c95}.tr10-burnModes>button.is-active{border-color:rgba(244,181,78,.55);background:radial-gradient(480px 100px at 20% 0,rgba(244,181,78,.10),transparent 62%),linear-gradient(180deg,#17180f,#090d0d);box-shadow:inset 0 1px rgba(255,255,255,.04),0 16px 38px rgba(0,0,0,.28)}.tr10-burnModes>button.is-active b{color:#ffe1a0}.tr10-burnModes>button.is-active span{color:#d5a953}
+        .tr10-burnStats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.tr10-burnStats>div{min-height:58px;padding:9px;display:grid;align-content:center;border:1px solid rgba(91,154,176,.11);border-radius:9px;background:#061016}.tr10-burnStats span{font-size:6px;font-weight:1000;letter-spacing:.1em;color:#657f89}.tr10-burnStats strong{margin-top:4px;color:#deedf2;font-size:14px;font-variant-numeric:tabular-nums}
+        .tr10-burnMap{border:1px solid rgba(93,157,179,.11);border-radius:11px;overflow:hidden;background:#050d11}.tr10-burnMap>header{padding:8px 10px;display:flex;justify-content:space-between;border-bottom:1px solid rgba(93,157,179,.09)}.tr10-burnMap>header span{font-size:7px;font-weight:1000;letter-spacing:.11em;color:#8da8b2}.tr10-burnMap>header small{font-size:7px;color:#657e87}.tr10-burnMap article{padding:9px 10px;display:grid;grid-template-columns:145px minmax(0,1fr) 82px;gap:10px;align-items:center;border-bottom:1px solid rgba(92,147,166,.07)}.tr10-burnMap article:last-child{border-bottom:0}.tr10-burnMap article>div:first-child{display:grid;gap:2px}.tr10-burnMap article b{font-size:8px;color:#f0c779}.tr10-burnMap article span{font-size:7px;color:#77909a}.tr10-burnMap article>strong{text-align:right;font-size:9px;color:#cbdce2;font-variant-numeric:tabular-nums}.tr10-burnMeter{height:6px;overflow:hidden;border-radius:999px;background:#0d1a20}.tr10-burnMeter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#26b6df,#f1b34f);box-shadow:0 0 10px rgba(70,204,241,.16)}
+        .tr10-burnHelperNote{padding:10px 11px;display:grid;grid-template-columns:105px 1fr;gap:10px;align-items:start;border:1px solid rgba(83,178,210,.15);border-radius:10px;background:rgba(8,29,38,.56)}.tr10-burnHelperNote b{font-size:7px;color:#78dff8;letter-spacing:.1em}.tr10-burnHelperNote span{font-size:8px;line-height:1.45;color:#8da5ae}.tr10-burnStatus{padding:9px 11px;border:1px solid rgba(242,174,61,.24);border-radius:9px;background:rgba(85,53,8,.16);color:#efc77d;font-size:8px;font-weight:1000;letter-spacing:.04em}.tr10-burnStatus.is-ready{border-color:rgba(58,212,142,.30);background:rgba(17,85,58,.18);color:#87e8b8}
+        .tr10-burnStudio>footer{padding:11px 13px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid rgba(83,154,180,.12);background:#061117}.tr10-burnStudio>footer button{height:40px;padding:0 14px;border:1px solid rgba(83,164,194,.18);border-radius:9px;background:#07131a;color:#d3e4ea;font-size:7px;font-weight:1000}.tr10-burnStudio>footer button.is-primary{min-width:180px;border-color:rgba(244,181,78,.52);background:linear-gradient(180deg,#6b4715,#3b260b);color:#ffebbd;box-shadow:inset 0 1px rgba(255,255,255,.08),0 12px 28px rgba(0,0,0,.30)}.tr10-burnStudio>footer button.is-primary.is-ready{border-color:rgba(54,217,143,.52);background:linear-gradient(180deg,#176743,#0d3d28);color:#c7f8de}
+
         @media(max-width:900px){.tr10-stats{grid-template-columns:repeat(3,1fr)}.tr10-tableHead,.tr10-row{grid-template-columns:28px minmax(0,1fr) 55px 100px}.tr10-tableHead span:last-child{display:none}.tr10-actions{grid-column:2/-1;justify-content:flex-start}.tr10-toolbar{grid-template-columns:1fr 1fr}.tr10-toolbar label:first-child{grid-column:1/-1}.tr10-playlistLayout{grid-template-columns:200px 1fr}.tr10-smart{grid-template-columns:1fr}}
-        @media(max-width:650px){.tr10-page{width:calc(100% - 14px)}.tr10-hero{padding:18px;display:block}.tr10-hero h1{font-size:30px}.tr10-hero>button{margin-top:12px}.tr10-stats{grid-template-columns:1fr 1fr}.tr10-sectionHead{display:block}.tr10-headActions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr}.tr10-healthRail{grid-template-columns:repeat(5,minmax(112px,1fr));overflow-x:auto;padding-bottom:2px}.tr10-tabs{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.tr10-statusPanelHead small{display:none}.tr10-toolbar{grid-template-columns:1fr}.tr10-toolbar label:first-child{grid-column:auto}.tr10-bulk{display:block}.tr10-bulk>div{margin-top:8px;display:grid;grid-template-columns:1fr 1fr}.tr10-tableHead{display:none}.tr10-row{grid-template-columns:26px minmax(0,1fr);gap:8px;padding:10px 9px}.tr10-row>.tr10-duration,.tr10-row>.tr10-energy{grid-column:2}.tr10-actions{grid-column:2;display:grid;grid-template-columns:40px 40px repeat(4,1fr)}.tr10-trackCell{grid-template-columns:auto auto minmax(0,1fr)}.tr10-healthBadge{grid-column:3;justify-self:start}.tr10-energy{width:150px}.tr10-order{display:none!important}.tr10-cardGrid{grid-template-columns:1fr;padding:9px}.tr10-playlistLayout{grid-template-columns:1fr}.tr10-playlistLayout>aside{border-right:0;border-bottom:1px solid rgba(78,143,166,.1);display:flex;overflow-x:auto}.tr10-createPlaylist{min-width:190px}.tr10-playlistLayout>aside>button{min-width:145px}.tr10-playlistSongs article{grid-template-columns:23px auto minmax(0,1fr) auto}.tr10-playlistSongs article>button:nth-of-type(n+2){display:none}.tr10-inspector{height:calc(100dvh - 16px)}.tr10-modalBack{padding:8px}.tr10-inspectGrid{grid-template-columns:1fr;padding:10px}.tr10-meta{grid-template-columns:1fr 1fr;padding:0 10px 10px}.tr10-inspectCommands{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer .tr10-saveButton{grid-column:1/-1;grid-row:1}.tr10-detailLookupHead{display:block}.tr10-detailLookupHead>button{margin-bottom:8px}.tr10-detailCandidates>button,.tr10-candidates>button{grid-template-columns:52px minmax(0,1fr) 26px}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:52px;height:52px}.tr10-matchTier{grid-column:2;justify-self:start;text-align:left}.tr10-selectMark{grid-column:3;grid-row:1/3}.tr10-detailLookupFooter{display:grid;grid-template-columns:1fr 1fr}.tr10-detailLookupFooter>div{grid-column:1/-1}.tr10-reviewProgress>div{display:grid}.tr10-reviewDock{right:9px;bottom:80px}.tr10-smartBuild{padding:18px}}
+        @media(max-width:650px){.tr10-burnModes{grid-template-columns:1fr}.tr10-burnStats{grid-template-columns:1fr 1fr}.tr10-burnMap article{grid-template-columns:98px minmax(0,1fr) 64px;gap:7px}.tr10-burnHelperNote{grid-template-columns:1fr;gap:4px}.tr10-burnStudio>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-burnStudio>footer button.is-primary{min-width:0}.tr10-page{width:calc(100% - 14px)}.tr10-hero{padding:18px;display:block}.tr10-hero h1{font-size:30px}.tr10-hero>button{margin-top:12px}.tr10-stats{grid-template-columns:1fr 1fr}.tr10-sectionHead{display:block}.tr10-headActions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr}.tr10-healthRail{grid-template-columns:repeat(5,minmax(112px,1fr));overflow-x:auto;padding-bottom:2px}.tr10-tabs{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.tr10-statusPanelHead small{display:none}.tr10-toolbar{grid-template-columns:1fr}.tr10-toolbar label:first-child{grid-column:auto}.tr10-bulk{display:block}.tr10-bulk>div{margin-top:8px;display:grid;grid-template-columns:1fr 1fr}.tr10-tableHead{display:none}.tr10-row{grid-template-columns:26px minmax(0,1fr);gap:8px;padding:10px 9px}.tr10-row>.tr10-duration,.tr10-row>.tr10-energy{grid-column:2}.tr10-actions{grid-column:2;display:grid;grid-template-columns:40px 40px repeat(4,1fr)}.tr10-trackCell{grid-template-columns:auto auto minmax(0,1fr)}.tr10-healthBadge{grid-column:3;justify-self:start}.tr10-energy{width:150px}.tr10-order{display:none!important}.tr10-cardGrid{grid-template-columns:1fr;padding:9px}.tr10-playlistLayout{grid-template-columns:1fr}.tr10-playlistLayout>aside{border-right:0;border-bottom:1px solid rgba(78,143,166,.1);display:flex;overflow-x:auto}.tr10-createPlaylist{min-width:190px}.tr10-playlistLayout>aside>button{min-width:145px}.tr10-playlistSongs article{grid-template-columns:23px auto minmax(0,1fr) auto}.tr10-playlistSongs article>button:nth-of-type(n+2){display:none}.tr10-inspector{height:calc(100dvh - 16px)}.tr10-modalBack{padding:8px}.tr10-inspectGrid{grid-template-columns:1fr;padding:10px}.tr10-meta{grid-template-columns:1fr 1fr;padding:0 10px 10px}.tr10-inspectCommands{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer .tr10-saveButton{grid-column:1/-1;grid-row:1}.tr10-detailLookupHead{display:block}.tr10-detailLookupHead>button{margin-bottom:8px}.tr10-detailCandidates>button,.tr10-candidates>button{grid-template-columns:52px minmax(0,1fr) 26px}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:52px;height:52px}.tr10-matchTier{grid-column:2;justify-self:start;text-align:left}.tr10-selectMark{grid-column:3;grid-row:1/3}.tr10-detailLookupFooter{display:grid;grid-template-columns:1fr 1fr}.tr10-detailLookupFooter>div{grid-column:1/-1}.tr10-reviewProgress>div{display:grid}.tr10-reviewDock{right:9px;bottom:80px}.tr10-smartBuild{padding:18px}}
 
         /* FINAL PRO LIBRARY + RESPONSIVE PASS: preserve all current features */
         .tr10-page{
