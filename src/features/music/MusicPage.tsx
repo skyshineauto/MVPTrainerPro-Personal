@@ -9,7 +9,6 @@ import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
   getMusicTrackSignedUrl,
-  MUSIC_BUCKET,
   listMusicTracks,
   removeMusicArtwork,
   removeMusicTrack,
@@ -67,7 +66,6 @@ import {
   type MusicDiscoverySavedSong,
   type MusicDiscoverySeed,
 } from "../../lib/musicDiscovery";
-import { supabase } from "../../lib/supabase";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -458,8 +456,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [burnMode, setBurnMode] = useState<BurnMode>("mp3");
   const [burnBusy, setBurnBusy] = useState(false);
   const [burnStatus, setBurnStatus] = useState("");
-  const [burnLaunchUrl, setBurnLaunchUrl] = useState("");
-  const [burnManifestPath, setBurnManifestPath] = useState("");
   const [enrichment, setEnrichment] = useState<EnrichmentState>({ running: false, current: 0, total: 0, matched: 0, review: 0, notFound: 0, label: "", serviceMessage: "" });
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
@@ -1009,8 +1005,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
     setBurnMode("mp3");
     setBurnStatus("");
-    setBurnLaunchUrl("");
-    setBurnManifestPath("");
     setBurnOpen(true);
   }
 
@@ -1018,100 +1012,105 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (burnBusy) return;
     setBurnOpen(false);
     setBurnStatus("");
-    setBurnLaunchUrl("");
-    setBurnManifestPath("");
   }
 
-  async function prepareWindowsBurn() {
+  function burnSafeName(value: string) {
+    return (value || "Music")
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 110) || "Music";
+  }
+
+  function burnExtension(track: MusicTrack) {
+    const name = String(track.original_name || "");
+    const match = name.match(/\.([a-zA-Z0-9]{2,5})$/);
+    if (match?.[1]) return match[1].toLowerCase();
+    const mime = String(track.mime_type || "").toLowerCase();
+    if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
+    if (mime.includes("wav") || mime.includes("wave")) return "wav";
+    return "mp3";
+  }
+
+  async function writeBurnText(directory: any, fileName: string, text: string) {
+    const handle = await directory.getFileHandle(fileName, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+  }
+
+  async function writeBurnTrack(directory: any, track: MusicTrack, fileName: string) {
+    const url = await getMusicTrackSignedUrl(track);
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Could not download ${track.title}.`);
+    const blob = await response.blob();
+    const handle = await directory.getFileHandle(fileName, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  }
+
+  function burnInstructions(mode: BurnMode, playlistName: string, discNumber: number, discCount: number) {
+    const heading = `MVP TRAINER PRO • ${playlistName} • DISC ${discNumber} OF ${discCount}`;
+    if (mode === "mp3") {
+      return `${heading}\n\nMP3 / DATA DISC\n\n1. Insert a blank CD-R.\n2. Open this Disc ${discNumber} folder in File Explorer.\n3. Select the numbered music files and copy/send them to your CD/DVD drive.\n4. Use Windows “Finish burning” / “Burn to disc”.\n5. Choose the option intended for a CD/DVD player when Windows asks.\n\nThe numbered filenames preserve your MVP Trainer playlist order.\nPLAYLIST.m3u8 is included for compatible players.\n`;
+    }
+    return `${heading}\n\nSTANDARD AUDIO CD\n\n1. Insert a blank CD-R.\n2. Open Windows Media Player Legacy (or your preferred audio-CD burning software).\n3. Open PLAYLIST.m3u8 from this Disc ${discNumber} folder or add the numbered music files in order.\n4. Choose Audio CD / Burn.\n5. Verify the order, then start the burn.\n\nThis folder is guidance-only preparation. MVP Trainer does not log or alter your music files.\n`;
+  }
+
+  async function prepareCdFiles() {
     if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
+    const picker = (window as any).showDirectoryPicker as undefined | ((options?: any) => Promise<any>);
+    if (!picker) {
+      setBurnStatus("DESKTOP CHROME OR EDGE IS REQUIRED TO PREPARE A CD FOLDER SAFELY.");
+      return;
+    }
+
     setBurnBusy(true);
-    setBurnStatus("PREPARING SECURE WINDOWS BURN PACKAGE…");
-    setBurnLaunchUrl("");
+    setBurnStatus("CHOOSE WHERE TO SAVE THE CD FILES…");
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      if (!authData.user) throw new Error("Sign in before preparing a disc.");
+      const destination = await picker({ mode: "readwrite" });
+      const rootName = burnSafeName(`${selectedPlaylist.name} - ${burnMode === "mp3" ? "MP3 CD" : "Audio CD"}`);
+      const root = await destination.getDirectoryHandle(rootName, { create: true });
+      const overallIndex = new Map(selectedPlaylistTracks.map((track, index) => [track.id, index + 1] as const));
 
-      const signedTracks = await Promise.all(
-        selectedPlaylistTracks.map(async (track, index) => ({
-          id: track.id,
-          order: index + 1,
-          title: track.title,
-          artist: artistLabel(track),
-          album: track.album || "",
-          originalName: track.original_name,
-          mimeType: track.mime_type || "",
-          bytes: burnTrackBytes(track),
-          seconds: burnTrackSeconds(track),
-          url: await getMusicTrackSignedUrl(track),
-        }))
+      for (let discIndex = 0; discIndex < burnDiscs.length; discIndex += 1) {
+        const disc = burnDiscs[discIndex];
+        const discDir = await root.getDirectoryHandle(`Disc ${disc.number}`, { create: true });
+        const playlistLines = ["#EXTM3U"];
+
+        for (let trackIndex = 0; trackIndex < disc.tracks.length; trackIndex += 1) {
+          const track = disc.tracks[trackIndex];
+          const order = overallIndex.get(track.id) ?? trackIndex + 1;
+          const ext = burnExtension(track);
+          const fileName = `${String(order).padStart(2, "0")} - ${burnSafeName(artistLabel(track))} - ${burnSafeName(track.title)}.${ext}`;
+          setBurnStatus(`SAVING DISC ${disc.number}/${burnDiscs.length} • ${trackIndex + 1}/${disc.tracks.length} • ${track.title}`);
+          await writeBurnTrack(discDir, track, fileName);
+          playlistLines.push(`#EXTINF:${Math.round(burnTrackSeconds(track))},${artistLabel(track)} - ${track.title}`);
+          playlistLines.push(fileName);
+        }
+
+        await writeBurnText(discDir, "PLAYLIST.m3u8", `${playlistLines.join("\n")}\n`);
+        await writeBurnText(
+          discDir,
+          "BURN_INSTRUCTIONS.txt",
+          burnInstructions(burnMode, selectedPlaylist.name, disc.number, burnDiscs.length)
+        );
+      }
+
+      await writeBurnText(
+        root,
+        "README.txt",
+        `MVP Trainer Pro CD preparation\nPlaylist: ${selectedPlaylist.name}\nMode: ${burnMode === "mp3" ? "MP3 / Data Disc" : "Standard Audio CD"}\nTracks: ${selectedPlaylistTracks.length}\nDiscs: ${burnDiscs.length}\nPlay time: ${formatBurnClock(selectedPlaylistBurnSeconds)}\nLibrary size: ${formatBurnMb(selectedPlaylistBurnBytes)}\n\nOpen each Disc folder and follow BURN_INSTRUCTIONS.txt.\n`
       );
 
-      const manifest = {
-        version: 1,
-        source: "MVP Trainer Pro",
-        createdAt: new Date().toISOString(),
-        mode: burnMode,
-        playlist: {
-          id: selectedPlaylist.id,
-          name: selectedPlaylist.name,
-          trackCount: selectedPlaylistTracks.length,
-          bytes: selectedPlaylistBurnBytes,
-          seconds: selectedPlaylistBurnSeconds,
-        },
-        capacity: burnMode === "mp3"
-          ? { type: "data", bytes: MP3_CD_CAPACITY_BYTES, label: "700 MB CD-R" }
-          : { type: "audio", seconds: AUDIO_CD_CAPACITY_SECONDS, label: "80 minute audio CD" },
-        discs: burnDiscs.map((disc) => ({
-          number: disc.number,
-          bytes: disc.bytes,
-          seconds: disc.seconds,
-          trackIds: disc.tracks.map((track) => track.id),
-        })),
-        tracks: signedTracks,
-      };
-
-      const manifestPath = `${authData.user.id}/burn-manifests/${Date.now()}-${crypto.randomUUID()}.json`;
-      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
-      const { error: uploadError } = await supabase.storage
-        .from(MUSIC_BUCKET)
-        .upload(manifestPath, manifestBlob, { upsert: false, contentType: "application/json", cacheControl: "21600" });
-      if (uploadError) throw uploadError;
-
-      const { data: signedManifest, error: signedError } = await supabase.storage
-        .from(MUSIC_BUCKET)
-        .createSignedUrl(manifestPath, 6 * 60 * 60);
-      if (signedError) throw signedError;
-      if (!signedManifest?.signedUrl) throw new Error("Could not create the Windows burn handoff.");
-
-      setBurnManifestPath(manifestPath);
-      setBurnLaunchUrl(`mvptrainerburn://burn?manifest=${encodeURIComponent(signedManifest.signedUrl)}`);
-      setBurnStatus("READY • OPEN WINDOWS BURNER");
-    } catch (caught) {
-      setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare this disc.");
+      setBurnStatus(`READY • ${burnDiscs.length} DISC${burnDiscs.length === 1 ? "" : "S"} PREPARED IN YOUR SELECTED FOLDER`);
+    } catch (caught: any) {
+      if (caught?.name === "AbortError") setBurnStatus("CD PREPARATION CANCELED.");
+      else setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare the CD files.");
     } finally {
       setBurnBusy(false);
-    }
-  }
-
-  function launchWindowsBurner() {
-    if (!burnLaunchUrl) return;
-    setBurnStatus("OPENING WINDOWS BURNER…");
-    const link = document.createElement("a");
-    link.href = burnLaunchUrl;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    // The helper downloads the manifest immediately. Remove the tiny temporary
-    // manifest later so burn handoffs do not accumulate in storage.
-    if (burnManifestPath) {
-      const path = burnManifestPath;
-      window.setTimeout(() => {
-        void supabase.storage.from(MUSIC_BUCKET).remove([path]);
-      }, 6 * 60 * 60 * 1000);
     }
   }
   async function buildAndPlaySmartMix(mode: SmartIntensity = smartIntensity) {
@@ -1462,15 +1461,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
             <div className="tr10-burnBody">
               <div className="tr10-burnModes">
-                <button type="button" className={burnMode === "mp3" ? "is-active" : ""} onClick={() => { setBurnMode("mp3"); setBurnLaunchUrl(""); setBurnStatus(""); }}>
+                <button type="button" className={burnMode === "mp3" ? "is-active" : ""} onClick={() => { setBurnMode("mp3"); setBurnStatus(""); }}>
                   <b>MP3 DISC</b>
                   <span>700 MB DATA CD</span>
-                  <small>Keeps the original music files for compatible car stereos, computers, and players.</small>
+                  <small>Prepares your numbered playlist files and M3U for Windows File Explorer disc burning.</small>
                 </button>
-                <button type="button" className={burnMode === "audio" ? "is-active" : ""} onClick={() => { setBurnMode("audio"); setBurnLaunchUrl(""); setBurnStatus(""); }}>
+                <button type="button" className={burnMode === "audio" ? "is-active" : ""} onClick={() => { setBurnMode("audio"); setBurnStatus(""); }}>
                   <b>STANDARD AUDIO CD</b>
                   <span>80 MINUTE CD</span>
-                  <small>Prepares the ordered playlist and opens the Windows Media Player Burn workflow.</small>
+                  <small>Prepares the ordered files and M3U for Windows Media Player Legacy or your audio-CD burner.</small>
                 </button>
               </div>
 
@@ -1500,22 +1499,18 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               </section>
 
               <div className="tr10-burnHelperNote">
-                <b>WINDOWS HELPER</b>
-                <span>Install the included MVP Trainer Burn Helper once on this PC. After that, OPEN WINDOWS BURNER hands the selected disc plan to Windows.</span>
+                <b>SAFE WINDOWS WORKFLOW</b>
+                <span>MVP Trainer saves the ordered music files directly into a folder you choose. No PowerShell, helper app, registry change, or antivirus exception is required.</span>
               </div>
 
-              {burnStatus ? <div className={`tr10-burnStatus ${burnLaunchUrl ? "is-ready" : ""}`}>{burnStatus}</div> : null}
+              {burnStatus ? <div className={`tr10-burnStatus ${burnStatus.startsWith("READY") ? "is-ready" : ""}`}>{burnStatus}</div> : null}
             </div>
 
             <footer>
               <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>CANCEL</button>
-              {!burnLaunchUrl ? (
-                <button type="button" className="is-primary" disabled={burnBusy || !selectedPlaylistTracks.length} onClick={() => void prepareWindowsBurn()}>
-                  {burnBusy ? "PREPARING…" : burnMode === "mp3" ? "PREPARE MP3 DISC" : "PREPARE AUDIO CD"}
-                </button>
-              ) : (
-                <button type="button" className="is-primary is-ready" onClick={launchWindowsBurner}>OPEN WINDOWS BURNER</button>
-              )}
+              <button type="button" className="is-primary" disabled={burnBusy || !selectedPlaylistTracks.length} onClick={() => void prepareCdFiles()}>
+                {burnBusy ? "PREPARING…" : burnMode === "mp3" ? "PREPARE MP3 DISC FILES" : "PREPARE AUDIO CD FILES"}
+              </button>
             </footer>
           </section>
         </div>
