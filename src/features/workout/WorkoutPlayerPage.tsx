@@ -3308,7 +3308,7 @@ export function WorkoutPlayerPage({ params }: any) {
       </div>
 
       {current && currentRunnerItem ? (
-        <div className="tr-activeExerciseRunner" data-ui-rev="active-console-v2">
+        <div className="tr-activeExerciseRunner">
           <ExerciseRunner
             workoutExercise={current}
             item={currentRunnerItem}
