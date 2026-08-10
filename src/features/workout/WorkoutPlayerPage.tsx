@@ -3308,7 +3308,7 @@ export function WorkoutPlayerPage({ params }: any) {
       </div>
 
       {current && currentRunnerItem ? (
-        <div className="tr-activeExerciseRunner">
+        <div className="tr-activeExerciseRunner" data-ui-rev="active-console-v2">
           <ExerciseRunner
             workoutExercise={current}
             item={currentRunnerItem}
@@ -5492,7 +5492,7 @@ const unlock = async () => {
 
                   <span className="tr-proCoachHeaderRight">
                     <span className={`tr-proCoachDecision is-${previousGuidance.decision.toLowerCase()}`}>
-                      {previousGuidance.decision}
+                      {previousGuidance.decision === "PROGRESS" ? "INCREASE" : previousGuidance.decision === "DELOAD" ? "REDUCE" : previousGuidance.decision}
                     </span>
                     <span className="tr-proCoachMinimize">
                       {progressionOpen ? "MINIMIZE" : "EXPAND"}
@@ -6608,7 +6608,7 @@ const unlock = async () => {
 }
 
 .tr-proCoach{
-  position:relative;
+  position:relative; --coach-accent:#63dcff;
   overflow:hidden;
   margin-top:16px;
   border-radius:22px;
@@ -6631,9 +6631,9 @@ const unlock = async () => {
   background:linear-gradient(180deg,rgba(0,215,255,.95),rgba(0,120,255,.18));
   box-shadow:0 0 18px rgba(0,190,255,.35);
 }
-.tr-proCoach--progress::before{background:linear-gradient(180deg,#59f3a8,rgba(22,184,112,.18));}
-.tr-proCoach--monitor::before{background:linear-gradient(180deg,#e4c678,rgba(193,148,44,.18));}
-.tr-proCoach--deload::before{background:linear-gradient(180deg,#ff7584,rgba(207,55,77,.18));}
+.tr-proCoach--progress{--coach-accent:#59f3a8;}.tr-proCoach--progress::before{background:linear-gradient(180deg,#59f3a8,rgba(22,184,112,.18));}
+.tr-proCoach--monitor{--coach-accent:#f0c760;}.tr-proCoach--monitor::before{background:linear-gradient(180deg,#f0c760,rgba(193,148,44,.18));}
+.tr-proCoach--deload{--coach-accent:#ffad55;}.tr-proCoach--deload::before{background:linear-gradient(180deg,#ffad55,rgba(224,124,31,.18));}
 .tr-proCoachHeader{
   width:100%;
   min-height:72px;
@@ -6669,11 +6669,11 @@ const unlock = async () => {
   box-shadow:inset 0 1px 0 rgba(255,255,255,.11),0 0 22px rgba(0,180,255,.12);
 }
 .tr-proCoachTitle{
-  display:block;
+  display:block;font-family:inherit;
   color:rgba(250,253,255,.98);
-  font-size:15px;
-  font-weight:1100;
-  letter-spacing:.14em;
+  font-size:14px;
+  font-weight:900;
+  letter-spacing:.095em;
 }
 .tr-proCoachSubtitle{
   display:block;
@@ -6700,13 +6700,13 @@ const unlock = async () => {
   border:1px solid rgba(0,190,255,.40);
   background:rgba(0,170,255,.10);
   color:rgba(206,245,255,.98);
-  font-size:9px;
-  font-weight:1100;
-  letter-spacing:.14em;
+  font-size:9px;font-family:inherit;
+  font-weight:900;
+  letter-spacing:.12em;
 }
-.tr-proCoachDecision.is-progress{border-color:rgba(74,235,155,.44);background:rgba(40,205,130,.11);color:#a8ffd0;}
-.tr-proCoachDecision.is-monitor{border-color:rgba(228,198,120,.44);background:rgba(205,165,65,.10);color:#f3dfaa;}
-.tr-proCoachDecision.is-deload{border-color:rgba(255,102,120,.46);background:rgba(230,70,92,.11);color:#ffc1c9;}
+.tr-proCoachDecision.is-progress{border-color:rgba(74,235,155,.52);background:rgba(40,205,130,.13);color:#a8ffd0;box-shadow:0 0 16px rgba(40,205,130,.10);}
+.tr-proCoachDecision.is-monitor{border-color:rgba(240,199,96,.50);background:rgba(205,165,65,.12);color:#ffe2a0;box-shadow:0 0 16px rgba(205,165,65,.09);}
+.tr-proCoachDecision.is-deload{border-color:rgba(255,173,85,.54);background:rgba(224,124,31,.13);color:#ffd2a0;box-shadow:0 0 16px rgba(224,124,31,.10);}
 .tr-proCoachMinimize{
   color:rgba(183,207,220,.62);
   font-size:8px;
@@ -6771,11 +6771,11 @@ const unlock = async () => {
 }
 .tr-proCoachHeroAction{
   margin-top:8px;
-  color:rgba(246,253,255,.99);
-  font-size:clamp(23px,3vw,36px);
+  color:var(--coach-accent);
+  font-size:clamp(24px,3vw,36px);
   line-height:1.04;
-  font-weight:1150;
-  letter-spacing:.018em;
+  font-weight:900;font-family:inherit;
+  letter-spacing:-.01em;
   text-wrap:balance;
 }
 .tr-proCoachHeroTitle{
