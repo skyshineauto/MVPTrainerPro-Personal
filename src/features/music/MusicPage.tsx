@@ -1039,23 +1039,275 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     await writable.close();
   }
 
-  async function writeBurnTrack(directory: any, track: MusicTrack, fileName: string) {
+  function concatBurnBytes(parts: Uint8Array[]) {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
+
+  function id3SyncSafe(value: number) {
+    const size = Math.max(0, Math.floor(value));
+    return new Uint8Array([
+      (size >> 21) & 0x7f,
+      (size >> 14) & 0x7f,
+      (size >> 7) & 0x7f,
+      size & 0x7f,
+    ]);
+  }
+
+  function id3ReadSyncSafe(bytes: Uint8Array, offset: number) {
+    return (
+      ((bytes[offset] & 0x7f) << 21) |
+      ((bytes[offset + 1] & 0x7f) << 14) |
+      ((bytes[offset + 2] & 0x7f) << 7) |
+      (bytes[offset + 3] & 0x7f)
+    );
+  }
+
+  function id3ReadBe32(bytes: Uint8Array, offset: number) {
+    return (
+      bytes[offset] * 0x1000000 +
+      bytes[offset + 1] * 0x10000 +
+      bytes[offset + 2] * 0x100 +
+      bytes[offset + 3]
+    );
+  }
+
+  function id3TextPayload(value: string, version: number) {
+    const text = String(value || "").trim();
+    if (version >= 4) {
+      return concatBurnBytes([new Uint8Array([3]), new TextEncoder().encode(text)]);
+    }
+
+    const utf16 = new Uint8Array(3 + text.length * 2);
+    utf16[0] = 1;
+    utf16[1] = 0xff;
+    utf16[2] = 0xfe;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      utf16[3 + index * 2] = code & 0xff;
+      utf16[4 + index * 2] = (code >> 8) & 0xff;
+    }
+    return utf16;
+  }
+
+  function id3TextFrame(id: string, value: string, version: number) {
+    const payload = id3TextPayload(value, version);
+    const header = new Uint8Array(10);
+    for (let index = 0; index < 4; index += 1) header[index] = id.charCodeAt(index) || 0;
+    const sizeBytes = version >= 4
+      ? id3SyncSafe(payload.length)
+      : new Uint8Array([
+          (payload.length >>> 24) & 0xff,
+          (payload.length >>> 16) & 0xff,
+          (payload.length >>> 8) & 0xff,
+          payload.length & 0xff,
+        ]);
+    header.set(sizeBytes, 4);
+    return concatBurnBytes([header, payload]);
+  }
+
+  function id3AsciiField(value: string, length: number) {
+    const out = new Uint8Array(length);
+    const normalized = String(value || "").normalize("NFKD");
+    for (let index = 0; index < Math.min(length, normalized.length); index += 1) {
+      const code = normalized.charCodeAt(index);
+      out[index] = code >= 32 && code <= 255 ? code : 63;
+    }
+    return out;
+  }
+
+  function buildBurnId3v1(track: MusicTrack, order: number) {
+    const out = new Uint8Array(128);
+    out.set(new TextEncoder().encode("TAG"), 0);
+    out.set(id3AsciiField(track.title || "", 30), 3);
+    out.set(id3AsciiField(artistLabel(track), 30), 33);
+    out.set(id3AsciiField(track.album || "", 30), 63);
+    out.set(id3AsciiField(track.release_year ? String(track.release_year).slice(0, 4) : "", 4), 93);
+    out.set(id3AsciiField("MVP Trainer Pro", 28), 97);
+    out[125] = 0;
+    out[126] = Math.max(1, Math.min(255, Math.floor(order)));
+    out[127] = 255;
+    return out;
+  }
+
+  function parseBurnId3(bytes: Uint8Array) {
+    const hasTag =
+      bytes.length >= 10 &&
+      bytes[0] === 0x49 &&
+      bytes[1] === 0x44 &&
+      bytes[2] === 0x33;
+
+    if (!hasTag) {
+      return { version: 3, audioStart: 0, preservedFrames: [] as Uint8Array[] };
+    }
+
+    const version = bytes[3] === 4 ? 4 : bytes[3] === 3 ? 3 : 3;
+    const sourceVersion = bytes[3];
+    const flags = bytes[5] || 0;
+    const tagSize = id3ReadSyncSafe(bytes, 6);
+    const footerBytes = sourceVersion === 4 && (flags & 0x10) ? 10 : 0;
+    const audioStart = Math.min(bytes.length, 10 + tagSize + footerBytes);
+
+    if ((sourceVersion !== 3 && sourceVersion !== 4) || (flags & 0x80)) {
+      return { version, audioStart, preservedFrames: [] as Uint8Array[] };
+    }
+
+    const tagEnd = Math.min(bytes.length, 10 + tagSize);
+    let cursor = 10;
+
+    if (flags & 0x40) {
+      if (sourceVersion === 3 && cursor + 4 <= tagEnd) {
+        const extendedSize = id3ReadBe32(bytes, cursor);
+        cursor = Math.min(tagEnd, cursor + 4 + Math.max(0, extendedSize));
+      } else if (sourceVersion === 4 && cursor + 4 <= tagEnd) {
+        const extendedSize = id3ReadSyncSafe(bytes, cursor);
+        cursor = Math.min(tagEnd, cursor + Math.max(4, extendedSize));
+      }
+    }
+
+    const preservedFrames: Uint8Array[] = [];
+    const replacedIds = new Set(["TRCK", "TIT2", "TPE1", "TALB", "TYER", "TDRC", "TCON", "TPOS"]);
+
+    while (cursor + 10 <= tagEnd) {
+      const id = String.fromCharCode(bytes[cursor], bytes[cursor + 1], bytes[cursor + 2], bytes[cursor + 3]);
+      if (!/^[A-Z0-9]{4}$/.test(id)) break;
+
+      const frameSize = sourceVersion === 4
+        ? id3ReadSyncSafe(bytes, cursor + 4)
+        : id3ReadBe32(bytes, cursor + 4);
+      if (!(frameSize >= 0) || cursor + 10 + frameSize > tagEnd) break;
+
+      if (!replacedIds.has(id)) {
+        preservedFrames.push(bytes.slice(cursor, cursor + 10 + frameSize));
+      }
+      cursor += 10 + frameSize;
+    }
+
+    return { version, audioStart, preservedFrames };
+  }
+
+  async function normalizeMp3BurnCopy(
+    blob: Blob,
+    track: MusicTrack,
+    order: number,
+    totalTracks: number,
+    discNumber: number,
+    discCount: number
+  ) {
+    const source = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parseBurnId3(source);
+    const version = parsed.version;
+    const metadataFrames: Uint8Array[] = [
+      id3TextFrame("TIT2", track.title || "Unknown Title", version),
+      id3TextFrame("TPE1", artistLabel(track), version),
+      id3TextFrame("TRCK", `${order}/${totalTracks}`, version),
+      id3TextFrame("TPOS", `${discNumber}/${discCount}`, version),
+    ];
+
+    if (track.album) metadataFrames.push(id3TextFrame("TALB", track.album, version));
+    if (track.genre) metadataFrames.push(id3TextFrame("TCON", track.genre, version));
+    if (track.release_year) {
+      metadataFrames.push(
+        id3TextFrame(version >= 4 ? "TDRC" : "TYER", String(track.release_year).slice(0, 4), version)
+      );
+    }
+
+    const tagBody = concatBurnBytes([...parsed.preservedFrames, ...metadataFrames]);
+    const header = new Uint8Array(10);
+    header.set(new TextEncoder().encode("ID3"), 0);
+    header[3] = version;
+    header[4] = 0;
+    header[5] = 0;
+    header.set(id3SyncSafe(tagBody.length), 6);
+
+    let audioEnd = source.length;
+    if (
+      source.length >= 128 &&
+      source[source.length - 128] === 0x54 &&
+      source[source.length - 127] === 0x41 &&
+      source[source.length - 126] === 0x47
+    ) {
+      audioEnd -= 128;
+    }
+
+    const audioBytes = source.slice(parsed.audioStart, audioEnd);
+    const id3v1 = buildBurnId3v1(track, order);
+    return new Blob([header, tagBody, audioBytes, id3v1], { type: "audio/mpeg" });
+  }
+
+  async function writeBurnTrack(
+    directory: any,
+    track: MusicTrack,
+    fileName: string,
+    options?: {
+      normalizeMp3Order?: boolean;
+      order?: number;
+      totalTracks?: number;
+      discNumber?: number;
+      discCount?: number;
+    }
+  ) {
     const url = await getMusicTrackSignedUrl(track);
     const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) throw new Error(`Could not download ${track.title}.`);
-    const blob = await response.blob();
+    let blob = await response.blob();
+
+    if (options?.normalizeMp3Order) {
+      blob = await normalizeMp3BurnCopy(
+        blob,
+        track,
+        options.order ?? 1,
+        options.totalTracks ?? 1,
+        options.discNumber ?? 1,
+        options.discCount ?? 1
+      );
+    }
+
     const handle = await directory.getFileHandle(fileName, { create: true });
     const writable = await handle.createWritable();
     await writable.write(blob);
     await writable.close();
   }
 
-  function burnInstructions(mode: BurnMode, playlistName: string, discNumber: number, discCount: number) {
-    const heading = `MVP TRAINER PRO • ${playlistName} • DISC ${discNumber} OF ${discCount}`;
-    if (mode === "mp3") {
-      return `${heading}\n\nMP3 / DATA DISC\n\n1. Insert a blank CD-R.\n2. Open this Disc ${discNumber} folder in File Explorer.\n3. Select the numbered music files and copy/send them to your CD/DVD drive.\n4. Use Windows “Finish burning” / “Burn to disc”.\n5. Choose the option intended for a CD/DVD player when Windows asks.\n\nThe numbered filenames preserve your MVP Trainer playlist order.\nPLAYLIST.m3u8 is included for compatible players.\n`;
+  async function removeBurnEntryIfPresent(directory: any, name: string, recursive = false) {
+    try {
+      await directory.removeEntry(name, { recursive });
+    } catch {
+      // The generated entry may not exist yet.
     }
-    return `${heading}\n\nSTANDARD AUDIO CD\n\n1. Insert a blank CD-R.\n2. Open Windows Media Player Legacy (or your preferred audio-CD burning software).\n3. Open PLAYLIST.m3u8 from this Disc ${discNumber} folder or add the numbered music files in order.\n4. Choose Audio CD / Burn.\n5. Verify the order, then start the burn.\n\nThis folder is guidance-only preparation. MVP Trainer does not log or alter your music files.\n`;
+  }
+
+  async function cleanGeneratedBurnOutput(root: any) {
+    await removeBurnEntryIfPresent(root, "README.txt");
+    await removeBurnEntryIfPresent(root, "BURN_INSTRUCTIONS.txt");
+    await removeBurnEntryIfPresent(root, "PLAYLIST.m3u8");
+
+    try {
+      for await (const [name, handle] of root.entries()) {
+        if (/^Disc \d+$/i.test(name) && handle?.kind === "directory") {
+          await removeBurnEntryIfPresent(root, name, true);
+        }
+        if (/^PLAYLIST - Disc \d+\.m3u8$/i.test(name) && handle?.kind === "file") {
+          await removeBurnEntryIfPresent(root, name);
+        }
+      }
+    } catch {
+      // Browsers that cannot enumerate still overwrite the files generated below.
+    }
+  }
+
+  function burnInstructions(mode: BurnMode, playlistName: string, discCount: number) {
+    const heading = `MVP TRAINER PRO • ${playlistName}`;
+    if (mode === "mp3") {
+      return `${heading}\n\nMP3 / DATA DISC\n\nMVP Trainer prepared ${discCount} disc folder${discCount === 1 ? "" : "s"}. Each Disc folder contains MUSIC FILES ONLY for the cleanest car-stereo and MP3-player compatibility.\n\nFor each disc:\n1. Insert a blank CD-R.\n2. Open the matching Disc folder in File Explorer.\n3. Select ONLY the numbered MP3/music files inside that folder.\n4. Copy/send them to your CD/DVD drive.\n5. Use Windows “Finish burning” / “Burn to disc”.\n6. Choose the option intended for a CD/DVD player when Windows asks.\n\nIMPORTANT\n• Filenames are numbered in your MVP Trainer playlist order.\n• Exported MP3 COPIES also receive normalized embedded Track Number metadata so compatible stereos see the same order.\n• Your original MVP Trainer library files are never modified.\n• PLAYLIST file(s) are kept here in the parent folder for reference and should not be copied to the MP3 disc unless you specifically want them.\n`;
+    }
+    return `${heading}\n\nSTANDARD AUDIO CD\n\nMVP Trainer prepared ${discCount} disc folder${discCount === 1 ? "" : "s"} in playlist order.\n\nFor each disc:\n1. Insert a blank CD-R.\n2. Open Windows Media Player Legacy or your preferred audio-CD burning software.\n3. Open the matching PLAYLIST file in this parent folder, or add the numbered files from that Disc folder in order.\n4. Choose Audio CD / Burn.\n5. Verify the order, then start the burn.\n\nThe Disc folders contain music files only. Your original MVP Trainer library files are never modified.\n`;
   }
 
   async function prepareCdFiles() {
@@ -1073,7 +1325,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       const destination = await picker({ mode: "readwrite" });
       const rootName = burnSafeName(`${selectedPlaylist.name} - ${burnMode === "mp3" ? "MP3 CD" : "Audio CD"}`);
       const root = await destination.getDirectoryHandle(rootName, { create: true });
+      await cleanGeneratedBurnOutput(root);
+
       const overallIndex = new Map(selectedPlaylistTracks.map((track, index) => [track.id, index + 1] as const));
+      const playlistFiles: Array<{ name: string; lines: string[] }> = [];
 
       for (let discIndex = 0; discIndex < burnDiscs.length; discIndex += 1) {
         const disc = burnDiscs[discIndex];
@@ -1086,26 +1341,36 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           const ext = burnExtension(track);
           const fileName = `${String(order).padStart(2, "0")} - ${burnSafeName(artistLabel(track))} - ${burnSafeName(track.title)}.${ext}`;
           setBurnStatus(`SAVING DISC ${disc.number}/${burnDiscs.length} • ${trackIndex + 1}/${disc.tracks.length} • ${track.title}`);
-          await writeBurnTrack(discDir, track, fileName);
+          await writeBurnTrack(discDir, track, fileName, {
+            normalizeMp3Order: burnMode === "mp3" && ext === "mp3",
+            order,
+            totalTracks: selectedPlaylistTracks.length,
+            discNumber: disc.number,
+            discCount: burnDiscs.length,
+          });
           playlistLines.push(`#EXTINF:${Math.round(burnTrackSeconds(track))},${artistLabel(track)} - ${track.title}`);
-          playlistLines.push(fileName);
+          playlistLines.push(`Disc ${disc.number}/${fileName}`);
         }
 
-        await writeBurnText(discDir, "PLAYLIST.m3u8", `${playlistLines.join("\n")}\n`);
-        await writeBurnText(
-          discDir,
-          "BURN_INSTRUCTIONS.txt",
-          burnInstructions(burnMode, selectedPlaylist.name, disc.number, burnDiscs.length)
-        );
+        playlistFiles.push({
+          name: burnDiscs.length === 1 ? "PLAYLIST.m3u8" : `PLAYLIST - Disc ${disc.number}.m3u8`,
+          lines: playlistLines,
+        });
+      }
+
+      for (const playlistFile of playlistFiles) {
+        await writeBurnText(root, playlistFile.name, `${playlistFile.lines.join("\n")}\n`);
       }
 
       await writeBurnText(
         root,
-        "README.txt",
-        `MVP Trainer Pro CD preparation\nPlaylist: ${selectedPlaylist.name}\nMode: ${burnMode === "mp3" ? "MP3 / Data Disc" : "Standard Audio CD"}\nTracks: ${selectedPlaylistTracks.length}\nDiscs: ${burnDiscs.length}\nPlay time: ${formatBurnClock(selectedPlaylistBurnSeconds)}\nLibrary size: ${formatBurnMb(selectedPlaylistBurnBytes)}\n\nOpen each Disc folder and follow BURN_INSTRUCTIONS.txt.\n`
+        "BURN_INSTRUCTIONS.txt",
+        burnInstructions(burnMode, selectedPlaylist.name, burnDiscs.length)
       );
 
-      setBurnStatus(`READY • ${burnDiscs.length} DISC${burnDiscs.length === 1 ? "" : "S"} PREPARED IN YOUR SELECTED FOLDER`);
+      setBurnStatus(
+        `READY • ${burnDiscs.length} DISC${burnDiscs.length === 1 ? "" : "S"} PREPARED • DISC FOLDERS CONTAIN MUSIC ONLY${burnMode === "mp3" ? " • MP3 TRACK ORDER NORMALIZED" : ""}`
+      );
     } catch (caught: any) {
       if (caught?.name === "AbortError") setBurnStatus("CD PREPARATION CANCELED.");
       else setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare the CD files.");
