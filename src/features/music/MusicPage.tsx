@@ -456,6 +456,16 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [burnMode, setBurnMode] = useState<BurnMode>("mp3");
   const [burnBusy, setBurnBusy] = useState(false);
   const [burnStatus, setBurnStatus] = useState("");
+  const [burnComplete, setBurnComplete] = useState(false);
+  const [burnProgress, setBurnProgress] = useState<{
+    disc: number;
+    discs: number;
+    track: number;
+    tracks: number;
+    title: string;
+    artist: string;
+    percent: number;
+  } | null>(null);
   const [enrichment, setEnrichment] = useState<EnrichmentState>({ running: false, current: 0, total: 0, matched: 0, review: 0, notFound: 0, label: "", serviceMessage: "" });
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
@@ -1005,6 +1015,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
     setBurnMode("mp3");
     setBurnStatus("");
+    setBurnComplete(false);
+    setBurnProgress(null);
     setBurnOpen(true);
   }
 
@@ -1012,6 +1024,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (burnBusy) return;
     setBurnOpen(false);
     setBurnStatus("");
+    setBurnComplete(false);
+    setBurnProgress(null);
+  }
+
+  function changeBurnMode(mode: BurnMode) {
+    if (burnBusy || burnComplete) return;
+    setBurnMode(mode);
+    setBurnStatus("");
+    setBurnProgress(null);
   }
 
   function burnSafeName(value: string) {
@@ -1314,12 +1335,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (!selectedPlaylist || !selectedPlaylistTracks.length) return;
     const picker = (window as any).showDirectoryPicker as undefined | ((options?: any) => Promise<any>);
     if (!picker) {
-      setBurnStatus("DESKTOP CHROME OR EDGE IS REQUIRED TO PREPARE A CD FOLDER SAFELY.");
+      setBurnStatus("DESKTOP CHROME OR EDGE IS REQUIRED TO PREPARE DISC FILES.");
       return;
     }
 
     setBurnBusy(true);
-    setBurnStatus("CHOOSE WHERE TO SAVE THE CD FILES…");
+    setBurnComplete(false);
+    setBurnProgress(null);
+    setBurnStatus("SELECT A DESTINATION FOLDER TO BEGIN.");
 
     try {
       const destination = await picker({ mode: "readwrite" });
@@ -1329,6 +1352,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
       const overallIndex = new Map(selectedPlaylistTracks.map((track, index) => [track.id, index + 1] as const));
       const playlistFiles: Array<{ name: string; lines: string[] }> = [];
+      let preparedTrackCount = 0;
 
       for (let discIndex = 0; discIndex < burnDiscs.length; discIndex += 1) {
         const disc = burnDiscs[discIndex];
@@ -1340,13 +1364,33 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           const order = overallIndex.get(track.id) ?? trackIndex + 1;
           const ext = burnExtension(track);
           const fileName = `${String(order).padStart(2, "0")} - ${burnSafeName(artistLabel(track))} - ${burnSafeName(track.title)}.${ext}`;
-          setBurnStatus(`SAVING DISC ${disc.number}/${burnDiscs.length} • ${trackIndex + 1}/${disc.tracks.length} • ${track.title}`);
+          const percent = Math.max(1, Math.min(99, Math.round((preparedTrackCount / selectedPlaylistTracks.length) * 100)));
+          setBurnProgress({
+            disc: disc.number,
+            discs: burnDiscs.length,
+            track: preparedTrackCount + 1,
+            tracks: selectedPlaylistTracks.length,
+            title: track.title,
+            artist: artistLabel(track),
+            percent,
+          });
+          setBurnStatus("");
           await writeBurnTrack(discDir, track, fileName, {
             normalizeMp3Order: burnMode === "mp3" && ext === "mp3",
             order,
             totalTracks: selectedPlaylistTracks.length,
             discNumber: disc.number,
             discCount: burnDiscs.length,
+          });
+          preparedTrackCount += 1;
+          setBurnProgress({
+            disc: disc.number,
+            discs: burnDiscs.length,
+            track: preparedTrackCount,
+            tracks: selectedPlaylistTracks.length,
+            title: track.title,
+            artist: artistLabel(track),
+            percent: Math.round((preparedTrackCount / selectedPlaylistTracks.length) * 100),
           });
           playlistLines.push(`#EXTINF:${Math.round(burnTrackSeconds(track))},${artistLabel(track)} - ${track.title}`);
           playlistLines.push(`Disc ${disc.number}/${fileName}`);
@@ -1368,12 +1412,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         burnInstructions(burnMode, selectedPlaylist.name, burnDiscs.length)
       );
 
-      setBurnStatus(
-        `READY • ${burnDiscs.length} DISC${burnDiscs.length === 1 ? "" : "S"} PREPARED • DISC FOLDERS CONTAIN MUSIC ONLY${burnMode === "mp3" ? " • MP3 TRACK ORDER NORMALIZED" : ""}`
-      );
+      setBurnProgress(null);
+      setBurnStatus("");
+      setBurnComplete(true);
     } catch (caught: any) {
-      if (caught?.name === "AbortError") setBurnStatus("CD PREPARATION CANCELED.");
-      else setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare the CD files.");
+      setBurnProgress(null);
+      setBurnComplete(false);
+      if (caught?.name === "AbortError") setBurnStatus("DISC PREPARATION CANCELED.");
+      else setBurnStatus(caught instanceof Error ? caught.message : "Could not prepare the disc files.");
     } finally {
       setBurnBusy(false);
     }
@@ -1714,27 +1760,27 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
       {burnOpen && selectedPlaylist ? (
         <div className="tr10-modalBack tr10-burnBack" onMouseDown={closeBurnStudio}>
-          <section className="tr10-burnStudio" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
+          <section className={`tr10-burnStudio ${burnComplete ? "is-complete" : ""}`} role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
             <header>
               <div>
-                <span>CD BURN STUDIO</span>
+                <span>DISC AUTHORING STUDIO</span>
                 <h2>{selectedPlaylist.name}</h2>
-                <p>Prepare this playlist in its current song order and hand it to Windows.</p>
+                <p>Prepare this playlist for a professionally organized MP3 or Audio CD.</p>
               </div>
               <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>×</button>
             </header>
 
             <div className="tr10-burnBody">
               <div className="tr10-burnModes">
-                <button type="button" className={burnMode === "mp3" ? "is-active" : ""} onClick={() => { setBurnMode("mp3"); setBurnStatus(""); }}>
+                <button type="button" disabled={burnBusy || burnComplete} className={burnMode === "mp3" ? "is-active" : ""} onClick={() => changeBurnMode("mp3")}>
                   <b>MP3 DISC</b>
                   <span>700 MB DATA CD</span>
-                  <small>Prepares your numbered playlist files and M3U for Windows File Explorer disc burning.</small>
+                  <small>Original music files • Playlist order optimized for compatible stereos, computers, and MP3 players.</small>
                 </button>
-                <button type="button" className={burnMode === "audio" ? "is-active" : ""} onClick={() => { setBurnMode("audio"); setBurnStatus(""); }}>
+                <button type="button" disabled={burnBusy || burnComplete} className={burnMode === "audio" ? "is-active" : ""} onClick={() => changeBurnMode("audio")}>
                   <b>STANDARD AUDIO CD</b>
-                  <span>80 MINUTE CD</span>
-                  <small>Prepares the ordered files and M3U for Windows Media Player Legacy or your audio-CD burner.</small>
+                  <span>80 MINUTE AUDIO CD</span>
+                  <small>Traditional audio-disc preparation • Compatible with standard CD players and audio-CD software.</small>
                 </button>
               </div>
 
@@ -1763,19 +1809,57 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 })}
               </section>
 
-              <div className="tr10-burnHelperNote">
-                <b>SAFE WINDOWS WORKFLOW</b>
-                <span>MVP Trainer saves the ordered music files directly into a folder you choose. No PowerShell, helper app, registry change, or antivirus exception is required.</span>
-              </div>
+              {!burnComplete ? (
+                <div className="tr10-burnHelperNote">
+                  <b>DISC PREPARATION</b>
+                  <span>MVP Trainer organizes, numbers, and prepares your playlist for Windows disc burning.</span>
+                </div>
+              ) : null}
 
-              {burnStatus ? <div className={`tr10-burnStatus ${burnStatus.startsWith("READY") ? "is-ready" : ""}`}>{burnStatus}</div> : null}
+              {burnBusy && burnProgress ? (
+                <section className="tr10-burnProgressPanel" aria-live="polite">
+                  <div className="tr10-burnProgressHead">
+                    <div>
+                      <span>PREPARING DISC {burnProgress.disc} OF {burnProgress.discs}</span>
+                      <strong>TRACK {burnProgress.track} OF {burnProgress.tracks}</strong>
+                    </div>
+                    <b>{burnProgress.percent}%</b>
+                  </div>
+                  <div className="tr10-burnProgressTrack"><i style={{ width: `${burnProgress.percent}%` }} /></div>
+                  <div className="tr10-burnProgressSong">
+                    <strong>{burnProgress.artist} • {burnProgress.title}</strong>
+                    <span>Organizing files • Updating track order</span>
+                  </div>
+                </section>
+              ) : null}
+
+              {burnComplete ? (
+                <section className="tr10-burnComplete" aria-live="polite">
+                  <div className="tr10-burnCompleteIcon" aria-hidden="true">✓</div>
+                  <div className="tr10-burnCompleteCopy">
+                    <span>PREPARATION COMPLETE</span>
+                    <h3>DISC FILES READY</h3>
+                    <p>{selectedPlaylistTracks.length} tracks • {burnMode === "mp3" ? formatBurnMb(selectedPlaylistBurnBytes) : formatBurnClock(selectedPlaylistBurnSeconds)} • {burnDiscs.length || 1} disc{burnDiscs.length === 1 ? "" : "s"}</p>
+                    <strong>{burnSafeName(`${selectedPlaylist.name} - ${burnMode === "mp3" ? "MP3 CD" : "Audio CD"}`)}</strong>
+                    <small>Your playlist is organized and ready for Windows disc burning. Close this window, open the destination folder, and burn the prepared Disc folder.</small>
+                  </div>
+                </section>
+              ) : burnStatus ? (
+                <div className="tr10-burnStatus">{burnStatus}</div>
+              ) : null}
             </div>
 
-            <footer>
-              <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>CANCEL</button>
-              <button type="button" className="is-primary" disabled={burnBusy || !selectedPlaylistTracks.length} onClick={() => void prepareCdFiles()}>
-                {burnBusy ? "PREPARING…" : burnMode === "mp3" ? "PREPARE MP3 DISC FILES" : "PREPARE AUDIO CD FILES"}
-              </button>
+            <footer className={burnComplete ? "is-complete" : ""}>
+              {burnComplete ? (
+                <button type="button" className="is-primary is-ready" onClick={closeBurnStudio}>CLOSE</button>
+              ) : (
+                <>
+                  <button type="button" disabled={burnBusy} onClick={closeBurnStudio}>CANCEL</button>
+                  <button type="button" className="is-primary" disabled={burnBusy || !selectedPlaylistTracks.length} onClick={() => void prepareCdFiles()}>
+                    {burnBusy ? "PREPARING DISC…" : burnMode === "mp3" ? "PREPARE MP3 DISC" : "PREPARE AUDIO CD"}
+                  </button>
+                </>
+              )}
             </footer>
           </section>
         </div>
@@ -1807,11 +1891,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-burnBody{min-height:0;overflow:auto;padding:13px;display:grid;gap:11px}.tr10-burnModes{display:grid;grid-template-columns:1fr 1fr;gap:9px}.tr10-burnModes>button{min-height:104px;padding:12px;display:grid;align-content:start;gap:4px;text-align:left;border:1px solid rgba(104,166,187,.14);border-radius:12px;background:linear-gradient(180deg,#09161d,#050c10);color:#a6bac2}.tr10-burnModes>button b{font-size:12px;color:#e4f0f4}.tr10-burnModes>button span{font-size:7px;font-weight:1000;letter-spacing:.09em;color:#718b95}.tr10-burnModes>button small{margin-top:4px;font-size:8px;line-height:1.4;color:#758c95}.tr10-burnModes>button.is-active{border-color:rgba(244,181,78,.55);background:radial-gradient(480px 100px at 20% 0,rgba(244,181,78,.10),transparent 62%),linear-gradient(180deg,#17180f,#090d0d);box-shadow:inset 0 1px rgba(255,255,255,.04),0 16px 38px rgba(0,0,0,.28)}.tr10-burnModes>button.is-active b{color:#ffe1a0}.tr10-burnModes>button.is-active span{color:#d5a953}
         .tr10-burnStats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.tr10-burnStats>div{min-height:58px;padding:9px;display:grid;align-content:center;border:1px solid rgba(91,154,176,.11);border-radius:9px;background:#061016}.tr10-burnStats span{font-size:6px;font-weight:1000;letter-spacing:.1em;color:#657f89}.tr10-burnStats strong{margin-top:4px;color:#deedf2;font-size:14px;font-variant-numeric:tabular-nums}
         .tr10-burnMap{border:1px solid rgba(93,157,179,.11);border-radius:11px;overflow:hidden;background:#050d11}.tr10-burnMap>header{padding:8px 10px;display:flex;justify-content:space-between;border-bottom:1px solid rgba(93,157,179,.09)}.tr10-burnMap>header span{font-size:7px;font-weight:1000;letter-spacing:.11em;color:#8da8b2}.tr10-burnMap>header small{font-size:7px;color:#657e87}.tr10-burnMap article{padding:9px 10px;display:grid;grid-template-columns:145px minmax(0,1fr) 82px;gap:10px;align-items:center;border-bottom:1px solid rgba(92,147,166,.07)}.tr10-burnMap article:last-child{border-bottom:0}.tr10-burnMap article>div:first-child{display:grid;gap:2px}.tr10-burnMap article b{font-size:8px;color:#f0c779}.tr10-burnMap article span{font-size:7px;color:#77909a}.tr10-burnMap article>strong{text-align:right;font-size:9px;color:#cbdce2;font-variant-numeric:tabular-nums}.tr10-burnMeter{height:6px;overflow:hidden;border-radius:999px;background:#0d1a20}.tr10-burnMeter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#26b6df,#f1b34f);box-shadow:0 0 10px rgba(70,204,241,.16)}
-        .tr10-burnHelperNote{padding:10px 11px;display:grid;grid-template-columns:105px 1fr;gap:10px;align-items:start;border:1px solid rgba(83,178,210,.15);border-radius:10px;background:rgba(8,29,38,.56)}.tr10-burnHelperNote b{font-size:7px;color:#78dff8;letter-spacing:.1em}.tr10-burnHelperNote span{font-size:8px;line-height:1.45;color:#8da5ae}.tr10-burnStatus{padding:9px 11px;border:1px solid rgba(242,174,61,.24);border-radius:9px;background:rgba(85,53,8,.16);color:#efc77d;font-size:8px;font-weight:1000;letter-spacing:.04em}.tr10-burnStatus.is-ready{border-color:rgba(58,212,142,.30);background:rgba(17,85,58,.18);color:#87e8b8}
-        .tr10-burnStudio>footer{padding:11px 13px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid rgba(83,154,180,.12);background:#061117}.tr10-burnStudio>footer button{height:40px;padding:0 14px;border:1px solid rgba(83,164,194,.18);border-radius:9px;background:#07131a;color:#d3e4ea;font-size:7px;font-weight:1000}.tr10-burnStudio>footer button.is-primary{min-width:180px;border-color:rgba(244,181,78,.52);background:linear-gradient(180deg,#6b4715,#3b260b);color:#ffebbd;box-shadow:inset 0 1px rgba(255,255,255,.08),0 12px 28px rgba(0,0,0,.30)}.tr10-burnStudio>footer button.is-primary.is-ready{border-color:rgba(54,217,143,.52);background:linear-gradient(180deg,#176743,#0d3d28);color:#c7f8de}
+        .tr10-burnHelperNote{padding:11px 12px;display:grid;grid-template-columns:116px 1fr;gap:12px;align-items:start;border:1px solid rgba(83,178,210,.15);border-radius:10px;background:linear-gradient(180deg,rgba(8,29,38,.62),rgba(4,16,22,.72));box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.tr10-burnHelperNote b{font-size:7px;color:#78dff8;letter-spacing:.12em}.tr10-burnHelperNote span{font-size:8px;line-height:1.45;color:#9bb1b9}.tr10-burnStatus{padding:10px 12px;border:1px solid rgba(242,174,61,.24);border-radius:9px;background:rgba(85,53,8,.16);color:#efc77d;font-size:8px;font-weight:1000;letter-spacing:.04em}
+        .tr10-burnProgressPanel{padding:13px;border:1px solid rgba(69,205,245,.30);border-top-color:rgba(137,229,255,.45);border-radius:12px;background:linear-gradient(180deg,#09202a,#061218);box-shadow:0 18px 38px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.055)}.tr10-burnProgressHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.tr10-burnProgressHead>div{display:grid;gap:4px}.tr10-burnProgressHead span{font-size:7px;font-weight:1000;letter-spacing:.13em;color:#70d9f6}.tr10-burnProgressHead strong{font-size:11px;color:#eaf8fc}.tr10-burnProgressHead>b{font-size:20px;line-height:1;color:#f4c56d;font-variant-numeric:tabular-nums}.tr10-burnProgressTrack{height:8px;margin:11px 0 10px;overflow:hidden;border-radius:999px;background:#02070a;box-shadow:inset 0 1px 3px rgba(0,0,0,.8)}.tr10-burnProgressTrack i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#25bde8,#f0b64d);box-shadow:0 0 14px rgba(57,201,242,.22);transition:width .18s ease}.tr10-burnProgressSong{display:grid;gap:3px}.tr10-burnProgressSong strong{font-size:10px;color:#dfeff4}.tr10-burnProgressSong span{font-size:7px;color:#718a94}
+        .tr10-burnComplete{padding:16px;display:grid;grid-template-columns:54px minmax(0,1fr);gap:14px;align-items:center;border:1px solid rgba(53,220,145,.38);border-top-color:rgba(138,255,200,.52);border-radius:13px;background:radial-gradient(520px 120px at 18% 0,rgba(52,218,144,.11),transparent 68%),linear-gradient(180deg,#0a2119,#06120e);box-shadow:0 22px 48px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.06)}.tr10-burnCompleteIcon{width:50px;height:50px;display:grid;place-items:center;border:1px solid rgba(79,225,159,.46);border-radius:14px;background:linear-gradient(180deg,#174a34,#0b2b1e);color:#8cf0ba;font-size:24px;font-weight:1000;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 12px 24px rgba(0,0,0,.28)}.tr10-burnCompleteCopy{display:grid;gap:4px}.tr10-burnCompleteCopy>span{font-size:7px;font-weight:1000;letter-spacing:.14em;color:#71dda5}.tr10-burnCompleteCopy h3{margin:0;color:#f0fff7;font-size:18px;letter-spacing:.02em}.tr10-burnCompleteCopy p{margin:0;color:#b7d6c5;font-size:9px;font-weight:850}.tr10-burnCompleteCopy>strong{margin-top:4px;color:#dff9ea;font-size:9px}.tr10-burnCompleteCopy small{max-width:620px;color:#78988a;font-size:8px;line-height:1.45}
+        .tr10-burnStudio.is-complete .tr10-burnModes>button:not(.is-active){opacity:.38}.tr10-burnStudio.is-complete .tr10-burnModes>button.is-active{cursor:default}.tr10-burnStudio>footer{padding:11px 13px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid rgba(83,154,180,.12);background:#061117}.tr10-burnStudio>footer.is-complete{justify-content:flex-end}.tr10-burnStudio>footer button{height:40px;padding:0 14px;border:1px solid rgba(83,164,194,.18);border-radius:9px;background:#07131a;color:#d3e4ea;font-size:7px;font-weight:1000}.tr10-burnStudio>footer button.is-primary{min-width:180px;border-color:rgba(244,181,78,.52);background:linear-gradient(180deg,#6b4715,#3b260b);color:#ffebbd;box-shadow:inset 0 1px rgba(255,255,255,.08),0 12px 28px rgba(0,0,0,.30)}.tr10-burnStudio>footer button.is-primary.is-ready{border-color:rgba(54,217,143,.52);background:linear-gradient(180deg,#176743,#0d3d28);color:#d9ffea;box-shadow:inset 0 1px rgba(255,255,255,.09),0 12px 28px rgba(0,0,0,.32)}
 
         @media(max-width:900px){.tr10-stats{grid-template-columns:repeat(3,1fr)}.tr10-tableHead,.tr10-row{grid-template-columns:28px minmax(0,1fr) 55px 100px}.tr10-tableHead span:last-child{display:none}.tr10-actions{grid-column:2/-1;justify-content:flex-start}.tr10-toolbar{grid-template-columns:1fr 1fr}.tr10-toolbar label:first-child{grid-column:1/-1}.tr10-playlistLayout{grid-template-columns:200px 1fr}.tr10-smart{grid-template-columns:1fr}}
-        @media(max-width:650px){.tr10-burnModes{grid-template-columns:1fr}.tr10-burnStats{grid-template-columns:1fr 1fr}.tr10-burnMap article{grid-template-columns:98px minmax(0,1fr) 64px;gap:7px}.tr10-burnHelperNote{grid-template-columns:1fr;gap:4px}.tr10-burnStudio>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-burnStudio>footer button.is-primary{min-width:0}.tr10-page{width:calc(100% - 14px)}.tr10-hero{padding:18px;display:block}.tr10-hero h1{font-size:30px}.tr10-hero>button{margin-top:12px}.tr10-stats{grid-template-columns:1fr 1fr}.tr10-sectionHead{display:block}.tr10-headActions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr}.tr10-healthRail{grid-template-columns:repeat(5,minmax(112px,1fr));overflow-x:auto;padding-bottom:2px}.tr10-tabs{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.tr10-statusPanelHead small{display:none}.tr10-toolbar{grid-template-columns:1fr}.tr10-toolbar label:first-child{grid-column:auto}.tr10-bulk{display:block}.tr10-bulk>div{margin-top:8px;display:grid;grid-template-columns:1fr 1fr}.tr10-tableHead{display:none}.tr10-row{grid-template-columns:26px minmax(0,1fr);gap:8px;padding:10px 9px}.tr10-row>.tr10-duration,.tr10-row>.tr10-energy{grid-column:2}.tr10-actions{grid-column:2;display:grid;grid-template-columns:40px 40px repeat(4,1fr)}.tr10-trackCell{grid-template-columns:auto auto minmax(0,1fr)}.tr10-healthBadge{grid-column:3;justify-self:start}.tr10-energy{width:150px}.tr10-order{display:none!important}.tr10-cardGrid{grid-template-columns:1fr;padding:9px}.tr10-playlistLayout{grid-template-columns:1fr}.tr10-playlistLayout>aside{border-right:0;border-bottom:1px solid rgba(78,143,166,.1);display:flex;overflow-x:auto}.tr10-createPlaylist{min-width:190px}.tr10-playlistLayout>aside>button{min-width:145px}.tr10-playlistSongs article{grid-template-columns:23px auto minmax(0,1fr) auto}.tr10-playlistSongs article>button:nth-of-type(n+2){display:none}.tr10-inspector{height:calc(100dvh - 16px)}.tr10-modalBack{padding:8px}.tr10-inspectGrid{grid-template-columns:1fr;padding:10px}.tr10-meta{grid-template-columns:1fr 1fr;padding:0 10px 10px}.tr10-inspectCommands{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer .tr10-saveButton{grid-column:1/-1;grid-row:1}.tr10-detailLookupHead{display:block}.tr10-detailLookupHead>button{margin-bottom:8px}.tr10-detailCandidates>button,.tr10-candidates>button{grid-template-columns:52px minmax(0,1fr) 26px}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:52px;height:52px}.tr10-matchTier{grid-column:2;justify-self:start;text-align:left}.tr10-selectMark{grid-column:3;grid-row:1/3}.tr10-detailLookupFooter{display:grid;grid-template-columns:1fr 1fr}.tr10-detailLookupFooter>div{grid-column:1/-1}.tr10-reviewProgress>div{display:grid}.tr10-reviewDock{right:9px;bottom:80px}.tr10-smartBuild{padding:18px}}
+        @media(max-width:650px){.tr10-burnModes{grid-template-columns:1fr}.tr10-burnStats{grid-template-columns:1fr 1fr}.tr10-burnMap article{grid-template-columns:98px minmax(0,1fr) 64px;gap:7px}.tr10-burnHelperNote{grid-template-columns:1fr;gap:4px}.tr10-burnComplete{grid-template-columns:42px minmax(0,1fr);padding:13px}.tr10-burnCompleteIcon{width:40px;height:40px;border-radius:11px;font-size:20px}.tr10-burnCompleteCopy h3{font-size:16px}.tr10-burnStudio>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-burnStudio>footer.is-complete{grid-template-columns:1fr}.tr10-burnStudio>footer button.is-primary{min-width:0}.tr10-page{width:calc(100% - 14px)}.tr10-hero{padding:18px;display:block}.tr10-hero h1{font-size:30px}.tr10-hero>button{margin-top:12px}.tr10-stats{grid-template-columns:1fr 1fr}.tr10-sectionHead{display:block}.tr10-headActions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr}.tr10-healthRail{grid-template-columns:repeat(5,minmax(112px,1fr));overflow-x:auto;padding-bottom:2px}.tr10-tabs{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}.tr10-statusPanelHead small{display:none}.tr10-toolbar{grid-template-columns:1fr}.tr10-toolbar label:first-child{grid-column:auto}.tr10-bulk{display:block}.tr10-bulk>div{margin-top:8px;display:grid;grid-template-columns:1fr 1fr}.tr10-tableHead{display:none}.tr10-row{grid-template-columns:26px minmax(0,1fr);gap:8px;padding:10px 9px}.tr10-row>.tr10-duration,.tr10-row>.tr10-energy{grid-column:2}.tr10-actions{grid-column:2;display:grid;grid-template-columns:40px 40px repeat(4,1fr)}.tr10-trackCell{grid-template-columns:auto auto minmax(0,1fr)}.tr10-healthBadge{grid-column:3;justify-self:start}.tr10-energy{width:150px}.tr10-order{display:none!important}.tr10-cardGrid{grid-template-columns:1fr;padding:9px}.tr10-playlistLayout{grid-template-columns:1fr}.tr10-playlistLayout>aside{border-right:0;border-bottom:1px solid rgba(78,143,166,.1);display:flex;overflow-x:auto}.tr10-createPlaylist{min-width:190px}.tr10-playlistLayout>aside>button{min-width:145px}.tr10-playlistSongs article{grid-template-columns:23px auto minmax(0,1fr) auto}.tr10-playlistSongs article>button:nth-of-type(n+2){display:none}.tr10-inspector{height:calc(100dvh - 16px)}.tr10-modalBack{padding:8px}.tr10-inspectGrid{grid-template-columns:1fr;padding:10px}.tr10-meta{grid-template-columns:1fr 1fr;padding:0 10px 10px}.tr10-inspectCommands{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer{display:grid;grid-template-columns:1fr 1fr}.tr10-inspector>footer .tr10-saveButton{grid-column:1/-1;grid-row:1}.tr10-detailLookupHead{display:block}.tr10-detailLookupHead>button{margin-bottom:8px}.tr10-detailCandidates>button,.tr10-candidates>button{grid-template-columns:52px minmax(0,1fr) 26px}.tr10-detailCandidates img,.tr10-candidates img,.tr10-candidateArt{width:52px;height:52px}.tr10-matchTier{grid-column:2;justify-self:start;text-align:left}.tr10-selectMark{grid-column:3;grid-row:1/3}.tr10-detailLookupFooter{display:grid;grid-template-columns:1fr 1fr}.tr10-detailLookupFooter>div{grid-column:1/-1}.tr10-reviewProgress>div{display:grid}.tr10-reviewDock{right:9px;bottom:80px}.tr10-smartBuild{padding:18px}}
 
         /* FINAL PRO LIBRARY + RESPONSIVE PASS: preserve all current features */
         .tr10-page{
