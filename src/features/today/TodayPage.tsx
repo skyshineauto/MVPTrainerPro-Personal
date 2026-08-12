@@ -355,19 +355,7 @@ export function TodayPage() {
       if (!auth.user) throw new Error("Sign in to view workouts.");
       const userId = auth.user.id;
 
-      const [{ data: active, error: activeError }, { data: queueData, error: queueError }] = await Promise.all([
-        supabase
-          .from("workouts")
-          .select("id,scheduled_session_id,started_at")
-          .eq("user_id", userId)
-          .is("completed_at", null)
-          .not("started_at", "is", null)
-          .order("started_at", { ascending: false, nullsFirst: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase.rpc("rpc_queue_dashboard", { p_keep: 7 }),
-      ]);
-      if (activeError) throw activeError;
+      const { data: queueData, error: queueError } = await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
       if (queueError) throw queueError;
 
       const nextQueue: QueueDash = {
@@ -377,7 +365,50 @@ export function TodayPage() {
       };
       setQueue(nextQueue);
 
-      const nextActiveId = (active as any)?.scheduled_session_id ? String((active as any).scheduled_session_id) : null;
+      const activeProgramId = nextQueue.activeBlock?.id ? String(nextQueue.activeBlock.id) : null;
+      let nextActiveId: string | null = null;
+
+      if (activeProgramId) {
+        const { data: activeCandidates, error: activeError } = await supabase
+          .from("workouts")
+          .select("id,scheduled_session_id,started_at")
+          .eq("user_id", userId)
+          .is("completed_at", null)
+          .not("started_at", "is", null)
+          .order("started_at", { ascending: false, nullsFirst: false })
+          .limit(20);
+        if (activeError) throw activeError;
+
+        const activeCandidateSessionIds = unique(
+          (activeCandidates ?? [])
+            .map((row: any) => String(row.scheduled_session_id ?? ""))
+            .filter(Boolean)
+        );
+
+        if (activeCandidateSessionIds.length) {
+          const { data: activeCandidateSessions, error: activeSessionError } = await supabase
+            .from("scheduled_sessions")
+            .select("id,program_block_id")
+            .eq("user_id", userId)
+            .in("id", activeCandidateSessionIds);
+          if (activeSessionError) throw activeSessionError;
+
+          const activeProgramSessionIds = new Set(
+            (activeCandidateSessions ?? [])
+              .filter((row: any) => String(row.program_block_id ?? "") === activeProgramId)
+              .map((row: any) => String(row.id))
+          );
+
+          const matchingActiveWorkout = (activeCandidates ?? []).find((row: any) =>
+            activeProgramSessionIds.has(String(row.scheduled_session_id ?? ""))
+          );
+
+          nextActiveId = matchingActiveWorkout?.scheduled_session_id
+            ? String(matchingActiveWorkout.scheduled_session_id)
+            : null;
+        }
+      }
+
       setActiveSessionId(nextActiveId);
 
       const sessionCandidates = [
@@ -448,15 +479,37 @@ export function TodayPage() {
       setSessions(sessionRows);
       setMetaBySession(metaMap);
 
-      const { data: completedData, error: completedError } = await supabase
-        .from("workouts")
-        .select("id,scheduled_session_id,completed_at,post_difficulty")
-        .eq("user_id", userId)
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(24);
-      if (completedError) throw completedError;
-      const completed = completedData ?? [];
+      const activeProgramIdForHistory = nextQueue.activeBlock?.id
+        ? String(nextQueue.activeBlock.id)
+        : null;
+
+      let completed: any[] = [];
+
+      if (activeProgramIdForHistory) {
+        const { data: programSessions, error: programSessionsError } = await supabase
+          .from("scheduled_sessions")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("program_block_id", activeProgramIdForHistory);
+        if (programSessionsError) throw programSessionsError;
+
+        const activeProgramSessionIds = (programSessions ?? [])
+          .map((row: any) => String(row.id ?? ""))
+          .filter(Boolean);
+
+        if (activeProgramSessionIds.length) {
+          const { data: completedData, error: completedError } = await supabase
+            .from("workouts")
+            .select("id,scheduled_session_id,completed_at,post_difficulty")
+            .eq("user_id", userId)
+            .in("scheduled_session_id", activeProgramSessionIds)
+            .not("completed_at", "is", null)
+            .order("completed_at", { ascending: false })
+            .limit(24);
+          if (completedError) throw completedError;
+          completed = completedData ?? [];
+        }
+      }
       const completedWorkoutIds = completed.map((row: any) => String(row.id));
       const painByWorkout = new Map<string, number>();
       if (completedWorkoutIds.length) {
