@@ -41,7 +41,8 @@ import icoQuads from "../../assets/front.png";
 import icoCalves from "../../assets/muscles.png";
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
-const EDIT_RESULTS_BATCH_SIZE = 14;
+const EDIT_RESULTS_BATCH_SIZE_DESKTOP = 6;
+const EDIT_RESULTS_BATCH_SIZE_MOBILE = 5;
 
 function lockDocumentForModal() {
   const appWindow = window as any;
@@ -2320,6 +2321,12 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [editing, setEditing] = useState(false);
   const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
+  const [editResultsBatchSize, setEditResultsBatchSize] = useState(() => {
+    if (typeof window === "undefined") return EDIT_RESULTS_BATCH_SIZE_DESKTOP;
+    return window.matchMedia("(max-width: 720px)").matches
+      ? EDIT_RESULTS_BATCH_SIZE_MOBILE
+      : EDIT_RESULTS_BATCH_SIZE_DESKTOP;
+  });
 
   const [searchQ, setSearchQ] = useState("");
   const [searchBusy, setSearchBusy] = useState(false);
@@ -2346,6 +2353,19 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [completeOverlayOpen, setCompleteOverlayOpen] = useState(false);
   const restTimer = useRestTimer();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const query = window.matchMedia("(max-width: 720px)");
+    const syncBatchSize = () => {
+      setEditResultsBatchSize(
+        query.matches ? EDIT_RESULTS_BATCH_SIZE_MOBILE : EDIT_RESULTS_BATCH_SIZE_DESKTOP
+      );
+    };
+    syncBatchSize();
+    query.addEventListener?.("change", syncBatchSize);
+    return () => query.removeEventListener?.("change", syncBatchSize);
+  }, []);
 
   useEffect(() => {
     void preloadWorkoutAlerts();
@@ -2973,7 +2993,7 @@ export function WorkoutPlayerPage({ params }: any) {
 
       setSearchResults(baseDecorated);
       setSearchPage(0);
-      setSearchHasMore(baseDecorated.length > EDIT_RESULTS_BATCH_SIZE);
+      setSearchHasMore(baseDecorated.length > editResultsBatchSize);
 
       if (!local.length) return;
 
@@ -2988,7 +3008,7 @@ export function WorkoutPlayerPage({ params }: any) {
         }));
 
         setSearchResults(enhanced);
-        setSearchHasMore(enhanced.length > EDIT_RESULTS_BATCH_SIZE);
+        setSearchHasMore(enhanced.length > editResultsBatchSize);
       } catch (mediaError) {
         console.warn("Could not enhance active-session exercise media status.", mediaError);
       }
@@ -3010,7 +3030,7 @@ export function WorkoutPlayerPage({ params }: any) {
     try {
       setSearchPage((prev) => {
         const next = prev + 1;
-        const nextVisibleCount = (next + 1) * EDIT_RESULTS_BATCH_SIZE;
+        const nextVisibleCount = (next + 1) * editResultsBatchSize;
         setSearchHasMore(searchResults.length > nextVisibleCount);
         return next;
       });
@@ -3451,7 +3471,8 @@ export function WorkoutPlayerPage({ params }: any) {
     searchLoadingMore={searchLoadingMore}
     searchHasMore={searchHasMore}
     searchError={searchError}
-    searchResults={searchResults.slice(0, (searchPage + 1) * EDIT_RESULTS_BATCH_SIZE)}
+    searchResults={searchResults.slice(0, (searchPage + 1) * editResultsBatchSize)}
+    resultsBatchSize={editResultsBatchSize}
     onSearch={(v) => runSearch(v)}
     onRetry={() => runSearch(searchQ, { force: true })}
     onLoadMore={loadMoreSearchResults}
@@ -4409,6 +4430,7 @@ function EditSessionPanel(props: {
   searchHasMore: boolean;
   searchError: string | null;
   searchResults: DecoratedSearchRow[];
+  resultsBatchSize: number;
   onSearch: (q: string) => Promise<void>;
   onRetry: () => Promise<void>;
   onLoadMore: () => Promise<void>;
@@ -4437,6 +4459,7 @@ function EditSessionPanel(props: {
     searchHasMore,
     searchError,
     searchResults,
+    resultsBatchSize,
     onSearch,
     onRetry,
     onLoadMore,
@@ -4470,35 +4493,31 @@ function EditSessionPanel(props: {
     onSwap(weId);
   }
 
-  function handleResultsScroll(event: React.UIEvent<HTMLDivElement>) {
-    if (!searchHasMore || searchBusy || searchLoadingMore) return;
-    const viewport = event.currentTarget;
-    const remaining = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    if (remaining <= 180) void onLoadMore();
-  }
-
   function selectBroadMuscle(nextMuscle: AddMuscleKey) {
     setAddMuscle(nextMuscle);
     setAddMuscleDetail("all");
   }
 
-  const dangerStyle: React.CSSProperties = {
-    height: 36,
-    borderRadius: 12,
-    border: "1px solid rgba(255,140,0,.55)",
-    background: "linear-gradient(180deg, rgba(255,140,0,.26), rgba(255,80,80,.12))",
-    color: "rgba(255,255,255,.92)",
-    fontWeight: 950,
-    letterSpacing: ".10em",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    padding: "0 12px",
-  };
-
   function iconForWe(we: WorkoutExerciseRow) {
     const ex = we.exercise || {};
     const ic = resolveRowIcon(ex);
     return ic.icon ? <img className="tr-ico" src={ic.icon} alt={ic.alt} /> : null;
+  }
+
+  function prettyMeta(value: string) {
+    return String(value || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function resultMeta(row: DecoratedSearchRow) {
+    const muscles = Array.isArray(row.primary_muscles)
+      ? row.primary_muscles.filter(Boolean).map(prettyMeta)
+      : [];
+    const equipment = Array.isArray(row.equipment)
+      ? row.equipment.filter(Boolean).map(prettyMeta)
+      : [];
+    return `${muscles.length ? muscles.join(", ") : "General"} • ${equipment.length ? equipment.join(", ") : "Other"}`;
   }
 
   const showResultsEmptyState =
@@ -4509,25 +4528,19 @@ function EditSessionPanel(props: {
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit session">
+    <div className="tr-modalOverlay tr-modalOverlay--locked" role="dialog" aria-modal="true" aria-label="Edit active session">
       <div className={`tr-modal tr-modal--viewport tr-editModal tr-editModal--sessionPicker tr-editModal--mobile-${mobileTab}`}>
-        <div className="tr-modalHead">
-          <div style={{ fontWeight: 950 }}>
-            Edit Session <span className="tr-sub">({items.length})</span>
+        <header className="tr-modalHead tr-editSessionHead">
+          <div className="tr-editSessionIdentity">
+            <div className="tr-kicker">WORKOUT EDITOR</div>
+            <div className="tr-editSessionTitle">EDIT ACTIVE SESSION</div>
+            <div className="tr-editSessionCount">{items.length} EXERCISES</div>
           </div>
 
-          <div className="tr-editModalActions" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button className="tr-btn tr-btn--primary" onClick={onSaveSessionOnly}>
-              Save (this session)
-            </button>
-            <button className="tr-btn" onClick={onSaveAllFuture}>
-              Save to all future sessions
-            </button>
-            <button className="tr-btn" onClick={onClose}>
-              Close
-            </button>
-          </div>
-        </div>
+          <button className="tr-btn tr-editCloseBtn" onClick={onClose}>
+            CLOSE
+          </button>
+        </header>
 
         <div className="tr-modalBody tr-editModalBody">
           <div className="tr-editMobileTabs" role="tablist" aria-label="Edit session sections">
@@ -4538,7 +4551,7 @@ function EditSessionPanel(props: {
               className={`tr-seg ${mobileTab === "current" ? "is-active" : ""}`}
               onClick={() => setMobileTab("current")}
             >
-              Current Session ({items.length})
+              CURRENT ({items.length})
             </button>
             <button
               type="button"
@@ -4547,77 +4560,81 @@ function EditSessionPanel(props: {
               className={`tr-seg ${mobileTab === "add" ? "is-active" : ""}`}
               onClick={() => setMobileTab("add")}
             >
-              {mode === "swap" ? "Pick Replacement" : "Add Exercise"}
+              {mode === "swap" ? "REPLACEMENT" : "ADD EXERCISE"}
             </button>
           </div>
 
-          <div className="tr-editCurrentPanel">
-          <Card title="Current session exercises" tone="base">
+          <section className="tr-editCurrentPanel tr-editSection tr-editSection--current">
+            <div className="tr-editSectionHead">
+              <div>
+                <div className="tr-kicker">CURRENT WORKOUT</div>
+                <h3>CURRENT SESSION EXERCISES</h3>
+              </div>
+              <span className="tr-editSectionCount">{items.length} TOTAL</span>
+            </div>
+
             <div className="tr-editCurrentList">
               {items.map((we, idx) => (
-                <div key={we.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center" }}>
-                  <div style={{ display: "grid", gap: 4 }}>
-                    <div style={{ fontWeight: 950, display: "flex", gap: 10, alignItems: "center" }}>
+                <div key={we.id} className="tr-editCurrentExerciseRow">
+                  <div className="tr-editExerciseIndex">{String(idx + 1).padStart(2, "0")}</div>
+
+                  <div className="tr-editExerciseCopy">
+                    <div className="tr-editExerciseName">
                       {iconForWe(we)}
-                      {idx + 1}. {we.exercise?.name ?? we.exercise_id}
+                      <strong>{we.exercise?.name ?? we.exercise_id}</strong>
                     </div>
-                    <div className="tr-sub">
-                      {we.prescription_snapshot?.sets ?? "—"} sets • {we.prescription_snapshot?.rep_min ?? "—"}-
-                      {we.prescription_snapshot?.rep_max ?? "—"} reps
-                    </div>
+                    <span>
+                      {we.prescription_snapshot?.sets ?? "—"} SETS • {we.prescription_snapshot?.rep_min ?? "—"}-
+                      {we.prescription_snapshot?.rep_max ?? "—"} REPS
+                    </span>
                   </div>
 
-                  <button className={`tr-seg ${swapTargetWeId === we.id ? "is-active" : ""}`} onClick={() => handleSwap(we.id)}>
-                    Swap
-                  </button>
-
-                  <button style={dangerStyle} onClick={() => onDelete(we.id)}>
-                    Delete
-                  </button>
+                  <div className="tr-editExerciseActions">
+                    <button className={`tr-seg ${swapTargetWeId === we.id ? "is-active" : ""}`} onClick={() => handleSwap(we.id)}>
+                      SWAP
+                    </button>
+                    <button className="tr-editDeleteBtn" onClick={() => onDelete(we.id)}>
+                      DELETE
+                    </button>
+                  </div>
                 </div>
               ))}
-              {!items.length ? <div className="tr-sub">No exercises yet.</div> : null}
+              {!items.length ? <div className="tr-editEmptyState">No exercises are currently in this session.</div> : null}
             </div>
-          </Card>
-          </div>
+          </section>
 
-          <div className="tr-editAddPanel">
-          <Card title={mode === "swap" ? "Pick replacement" : "Add an exercise"} tone="blue">
-            <div className="tr-editAddLayout" style={{ display: "grid", gap: 10 }}>
-              <div className="tr-mobileExercisePickerBar">
-                {mode === "add" ? (
+          <section className="tr-editAddPanel tr-editSection tr-editSection--add">
+            <div className="tr-editSectionHead">
+              <div>
+                <div className="tr-kicker">EXERCISE LIBRARY</div>
+                <h3>{mode === "swap" ? "PICK A REPLACEMENT" : "ADD EXERCISE"}</h3>
+              </div>
+              <button type="button" className="tr-btn tr-btn--blueOutline tr-editCreateBtn" onClick={onCreateNew}>
+                + CREATE NEW EXERCISE
+              </button>
+            </div>
+
+            <div className="tr-editAddLayout">
+              {mode === "add" ? (
+                <div className="tr-mobileExercisePickerBar">
                   <button
                     type="button"
                     className={`tr-btn ${mobileFiltersOpen ? "tr-btn--primary" : "tr-btn--blueOutline"}`}
                     onClick={() => setMobileFiltersOpen((value) => !value)}
                     aria-expanded={mobileFiltersOpen}
                   >
-                    {mobileFiltersOpen ? "Hide Filters" : "Filters"}
+                    {mobileFiltersOpen ? "HIDE FILTERS" : "FILTERS"}
                   </button>
-                ) : <span />}
-                <button type="button" className="tr-btn tr-btn--blueOutline" onClick={onCreateNew}>
-                  + New Exercise
-                </button>
-              </div>
+                  <button type="button" className="tr-btn tr-btn--blueOutline" onClick={onCreateNew}>
+                    + NEW EXERCISE
+                  </button>
+                </div>
+              ) : null}
 
               {mode === "add" ? (
-                <div className={`tr-rowbox tr-editFilterScroll ${mobileFiltersOpen ? "is-open" : "is-collapsed"}`} style={{ display: "grid", gap: 10 }}>
-                  <div className="tr-createInlineBar">
-                    <div>
-                      <div className="tr-kicker">CUSTOM EXERCISE</div>
-                      <div className="tr-sub">Create it with defaults and media, then add it now.</div>
-                    </div>
-                    <button
-                      type="button"
-                      className="tr-btn tr-btn--blueOutline"
-                      onClick={onCreateNew}
-                    >
-                      + Create New Exercise
-                    </button>
-                  </div>
-
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div className="tr-kicker">MUSCLE</div>
+                <div className={`tr-editFilterScroll ${mobileFiltersOpen ? "is-open" : "is-collapsed"}`}>
+                  <div className="tr-editFilterGroup">
+                    <div className="tr-filterLabel">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
                       <button className={`tr-seg ${addMuscle === "all" ? "is-active" : ""}`} onClick={() => selectBroadMuscle("all")}>
                         ALL
@@ -4642,12 +4659,10 @@ function EditSessionPanel(props: {
                         ))}
                       </div>
                     ) : null}
-
-                    <div className="tr-sub">Muscle ignored in cardio mode (per contract).</div>
                   </div>
 
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div className="tr-kicker">EQUIPMENT</div>
+                  <div className="tr-editFilterGroup">
+                    <div className="tr-filterLabel">EQUIPMENT</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
                       <button className={`tr-seg ${addEquip === "all" ? "is-active" : ""}`} onClick={() => setAddEquip("all")}>
                         ALL
@@ -4659,56 +4674,58 @@ function EditSessionPanel(props: {
                       ))}
                     </div>
                   </div>
+
+                  {addEquip === "cardio" ? (
+                    <div className="tr-editFilterNote">Muscle filters are unavailable for cardio exercises.</div>
+                  ) : null}
                 </div>
               ) : null}
 
-              <input value={searchQ} onChange={(e) => onSearch(e.target.value)} placeholder="Search exercises…" style={{ height: 44 }} />
+              <label className="tr-editSearchField">
+                <span className="tr-filterLabel">SEARCH EXERCISES</span>
+                <input value={searchQ} onChange={(e) => void onSearch(e.target.value)} placeholder="Search exercises…" />
+              </label>
 
-              <div className="tr-sub">
-                {searchBusy ? "Searching…" : mode === "swap" ? "Pick an exercise to swap in." : "Pick an exercise to add."}
+              <div className="tr-editPickerPrompt">
+                {searchBusy ? "SEARCHING EXERCISE LIBRARY…" : mode === "swap" ? "SELECT THE EXERCISE TO USE AS THE REPLACEMENT." : "SELECT AN EXERCISE TO ADD TO THIS SESSION."}
               </div>
 
-              <div className="tr-editResultsViewport" onScroll={handleResultsScroll}>
+              <div className="tr-editResultsViewport">
                 {searchResults.map((r) => (
                   <button
                     key={r.id}
-                    className="tr-rowBtn"
+                    className="tr-rowBtn tr-editResultRowBtn"
                     onClick={() => (mode === "swap" ? onPickSwap(r.id) : onPickAdd(r.id))}
                   >
-                    <div className="tr-rowbox" style={{ display: "grid", gap: 6 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div style={{ fontWeight: 950, display: "flex", gap: 10, alignItems: "center" }}>
-                            {r.icon ? <img className="tr-ico" src={r.icon} alt={r.iconAlt || ""} /> : null}
-                            {r.name}
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                          {r.effectiveHasMedia ? (
-                            <div className="tr-pillOK" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                              <CheckIcon />
-                              OK
-                            </div>
-                          ) : (
-                            <div className="tr-pillMISS" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                              <AlertIcon />
-                              MISSING
-                            </div>
-                          )}
-
-                          {mode === "add" ? (
-                            <span className={`tr-addedBadge ${justAddedId === r.id ? "is-on" : ""}`}>
-                              {justAddedId === r.id ? "ADDED" : "ADD"}
-                            </span>
-                          ) : null}
-                        </div>
+                    <div className={`tr-editResultRow ${r.effectiveHasMedia ? "is-ready" : "is-missing"}`}>
+                      <div className="tr-editResultIcon">
+                        {r.icon ? <img className="tr-ico" src={r.icon} alt={r.iconAlt || ""} /> : <span aria-hidden>•</span>}
                       </div>
 
-                      <div className="tr-sub">
-                        {(Array.isArray(r.primary_muscles) && r.primary_muscles.length ? r.primary_muscles.join(", ") : "—")} •{" "}
-                        {(Array.isArray(r.equipment) && r.equipment.length ? r.equipment.join(", ") : "—")} • {r.source ?? "—"}
+                      <div className="tr-editResultCopy">
+                        <strong>{r.name}</strong>
+                        <span>{resultMeta(r)}</span>
                       </div>
+
+                      {r.effectiveHasMedia ? (
+                        <div className="tr-editResultStatus is-ready">
+                          <CheckIcon />
+                          <span>READY</span>
+                        </div>
+                      ) : (
+                        <div className="tr-editResultStatus is-missing">
+                          <AlertIcon />
+                          <span>NEEDS MEDIA</span>
+                        </div>
+                      )}
+
+                      {mode === "add" ? (
+                        <span className={`tr-addedBadge ${justAddedId === r.id ? "is-on" : ""}`}>
+                          {justAddedId === r.id ? "ADDED" : "ADD"}
+                        </span>
+                      ) : (
+                        <span className="tr-editResultPick">SELECT</span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -4722,7 +4739,7 @@ function EditSessionPanel(props: {
                     <strong>Exercises did not load.</strong>
                     <span>{searchError}</span>
                     <button type="button" className="tr-btn tr-btn--primary" onClick={() => void onRetry()}>
-                      Retry
+                      RETRY
                     </button>
                   </div>
                 ) : null}
@@ -4730,33 +4747,42 @@ function EditSessionPanel(props: {
                 {showResultsEmptyState ? (
                   <div className="tr-pickerStatus">No exercises match these filters.</div>
                 ) : null}
-
               </div>
+
+              {searchResults.length ? (
+                <div className="tr-editLoadMoreBlock">
+                  {searchHasMore ? (
+                    <button
+                      type="button"
+                      className="tr-btn tr-btn--primary tr-editLoadMoreBtn"
+                      onClick={() => void onLoadMore()}
+                      disabled={searchBusy || searchLoadingMore}
+                    >
+                      {searchLoadingMore ? "LOADING…" : `SHOW ${resultsBatchSize} MORE`}
+                    </button>
+                  ) : (
+                    <div className="tr-editAllLoaded">✓ ALL MATCHING EXERCISES LOADED</div>
+                  )}
+                </div>
+              ) : null}
             </div>
-          </Card>
+          </section>
+        </div>
+
+        <footer className="tr-modalFooter tr-editModalFooter tr-editSaveFooter">
+          <div className="tr-editSaveFooterCopy">
+            <span className="tr-kicker">SAVE CHANGES</span>
+            <small>Choose whether these edits apply only now or to future sessions too.</small>
           </div>
-        </div>
-
-        <div className="tr-modalFooter tr-modalFooter--center tr-editModalFooter">
-          <button
-            type="button"
-            className="tr-btn tr-btn--primary tr-editFooterCurrentAction"
-            style={{ height: 46, minWidth: 240 }}
-            onClick={() => setMobileTab("add")}
-          >
-            Add Exercise
-          </button>
-
-          <button
-            type="button"
-            className="tr-btn tr-btn--primary tr-editFooterLoadMore"
-            style={{ height: 46, minWidth: 240 }}
-            onClick={onLoadMore}
-            disabled={!searchHasMore || searchBusy || searchLoadingMore}
-          >
-            {searchLoadingMore ? "Loading…" : "Load more exercises"}
-          </button>
-        </div>
+          <div className="tr-editSaveActions">
+            <button className="tr-btn tr-btn--primary" onClick={onSaveSessionOnly}>
+              SAVE THIS SESSION
+            </button>
+            <button className="tr-btn" onClick={onSaveAllFuture}>
+              SAVE TO ALL FUTURE SESSIONS
+            </button>
+          </div>
+        </footer>
       </div>
 
       <style>{`
