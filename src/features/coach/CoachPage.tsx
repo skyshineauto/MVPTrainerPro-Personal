@@ -56,6 +56,7 @@ type ScheduledRow = {
   session_type: string | null;
   status: string | null;
   program_block_id: string | null;
+  queue_index: number | null;
 };
 
 type TemplateRow = {
@@ -174,8 +175,13 @@ type CoachHistoryRow = {
 
 type ToastState = { open: boolean; tone: "ok" | "err"; text: string };
 
-const HISTORY_KEY = "mvp-coach-recommendation-history-v3";
+const LEGACY_HISTORY_KEY = "mvp-coach-recommendation-history-v3";
+const HISTORY_KEY_PREFIX = "mvp-coach-recommendation-history-v4";
 const TIP_RECENT_KEY = "mvp-coach-tip-recent-v3";
+
+function coachHistoryKey(programBlockId: string | null | undefined) {
+  return programBlockId ? `${HISTORY_KEY_PREFIX}:${programBlockId}` : null;
+}
 
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
@@ -545,12 +551,23 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
       let scheduleRows: ScheduledRow[] = [];
       if (active?.id) {
+        /*
+         * Keep Coach on the same completion-driven queue used by Training.
+         * rpc_queue_dashboard is program-scoped and repairs/reorders only the
+         * active program's pending queue.
+         */
+        const { error: queueError } = await supabase.rpc("rpc_queue_dashboard", {
+          p_keep: 7,
+        });
+        if (queueError) throw queueError;
+
         const { data, error } = await supabase
           .from("scheduled_sessions")
-          .select("id,template_id,date,session_type,status,program_block_id")
+          .select("id,template_id,date,session_type,status,program_block_id,queue_index")
           .eq("user_id", uid)
           .eq("program_block_id", active.id)
-          .order("date", { ascending: true });
+          .order("queue_index", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: true });
         if (error) throw error;
         scheduleRows = (data ?? []) as ScheduledRow[];
       }
@@ -580,15 +597,28 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       }
       setTemplateExercises(nextTemplateExercises);
 
-      const { data: workoutData, error: workoutError } = await supabase
-        .from("workouts")
-        .select("id,scheduled_session_id,completed_at,started_at,ended_at,active_seconds,bodyweight_lb,protein_target_g,post_difficulty")
-        .eq("user_id", uid)
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(250);
-      if (workoutError) throw workoutError;
-      const nextWorkouts = (workoutData ?? []) as WorkoutRow[];
+      const activeScheduledSessionIds = scheduleRows.map((row) => row.id);
+      let nextWorkouts: WorkoutRow[] = [];
+
+      if (activeScheduledSessionIds.length) {
+        const { data: workoutData, error: workoutError } = await supabase
+          .from("workouts")
+          .select("id,scheduled_session_id,completed_at,started_at,ended_at,active_seconds,bodyweight_lb,protein_target_g,post_difficulty")
+          .eq("user_id", uid)
+          .in("scheduled_session_id", activeScheduledSessionIds)
+          .not("completed_at", "is", null)
+          .order("completed_at", { ascending: false })
+          .limit(250);
+
+        if (workoutError) throw workoutError;
+        nextWorkouts = (workoutData ?? []) as WorkoutRow[];
+      }
+
+      /*
+       * From this point forward, workouts/workoutExercises/workoutSets held by
+       * Coach belong only to the active program. Other programs never enter
+       * the in-memory coaching dataset.
+       */
       setWorkouts(nextWorkouts);
 
       const workoutIds = nextWorkouts.map((row) => row.id);
@@ -639,14 +669,31 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
   useEffect(() => {
     void loadCoach();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /*
+   * RECENT COACHING CALLS ARE PROGRAM-LOCAL.
+   *
+   * The old v3 key is deliberately left untouched because it may contain
+   * mixed-program rows from the previous implementation. We do not migrate
+   * ambiguous rows into any program. Each program now has its own v4 key.
+   */
+  useEffect(() => {
+    void LEGACY_HISTORY_KEY;
+    const key = coachHistoryKey(activeProgram?.id);
+    if (!key) {
+      setRecommendationHistory([]);
+      return;
+    }
+
     try {
-      const raw = window.localStorage.getItem(HISTORY_KEY);
+      const raw = window.localStorage.getItem(key);
       setRecommendationHistory(raw ? (JSON.parse(raw) as CoachHistoryRow[]) : []);
     } catch {
       setRecommendationHistory([]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeProgram?.id]);
 
   async function setActiveProgramBlock(blockId: string) {
     if (!userId) return;
@@ -870,11 +917,16 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       .filter((row) => !completedScheduledIds.has(row.id))
       .slice()
       .sort((a, b) => {
-        const left = ms(a.date);
-        const right = ms(b.date);
-        if (!Number.isFinite(left)) return 1;
-        if (!Number.isFinite(right)) return -1;
-        return left - right;
+        const leftQueue = a.queue_index == null ? Number.POSITIVE_INFINITY : Number(a.queue_index);
+        const rightQueue = b.queue_index == null ? Number.POSITIVE_INFINITY : Number(b.queue_index);
+
+        if (leftQueue !== rightQueue) return leftQueue - rightQueue;
+
+        const leftDate = ms(a.date);
+        const rightDate = ms(b.date);
+        if (!Number.isFinite(leftDate)) return 1;
+        if (!Number.isFinite(rightDate)) return -1;
+        return leftDate - rightDate;
       })[0] ?? null,
     [completedScheduledIds, scheduled]
   );
@@ -914,7 +966,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
     if (increase) {
       rows.push({
-        id: `increase-${increase.id}`,
+        id: `${activeProgram?.id ?? "no-program"}:increase-${increase.id}`,
         eyebrow: "PRIMARY ACTION",
         title: `Increase ${increase.name}`,
         body: increase.reason,
@@ -924,7 +976,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       });
     } else if (reduce) {
       rows.push({
-        id: `reduce-${reduce.id}`,
+        id: `${activeProgram?.id ?? "no-program"}:reduce-${reduce.id}`,
         eyebrow: "PRIMARY ACTION",
         title: `Reduce ${reduce.name}`,
         body: reduce.reason,
@@ -934,7 +986,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       });
     } else if (hold) {
       rows.push({
-        id: `hold-${hold.id}`,
+        id: `${activeProgram?.id ?? "no-program"}:hold-${hold.id}`,
         eyebrow: "PRIMARY ACTION",
         title: `Hold ${hold.name}`,
         body: hold.reason,
@@ -945,7 +997,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     }
 
     rows.push({
-      id: "next-workout",
+      id: `${activeProgram?.id ?? "no-program"}:next-workout`,
       eyebrow: "NEXT WORKOUT",
       title: nextTemplate ? cleanWorkoutName(nextTemplate.name) : "Build the next trend",
       body: nextTemplate
@@ -957,7 +1009,9 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
     const painSignal = exerciseInsights.find((row) => (row.currentPain ?? 0) >= 3);
     rows.push({
-      id: painSignal ? `pain-${painSignal.id}` : "recovery-clear",
+      id: painSignal
+        ? `${activeProgram?.id ?? "no-program"}:pain-${painSignal.id}`
+        : `${activeProgram?.id ?? "no-program"}:recovery-clear`,
       eyebrow: "RECOVERY CHECK",
       title: painSignal ? `Hold progression on ${painSignal.name}` : "Pain signal is controlled",
       body: painSignal
@@ -969,16 +1023,26 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     });
 
     return rows.slice(0, 3);
-  }, [activeProgramName, exerciseInsights, nextTemplate, nextWorkoutExercises]);
+  }, [activeProgram?.id, activeProgramName, exerciseInsights, nextTemplate, nextWorkoutExercises]);
 
   useEffect(() => {
-    if (!recommendations.length) return;
+    const key = coachHistoryKey(activeProgram?.id);
+    if (!key || !recommendations.length) return;
+
     try {
-      const raw = window.localStorage.getItem(HISTORY_KEY);
+      const raw = window.localStorage.getItem(key);
       const current = raw ? (JSON.parse(raw) as CoachHistoryRow[]) : [];
       const now = new Date().toISOString();
+
       const additions = recommendations
-        .filter((recommendation) => !current.some((row) => row.id === recommendation.id && Date.now() - ms(row.createdAt) < 2 * 86400000))
+        .filter(
+          (recommendation) =>
+            !current.some(
+              (row) =>
+                row.id === recommendation.id &&
+                Date.now() - ms(row.createdAt) < 2 * 86400000
+            )
+        )
         .map((recommendation) => ({
           id: recommendation.id,
           createdAt: now,
@@ -986,14 +1050,19 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           action: recommendation.action,
           tone: recommendation.tone,
         }));
-      if (!additions.length) return;
+
+      if (!additions.length) {
+        setRecommendationHistory(current);
+        return;
+      }
+
       const next = [...additions, ...current].slice(0, 30);
-      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      window.localStorage.setItem(key, JSON.stringify(next));
       setRecommendationHistory(next);
     } catch {
       // History is optional.
     }
-  }, [recommendations]);
+  }, [activeProgram?.id, recommendations]);
 
   const programReview = useMemo(() => {
     const changes = exerciseInsights.map((row) => row.change30).filter((value): value is number => value != null && Number.isFinite(value));
