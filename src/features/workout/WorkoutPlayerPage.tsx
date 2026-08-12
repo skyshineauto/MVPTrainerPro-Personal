@@ -541,48 +541,116 @@ function formatLoggedWeight(weight: number) {
   return Number.isInteger(weight) ? String(weight) : String(Number(weight.toFixed(2)));
 }
 
+type CompletedProgramWorkout = {
+  id: string;
+  scheduled_session_id: string | null;
+  completed_at: string;
+  workout_summary: any;
+};
+
+async function loadCompletedProgramWorkouts(
+  userId: string,
+  programBlockId: string | null | undefined
+): Promise<CompletedProgramWorkout[]> {
+  if (!programBlockId) return [];
+
+  const { data: programSessions, error: programSessionsError } = await supabase
+    .from("scheduled_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("program_block_id", programBlockId);
+
+  if (programSessionsError) throw programSessionsError;
+
+  const scheduledSessionIds = (programSessions ?? [])
+    .map((row: any) => String(row.id ?? ""))
+    .filter(Boolean);
+
+  if (!scheduledSessionIds.length) return [];
+
+  const completed: CompletedProgramWorkout[] = [];
+
+  for (const chunk of chunkValues(scheduledSessionIds)) {
+    const { data, error } = await supabase
+      .from("workouts")
+      .select("id,scheduled_session_id,completed_at,workout_summary")
+      .eq("user_id", userId)
+      .in("scheduled_session_id", chunk)
+      .not("completed_at", "is", null);
+
+    if (error) throw error;
+
+    completed.push(
+      ...((data ?? []) as any[]).map((row) => ({
+        id: String(row.id),
+        scheduled_session_id: row.scheduled_session_id ? String(row.scheduled_session_id) : null,
+        completed_at: String(row.completed_at),
+        workout_summary: row.workout_summary ?? null,
+      }))
+    );
+  }
+
+  completed.sort(
+    (a, b) =>
+      new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
+  );
+
+  return completed;
+}
+
 async function loadPreviousPerformance(params: {
   exerciseId: string;
   currentWorkoutId: string;
+  programBlockId: string | null;
 }): Promise<PreviousPerformance | null> {
-  const { exerciseId, currentWorkoutId } = params;
-  if (!exerciseId) return null;
+  const { exerciseId, currentWorkoutId, programBlockId } = params;
+  if (!exerciseId || !programBlockId) return null;
 
   const { data: u, error: uErr } = await supabase.auth.getUser();
   if (uErr) throw uErr;
   if (!u.user) return null;
 
-  const { data: matchingRows, error: matchingErr } = await supabase
-    .from("workout_exercises")
-    .select("id, workout_id, exercise_id, prescription_snapshot, pain, difficulty")
-    .eq("exercise_id", exerciseId)
-    .neq("workout_id", currentWorkoutId);
-
-  if (matchingErr) throw matchingErr;
-
-  const matchingExercises = (matchingRows ?? []) as any[];
-  const workoutIds = Array.from(
-    new Set(matchingExercises.map((row) => row.workout_id).filter(Boolean))
+  /*
+   * PROGRAM ISOLATION:
+   * Only completed workouts whose scheduled session belongs to this exact
+   * program_block_id are eligible. The same exercise performed in any other
+   * program is intentionally invisible here.
+   */
+  const programWorkouts = await loadCompletedProgramWorkouts(
+    u.user.id,
+    programBlockId
   );
-  if (!workoutIds.length) return null;
 
-  const { data: completedWorkouts, error: workoutErr } = await supabase
-    .from("workouts")
-    .select("id, completed_at, workout_summary")
-    .eq("user_id", u.user.id)
-    .in("id", workoutIds)
-    .not("completed_at", "is", null)
-    .order("completed_at", { ascending: false })
-    .limit(1);
+  const eligibleWorkouts = programWorkouts.filter(
+    (workout) => workout.id !== currentWorkoutId
+  );
+  if (!eligibleWorkouts.length) return null;
 
-  if (workoutErr) throw workoutErr;
+  const matchingExercises: any[] = [];
+  for (const chunk of chunkValues(eligibleWorkouts.map((workout) => workout.id))) {
+    const { data, error } = await supabase
+      .from("workout_exercises")
+      .select("id,workout_id,exercise_id,prescription_snapshot,pain,difficulty")
+      .eq("exercise_id", exerciseId)
+      .in("workout_id", chunk);
 
-  const previousWorkout = (completedWorkouts ?? [])[0] as any;
+    if (error) throw error;
+    matchingExercises.push(...(data ?? []));
+  }
+
+  if (!matchingExercises.length) return null;
+
+  const exerciseByWorkout = new Map<string, any>();
+  for (const row of matchingExercises) {
+    exerciseByWorkout.set(String(row.workout_id), row);
+  }
+
+  const previousWorkout = eligibleWorkouts.find((workout) =>
+    exerciseByWorkout.has(workout.id)
+  );
   if (!previousWorkout) return null;
 
-  const previousExercise = matchingExercises.find(
-    (row) => row.workout_id === previousWorkout.id
-  );
+  const previousExercise = exerciseByWorkout.get(previousWorkout.id);
   if (!previousExercise?.id) return null;
 
   const { data: setRows, error: setsErr } = await supabase
@@ -774,45 +842,48 @@ function primaryWorkingWeight(sets: PreviousSetRow[]) {
 async function loadExerciseHistoryStats(params: {
   exerciseId: string;
   currentWorkoutId: string;
+  programBlockId: string | null;
 }): Promise<ExerciseHistoryStats> {
-  const { exerciseId, currentWorkoutId } = params;
-  if (!exerciseId) return emptyHistoryStats();
+  const { exerciseId, currentWorkoutId, programBlockId } = params;
+  if (!exerciseId || !programBlockId) return emptyHistoryStats();
 
   const { data: u, error: uErr } = await supabase.auth.getUser();
   if (uErr) throw uErr;
   if (!u.user) return emptyHistoryStats();
 
-  const { data: exerciseRows, error: exerciseErr } = await supabase
-    .from("workout_exercises")
-    .select("id,workout_id")
-    .eq("exercise_id", exerciseId)
-    .neq("workout_id", currentWorkoutId)
-    .limit(250);
+  /*
+   * PROGRAM ISOLATION:
+   * PRs, session count, best weight, e1RM, rep-at-weight records and volume
+   * are calculated only from this program's completed workouts.
+   */
+  const programWorkouts = (
+    await loadCompletedProgramWorkouts(u.user.id, programBlockId)
+  ).filter((workout) => workout.id !== currentWorkoutId);
 
-  if (exerciseErr) throw exerciseErr;
+  if (!programWorkouts.length) return emptyHistoryStats();
 
-  const rows = (exerciseRows ?? []) as Array<{ id: string; workout_id: string }>;
-  if (!rows.length) return emptyHistoryStats();
+  const exerciseRows: Array<{ id: string; workout_id: string }> = [];
 
-  const workoutIds = Array.from(new Set(rows.map((row) => row.workout_id).filter(Boolean)));
-  const completedWorkouts: any[] = [];
-  for (const chunk of chunkValues(workoutIds)) {
+  for (const chunk of chunkValues(programWorkouts.map((workout) => workout.id))) {
     const { data, error } = await supabase
-      .from("workouts")
-      .select("id")
-      .eq("user_id", u.user.id)
-      .in("id", chunk)
-      .not("completed_at", "is", null);
+      .from("workout_exercises")
+      .select("id,workout_id")
+      .eq("exercise_id", exerciseId)
+      .in("workout_id", chunk);
+
     if (error) throw error;
-    completedWorkouts.push(...(data ?? []));
+
+    exerciseRows.push(
+      ...((data ?? []) as Array<{ id: string; workout_id: string }>)
+    );
   }
 
-  const completedIds = new Set(completedWorkouts.map((row: any) => row.id));
-  const completedExerciseRows = rows.filter((row) => completedIds.has(row.workout_id));
-  if (!completedExerciseRows.length) return emptyHistoryStats();
+  if (!exerciseRows.length) return emptyHistoryStats();
 
-  const workoutExerciseIds = completedExerciseRows.map((row) => row.id);
-  const workoutByExercise = new Map(completedExerciseRows.map((row) => [row.id, row.workout_id]));
+  const workoutExerciseIds = exerciseRows.map((row) => row.id);
+  const workoutByExercise = new Map(
+    exerciseRows.map((row) => [row.id, row.workout_id])
+  );
 
   const setRows: any[] = [];
   for (const chunk of chunkValues(workoutExerciseIds)) {
@@ -820,12 +891,13 @@ async function loadExerciseHistoryStats(params: {
       .from("workout_sets")
       .select("workout_exercise_id,set_index,reps,weight")
       .in("workout_exercise_id", chunk);
+
     if (error) throw error;
     setRows.push(...(data ?? []));
   }
 
   const stats = emptyHistoryStats();
-  stats.sessions = completedIds.size;
+  stats.sessions = new Set(exerciseRows.map((row) => row.workout_id)).size;
   const sessionVolumes = new Map<string, number>();
 
   for (const row of setRows ?? []) {
@@ -845,14 +917,24 @@ async function loadExerciseHistoryStats(params: {
     }
     stats.bestSetVolume = Math.max(stats.bestSetVolume, volume);
     stats.bestEstimated1RM = Math.max(stats.bestEstimated1RM, e1rm);
-    stats.maxRepsByWeight[weightKey] = Math.max(stats.maxRepsByWeight[weightKey] ?? 0, reps);
+    stats.maxRepsByWeight[weightKey] = Math.max(
+      stats.maxRepsByWeight[weightKey] ?? 0,
+      reps
+    );
 
     if (workoutId) {
-      sessionVolumes.set(workoutId, (sessionVolumes.get(workoutId) ?? 0) + volume);
+      sessionVolumes.set(
+        workoutId,
+        (sessionVolumes.get(workoutId) ?? 0) + volume
+      );
     }
   }
 
-  stats.bestSessionVolume = Math.max(0, ...Array.from(sessionVolumes.values()));
+  stats.bestSessionVolume = Math.max(
+    0,
+    ...Array.from(sessionVolumes.values())
+  );
+
   return stats;
 }
 
@@ -2369,6 +2451,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const [userUploadMap, setUserUploadMap] = useState<Record<string, MediaPack>>({});
 
   const [sessionType, setSessionType] = useState<string | null>(null);
+  const [programBlockId, setProgramBlockId] = useState<string | null>(null);
   const [goal, setGoal] = useState<string | null>(null);
   const [goalMode, setGoalMode] = useState<string | null>(null);
   const [symptomKey, setSymptomKey] = useState<SymptomKey | null>(null);
@@ -2434,21 +2517,32 @@ export function WorkoutPlayerPage({ params }: any) {
 
       const { data: ss, error: ssErr } = await supabase
         .from("scheduled_sessions")
-        .select("id, session_type, program_block_id")
+        .select("id,session_type,program_block_id")
         .eq("id", sessionId)
+        .eq("user_id", u.user.id)
         .maybeSingle();
 
       if (ssErr) throw ssErr;
 
+      const sessionProgramBlockId = (ss as any)?.program_block_id
+        ? String((ss as any).program_block_id)
+        : null;
+
       setSessionType((ss as any)?.session_type ?? null);
+      setProgramBlockId(sessionProgramBlockId);
+
+      if (!sessionProgramBlockId) {
+        setGoal(null);
+        setGoalMode(null);
+        setSymptomKey(null);
+        return;
+      }
 
       const { data: ab, error: abErr } = await supabase
         .from("program_blocks")
-        .select("id, goal, goal_mode")
+        .select("id,goal,goal_mode")
         .eq("user_id", u.user.id)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
+        .eq("id", sessionProgramBlockId)
         .maybeSingle();
 
       if (abErr) throw abErr;
@@ -2461,7 +2555,7 @@ export function WorkoutPlayerPage({ params }: any) {
       if (isSymptomMode(gm)) {
         const { data: intake } = await supabase
           .from("intake_snapshots")
-          .select("symptoms, created_at")
+          .select("symptoms,created_at")
           .eq("user_id", u.user.id)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -2471,7 +2565,13 @@ export function WorkoutPlayerPage({ params }: any) {
       } else {
         setSymptomKey(null);
       }
-    } catch {}
+    } catch {
+      // Fail closed for program-sensitive context.
+      setProgramBlockId(null);
+      setGoal(null);
+      setGoalMode(null);
+      setSymptomKey(null);
+    }
   }
 
   useEffect(() => {
@@ -2528,6 +2628,10 @@ export function WorkoutPlayerPage({ params }: any) {
 
     const sess = (data as any)?.session ?? null;
     const tmpl = (data as any)?.template ?? null;
+
+    if (sess?.program_block_id) {
+      setProgramBlockId(String(sess.program_block_id));
+    }
     const tId =
       (sess?.template_id as string | undefined) ??
       (tmpl?.id as string | undefined) ??
@@ -2649,17 +2753,39 @@ export function WorkoutPlayerPage({ params }: any) {
         const bw = wRow.bodyweight_lb != null ? Number(wRow.bodyweight_lb) : null;
         setStartedWeight(bw);
 
-        const { data: ab } = await supabase
-          .from("program_blocks")
-          .select("goal")
+        const { data: sessionContext, error: sessionContextError } = await supabase
+          .from("scheduled_sessions")
+          .select("program_block_id")
+          .eq("id", sessionId)
           .eq("user_id", u.user.id)
-          .eq("status", "active")
-          .order("created_at", { ascending: false })
-          .limit(1)
           .maybeSingle();
 
-        const goal = (ab?.goal as string) ?? null;
-        setProteinTarget(bw && bw > 0 ? roundProtein(bw * proteinMultiplier(goal)) : null);
+        if (sessionContextError) throw sessionContextError;
+
+        const exactProgramId = (sessionContext as any)?.program_block_id
+          ? String((sessionContext as any).program_block_id)
+          : null;
+
+        if (exactProgramId) setProgramBlockId(exactProgramId);
+
+        let exactGoal: string | null = null;
+        if (exactProgramId) {
+          const { data: programRow, error: programError } = await supabase
+            .from("program_blocks")
+            .select("goal")
+            .eq("user_id", u.user.id)
+            .eq("id", exactProgramId)
+            .maybeSingle();
+
+          if (programError) throw programError;
+          exactGoal = (programRow?.goal as string) ?? null;
+        }
+
+        setProteinTarget(
+          bw && bw > 0
+            ? roundProtein(bw * proteinMultiplier(exactGoal))
+            : null
+        );
 
         await hydrateAfterStart(wId);
       } else {
@@ -2718,17 +2844,39 @@ export function WorkoutPlayerPage({ params }: any) {
       setGateOpen(false);
       setStartedWeight(w);
 
-      const { data: ab } = await supabase
-        .from("program_blocks")
-        .select("goal")
+      const { data: sessionContext, error: sessionContextError } = await supabase
+        .from("scheduled_sessions")
+        .select("program_block_id")
+        .eq("id", sessionId)
         .eq("user_id", u.user.id)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
         .maybeSingle();
 
-      const goal = (ab?.goal as string) ?? null;
-      setProteinTarget(w > 0 ? roundProtein(w * proteinMultiplier(goal)) : null);
+      if (sessionContextError) throw sessionContextError;
+
+      const exactProgramId = (sessionContext as any)?.program_block_id
+        ? String((sessionContext as any).program_block_id)
+        : null;
+
+      if (exactProgramId) setProgramBlockId(exactProgramId);
+
+      let exactGoal: string | null = null;
+      if (exactProgramId) {
+        const { data: programRow, error: programError } = await supabase
+          .from("program_blocks")
+          .select("goal")
+          .eq("user_id", u.user.id)
+          .eq("id", exactProgramId)
+          .maybeSingle();
+
+        if (programError) throw programError;
+        exactGoal = (programRow?.goal as string) ?? null;
+      }
+
+      setProteinTarget(
+        w > 0
+          ? roundProtein(w * proteinMultiplier(exactGoal))
+          : null
+      );
 
       await hydrateAfterStart(workoutId);
     } catch (e: any) {
@@ -3463,6 +3611,7 @@ export function WorkoutPlayerPage({ params }: any) {
           <ExerciseRunner
             workoutExercise={current}
             item={currentRunnerItem}
+            programBlockId={programBlockId}
             onChanged={reloadWorkoutExercisesKeepIndex}
             onExerciseCompleted={handleExerciseCompleted}
             showToast={showToast}
@@ -4818,6 +4967,7 @@ function EditSessionPanel(props: {
 function ExerciseRunner({
   workoutExercise,
   item,
+  programBlockId,
   onChanged,
   onExerciseCompleted,
   showToast,
@@ -4828,6 +4978,7 @@ function ExerciseRunner({
 }: {
   workoutExercise: WorkoutExerciseRow;
   item: any;
+  programBlockId: string | null;
   onChanged: () => Promise<WorkoutExerciseRow[]>;
   onExerciseCompleted: (workoutExerciseId: string) => Promise<void>;
   showToast: (msg: string, tone?: ToastTone) => void;
@@ -4952,10 +5103,12 @@ function ExerciseRunner({
           loadPreviousPerformance({
             exerciseId,
             currentWorkoutId: workoutExercise.workout_id,
+            programBlockId,
           }),
           loadExerciseHistoryStats({
             exerciseId,
             currentWorkoutId: workoutExercise.workout_id,
+            programBlockId,
           }),
         ]);
 
@@ -5069,7 +5222,7 @@ function ExerciseRunner({
     return () => {
       cancelled = true;
     };
-  }, [weId, exerciseId, workoutExercise.workout_id, setsTarget, timed]);
+  }, [weId, exerciseId, workoutExercise.workout_id, programBlockId, setsTarget, timed]);
 
   const allSetsLogged = useMemo(() => {
     if (timed) return true;
