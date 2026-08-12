@@ -164,14 +164,17 @@ function isSameDay(left: Date, right: Date) {
     left.getDate() === right.getDate();
 }
 
-function scheduleDateLabel(raw: unknown) {
-  const date = parseDate(raw);
-  if (!date) return "DATE NOT SET";
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (isSameDay(date, today)) return `TODAY • ${formatAppDate(date)}`;
-  if (isSameDay(date, tomorrow)) return `TOMORROW • ${formatAppDate(date)}`;
+function addLocalDays(base: Date, days: number) {
+  const date = new Date(base);
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function rollingScheduleDateLabel(base: Date, offsetDays: number) {
+  const date = addLocalDays(base, offsetDays);
+  if (offsetDays === 0) return `TODAY • ${formatAppDate(date)}`;
+  if (offsetDays === 1) return `TOMORROW • ${formatAppDate(date)}`;
   return formatAppDate(date);
 }
 
@@ -325,6 +328,11 @@ export function TodayPage() {
   const [metaBySession, setMetaBySession] = useState<Map<string, SessionMeta>>(new Map());
   const [history, setHistory] = useState<HistorySignal[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [referenceToday, setReferenceToday] = useState(() => {
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    return now;
+  });
 
   async function loadLatestSymptom(goalMode: string | null, userId: string) {
     if (!isSymptomMode(goalMode)) return null;
@@ -499,6 +507,16 @@ export function TodayPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = new Date();
+      now.setHours(12, 0, 0, 0);
+      setReferenceToday((current) => isSameDay(current, now) ? current : now);
+    }, 60_000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   const goal = queue?.activeBlock?.goal ? String(queue.activeBlock.goal) : null;
   const goalMode = queue?.activeBlock?.goal_mode ? String(queue.activeBlock.goal_mode) : null;
   const hasProgram = Boolean(queue?.activeBlock?.id);
@@ -572,7 +590,7 @@ export function TodayPage() {
                 <span>{activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}</span>
                 <div className={`trp-readiness is-${primaryReadiness.tone}`}><i />{activeSessionId ? "IN PROGRESS" : primaryReadiness.label}</div>
               </div>
-              {!activeSessionId && nextSession ? <div className="trp-dateBadge">{scheduleDateLabel(nextSession.date)}</div> : null}
+              {!activeSessionId && nextSession ? <div className="trp-dateBadge">{rollingScheduleDateLabel(referenceToday, 0)}</div> : null}
             </div>
 
             <div className="trp-primaryBody">
@@ -637,7 +655,7 @@ export function TodayPage() {
                           <span className="trp-sequence">{index === 0 ? "NEXT UP" : `UPCOMING ${index + 1}`}</span>
                           <div className={`trp-readiness is-${readiness.tone}`}><i />{readiness.label}</div>
                         </div>
-                        <div className="trp-sessionDate">{scheduleDateLabel(session.date)}</div>
+                        <div className="trp-sessionDate">{rollingScheduleDateLabel(referenceToday, index)}</div>
                       </div>
 
                       <div className="trp-sessionTitle">
