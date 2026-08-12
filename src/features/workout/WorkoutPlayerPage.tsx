@@ -140,9 +140,35 @@ function lockDocumentForModal() {
       return;
     }
 
-    const scroller = target.closest<HTMLElement>(
-      ".tr-editCurrentList, .tr-editResultsViewport, .tr-editFilterScroll, .tr-completeGrid, .tr-modalBody"
-    );
+    // Find the first ancestor that can actually scroll vertically.
+    // The active-session editor intentionally renders its inner filter/result
+    // regions with overflow: visible so the modal body owns the mobile scroll.
+    // Using Element.closest() alone can stop on one of those non-scrollable
+    // inner regions and incorrectly block the swipe before it reaches the modal.
+    let scroller: HTMLElement | null = null;
+    let node: Element | null = target;
+
+    while (node) {
+      if (
+        node instanceof HTMLElement &&
+        node.matches(
+          ".tr-editCurrentList, .tr-editResultsViewport, .tr-editFilterScroll, .tr-completeGrid, .tr-modalBody"
+        )
+      ) {
+        const style = window.getComputedStyle(node);
+        const overflowY = style.overflowY;
+        const canScrollY =
+          /^(auto|scroll|overlay)$/.test(overflowY) &&
+          node.scrollHeight > node.clientHeight + 1;
+
+        if (canScrollY) {
+          scroller = node;
+          break;
+        }
+      }
+
+      node = node.parentElement;
+    }
 
     if (!scroller || Math.abs(deltaX) > Math.abs(deltaY)) {
       if (!scroller) event.preventDefault();
@@ -150,10 +176,6 @@ function lockDocumentForModal() {
     }
 
     const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    if (maxScrollTop <= 1) {
-      event.preventDefault();
-      return;
-    }
 
     const atTop = scroller.scrollTop <= 0;
     const atBottom = scroller.scrollTop >= maxScrollTop - 1;
