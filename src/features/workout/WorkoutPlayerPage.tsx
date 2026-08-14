@@ -977,6 +977,520 @@ function detectPersonalRecords(
   return labels;
 }
 
+type PersonalRecordDetail = {
+  key: "weight" | "reps" | "set_volume" | "strength" | "session_volume";
+  label: string;
+  previous: string;
+  current: string;
+  improvement: string;
+};
+
+type PersonalRecordCelebrationState = {
+  id: string;
+  exerciseName: string;
+  setNumber: number;
+  weight: number;
+  reps: number;
+  records: PersonalRecordDetail[];
+};
+
+function buildPersonalRecordDetails(params: {
+  set: { reps: number; weight: number };
+  history: ExerciseHistoryStats;
+  priorCompletedSets: Array<{ reps: number; weight: number }>;
+}): PersonalRecordDetail[] {
+  const { set, history, priorCompletedSets } = params;
+  const reps = Number(set.reps ?? 0);
+  const weight = Number(set.weight ?? 0);
+
+  // The first completed session establishes the baseline. Do not manufacture
+  // "PRs" when there is no prior completed history to beat.
+  if (!(reps > 0) || !(weight > 0) || history.sessions <= 0) return [];
+
+  const validPrior = priorCompletedSets.filter(
+    (row) => Number(row.reps) > 0 && Number(row.weight) > 0
+  );
+
+  const currentVolume = reps * weight;
+  const currentE1rm = estimatedOneRepMax(weight, reps);
+  const weightKey = String(Number(weight.toFixed(2)));
+
+  const priorLiveBestWeight = Math.max(
+    Number(history.bestWeight ?? 0),
+    ...validPrior.map((row) => Number(row.weight ?? 0))
+  );
+
+  const priorLiveRepsAtWeight = Math.max(
+    Number(history.maxRepsByWeight[weightKey] ?? 0),
+    ...validPrior
+      .filter((row) => Number(row.weight) === weight)
+      .map((row) => Number(row.reps ?? 0))
+  );
+
+  const priorLiveBestSetVolume = Math.max(
+    Number(history.bestSetVolume ?? 0),
+    ...validPrior.map((row) => Number(row.reps ?? 0) * Number(row.weight ?? 0))
+  );
+
+  const priorLiveBestE1rm = Math.max(
+    Number(history.bestEstimated1RM ?? 0),
+    ...validPrior.map((row) =>
+      estimatedOneRepMax(Number(row.weight ?? 0), Number(row.reps ?? 0))
+    )
+  );
+
+  const priorSessionVolume = validPrior.reduce(
+    (sum, row) => sum + Number(row.reps ?? 0) * Number(row.weight ?? 0),
+    0
+  );
+  const currentSessionVolume = priorSessionVolume + currentVolume;
+
+  const records: PersonalRecordDetail[] = [];
+
+  if (weight > priorLiveBestWeight) {
+    records.push({
+      key: "weight",
+      label: "HEAVIEST WEIGHT",
+      previous: `${formatLoggedWeight(priorLiveBestWeight)} lb`,
+      current: `${formatLoggedWeight(weight)} lb`,
+      improvement: `+${formatLoggedWeight(weight - priorLiveBestWeight)} lb`,
+    });
+  }
+
+  if (reps > priorLiveRepsAtWeight) {
+    records.push({
+      key: "reps",
+      label: "REP PR AT THIS WEIGHT",
+      previous:
+        priorLiveRepsAtWeight > 0
+          ? `${priorLiveRepsAtWeight} reps @ ${formatLoggedWeight(weight)} lb`
+          : `No prior reps @ ${formatLoggedWeight(weight)} lb`,
+      current: `${reps} reps @ ${formatLoggedWeight(weight)} lb`,
+      improvement:
+        priorLiveRepsAtWeight > 0
+          ? `+${reps - priorLiveRepsAtWeight} rep${reps - priorLiveRepsAtWeight === 1 ? "" : "s"}`
+          : "NEW WEIGHT / REP MARK",
+    });
+  }
+
+  if (currentVolume > priorLiveBestSetVolume) {
+    records.push({
+      key: "set_volume",
+      label: "SET VOLUME",
+      previous: `${Math.round(priorLiveBestSetVolume).toLocaleString()} lb`,
+      current: `${Math.round(currentVolume).toLocaleString()} lb`,
+      improvement: `+${Math.round(currentVolume - priorLiveBestSetVolume).toLocaleString()} lb`,
+    });
+  }
+
+  if (currentE1rm > priorLiveBestE1rm) {
+    records.push({
+      key: "strength",
+      label: "ESTIMATED STRENGTH",
+      previous: `${formatLoggedWeight(Number(priorLiveBestE1rm.toFixed(1)))} lb e1RM`,
+      current: `${formatLoggedWeight(Number(currentE1rm.toFixed(1)))} lb e1RM`,
+      improvement: `+${formatLoggedWeight(Number((currentE1rm - priorLiveBestE1rm).toFixed(1)))} lb`,
+    });
+  }
+
+  // Celebrate session-volume history only once: exactly when today's exercise
+  // volume crosses the previous completed-session record.
+  if (
+    Number(history.bestSessionVolume ?? 0) > 0 &&
+    priorSessionVolume <= Number(history.bestSessionVolume) &&
+    currentSessionVolume > Number(history.bestSessionVolume)
+  ) {
+    records.push({
+      key: "session_volume",
+      label: "EXERCISE SESSION VOLUME",
+      previous: `${Math.round(history.bestSessionVolume).toLocaleString()} lb`,
+      current: `${Math.round(currentSessionVolume).toLocaleString()} lb`,
+      improvement: `+${Math.round(currentSessionVolume - history.bestSessionVolume).toLocaleString()} lb`,
+    });
+  }
+
+  return records;
+}
+
+function PersonalRecordOverlay({
+  celebration,
+  onClose,
+}: {
+  celebration: PersonalRecordCelebrationState | null;
+  onClose: () => void;
+}) {
+  if (!celebration || typeof document === "undefined") return null;
+
+  const count = celebration.records.length;
+  const headline = count > 1 ? `${count} RECORDS BROKEN` : "NEW PERSONAL RECORD";
+
+  return createPortal(
+    <div
+      className="tr-prOverlay"
+      role="presentation"
+      onClick={onClose}
+    >
+      <section
+        className="tr-prCelebration"
+        role="status"
+        aria-live="assertive"
+        aria-label={`${headline} for ${celebration.exerciseName}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="tr-prHalo" aria-hidden />
+        <div className="tr-prTopLine" aria-hidden />
+
+        <header className="tr-prHeader">
+          <div className="tr-prMark" aria-hidden>PR</div>
+          <div className="tr-prHeaderCopy">
+            <span>PERFORMANCE MILESTONE</span>
+            <strong>{headline}</strong>
+          </div>
+          <button
+            type="button"
+            className="tr-prClose"
+            onClick={onClose}
+            aria-label="Dismiss personal record celebration"
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="tr-prHero">
+          <span>{celebration.exerciseName}</span>
+          <strong>
+            {formatLoggedWeight(celebration.weight)} LB
+            <small> × </small>
+            {celebration.reps} REPS
+          </strong>
+          <small>SET {celebration.setNumber} • VERIFIED AGAINST COMPLETED PROGRAM HISTORY</small>
+        </div>
+
+        <div className="tr-prRecordGrid">
+          {celebration.records.map((record) => (
+            <article key={record.key} className="tr-prRecord">
+              <div className="tr-prRecordLabel">{record.label}</div>
+
+              <div className="tr-prCompare">
+                <div>
+                  <span>PREVIOUS BEST</span>
+                  <strong>{record.previous}</strong>
+                </div>
+                <div className="tr-prArrow" aria-hidden>→</div>
+                <div>
+                  <span>NEW BEST</span>
+                  <strong>{record.current}</strong>
+                </div>
+              </div>
+
+              <div className="tr-prImprovement">{record.improvement}</div>
+            </article>
+          ))}
+        </div>
+
+        <footer className="tr-prFooter">
+          <span>RECORDED TO YOUR PERFORMANCE HISTORY</span>
+          <strong>TAP ANYWHERE TO DISMISS</strong>
+        </footer>
+
+        <div className="tr-prAutoDismiss" aria-hidden>
+          <span />
+        </div>
+      </section>
+
+      <style>{`
+        .tr-prOverlay{
+          position:fixed;
+          inset:0;
+          z-index:18000;
+          display:grid;
+          place-items:center;
+          padding:18px;
+          background:rgba(0,0,0,.58);
+          backdrop-filter:blur(8px);
+          -webkit-backdrop-filter:blur(8px);
+          animation:trPrOverlayIn .18s ease-out both;
+        }
+        .tr-prCelebration{
+          position:relative;
+          width:min(760px,100%);
+          overflow:hidden;
+          border:1px solid rgba(255,200,80,.48);
+          border-radius:26px;
+          background:
+            radial-gradient(700px 280px at 50% -15%,rgba(255,182,46,.18),transparent 64%),
+            radial-gradient(500px 240px at 100% 100%,rgba(0,174,255,.09),transparent 70%),
+            linear-gradient(180deg,rgba(16,19,24,.995),rgba(5,8,12,.998));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.08),
+            0 34px 110px rgba(0,0,0,.72),
+            0 0 50px rgba(255,168,34,.15);
+          animation:trPrCardIn .34s cubic-bezier(.18,.86,.25,1.04) both;
+        }
+        .tr-prHalo{
+          position:absolute;
+          width:380px;
+          height:200px;
+          left:50%;
+          top:-95px;
+          transform:translateX(-50%);
+          border-radius:50%;
+          background:radial-gradient(circle,rgba(255,195,72,.30),transparent 70%);
+          filter:blur(26px);
+          pointer-events:none;
+        }
+        .tr-prTopLine{
+          position:absolute;
+          left:10%;
+          right:10%;
+          top:0;
+          height:2px;
+          background:linear-gradient(90deg,transparent,#ffd76b,transparent);
+          box-shadow:0 0 20px rgba(255,205,92,.42);
+        }
+        .tr-prHeader{
+          position:relative;
+          z-index:2;
+          display:grid;
+          grid-template-columns:58px minmax(0,1fr) 42px;
+          align-items:center;
+          gap:13px;
+          padding:20px 22px 16px;
+          border-bottom:1px solid rgba(255,255,255,.075);
+        }
+        .tr-prMark{
+          width:58px;
+          height:58px;
+          display:grid;
+          place-items:center;
+          border:1px solid rgba(255,205,96,.58);
+          border-radius:18px;
+          color:#161006;
+          background:linear-gradient(180deg,#ffe28a,#f3a51f);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.72),
+            0 10px 26px rgba(0,0,0,.38),
+            0 0 22px rgba(255,175,32,.19);
+          font-size:18px;
+          font-weight:1100;
+          letter-spacing:.04em;
+        }
+        .tr-prHeaderCopy{
+          min-width:0;
+          display:grid;
+          gap:4px;
+        }
+        .tr-prHeaderCopy span{
+          color:#6edfff;
+          font-size:8px;
+          font-weight:1050;
+          letter-spacing:.20em;
+        }
+        .tr-prHeaderCopy strong{
+          color:#fff0b4;
+          font-size:clamp(21px,3vw,31px);
+          line-height:1;
+          font-weight:1100;
+          letter-spacing:-.025em;
+          text-shadow:0 0 22px rgba(255,190,52,.15);
+        }
+        .tr-prClose{
+          width:42px;
+          height:42px;
+          display:grid;
+          place-items:center;
+          border:1px solid rgba(255,255,255,.11);
+          border-radius:13px;
+          color:rgba(240,246,250,.78);
+          background:rgba(255,255,255,.035);
+          font-size:24px;
+          cursor:pointer;
+        }
+        .tr-prHero{
+          position:relative;
+          z-index:2;
+          padding:22px 22px 17px;
+          display:grid;
+          justify-items:center;
+          gap:8px;
+          text-align:center;
+        }
+        .tr-prHero>span{
+          color:rgba(211,230,240,.72);
+          font-size:12px;
+          font-weight:1000;
+          letter-spacing:.055em;
+        }
+        .tr-prHero>strong{
+          color:#fff;
+          font-size:clamp(35px,6vw,58px);
+          line-height:.95;
+          font-weight:1150;
+          letter-spacing:-.04em;
+          font-variant-numeric:tabular-nums;
+          text-shadow:
+            0 3px 0 rgba(0,0,0,.72),
+            0 0 28px rgba(255,185,46,.14);
+        }
+        .tr-prHero>strong small{
+          color:#ffd166;
+          font:inherit;
+        }
+        .tr-prHero>small{
+          color:rgba(150,186,203,.56);
+          font-size:7px;
+          font-weight:1000;
+          letter-spacing:.12em;
+        }
+        .tr-prRecordGrid{
+          position:relative;
+          z-index:2;
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:10px;
+          padding:0 18px 18px;
+        }
+        .tr-prRecord{
+          min-width:0;
+          padding:14px;
+          display:grid;
+          gap:11px;
+          border:1px solid rgba(255,255,255,.085);
+          border-radius:16px;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.13)),
+            rgba(4,8,12,.88);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+        }
+        .tr-prRecordLabel{
+          color:#ffd26b;
+          font-size:9px;
+          font-weight:1100;
+          letter-spacing:.13em;
+        }
+        .tr-prCompare{
+          display:grid;
+          grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr);
+          align-items:center;
+          gap:7px;
+        }
+        .tr-prCompare>div:not(.tr-prArrow){
+          min-width:0;
+          display:grid;
+          gap:4px;
+        }
+        .tr-prCompare span{
+          color:rgba(148,177,192,.50);
+          font-size:6px;
+          font-weight:1000;
+          letter-spacing:.11em;
+        }
+        .tr-prCompare strong{
+          min-width:0;
+          color:rgba(238,246,249,.92);
+          font-size:12px;
+          line-height:1.22;
+          font-weight:1000;
+          overflow-wrap:anywhere;
+        }
+        .tr-prCompare>div:last-child strong{color:#fff7d5}
+        .tr-prArrow{
+          color:#5fdcff;
+          font-size:17px;
+          text-align:center;
+        }
+        .tr-prImprovement{
+          width:max-content;
+          max-width:100%;
+          padding:5px 8px;
+          border:1px solid rgba(77,225,139,.28);
+          border-radius:999px;
+          color:#82efa8;
+          background:rgba(34,174,94,.09);
+          font-size:8px;
+          font-weight:1100;
+          letter-spacing:.08em;
+        }
+        .tr-prFooter{
+          position:relative;
+          z-index:2;
+          display:flex;
+          justify-content:space-between;
+          gap:12px;
+          padding:13px 18px 15px;
+          border-top:1px solid rgba(255,255,255,.065);
+          color:rgba(137,171,186,.52);
+          font-size:7px;
+          font-weight:1000;
+          letter-spacing:.10em;
+        }
+        .tr-prFooter strong{color:rgba(207,224,233,.66)}
+        .tr-prAutoDismiss{
+          height:3px;
+          background:rgba(255,255,255,.045);
+        }
+        .tr-prAutoDismiss span{
+          display:block;
+          width:100%;
+          height:100%;
+          transform-origin:left;
+          background:linear-gradient(90deg,#f3a61f,#ffe27e);
+          animation:trPrDismiss 5.2s linear forwards;
+        }
+        @keyframes trPrOverlayIn{
+          from{opacity:0}
+          to{opacity:1}
+        }
+        @keyframes trPrCardIn{
+          from{opacity:0;transform:translateY(18px) scale(.975)}
+          to{opacity:1;transform:translateY(0) scale(1)}
+        }
+        @keyframes trPrDismiss{
+          from{transform:scaleX(1)}
+          to{transform:scaleX(0)}
+        }
+        @media(max-width:700px){
+          .tr-prOverlay{
+            align-items:end;
+            padding:12px 12px calc(90px + env(safe-area-inset-bottom));
+            backdrop-filter:blur(6px);
+            -webkit-backdrop-filter:blur(6px);
+          }
+          .tr-prCelebration{
+            width:100%;
+            max-height:calc(100dvh - 116px);
+            overflow:auto;
+            border-radius:24px;
+          }
+          .tr-prHeader{
+            grid-template-columns:50px minmax(0,1fr) 38px;
+            gap:10px;
+            padding:16px 15px 13px;
+          }
+          .tr-prMark{width:50px;height:50px;border-radius:15px;font-size:16px}
+          .tr-prClose{width:38px;height:38px;border-radius:11px}
+          .tr-prHeaderCopy span{font-size:7px}
+          .tr-prHeaderCopy strong{font-size:20px}
+          .tr-prHero{padding:18px 14px 14px}
+          .tr-prHero>span{font-size:11px}
+          .tr-prHero>strong{font-size:clamp(34px,11vw,48px)}
+          .tr-prHero>small{font-size:6px;letter-spacing:.08em}
+          .tr-prRecordGrid{grid-template-columns:1fr;padding:0 12px 13px;gap:8px}
+          .tr-prRecord{padding:12px;border-radius:14px}
+          .tr-prCompare strong{font-size:11px}
+          .tr-prFooter{
+            align-items:flex-start;
+            flex-direction:column;
+            gap:4px;
+            padding:11px 13px 13px;
+          }
+        }
+      `}</style>
+    </div>,
+    document.body
+  );
+}
+
 function progressionGuidance(
   previous: PreviousPerformance | null,
   history: ExerciseHistoryStats,
@@ -5054,6 +5568,7 @@ function ExerciseRunner({
   const [previousLoading, setPreviousLoading] = useState(false);
   const [historyStats, setHistoryStats] = useState<ExerciseHistoryStats>(() => emptyHistoryStats());
   const [completedSetIndexes, setCompletedSetIndexes] = useState<number[]>([]);
+  const [prCelebration, setPrCelebration] = useState<PersonalRecordCelebrationState | null>(null);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [progressionOpen, setProgressionOpen] = useState(() => {
     const isMobile =
@@ -5103,6 +5618,7 @@ function ExerciseRunner({
     const act = Number((workoutExercise.prescription_snapshot ?? {})?.actual_minutes);
     setActualMinutes(Number.isFinite(act) && act > 0 ? Math.floor(act) : Math.max(0, Math.floor(dp)));
     setCalculatorOpen(false);
+    setPrCelebration(null);
     setProgressionOpen(
       !(
         typeof window !== "undefined" &&
@@ -5119,6 +5635,22 @@ function ExerciseRunner({
       setCompletedSetIndexes([]);
     }
   }, [weId]);
+
+  useEffect(() => {
+    if (!prCelebration) return;
+
+    try {
+      navigator.vibrate?.([70, 45, 130]);
+    } catch {
+      // Haptics are optional.
+    }
+
+    const timer = window.setTimeout(() => {
+      setPrCelebration(null);
+    }, 5200);
+
+    return () => window.clearTimeout(timer);
+  }, [prCelebration?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5455,10 +5987,29 @@ function ExerciseRunner({
     }
 
     const hasNextSet = nextIndex < sets.length;
-    const prs = detectPersonalRecords({ reps, weight }, historyStats);
 
-    if (prs.length) {
-      showToast(`NEW PR • ${prs.join(" • ")}`, "ok");
+    const priorCompletedSets = sets
+      .filter((set) => completedSetIndexes.includes(Number(set.set_index)))
+      .map((set) => ({
+        reps: Number(set.reps ?? 0),
+        weight: Number(set.weight ?? 0),
+      }));
+
+    const prDetails = buildPersonalRecordDetails({
+      set: { reps, weight },
+      history: historyStats,
+      priorCompletedSets,
+    });
+
+    if (prDetails.length) {
+      setPrCelebration({
+        id: `${weId}:${row.set_index}:${Date.now()}`,
+        exerciseName: item?.name ?? "Exercise",
+        setNumber: Number(row.set_index),
+        weight,
+        reps,
+        records: prDetails,
+      });
     } else if (hasNextSet) {
       showToast(`SET ${row.set_index} LOGGED • REST 60 SECONDS.`, "ok");
     } else {
@@ -5653,7 +6204,13 @@ const unlock = async () => {
   const plateLoad = calculatePlateLoad(calculatorWeight, plateBaseWeight);
 
   return (
-    <Card
+    <>
+      <PersonalRecordOverlay
+        celebration={prCelebration}
+        onClose={() => setPrCelebration(null)}
+      />
+
+      <Card
       title="Exercise Console"
       tone="base"
       clip="no-clip"
@@ -7969,7 +8526,8 @@ const unlock = async () => {
 }
 
 `}</style>
-    </Card>
+      </Card>
+    </>
   );
 }
 
