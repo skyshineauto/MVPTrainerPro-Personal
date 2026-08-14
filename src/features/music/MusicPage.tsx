@@ -158,9 +158,25 @@ function isSmartMixPlaylist(playlist: MusicPlaylist) {
 }
 
 function formatFileSize(bytes: number | null) {
-  if (!bytes) return "";
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+  const size = Math.max(0, Number(bytes || 0));
+  if (!Number.isFinite(size) || size <= 0) return "0 MB";
+
+  const kb = 1024;
+  const mb = kb * 1024;
+  const gb = mb * 1024;
+  const tb = gb * 1024;
+
+  if (size >= tb) {
+    const value = size / tb;
+    return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} TB`;
+  }
+  if (size >= gb) {
+    const value = size / gb;
+    return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} GB`;
+  }
+
+  const value = size / mb;
+  return `${value.toFixed(value >= 10 ? 0 : 1)} MB`;
 }
 function formatDuration(seconds: number | null) {
   if (!seconds) return "";
