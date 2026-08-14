@@ -24,7 +24,6 @@ import {
   MUSIC_EQ_FREQUENCIES,
   MUSIC_EQ_PRESETS,
   MUSIC_HEADPHONE_MODES,
-  MUSIC_OUTPUT_PROFILES,
   nextMusicTrack,
   pauseMusic,
   playMusic,
@@ -43,7 +42,6 @@ import {
   setMusicHeadphoneMode,
   setMusicHeadphoneWidth,
   setMusicPreamp,
-  setMusicOutputProfile,
   setMusicVolume,
   setPlayerMusicPreference,
   stopMusic,
@@ -52,7 +50,6 @@ import {
   type MusicCustomPresetSlot,
   type MusicEqPreset,
   type MusicHeadphoneMode,
-  type MusicOutputProfile,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
 
@@ -77,7 +74,6 @@ type IconName =
 
 type SavedDspProfile = {
   name: string;
-  outputProfile: MusicOutputProfile;
   eqEnabled: boolean;
   eqGains: number[];
   preampDb: number;
@@ -129,26 +125,6 @@ function sameDspNumber(left: number, right: number) {
   return Math.abs(Number(left) - Number(right)) < 0.01;
 }
 
-function musicSourceQualityLabel(track: MusicTrack | null) {
-  if (!track) return "NO SOURCE";
-  const mime = (track.mime_type || "").toLowerCase();
-  const name = (track.original_name || "").toLowerCase();
-  const codec = mime.includes("wav") || name.endsWith(".wav")
-    ? "WAV"
-    : mime.includes("mp4") || mime.includes("m4a") || name.endsWith(".m4a")
-      ? "M4A/AAC"
-      : "MP3";
-  const bytes = Number(track.file_size_bytes || 0);
-  const seconds = Number(track.duration_seconds || 0);
-  if (codec === "WAV") return "WAV • PCM SOURCE";
-  if (bytes > 0 && seconds > 0) {
-    const kbps = Math.max(1, Math.round((bytes * 8) / seconds / 1000));
-    const rounded = Math.max(32, Math.round(kbps / 8) * 8);
-    return `${codec} • ~${rounded} kbps`;
-  }
-  return codec;
-}
-
 function formatHz(frequency: number) {
   if (frequency >= 1000) {
     const value = frequency / 1000;
@@ -175,15 +151,7 @@ function PlayerIcon({ name }: { name: IconName }) {
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
 
-function MusicActivityRta({
-  playing,
-  profileLabel,
-  eqLabel,
-}: {
-  playing: boolean;
-  profileLabel: string;
-  eqLabel: string;
-}) {
+function MusicActivityRta({ playing }: { playing: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -209,12 +177,15 @@ function MusicActivityRta({
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 28) return;
+      const preWorkoutLaunchOpen =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("tr-prelaunch-open");
+      if (preWorkoutLaunchOpen || !visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 30) return;
       lastDraw = now;
 
       const width = Math.max(1, Math.floor(canvas.clientWidth));
       const height = Math.max(1, Math.floor(canvas.clientHeight));
-      const dpr = Math.min(1.75, window.devicePixelRatio || 1);
+      const dpr = Math.min(1.6, window.devicePixelRatio || 1);
       const pixelWidth = Math.floor(width * dpr);
       const pixelHeight = Math.floor(height * dpr);
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -228,28 +199,19 @@ function MusicActivityRta({
       ctx.clearRect(0, 0, width, height);
 
       const compact = width < 520;
-      const plotLeft = compact ? 27 : 40;
-      const plotRight = compact ? 5 : 8;
-      const plotTop = compact ? 27 : 31;
-      const plotBottom = compact ? 22 : 24;
+      const plotLeft = compact ? 6 : 34;
+      const plotRight = 6;
+      const plotTop = 7;
+      const plotBottom = 19;
       const plotWidth = Math.max(1, width - plotLeft - plotRight);
       const plotHeight = Math.max(1, height - plotTop - plotBottom);
 
       const background = ctx.createLinearGradient(0, 0, 0, height);
-      background.addColorStop(0, "#081319");
-      background.addColorStop(0.24, "#041016");
-      background.addColorStop(0.70, "#02080c");
+      background.addColorStop(0, "#09141a");
+      background.addColorStop(0.36, "#040b0f");
       background.addColorStop(1, "#010405");
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, width, height);
-
-      // Recessed optical-glass crown. Purely visual and does not touch the audio signal.
-      const crown = ctx.createLinearGradient(0, 0, 0, Math.max(24, plotTop));
-      crown.addColorStop(0, "rgba(132,229,255,.055)");
-      crown.addColorStop(0.42, "rgba(51,132,157,.018)");
-      crown.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = crown;
-      ctx.fillRect(0, 0, width, plotTop + 4);
 
       const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
       let framePeak = 0;
@@ -260,34 +222,33 @@ function MusicActivityRta({
         frameSum += value;
       }
       const frameAverage = frameSum / 10;
-      const activity = Math.max(0, Math.min(1, (framePeak - 0.022) / 0.50));
-      const dynamicFloor = Math.min(framePeak * 0.44, Math.max(0.012, frameAverage * 0.48));
-      const dynamicRange = Math.max(0.078, framePeak - dynamicFloor);
+      const activity = Math.max(0, Math.min(1, (framePeak - 0.025) / 0.52));
+      const dynamicFloor = Math.min(framePeak * 0.46, Math.max(0.014, frameAverage * 0.52));
+      const dynamicRange = Math.max(0.075, framePeak - dynamicFloor);
 
       for (let index = 0; index < 10; index += 1) {
         const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
-        const opened = source < 0.012 ? 0 : Math.min(1, (source - 0.012) / 0.70);
-        const absoluteShape = Math.pow(opened, 1.015);
+        const opened = source < 0.014 ? 0 : Math.min(1, (source - 0.014) / 0.72);
+        const absoluteShape = Math.pow(opened, 1.02);
         const contrast = Math.max(0, Math.min(1, (source - dynamicFloor) / dynamicRange));
-        const contrastShape = Math.pow(contrast, 1.30) * activity;
+        const contrastShape = Math.pow(contrast, 1.34) * activity;
         const transient = playing ? Math.max(0, source - rawHistory[index]) : 0;
         rawHistory[index] = source;
 
-        // Every movement term comes from the real analyzer signal. No fake/random motion.
-        const shaped = Math.min(1, absoluteShape * 0.66 + contrastShape * 0.28 + Math.min(0.12, transient * 1.35));
+        // All three terms come from the real analyzer signal. The frame-relative contrast and
+        // short transient lift simply use more of the available meter travel so the display
+        // behaves like a lively hardware RTA instead of ten similarly tall columns.
+        const shaped = Math.min(1, absoluteShape * 0.62 + contrastShape * 0.31 + Math.min(0.16, transient * 1.65));
         const previous = displayed[index];
-        const attack = 0.91;
-        // Bass decays with more physical weight; upper bands release faster and finer.
-        const frequencyRelease = 0.095 + index * 0.0105;
-        const release = playing ? frequencyRelease : 0.44;
+        const attack = 0.97;
+        const release = playing ? 0.105 : 0.46;
         displayed[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
 
-        if (displayed[index] >= peaks[index] - 0.0025) {
+        if (displayed[index] >= peaks[index] - 0.003) {
           peaks[index] = displayed[index];
-          peakHoldUntil[index] = now + 720;
+          peakHoldUntil[index] = now + 680;
         } else if (now > peakHoldUntil[index]) {
-          const peakFall = 0.0095 + index * 0.00075;
-          peaks[index] = Math.max(displayed[index], peaks[index] - peakFall);
+          peaks[index] = Math.max(displayed[index], peaks[index] - 0.013);
         }
       }
 
@@ -296,139 +257,114 @@ function MusicActivityRta({
       gridRatios.forEach((ratio, index) => {
         const y = Math.round(plotTop + plotHeight * ratio) + 0.5;
         ctx.strokeStyle = index === 0 || index === gridRatios.length - 1
-          ? "rgba(126,207,231,.135)"
-          : "rgba(126,207,231,.058)";
+          ? "rgba(127,207,231,.13)"
+          : "rgba(127,207,231,.072)";
         ctx.beginPath();
         ctx.moveTo(plotLeft, y);
         ctx.lineTo(width - plotRight, y);
         ctx.stroke();
       });
 
-      // Fine subdivisions give the window studio-RTA precision without becoming graph paper.
-      for (let division = 1; division < 10; division += 1) {
-        if (division % 2 === 0) continue;
-        const y = Math.round(plotTop + plotHeight * (division / 10)) + 0.5;
-        ctx.strokeStyle = "rgba(105,185,210,.024)";
-        ctx.beginPath();
-        ctx.moveTo(plotLeft, y);
-        ctx.lineTo(width - plotRight, y);
-        ctx.stroke();
-      }
-
-      {
+      if (!compact) {
         const dbLabels = ["0", "-12", "-24", "-36", "-48", "-60"];
-        ctx.fillStyle = compact ? "rgba(187,220,230,.62)" : "rgba(187,220,230,.64)";
-        ctx.font = compact ? "800 7px system-ui, sans-serif" : "800 9px system-ui, sans-serif";
+        ctx.fillStyle = "rgba(181,212,222,.56)";
+        ctx.font = "800 8px system-ui, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
         dbLabels.forEach((label, index) => {
-          ctx.fillText(label, plotLeft - (compact ? 5 : 8), plotTop + plotHeight * (index / (dbLabels.length - 1)));
+          ctx.fillText(label, plotLeft - 7, plotTop + plotHeight * (index / (dbLabels.length - 1)));
         });
       }
 
-      const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-      const mixChannel = (from: number, to: number, amount: number) => Math.round(from + (to - from) * clamp01(amount));
-      const mixMeterColor = (from: [number, number, number], to: [number, number, number], amount: number, alpha = 1) =>
-        `rgba(${mixChannel(from[0], to[0], amount)},${mixChannel(from[1], to[1], amount)},${mixChannel(from[2], to[2], amount)},${alpha})`;
-      const meterColorAt = (ratio: number, alpha = 1) => {
-        const level = clamp01(ratio);
-        // Exact visual dB zones from -60 dB at the floor to 0 dB at the crown.
-        // -60..-48 deep cyan, -48..-36 cyan, -36..-24 aqua,
-        // -24..-12 yellow-green -> warm yellow, -12..-6 amber, -6..0 orange/red.
-        if (level <= 0.20) return mixMeterColor([7, 113, 160], [13, 169, 204], level / 0.20, alpha);
-        if (level <= 0.40) return mixMeterColor([13, 169, 204], [20, 210, 232], (level - 0.20) / 0.20, alpha);
-        if (level <= 0.60) return mixMeterColor([20, 210, 232], [57, 233, 205], (level - 0.40) / 0.20, alpha);
-        if (level <= 0.80) return mixMeterColor([57, 233, 205], [244, 209, 70], (level - 0.60) / 0.20, alpha);
-        if (level <= 0.90) return mixMeterColor([244, 209, 70], [255, 161, 52], (level - 0.80) / 0.10, alpha);
-        return mixMeterColor([255, 161, 52], [255, 74, 63], (level - 0.90) / 0.10, alpha);
-      };
-      const meterGlowAt = (ratio: number) => {
-        const level = clamp01(ratio);
-        if (level >= 0.90) return "rgba(255,90,67,.62)";
-        if (level >= 0.80) return "rgba(255,178,58,.58)";
-        if (level >= 0.60) return "rgba(227,214,80,.48)";
-        return "rgba(48,218,239,.42)";
-      };
-
-      const gap = Math.max(compact ? 3 : 7, Math.min(compact ? 6 : 12, plotWidth * 0.010));
+      const gap = Math.max(compact ? 3 : 6, Math.min(compact ? 6 : 10, plotWidth * 0.009));
       const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
+      const barWidth = Math.max(6, slotWidth * (compact ? 0.58 : 0.56));
+      const insetX = (slotWidth - barWidth) / 2;
+
+      const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
+      wellGradient.addColorStop(0, "rgba(36,23,12,.20)");
+      wellGradient.addColorStop(0.18, "rgba(22,30,18,.16)");
+      wellGradient.addColorStop(0.52, "rgba(5,29,35,.28)");
+      wellGradient.addColorStop(1, "rgba(1,11,17,.86)");
+
+      const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
+      meterGradient.addColorStop(0, "#057f9d");
+      meterGradient.addColorStop(0.20, "#0fb6d0");
+      meterGradient.addColorStop(0.42, "#25d4db");
+      meterGradient.addColorStop(0.62, "#55d58a");
+      meterGradient.addColorStop(0.78, "#d6d64a");
+      meterGradient.addColorStop(0.90, "#f0a43e");
+      meterGradient.addColorStop(1, "#f26f54");
 
       for (let band = 0; band < 10; band += 1) {
         const slotX = plotLeft + band * (slotWidth + gap);
-        const widthRatio = Math.max(0.48, 0.64 - band * 0.014);
-        const barWidth = Math.max(5, slotWidth * (compact ? Math.max(0.50, widthRatio - 0.05) : widthRatio));
-        const barX = slotX + (slotWidth - barWidth) / 2;
+        const barX = slotX + insetX;
 
-        // Smoked recessed meter well with a fine vertical spine.
-        const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
-        wellGradient.addColorStop(0, "rgba(40,69,79,.16)");
-        wellGradient.addColorStop(0.42, "rgba(7,30,38,.22)");
-        wellGradient.addColorStop(1, "rgba(1,9,13,.82)");
         ctx.fillStyle = wellGradient;
         ctx.fillRect(slotX, plotTop, slotWidth, plotHeight);
-        ctx.strokeStyle = "rgba(111,196,221,.09)";
+        ctx.fillStyle = "rgba(255,255,255,.025)";
+        ctx.fillRect(slotX + 1, plotTop + 1, 1, plotHeight - 2);
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        ctx.fillRect(slotX + slotWidth - 2, plotTop + 1, 1, plotHeight - 2);
+        ctx.strokeStyle = "rgba(110,195,219,.105)";
         ctx.strokeRect(Math.round(slotX) + 0.5, Math.round(plotTop) + 0.5, Math.max(1, Math.round(slotWidth) - 1), Math.max(1, Math.round(plotHeight) - 1));
-        ctx.fillStyle = "rgba(190,238,250,.025)";
-        ctx.fillRect(Math.round(slotX + slotWidth * 0.5), plotTop + 1, 1, plotHeight - 2);
 
         const level = Math.max(0, Math.min(1, displayed[band]));
         const activeHeight = Math.max(0, plotHeight * level);
         if (activeHeight > 0.5) {
           const activeY = plotTop + plotHeight - activeHeight;
-          const segmentHeight = compact ? 2.2 : 2.7;
-          const segmentGap = compact ? 1.65 : 1.9;
-          const pitch = segmentHeight + segmentGap;
-          const segmentCount = Math.ceil(activeHeight / pitch);
+          ctx.fillStyle = meterGradient;
+          ctx.fillRect(barX, activeY, barWidth, activeHeight);
 
-          ctx.save();
-          ctx.shadowColor = "rgba(45,211,242,.22)";
-          ctx.shadowBlur = compact ? 3 : 5;
-          for (let segment = 0; segment < segmentCount; segment += 1) {
-            const segmentY = plotTop + plotHeight - (segment + 1) * pitch;
-            if (segmentY + segmentHeight < activeY) continue;
-            const normalizedHeight = clamp01(1 - (segmentY - plotTop) / plotHeight);
-            ctx.fillStyle = meterColorAt(normalizedHeight, 0.98);
-            ctx.shadowColor = meterGlowAt(normalizedHeight);
-            ctx.fillRect(barX, segmentY, barWidth, segmentHeight);
+          // Narrow luminous core creates depth without an expensive full-canvas blur.
+          const coreWidth = Math.max(1, barWidth * 0.30);
+          ctx.fillStyle = level > 0.82 ? "rgba(255,236,170,.23)" : "rgba(198,249,255,.17)";
+          ctx.fillRect(barX + (barWidth - coreWidth) / 2, activeY, coreWidth, activeHeight);
+          ctx.fillStyle = "rgba(255,255,255,.17)";
+          ctx.fillRect(barX + 1, activeY, 1, activeHeight);
+          ctx.fillStyle = "rgba(0,0,0,.22)";
+          ctx.fillRect(barX + barWidth - 2, activeY, 1, activeHeight);
+          ctx.fillStyle = level > 0.78 ? "rgba(255,224,139,.62)" : "rgba(205,251,255,.48)";
+          ctx.fillRect(barX, Math.round(activeY), barWidth, compact ? 1 : 1.5);
 
-            // Bright optical core follows the same dB color zone instead of turning every band white.
-            ctx.fillStyle = meterColorAt(Math.min(1, normalizedHeight + 0.035), normalizedHeight >= 0.80 ? 0.42 : 0.30);
-            const coreWidth = Math.max(1, barWidth * 0.28);
-            ctx.fillRect(barX + (barWidth - coreWidth) / 2, segmentY, coreWidth, segmentHeight);
+          const division = compact ? 6 : 7;
+          ctx.strokeStyle = "rgba(0,5,8,.28)";
+          for (let y = plotTop + plotHeight - division; y > activeY; y -= division) {
+            ctx.beginPath();
+            ctx.moveTo(barX, Math.round(y) + 0.5);
+            ctx.lineTo(barX + barWidth, Math.round(y) + 0.5);
+            ctx.stroke();
           }
-          ctx.restore();
 
-          // Current-level cap uses the exact dB zone color reached by this band.
-          ctx.fillStyle = meterColorAt(level, 0.88);
-          ctx.fillRect(barX - 0.5, Math.round(activeY), barWidth + 1, compact ? 1.2 : 1.6);
+          if (level > 0.72) {
+            const hotHeight = Math.min(activeHeight, plotHeight * 0.16);
+            ctx.fillStyle = "rgba(255,184,65,.10)";
+            ctx.fillRect(barX, activeY, barWidth, hotHeight);
+          }
         }
 
-        if (playing && peaks[band] > 0.022) {
-          const peakRatio = clamp01(peaks[band]);
-          const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peakRatio));
+        if (playing && peaks[band] > 0.025) {
+          const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peaks[band]));
           ctx.save();
-          ctx.fillStyle = meterColorAt(peakRatio, 1);
-          ctx.shadowColor = meterGlowAt(peakRatio);
-          ctx.shadowBlur = compact ? 5 : 8;
-          ctx.fillRect(barX - 2, Math.round(peakY), barWidth + 4, compact ? 2.0 : 2.5);
-          // Hairline highlight makes the peak marker read like a calibrated hardware hold line.
-          ctx.fillStyle = "rgba(255,255,255,.36)";
-          ctx.fillRect(barX - 1, Math.round(peakY), barWidth + 2, 0.7);
+          ctx.fillStyle = peaks[band] > 0.82 ? "#ffd66e" : "#dffaff";
+          ctx.shadowColor = peaks[band] > 0.82 ? "rgba(255,183,61,.58)" : "rgba(97,226,255,.48)";
+          ctx.shadowBlur = compact ? 3 : 4;
+          ctx.fillRect(barX - 1, Math.round(peakY), barWidth + 2, compact ? 1.5 : 2);
           ctx.restore();
         }
       }
 
-      const floorGlow = ctx.createLinearGradient(0, plotTop + plotHeight * 0.68, 0, plotTop + plotHeight);
-      floorGlow.addColorStop(0, "rgba(13,143,173,0)");
-      floorGlow.addColorStop(1, playing && framePeak > 0.075 ? "rgba(18,173,199,.075)" : "rgba(18,143,171,.018)");
+      const floorGlow = ctx.createLinearGradient(0, plotTop + plotHeight * 0.72, 0, plotTop + plotHeight);
+      floorGlow.addColorStop(0, "rgba(13,123,151,0)");
+      floorGlow.addColorStop(1, playing && framePeak > 0.08 ? "rgba(14,142,166,.075)" : "rgba(14,142,166,.02)");
       ctx.fillStyle = floorGlow;
-      ctx.fillRect(plotLeft, plotTop + plotHeight * 0.66, plotWidth, plotHeight * 0.34);
+      ctx.fillRect(plotLeft, plotTop + plotHeight * 0.68, plotWidth, plotHeight * 0.32);
 
-      const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.48);
-      glass.addColorStop(0, "rgba(255,255,255,.032)");
+      const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.55);
+      glass.addColorStop(0, "rgba(255,255,255,.035)");
       glass.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = glass;
-      ctx.fillRect(plotLeft, plotTop, plotWidth, plotHeight * 0.48);
+      ctx.fillRect(plotLeft, plotTop, plotWidth, plotHeight * 0.55);
     };
 
     frame = window.requestAnimationFrame(draw);
@@ -439,12 +375,8 @@ function MusicActivityRta({
   }, [playing]);
 
   return (
-    <div ref={hostRef} className="tr-activityRta tr-activityRta--10band tr-rtaFidelity" aria-label="10 band real-time spectrum analyzer">
+    <div ref={hostRef} className="tr-activityRta tr-activityRta--10band" aria-label="10 band real-time spectrum analyzer">
       <canvas ref={canvasRef} />
-      <div className="tr-rtaFidelityHead" aria-hidden>
-        <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
-        <strong>{profileLabel}<b>•</b>{eqLabel}</strong>
-      </div>
       <div className="tr-activityRtaLabels" aria-hidden>
         {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
       </div>
@@ -452,804 +384,291 @@ function MusicActivityRta({
   );
 }
 
-type HeroRgb = { r: number; g: number; b: number };
-type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
-type HeroColorPool = HeroRgb[];
 
-const HERO_SCENE_COUNT = 5;
-const HERO_SCENE_MIN_MS = 8000;
-const HERO_SCENE_MAX_MS = 10000;
-const HERO_MORPH_MS = 1150;
-const HERO_PALETTE_MIN_MS = 4200;
-const HERO_PALETTE_MAX_MS = 6500;
-const HERO_NEUTRAL_PALETTE: HeroPalette = [
-  { r: 196, g: 216, b: 220 },
-  { r: 137, g: 164, b: 171 },
-  { r: 194, g: 151, b: 114 },
-  { r: 241, g: 235, b: 220 },
-  { r: 20, g: 27, b: 31 },
-];
-
-function heroClamp(value: number, min = 0, max = 1) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function heroHash(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function heroMix(left: HeroRgb, right: HeroRgb, amount: number): HeroRgb {
-  const mix = heroClamp(amount);
-  return {
-    r: left.r + (right.r - left.r) * mix,
-    g: left.g + (right.g - left.g) * mix,
-    b: left.b + (right.b - left.b) * mix,
-  };
-}
-
-function heroLightness(color: HeroRgb) {
-  return (Math.max(color.r, color.g, color.b) + Math.min(color.r, color.g, color.b)) / 510;
-}
-
-function heroSaturation(color: HeroRgb) {
-  const r = color.r / 255;
-  const g = color.g / 255;
-  const b = color.b / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const light = (max + min) / 2;
-  const chroma = max - min;
-  return chroma === 0 ? 0 : heroClamp(chroma / Math.max(0.001, 1 - Math.abs(2 * light - 1)));
-}
-
-function heroColorDistance(left: HeroRgb, right: HeroRgb) {
-  const dr = left.r - right.r;
-  const dg = left.g - right.g;
-  const db = left.b - right.b;
-  return Math.sqrt(dr * dr + dg * dg + db * db);
-}
-
-function heroMakeVisible(color: HeroRgb) {
-  const gray = (color.r + color.g + color.b) / 3;
-  const saturationBoost = 1.18;
-  let adjusted: HeroRgb = {
-    r: heroClamp(gray + (color.r - gray) * saturationBoost, 0, 255),
-    g: heroClamp(gray + (color.g - gray) * saturationBoost, 0, 255),
-    b: heroClamp(gray + (color.b - gray) * saturationBoost, 0, 255),
-  };
-  const light = heroLightness(adjusted);
-  if (light < 0.14) {
-    const scale = Math.min(2.1, 0.22 / Math.max(0.035, light));
-    adjusted = {
-      r: heroClamp(adjusted.r * scale, 0, 255),
-      g: heroClamp(adjusted.g * scale, 0, 255),
-      b: heroClamp(adjusted.b * scale, 0, 255),
-    };
-  } else if (light > 0.88) {
-    const scale = 0.82 / Math.max(0.001, light);
-    adjusted = {
-      r: heroClamp(adjusted.r * scale, 0, 255),
-      g: heroClamp(adjusted.g * scale, 0, 255),
-      b: heroClamp(adjusted.b * scale, 0, 255),
-    };
-  }
-  return adjusted;
-}
-
-function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
-  type Bucket = { color: HeroRgb; hits: number; saturation: number; light: number };
-  const bins = new Map<string, { r: number; g: number; b: number; hits: number }>();
-  const quantum = 24;
-
-  for (let index = 0; index < data.length; index += 4) {
-    if (data[index + 3] < 180) continue;
-    const color = { r: data[index], g: data[index + 1], b: data[index + 2] };
-    const light = heroLightness(color);
-    if (light < 0.025 || light > 0.985) continue;
-    const qr = Math.round(color.r / quantum) * quantum;
-    const qg = Math.round(color.g / quantum) * quantum;
-    const qb = Math.round(color.b / quantum) * quantum;
-    const key = `${qr}:${qg}:${qb}`;
-    const bucket = bins.get(key) ?? { r: 0, g: 0, b: 0, hits: 0 };
-    bucket.r += color.r;
-    bucket.g += color.g;
-    bucket.b += color.b;
-    bucket.hits += 1;
-    bins.set(key, bucket);
-  }
-
-  const ranked: Bucket[] = Array.from(bins.values())
-    .filter((bucket) => bucket.hits >= 2)
-    .map((bucket) => {
-      const color = { r: bucket.r / bucket.hits, g: bucket.g / bucket.hits, b: bucket.b / bucket.hits };
-      return { color, hits: bucket.hits, saturation: heroSaturation(color), light: heroLightness(color) };
-    })
-    .sort((a, b) => b.hits - a.hits);
-
-  if (!ranked.length) return null;
-
-  const usable = ranked.filter((item) => item.light > 0.07 && item.light < 0.95);
-  const source = usable.length ? usable : ranked;
-  const colorful = source.filter((item) => item.saturation > 0.16);
-  const primaryPool = colorful.length >= 2 ? colorful : source;
-  const dominant = [...primaryPool].sort((a, b) => {
-    const score = (item: Bucket) => Math.sqrt(item.hits) * (0.72 + item.saturation * 2.35) * (1.08 - Math.abs(item.light - 0.48) * 0.42);
-    return score(b) - score(a);
-  })[0];
-
-  const diversityScore = (item: Bucket, anchors: HeroRgb[]) => {
-    const distance = Math.min(...anchors.map((anchor) => heroColorDistance(anchor, item.color)));
-    const population = Math.sqrt(item.hits);
-    return distance * (0.48 + item.saturation * 0.88) + population * (7.0 + item.saturation * 9.0);
-  };
-
-  const chosen: HeroRgb[] = [heroMakeVisible(dominant.color)];
-  while (chosen.length < 3) {
-    let best: Bucket | null = null;
-    let bestScore = -Infinity;
-    for (const item of source.slice(0, Math.min(80, source.length))) {
-      const score = diversityScore(item, chosen);
-      if (score > bestScore && chosen.every((color) => heroColorDistance(color, item.color) > 38)) {
-        best = item;
-        bestScore = score;
-      }
-    }
-    chosen.push(heroMakeVisible((best ?? source[Math.min(chosen.length, source.length - 1)]).color));
-  }
-
-  const accentCandidate = [...source]
-    .sort((a, b) => (b.saturation * 1.6 + Math.sqrt(b.hits) * 0.10) - (a.saturation * 1.6 + Math.sqrt(a.hits) * 0.10))
-    .find((item) => chosen.every((color) => heroColorDistance(color, item.color) > 34));
-  if (accentCandidate) chosen[2] = heroMakeVisible(accentCandidate.color);
-
-  const highlightCandidate = [...source]
-    .filter((item) => item.light > 0.48)
-    .sort((a, b) => (b.light * 1.5 + b.saturation * 0.35 + Math.sqrt(b.hits) * 0.03) - (a.light * 1.5 + a.saturation * 0.35 + Math.sqrt(a.hits) * 0.03))[0];
-  const highlightBase = highlightCandidate?.color ?? chosen.reduce((best, color) => heroLightness(color) > heroLightness(best) ? color : best, chosen[0]);
-  const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.18);
-  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.48), { r: 0, g: 0, b: 0 }, 0.82);
-  return [chosen[0], chosen[1], chosen[2], highlight, shadow];
-}
-
-
-function extractHeroColorPool(data: Uint8ClampedArray): HeroColorPool {
-  type PoolBucket = { color: HeroRgb; hits: number; saturation: number; light: number };
-  const bins = new Map<string, { r: number; g: number; b: number; hits: number }>();
-  const quantum = 20;
-
-  for (let index = 0; index < data.length; index += 4) {
-    if (data[index + 3] < 180) continue;
-    const color = { r: data[index], g: data[index + 1], b: data[index + 2] };
-    const light = heroLightness(color);
-    if (light < 0.025 || light > 0.985) continue;
-    const qr = Math.round(color.r / quantum) * quantum;
-    const qg = Math.round(color.g / quantum) * quantum;
-    const qb = Math.round(color.b / quantum) * quantum;
-    const key = `${qr}:${qg}:${qb}`;
-    const bucket = bins.get(key) ?? { r: 0, g: 0, b: 0, hits: 0 };
-    bucket.r += color.r;
-    bucket.g += color.g;
-    bucket.b += color.b;
-    bucket.hits += 1;
-    bins.set(key, bucket);
-  }
-
-  const ranked: PoolBucket[] = Array.from(bins.values())
-    .filter((bucket) => bucket.hits >= 2)
-    .map((bucket) => {
-      const color = { r: bucket.r / bucket.hits, g: bucket.g / bucket.hits, b: bucket.b / bucket.hits };
-      return { color, hits: bucket.hits, saturation: heroSaturation(color), light: heroLightness(color) };
-    })
-    .filter((item) => item.light > 0.055 && item.light < 0.96)
-    .sort((a, b) => {
-      const score = (item: PoolBucket) => Math.sqrt(item.hits) * (0.92 + item.saturation * 1.85) * (1.08 - Math.abs(item.light - 0.5) * 0.34);
-      return score(b) - score(a);
-    });
-
-  if (!ranked.length) return HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color }));
-
-  const pool: HeroRgb[] = [];
-  for (const item of ranked.slice(0, 100)) {
-    const visible = heroMakeVisible(item.color);
-    const minDistance = pool.length < 4 ? 34 : 27;
-    if (pool.every((existing) => heroColorDistance(existing, visible) > minDistance)) pool.push(visible);
-    if (pool.length >= 9) break;
-  }
-
-  // Preserve useful light and dark neutrals from the actual artwork as fidelity accents.
-  const lightNeutral = ranked
-    .filter((item) => item.light > 0.62 && item.saturation < 0.34)
-    .sort((a, b) => (b.hits * b.light) - (a.hits * a.light))[0];
-  const darkNeutral = ranked
-    .filter((item) => item.light < 0.32)
-    .sort((a, b) => b.hits - a.hits)[0];
-  for (const item of [lightNeutral, darkNeutral]) {
-    if (!item) continue;
-    const visible = heroMakeVisible(item.color);
-    if (pool.every((existing) => heroColorDistance(existing, visible) > 24)) pool.push(visible);
-  }
-
-  while (pool.length < 5) pool.push({ ...HERO_NEUTRAL_PALETTE[pool.length % 4] });
-  return pool.slice(0, 10);
-}
-
-function heroPaletteFromPool(pool: HeroColorPool, phase: number, seed: number): HeroPalette {
-  const source = pool.length ? pool : HERO_NEUTRAL_PALETTE.slice(0, 4);
-  const count = source.length;
-  const cycleStep = count % 2 === 0 ? (count % 3 === 0 ? 5 : 3) : 2;
-  const start = (seed + phase * cycleStep) % count;
-  const stride = count > 7 ? 3 : count > 4 ? 2 : 1;
-  const pick = (offset: number) => ({ ...source[(start + offset * stride) % count] });
-  const c0 = pick(0);
-  let c1 = pick(1);
-  let c2 = pick(2);
-
-  if (heroColorDistance(c0, c1) < 28 && count > 3) c1 = pick(3);
-  if (heroColorDistance(c0, c2) < 28 && count > 4) c2 = pick(4);
-
-  const highlightBase = [...source].sort((a, b) => heroLightness(b) - heroLightness(a))[phase % Math.min(3, count)] ?? c1;
-  const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.12);
-  const darkest = [...source].sort((a, b) => heroLightness(a) - heroLightness(b))[phase % Math.min(2, count)] ?? c0;
-  const shadow = heroMix(darkest, { r: 0, g: 0, b: 0 }, 0.72);
-  return [c0, c1, c2, highlight, shadow];
-}
-
-function heroTimedDuration(seed: number, step: number, minMs: number, maxMs: number) {
-  const span = Math.max(1, maxMs - minMs);
-  return minMs + (heroHash(`${seed}:${step}`) % (span + 1));
-}
-
-const HERO_VERTEX_SHADER = `
-  attribute vec2 a_position;
-  void main() {
-    gl_Position = vec4(a_position, 0.0, 1.0);
-  }
-`;
-
-const HERO_FRAGMENT_SHADER = `
-  precision highp float;
-
-  uniform vec2 u_resolution;
-  uniform float u_time;
-  uniform float u_sceneA;
-  uniform float u_sceneB;
-  uniform float u_blend;
-  uniform vec4 u_audio;
-  uniform float u_character;
-  uniform vec3 u_c0;
-  uniform vec3 u_c1;
-  uniform vec3 u_c2;
-  uniform vec3 u_c3;
-  uniform vec3 u_c4;
-
-  float sat(float v){ return clamp(v,0.0,1.0); }
-  vec2 rot(vec2 p,float a){ float c=cos(a),s=sin(a); return mat2(c,-s,s,c)*p; }
-
-  float hash21(vec2 p){
-    p=fract(p*vec2(123.34,456.21));
-    p+=dot(p,p+45.32);
-    return fract(p.x*p.y);
-  }
-  vec2 hash22(vec2 p){ float n=hash21(p); return vec2(n,hash21(p+n+19.19)); }
-
-  float noise(vec2 p){
-    vec2 i=floor(p), f=fract(p);
-    f=f*f*(3.0-2.0*f);
-    float a=hash21(i),b=hash21(i+vec2(1.0,0.0));
-    float c=hash21(i+vec2(0.0,1.0)),d=hash21(i+vec2(1.0,1.0));
-    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
-  }
-  float fbm(vec2 p){
-    float v=0.0,a=0.54;
-    mat2 m=mat2(0.80,-0.60,0.60,0.80);
-    for(int i=0;i<4;i++){
-      v+=a*noise(p);
-      p=m*p*2.02+vec2(13.7,8.1);
-      a*=0.49;
-    }
-    return v;
-  }
-
-  vec2 cuv(vec2 uv){
-    vec2 p=uv-0.5;
-    p.x*=u_resolution.x/max(1.0,u_resolution.y);
-    return p;
-  }
-
-  vec3 album(float x){
-    x=fract(x)*4.0;
-    if(x<1.0) return mix(u_c0,u_c1,smoothstep(0.0,1.0,x));
-    if(x<2.0) return mix(u_c1,u_c2,smoothstep(0.0,1.0,x-1.0));
-    if(x<3.0) return mix(u_c2,u_c0,smoothstep(0.0,1.0,x-2.0));
-    return mix(u_c0,u_c3,smoothstep(0.0,1.0,x-3.0));
-  }
-  vec3 darkBase(){ return mix(vec3(0.0025,0.005,0.007),u_c4,0.54); }
-
-  vec2 flowWarp(vec2 p,float t,float strength){
-    vec2 q=vec2(
-      fbm(p*0.72+vec2(t*0.12,-t*0.09)),
-      fbm(p*0.76+vec2(4.7-t*0.10,1.9+t*0.11))
-    )-0.5;
-    vec2 r=vec2(
-      fbm(p*0.88+q*1.55+vec2(7.1,2.3)+t*0.08),
-      fbm(p*0.84+q*1.62+vec2(2.1,8.4)-t*0.085)
-    )-0.5;
-    return p+(q*0.72+r*0.48)*strength;
-  }
-
-  // Volumetric light field. Broad depth layers, no identifiable blobs or rings.
-  vec3 sceneVolume(vec2 uv,float t){
-    vec2 p=cuv(uv)*1.05;
-    vec3 col=darkBase();
-    float total=0.0;
-    for(int i=0;i<9;i++){
-      float z=float(i)/8.0;
-      vec2 q=p*(0.78+z*0.82);
-      q=rot(q,0.10*sin(t*0.16+z*3.2));
-      q+=vec2(sin(t*0.20+z*5.1)*0.18,cos(t*0.17+z*4.3)*0.14);
-      q=flowWarp(q,t+z*1.7,0.36+z*0.16);
-      float n=fbm(q*1.32+vec2(z*5.3,-z*3.8));
-      float d=smoothstep(0.44,0.77,n)*(1.0-z*0.38);
-      float w=(0.066+z*0.014)*(1.0+u_audio.x*0.030);
-      col+=album(n*0.54+z*0.19+u_character*0.13)*d*w;
-      total+=d*w;
-    }
-    float bloom=smoothstep(0.18,0.52,total);
-    col+=album(total*1.7+0.16)*bloom*(0.072+u_audio.w*0.010);
-    return col;
-  }
-
-  // Liquid glass: continuous refractive heightfield with restrained specular light.
-  vec3 sceneGlass(vec2 uv,float t){
-    vec2 p=cuv(uv)*1.28;
-    p=flowWarp(p,t,0.46);
-    float e=0.012;
-    float h=fbm(p*1.22+vec2(t*0.10,-t*0.075));
-    float hx=fbm((p+vec2(e,0.0))*1.22+vec2(t*0.10,-t*0.075));
-    float hy=fbm((p+vec2(0.0,e))*1.22+vec2(t*0.10,-t*0.075));
-    vec2 g=clamp(vec2(h-hx,h-hy)/e,vec2(-1.1),vec2(1.1));
-    vec2 refr=p+g*(0.075+u_audio.y*0.010);
-    float under=fbm(refr*1.42-vec2(t*0.08,t*0.095));
-    float depth=fbm(refr*0.62+vec2(-t*0.045,t*0.055));
-    vec3 nrm=normalize(vec3(g*0.62,1.0));
-    vec3 light=normalize(vec3(-0.38,0.30,1.0));
-    float spec=pow(max(0.0,dot(nrm,light)),22.0);
-    float rim=pow(1.0-max(0.0,nrm.z),2.4);
-    vec3 col=mix(darkBase(),album(under*0.62+depth*0.21+0.08),0.42+under*0.46);
-    col+=u_c3*spec*(0.145+u_audio.z*0.010);
-    col+=album(depth+0.38)*rim*0.125;
-    return col;
-  }
-
-  // Luminous fabric: a broad shaded surface, not traveling ribbon lines.
-  vec3 sceneSilk(vec2 uv,float t){
-    vec2 p=cuv(uv)*1.03;
-    p=rot(p,0.08*sin(t*0.12));
-    p=flowWarp(p,t,0.27);
-    float phase=p.x*1.18+p.y*0.48;
-    float h=0.34*sin(phase*1.24+t*0.34)+0.22*sin(p.x*0.78-p.y*1.12-t*0.27+2.3);
-    h+=0.16*(fbm(p*1.05+vec2(t*0.065,-t*0.055))-0.5);
-    float ex=0.018;
-    vec2 px=p+vec2(ex,0.0), py=p+vec2(0.0,ex);
-    float hx=0.34*sin((px.x*1.18+px.y*0.48)*1.24+t*0.34)+0.22*sin(px.x*0.78-px.y*1.12-t*0.27+2.3);
-    float hy=0.34*sin((py.x*1.18+py.y*0.48)*1.24+t*0.34)+0.22*sin(py.x*0.78-py.y*1.12-t*0.27+2.3);
-    vec3 nrm=normalize(vec3((h-hx)/ex*0.22,(h-hy)/ex*0.22,1.0));
-    vec3 ld=normalize(vec3(-0.45,0.40,1.0));
-    float diff=0.48+0.52*max(0.0,dot(nrm,ld));
-    float sheen=pow(max(0.0,dot(nrm,normalize(vec3(0.30,-0.15,1.0)))),18.0);
-    float tint=fbm(p*0.74+vec2(-t*0.045,t*0.052));
-    vec3 surface=album(tint*0.58+h*0.13+u_character*0.08);
-    vec3 col=mix(darkBase(),surface,0.18+diff*0.60);
-    col+=u_c3*sheen*(0.115+u_audio.z*0.006);
-    return col;
-  }
-
-  // Photon atmosphere: layered depth particles suspended inside colored haze.
-  vec3 scenePhotons(vec2 uv,float t){
-    vec2 p=cuv(uv);
-    float haze=fbm(flowWarp(p*0.92,t,0.22)+vec2(t*0.045,-t*0.035));
-    vec3 col=mix(darkBase(),album(haze*0.42+0.10),smoothstep(0.25,0.82,haze)*0.32);
-    for(int layer=0;layer<4;layer++){
-      float lf=float(layer);
-      float scale=8.0+lf*6.5;
-      vec2 drift=vec2(
-        sin(t*(0.13+lf*0.012)+uv.y*2.7)*0.045+t*(0.005+lf*0.001),
-        cos(t*(0.11+lf*0.010)+uv.x*2.2)*0.040-t*(0.003+lf*0.0008)
-      );
-      vec2 grid=(uv+drift)*scale;
-      vec2 id=floor(grid), gv=fract(grid)-0.5;
-      vec2 rnd=hash22(id+lf*71.3);
-      vec2 pos=(rnd-0.5)*0.80;
-      float d=length(gv-pos);
-      float point=smoothstep(0.070+lf*0.005,0.0,d)*step(0.48-lf*0.040,rnd.x);
-      float halo=smoothstep(0.18,0.0,d)*0.10*point;
-      float twinkle=0.82+0.18*sin(t*(0.32+rnd.y*0.18)+rnd.x*14.0);
-      vec3 pc=album(rnd.y+lf*0.17+u_character*0.09);
-      col+=pc*(point*twinkle*(0.19+lf*0.024+u_audio.z*0.006)+halo*0.09);
-    }
-    return col;
-  }
-
-  // Plasma current: smooth domain-warped energy with broad caustics, never marble-gray.
-  vec3 scenePlasma(vec2 uv,float t){
-    vec2 p=cuv(uv)*1.20;
-    p=flowWarp(p,t,0.58);
-    float a=fbm(p*1.10+vec2(t*0.105,-t*0.082));
-    float b=fbm(rot(p,0.72)*1.36+vec2(-t*0.075,t*0.090)+3.7);
-    float c=fbm(p*0.62+vec2(t*0.048,t*0.042)+8.2);
-    float field=sat(a*0.56+b*0.34+c*0.22);
-    float caustic=pow(smoothstep(0.48,0.82,abs(a-b)*1.45),1.35);
-    vec3 col=mix(darkBase(),album(field*0.64+c*0.18+u_character*0.11),0.40+field*0.50);
-    col+=album(field+0.31)*caustic*(0.135+u_audio.w*0.008);
-    return col;
-  }
-
-  vec3 renderScene(float scene,vec2 uv,float t){
-    if(scene<0.5) return sceneVolume(uv,t);
-    if(scene<1.5) return sceneGlass(uv,t);
-    if(scene<2.5) return sceneSilk(uv,t);
-    if(scene<3.5) return scenePhotons(uv,t);
-    return scenePlasma(uv,t);
-  }
-
-  void main(){
-    vec2 uv=gl_FragCoord.xy/u_resolution.xy;
-    // One uninterrupted visual clock. Audio never changes time, velocity, direction, or scene position.
-    float visualTime=u_time*1.46;
-    vec3 color=renderScene(u_sceneA,uv,visualTime);
-
-    // Short material morph instead of a long double-exposure crossfade.
-    if(u_blend>0.001){
-      vec3 incoming=renderScene(u_sceneB,uv,visualTime);
-      vec2 mp=flowWarp(cuv(uv)*0.68,visualTime*0.42,0.26);
-      float field=fbm(mp+vec2(visualTime*0.018,-visualTime*0.014)+u_character*6.7);
-      float reveal=1.0-smoothstep(u_blend-0.16,u_blend+0.16,field);
-      float lumA=dot(color,vec3(0.2126,0.7152,0.0722));
-      float lumB=dot(incoming,vec3(0.2126,0.7152,0.0722));
-      incoming*=clamp((lumA+0.10)/(lumB+0.10),0.82,1.18);
-      color=mix(color,incoming,reveal);
-    }
-
-    // Multiple album colors coexist and drift independently so the cover never collapses to one tint.
-    vec2 ap=cuv(uv)*0.62;
-    float p0=fbm(ap+vec2(visualTime*0.030,-visualTime*0.022));
-    float p1=fbm(rot(ap,0.78)*1.12+vec2(-visualTime*0.021,visualTime*0.027)+4.8);
-    vec3 albumWash=mix(u_c0,u_c1,smoothstep(0.16,0.84,p0));
-    albumWash=mix(albumWash,u_c2,smoothstep(0.30,0.78,p1)*0.72);
-    color+=albumWash*(0.070+0.042*p0);
-
-    // Fine refractive fidelity layer. Smaller scale than V10 to avoid giant blurry patches.
-    vec2 detailUv=cuv(uv)*1.64;
-    float caA=fbm(flowWarp(detailUv,visualTime*0.58,0.18)+vec2(visualTime*0.034,-visualTime*0.025));
-    float caB=fbm(rot(detailUv,0.91)*1.34+vec2(-visualTime*0.027,visualTime*0.031)+5.4);
-    float caustic=pow(smoothstep(0.20,0.54,abs(caA-caB)),2.25);
-    float micro=pow(smoothstep(0.47,0.76,fbm(detailUv*1.70+vec2(-visualTime*0.030,visualTime*0.024)+11.0)),2.1);
-    color+=album(caA*0.61+caB*0.39+0.17)*caustic*0.072;
-    color+=mix(u_c3,album(caB+0.53),0.42)*micro*0.032;
-
-    // Tiny depth shimmer, deliberately independent of beat transients.
-    vec2 g=uv*vec2(36.0,20.0)+vec2(visualTime*0.028,-visualTime*0.019);
-    vec2 id=floor(g),gv=fract(g)-0.5;
-    vec2 rnd=hash22(id);
-    float sparkle=smoothstep(0.032,0.0,length(gv-(rnd-0.5)*0.72))*step(0.84,rnd.x);
-    color+=album(rnd.y+0.21)*sparkle*0.055;
-
-    float vig=smoothstep(1.05,0.20,length((uv-0.5)*vec2(0.88,1.02)));
-    color=mix(darkBase(),color,0.94+vig*0.06);
-    float luminance=dot(color,vec3(0.2126,0.7152,0.0722));
-    color=mix(vec3(luminance),color,1.42);
-    color=1.0-exp(-color*1.72);
-    color=pow(max(color,vec3(0.0)),vec3(0.93));
-    float dither=(hash21(gl_FragCoord.xy+visualTime*13.7)-0.5)/255.0;
-    color+=vec3(dither);
-    gl_FragColor=vec4(color,0.98);
-  }
-`;
-
-function MusicHeroSceneEngine({
-  playing,
-  trackKey,
-  artworkUrl,
-}: {
-  playing: boolean;
-  trackKey: string;
-  artworkUrl: string | null;
-}) {
+function MusicHeroFluidMotion({ playing }: { playing: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const playingRef = useRef(playing);
-  const targetCharacterRef = useRef((heroHash(trackKey || "mvp-music") % 10000) / 10000);
-  const trackKeyRef = useRef(trackKey || "mvp-music");
-  const palettePoolRef = useRef<HeroColorPool>(HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color })));
-  const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
-  const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
-
-  useEffect(() => {
-    playingRef.current = playing;
-  }, [playing]);
-
-  useEffect(() => {
-    trackKeyRef.current = trackKey || "mvp-music";
-    targetCharacterRef.current = (heroHash(trackKeyRef.current) % 10000) / 10000;
-  }, [trackKey]);
-
-  useEffect(() => {
-    if (!artworkUrl || typeof document === "undefined") {
-      palettePoolRef.current = HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color }));
-      targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
-      return;
-    }
-
-    let cancelled = false;
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.decoding = "async";
-
-    const sampleArtwork = () => {
-      if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
-      try {
-        const sample = document.createElement("canvas");
-        const size = 72;
-        sample.width = size;
-        sample.height = size;
-        const context = sample.getContext("2d", { willReadFrequently: true });
-        if (!context) return;
-        context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, size, size);
-        const imageData = context.getImageData(0, 0, size, size).data;
-        const pool = extractHeroColorPool(imageData);
-        const fallbackPalette = extractHeroPalette(imageData);
-        if (!cancelled) {
-          palettePoolRef.current = pool;
-          const seed = heroHash(trackKeyRef.current);
-          targetPaletteRef.current = pool.length >= 3 ? heroPaletteFromPool(pool, 0, seed) : (fallbackPalette ?? HERO_NEUTRAL_PALETTE);
-        }
-      } catch {
-        targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
-      }
-    };
-
-    image.onload = sampleArtwork;
-    image.src = artworkUrl;
-    if (image.complete) sampleArtwork();
-    return () => { cancelled = true; };
-  }, [artworkUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const gl = canvas.getContext("webgl", {
-      alpha: true,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      premultipliedAlpha: false,
-      preserveDrawingBuffer: false,
-      powerPreference: "high-performance",
-    });
-    if (!gl) return;
-
-    const compileShader = (type: number, source: string) => {
-      const shader = gl.createShader(type);
-      if (!shader) return null;
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        gl.deleteShader(shader);
-        return null;
-      }
-      return shader;
-    };
-
-    const vertexShader = compileShader(gl.VERTEX_SHADER, HERO_VERTEX_SHADER);
-    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, HERO_FRAGMENT_SHADER);
-    if (!vertexShader || !fragmentShader) {
-      if (vertexShader) gl.deleteShader(vertexShader);
-      if (fragmentShader) gl.deleteShader(fragmentShader);
-      return;
-    }
-
-    const program = gl.createProgram();
-    if (!program) {
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
-      return;
-    }
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
-      return;
-    }
-
-    const buffer = gl.createBuffer();
-    if (!buffer) {
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
-      return;
-    }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-    gl.useProgram(program);
-
-    const positionLocation = gl.getAttribLocation(program, "a_position");
-    gl.enableVertexAttribArray(positionLocation);
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-
-    const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
-    const timeLocation = gl.getUniformLocation(program, "u_time");
-    const sceneALocation = gl.getUniformLocation(program, "u_sceneA");
-    const sceneBLocation = gl.getUniformLocation(program, "u_sceneB");
-    const blendLocation = gl.getUniformLocation(program, "u_blend");
-    const audioLocation = gl.getUniformLocation(program, "u_audio");
-    const characterLocation = gl.getUniformLocation(program, "u_character");
-    const colorLocations = [0, 1, 2, 3, 4].map((index) => gl.getUniformLocation(program, `u_c${index}`));
-
     let frame = 0;
     let width = 1;
     let height = 1;
     let dpr = 1;
-    let lastNow = performance.now();
-    let lastAudioSample = 0;
-    let liveCharacter = targetCharacterRef.current;
-    let sceneIndex = heroHash("v11-scene-seed") % HERO_SCENE_COUNT;
-    let sceneSerial = 0;
-    let sceneStartedAt = performance.now();
-    let sceneDuration = heroTimedDuration(heroHash("v11-scene-duration"), sceneSerial, HERO_SCENE_MIN_MS, HERO_SCENE_MAX_MS);
-    let palettePhase = 0;
-    let paletteChangedAt = performance.now();
-    let paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
-    let lastPaletteTrackKey = trackKeyRef.current;
-    const audioSmooth = { low: 0, mid: 0, high: 0, energy: 0 };
-    const audioTarget = { low: 0, mid: 0, high: 0, energy: 0 };
+    let bass = 0;
+    let mids = 0;
+    let highs = 0;
+    let energy = 0;
+
+    const particles = Array.from({ length: 52 }, (_, index) => ({
+      seed: index * 17.731 + 3.17,
+      x: ((index * 37) % 101) / 101,
+      y: ((index * 61) % 97) / 97,
+      size: 0.55 + ((index * 13) % 11) / 10,
+      depth: 0.35 + ((index * 29) % 67) / 100,
+      speed: 0.55 + ((index * 19) % 31) / 24,
+    }));
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       width = Math.max(1, Math.floor(rect.width));
       height = Math.max(1, Math.floor(rect.height));
-      const device = window.devicePixelRatio || 1;
-      dpr = Math.min(device, 1.0);
+      dpr = Math.min(1.75, window.devicePixelRatio || 1);
       const pixelWidth = Math.max(1, Math.floor(width * dpr));
       const pixelHeight = Math.max(1, Math.floor(height * dpr));
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
         canvas.width = pixelWidth;
         canvas.height = pixelHeight;
       }
-      gl.viewport(0, 0, pixelWidth, pixelHeight);
     };
 
     resize();
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
-    resizeObserver?.observe(canvas);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    observer?.observe(canvas);
 
-    const expApproach = (current: number, target: number, dtSeconds: number, tauSeconds: number) => {
-      const amount = 1 - Math.exp(-Math.max(0, dtSeconds) / tauSeconds);
-      return current + (target - current) * amount;
+    const drawGlow = (
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      radiusX: number,
+      radiusY: number,
+      color: string,
+      alpha: number,
+    ) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(Math.max(0.001, radiusX / Math.max(1, radiusY)), 1);
+      const radius = Math.max(1, radiusY);
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      glow.addColorStop(0, color.replace("ALPHA", String(alpha)));
+      glow.addColorStop(0.34, color.replace("ALPHA", String(alpha * 0.72)));
+      glow.addColorStop(0.68, color.replace("ALPHA", String(alpha * 0.24)));
+      glow.addColorStop(1, color.replace("ALPHA", "0"));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     };
 
-    const setColor = (location: WebGLUniformLocation | null, color: HeroRgb) => {
-      if (!location) return;
-      gl.uniform3f(location, color.r / 255, color.g / 255, color.b / 255);
+    const drawRibbon = (
+      ctx: CanvasRenderingContext2D,
+      time: number,
+      baseY: number,
+      amplitude: number,
+      phase: number,
+      lineWidth: number,
+      colorA: string,
+      colorB: string,
+      alpha: number,
+      frequency: number,
+      drift: number,
+    ) => {
+      const gradient = ctx.createLinearGradient(0, 0, width, 0);
+      gradient.addColorStop(0, colorA.replace("ALPHA", "0"));
+      gradient.addColorStop(0.18, colorA.replace("ALPHA", String(alpha * 0.74)));
+      gradient.addColorStop(0.5, colorB.replace("ALPHA", String(alpha)));
+      gradient.addColorStop(0.82, colorA.replace("ALPHA", String(alpha * 0.68)));
+      gradient.addColorStop(1, colorB.replace("ALPHA", "0"));
+
+      ctx.save();
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.shadowColor = colorB.replace("ALPHA", String(alpha * 0.72));
+      ctx.shadowBlur = Math.max(8, lineWidth * 1.45);
+      ctx.beginPath();
+
+      const steps = Math.max(40, Math.ceil(width / 16));
+      for (let step = 0; step <= steps; step += 1) {
+        const ratio = step / steps;
+        const x = ratio * width;
+        const envelope = Math.sin(Math.PI * ratio);
+        const y =
+          baseY +
+          Math.sin(ratio * Math.PI * frequency + time * drift + phase) * amplitude * envelope +
+          Math.sin(ratio * Math.PI * (frequency * 0.53) - time * drift * 0.67 + phase * 1.7) * amplitude * 0.36;
+        if (step === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
     };
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (typeof document !== "undefined" && document.hidden) {
-        lastNow = now;
-        return;
+      const preWorkoutLaunchOpen =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("tr-prelaunch-open");
+      if (preWorkoutLaunchOpen || (typeof document !== "undefined" && document.hidden)) return;
+
+      resize();
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
+      const bassTarget = Math.max(0, Math.min(1, ((Number(raw[0]) || 0) + (Number(raw[1]) || 0) + (Number(raw[2]) || 0)) / 2.25));
+      const midsTarget = Math.max(0, Math.min(1, ((Number(raw[3]) || 0) + (Number(raw[4]) || 0) + (Number(raw[5]) || 0) + (Number(raw[6]) || 0)) / 2.7));
+      const highsTarget = Math.max(0, Math.min(1, ((Number(raw[7]) || 0) + (Number(raw[8]) || 0) + (Number(raw[9]) || 0)) / 2.15));
+      bass += (bassTarget - bass) * 0.13;
+      mids += (midsTarget - mids) * 0.11;
+      highs += (highsTarget - highs) * 0.14;
+      const energyTarget = playing ? Math.max(bassTarget, midsTarget * 0.88, highsTarget * 0.74) : 0;
+      energy += (energyTarget - energy) * 0.10;
+
+      const t = now * 0.001;
+      const idle = playing ? 1 : 0.72;
+      const speed = (0.58 + energy * 1.22) * idle;
+      const pulse = 0.5 + 0.5 * Math.sin(t * (1.15 + bass * 1.8));
+      const travel = t * speed;
+
+      const base = ctx.createLinearGradient(0, 0, width, height);
+      base.addColorStop(0, "#02070b");
+      base.addColorStop(0.42, "#061018");
+      base.addColorStop(1, "#020509");
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.globalCompositeOperation = "screen";
+
+      const x1 = width * (0.62 + Math.sin(travel * 0.47) * 0.18);
+      const y1 = height * (0.34 + Math.cos(travel * 0.63) * 0.22);
+      drawGlow(ctx, x1, y1, width * (0.42 + bass * 0.12), height * (0.78 + bass * 0.20), "rgba(22,214,255,ALPHA)", 0.31 + bass * 0.20);
+
+      const x2 = width * (0.84 + Math.cos(travel * 0.38 + 1.3) * 0.17);
+      const y2 = height * (0.64 + Math.sin(travel * 0.51 + 0.7) * 0.26);
+      drawGlow(ctx, x2, y2, width * (0.37 + mids * 0.10), height * (0.64 + mids * 0.20), "rgba(104,73,255,ALPHA)", 0.25 + mids * 0.18);
+
+      const x3 = width * (0.48 + Math.sin(travel * 0.31 + 2.4) * 0.22);
+      const y3 = height * (0.76 + Math.cos(travel * 0.42 + 1.1) * 0.17);
+      drawGlow(ctx, x3, y3, width * (0.31 + highs * 0.08), height * (0.47 + highs * 0.15), "rgba(255,45,174,ALPHA)", 0.16 + highs * 0.20);
+
+      const x4 = width * (0.72 + Math.cos(travel * 0.29 + 3.0) * 0.25);
+      const y4 = height * (0.15 + Math.sin(travel * 0.44 + 1.8) * 0.18);
+      drawGlow(ctx, x4, y4, width * 0.28, height * 0.40, "rgba(70,255,174,ALPHA)", 0.12 + mids * 0.12);
+
+      const breathingRadius = width * (0.18 + pulse * 0.08 + bass * 0.07);
+      drawGlow(
+        ctx,
+        width * (0.66 + Math.sin(travel * 0.25) * 0.05),
+        height * (0.50 + Math.cos(travel * 0.31) * 0.06),
+        breathingRadius * 1.65,
+        height * (0.26 + pulse * 0.08 + bass * 0.08),
+        "rgba(115,225,255,ALPHA)",
+        0.12 + pulse * 0.08 + bass * 0.11,
+      );
+
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.32 + Math.sin(travel * 0.37) * 0.05),
+        height * (0.13 + bass * 0.07),
+        0.2,
+        Math.max(12, height * (0.055 + bass * 0.025)),
+        "rgba(26,205,255,ALPHA)",
+        "rgba(107,99,255,ALPHA)",
+        0.22 + bass * 0.15,
+        3.1,
+        1.25,
+      );
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.58 + Math.cos(travel * 0.31) * 0.06),
+        height * (0.16 + mids * 0.07),
+        2.0,
+        Math.max(10, height * (0.042 + mids * 0.024)),
+        "rgba(78,107,255,ALPHA)",
+        "rgba(236,67,255,ALPHA)",
+        0.17 + mids * 0.16,
+        4.0,
+        -0.94,
+      );
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.77 + Math.sin(travel * 0.42 + 1.4) * 0.04),
+        height * (0.09 + highs * 0.06),
+        4.2,
+        Math.max(7, height * (0.028 + highs * 0.018)),
+        "rgba(70,255,208,ALPHA)",
+        "rgba(45,186,255,ALPHA)",
+        0.13 + highs * 0.16,
+        5.2,
+        1.48,
+      );
+
+      ctx.globalCompositeOperation = "lighter";
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const phase = travel * particle.speed + particle.seed;
+        const orbitX = Math.sin(phase * 0.29 + particle.seed) * 0.11;
+        const orbitY = Math.cos(phase * 0.37 + particle.seed * 0.7) * 0.16;
+        const driftY = ((particle.y + travel * 0.018 * particle.speed) % 1.18) - 0.09;
+        const x = width * (particle.x + orbitX);
+        const y = height * (driftY + orbitY * 0.28);
+        const depthPulse = 0.62 + 0.38 * Math.sin(phase * 1.8);
+        const alpha = (0.10 + particle.depth * 0.18 + highs * 0.22) * depthPulse;
+        const radius = particle.size * (0.55 + particle.depth * 0.75 + highs * 0.34);
+
+        if (x < -12 || x > width + 12 || y < -12 || y > height + 12) continue;
+        ctx.beginPath();
+        ctx.fillStyle = index % 5 === 0
+          ? `rgba(182,121,255,${alpha})`
+          : index % 3 === 0
+            ? `rgba(84,255,217,${alpha})`
+            : `rgba(157,233,255,${alpha})`;
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (playing && highs > 0.16 && index % 7 === 0) {
+          const streak = 5 + highs * 18 * particle.depth;
+          ctx.strokeStyle = `rgba(202,245,255,${alpha * 0.48})`;
+          ctx.lineWidth = Math.max(0.5, radius * 0.45);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - streak, y + streak * 0.18);
+          ctx.stroke();
+        }
       }
 
-      const dtSeconds = heroClamp((now - lastNow) / 1000, 0, 0.08);
-      lastNow = now;
+      ctx.globalCompositeOperation = "source-over";
 
-      // Sample the analyzer at 20 Hz. Rendering remains display-rate and independent of beat transients.
-      if (now - lastAudioSample >= 50) {
-        lastAudioSample = now;
-        const raw = playingRef.current ? getMusicRtaLevels() : Array(10).fill(0);
-        const average = (from: number, to: number) => {
-          let sum = 0;
-          let count = 0;
-          for (let index = from; index <= to; index += 1) {
-            sum += heroClamp(Number(raw[index]) || 0);
-            count += 1;
-          }
-          return count ? sum / count : 0;
-        };
-        const lowRaw = average(0, 2);
-        const midRaw = average(3, 6);
-        const highRaw = average(7, 9);
-        const energyRaw = lowRaw * 0.38 + midRaw * 0.42 + highRaw * 0.20;
-        audioTarget.low = playingRef.current ? heroClamp(lowRaw * 0.72, 0, 0.46) : 0;
-        audioTarget.mid = playingRef.current ? heroClamp(midRaw * 0.68, 0, 0.44) : 0;
-        audioTarget.high = playingRef.current ? heroClamp(highRaw * 0.62, 0, 0.40) : 0;
-        audioTarget.energy = playingRef.current ? heroClamp(energyRaw * 0.66, 0, 0.42) : 0;
-      }
+      const softVignette = ctx.createRadialGradient(
+        width * 0.64,
+        height * 0.48,
+        Math.min(width, height) * 0.06,
+        width * 0.64,
+        height * 0.48,
+        Math.max(width, height) * 0.76,
+      );
+      softVignette.addColorStop(0, "rgba(0,0,0,0)");
+      softVignette.addColorStop(0.58, "rgba(0,0,0,.05)");
+      softVignette.addColorStop(1, "rgba(0,0,0,.48)");
+      ctx.fillStyle = softVignette;
+      ctx.fillRect(0, 0, width, height);
 
-      // The scene owns 90%+ of the motion. Music is a slow pressure layer, never a positional driver.
-      audioSmooth.low = expApproach(audioSmooth.low, audioTarget.low, dtSeconds, 1.55);
-      audioSmooth.mid = expApproach(audioSmooth.mid, audioTarget.mid, dtSeconds, 1.80);
-      audioSmooth.high = expApproach(audioSmooth.high, audioTarget.high, dtSeconds, 1.28);
-      audioSmooth.energy = expApproach(audioSmooth.energy, audioTarget.energy, dtSeconds, 2.05);
-
-      if (lastPaletteTrackKey !== trackKeyRef.current) {
-        lastPaletteTrackKey = trackKeyRef.current;
-        palettePhase = 0;
-        paletteChangedAt = now;
-        paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
-        targetPaletteRef.current = heroPaletteFromPool(palettePoolRef.current, palettePhase, heroHash(trackKeyRef.current));
-      }
-
-      // During playback, smoothly rotate emphasis across the full artwork color pool every 4.2–6.5 s.
-      if (playingRef.current && now - paletteChangedAt >= paletteDuration) {
-        palettePhase += 1;
-        paletteChangedAt = now;
-        paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
-        targetPaletteRef.current = heroPaletteFromPool(palettePoolRef.current, palettePhase, heroHash(trackKeyRef.current));
-      } else if (!playingRef.current) {
-        paletteChangedAt = now;
-      }
-
-      const livePalette = livePaletteRef.current;
-      const targetPalette = targetPaletteRef.current;
-      const paletteAmount = 1 - Math.exp(-dtSeconds / 1.35);
-      for (let index = 0; index < livePalette.length; index += 1) {
-        livePalette[index] = heroMix(livePalette[index], targetPalette[index], paletteAmount);
-      }
-      liveCharacter = expApproach(liveCharacter, targetCharacterRef.current, dtSeconds, 2.2);
-
-      while (now - sceneStartedAt >= sceneDuration) {
-        sceneStartedAt += sceneDuration;
-        sceneIndex = (sceneIndex + 1) % HERO_SCENE_COUNT;
-        sceneSerial += 1;
-        sceneDuration = heroTimedDuration(heroHash("v11-scene-duration"), sceneSerial, HERO_SCENE_MIN_MS, HERO_SCENE_MAX_MS);
-      }
-      const sceneElapsed = now - sceneStartedAt;
-      const sceneA = sceneIndex;
-      const sceneB = (sceneIndex + 1) % HERO_SCENE_COUNT;
-      const morphStart = Math.max(0, sceneDuration - HERO_MORPH_MS);
-      const rawBlend = sceneElapsed > morphStart ? heroClamp((sceneElapsed - morphStart) / HERO_MORPH_MS) : 0;
-      const blend = rawBlend * rawBlend * (3 - 2 * rawBlend);
-
-      gl.useProgram(program);
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
-      gl.uniform1f(timeLocation, now * 0.001);
-      gl.uniform1f(sceneALocation, sceneA);
-      gl.uniform1f(sceneBLocation, sceneB);
-      gl.uniform1f(blendLocation, blend);
-      gl.uniform4f(audioLocation, audioSmooth.low, audioSmooth.mid, audioSmooth.high, audioSmooth.energy);
-      gl.uniform1f(characterLocation, liveCharacter);
-      colorLocations.forEach((location, index) => setColor(location, livePalette[index]));
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      const sheen = ctx.createLinearGradient(0, 0, width, height);
+      sheen.addColorStop(0, "rgba(255,255,255,.025)");
+      sheen.addColorStop(0.35, "rgba(255,255,255,0)");
+      sheen.addColorStop(0.72, `rgba(93,223,255,${0.018 + energy * 0.025})`);
+      sheen.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = sheen;
+      ctx.fillRect(0, 0, width, height);
     };
 
     frame = window.requestAnimationFrame(draw);
     return () => {
       window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect();
-      gl.deleteBuffer(buffer);
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
+      observer?.disconnect();
     };
-  }, []);
+  }, [playing]);
 
-  return (
-    <div className="tr-playerVisualEngine" aria-hidden="true">
-      {artworkUrl ? <img className="tr-playerVisualArtwork" src={artworkUrl} alt="" /> : null}
-      <canvas ref={canvasRef} />
-      <span className="tr-playerVisualGlass" />
-    </div>
-  );
+  return <canvas ref={canvasRef} className="tr-playerFluidCanvas" aria-hidden="true" />;
 }
 
 export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
@@ -1267,11 +686,33 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
+  const [headerWorkoutState, setHeaderWorkoutState] = useState("");
   const restoredProfileRef = useRef<string>("");
-  const heroIdentityRef = useRef<HTMLDivElement | null>(null);
-  const heroTitleRef = useRef<HTMLElement | null>(null);
-  const heroArtistRef = useRef<HTMLElement | null>(null);
-  const heroActionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const readHeaderWorkoutState = () => {
+      const stamp = [
+        window.localStorage.getItem("mvp_active_session_id") || "",
+        window.localStorage.getItem("mvp_active_workout_id") || "",
+        window.localStorage.getItem("mvp_is_paused") || "false",
+        window.location.pathname,
+      ].join("|");
+
+      setHeaderWorkoutState((current) => (current === stamp ? current : stamp));
+    };
+
+    readHeaderWorkoutState();
+    const timer = window.setInterval(readHeaderWorkoutState, 750);
+    window.addEventListener("focus", readHeaderWorkoutState);
+    window.addEventListener("popstate", readHeaderWorkoutState);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", readHeaderWorkoutState);
+      window.removeEventListener("popstate", readHeaderWorkoutState);
+    };
+  }, []);
+
 
   useEffect(() => {
     const title = document.querySelector<HTMLElement>(".tr-topTitle");
@@ -1301,11 +742,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       return button;
     };
 
-    const hasActiveWorkout = Boolean(
-      window.localStorage.getItem("mvp_active_session_id") ||
-      window.localStorage.getItem("mvp_active_workout_id")
-    );
-    if (hasActiveWorkout) makeButton("RESUME", () => navigate("/"), "is-resume");
+    const activeSessionId = window.localStorage.getItem("mvp_active_session_id");
+    const activeWorkoutId = window.localStorage.getItem("mvp_active_workout_id");
+    const hasActiveWorkout = Boolean(activeSessionId || activeWorkoutId);
+    const workoutPaused = window.localStorage.getItem("mvp_is_paused") === "true";
+    const onWorkoutPage = window.location.pathname.startsWith("/workout/");
+    const workoutTarget = activeSessionId ? `/workout/${activeSessionId}` : "/";
+
+    if (hasActiveWorkout && !onWorkoutPage) {
+      makeButton(
+        workoutPaused ? "RESUME" : "RETURN TO WORKOUT",
+        () => navigate(workoutTarget),
+        "is-resume"
+      );
+    }
+
     makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"), "is-sound");
 
     const accountWrap = document.createElement("div");
@@ -1333,7 +784,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       originalActions.style.display = oldDisplay;
       mount?.remove();
     };
-  }, [navigate]);
+  }, [navigate, headerWorkoutState]);
 
   useEffect(() => {
     const refreshPlaylists = () => {
@@ -1376,7 +827,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     if (restoredProfileRef.current === restorationKey) return;
     restoredProfileRef.current = restorationKey;
 
-    setMusicOutputProfile(profile.outputProfile ?? "headphones");
     profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
     setMusicPreamp(profile.preampDb);
     setMusicEqEnabled(profile.eqEnabled);
@@ -1414,7 +864,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   function currentDspSnapshot(name: string): SavedDspProfile {
     return {
       name: name.trim() || "Custom DSP",
-      outputProfile: player.outputProfile,
       eqEnabled: player.eqEnabled,
       eqGains: [...player.eqGains],
       preampDb: player.preampDb,
@@ -1430,7 +879,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   function profileMatchesCurrent(profile: SavedDspProfile | null) {
     if (!profile) return false;
-    if ((profile.outputProfile ?? "headphones") !== player.outputProfile) return false;
     if (profile.eqEnabled !== player.eqEnabled) return false;
     if (profile.headphoneMode !== player.headphoneMode) return false;
     if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
@@ -1464,7 +912,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       return;
     }
     await runDspMutation(() => {
-      setMusicOutputProfile(profile.outputProfile ?? "headphones");
       applyMusicEqPreset(slot);
       profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
       setMusicPreamp(profile.preampDb);
@@ -1502,58 +949,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setSavePresetOpen(false);
   }
 
-
-  const track = player.currentTrack;
-
-  useEffect(() => {
-    const identity = heroIdentityRef.current;
-    const title = heroTitleRef.current;
-    const artist = heroArtistRef.current;
-    const actions = heroActionsRef.current;
-    if (!identity || !title || !artist || !actions) return;
-
-    let raf = 0;
-    const fitHeroTitle = () => {
-      window.cancelAnimationFrame(raf);
-      raf = window.requestAnimationFrame(() => {
-        const mobile = window.matchMedia("(max-width: 650px)").matches;
-        const narrow = window.matchMedia("(max-width: 390px)").matches;
-        const maxSize = mobile ? (narrow ? 25 : 30) : window.innerWidth >= 1100 ? 62 : 46;
-        const minSize = mobile ? (narrow ? 17 : 18) : 27;
-        const computed = window.getComputedStyle(identity);
-        const paddingY = (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
-        const artistHeight = artist.getBoundingClientRect().height;
-        const actionsHeight = actions.getBoundingClientRect().height;
-        const safetyGap = mobile ? 26 : 42;
-        const targetHeroHeight = mobile ? (narrow ? 218 : 216) : Math.max(220, identity.parentElement?.clientHeight || identity.clientHeight);
-        const availableTitleHeight = Math.max(42, targetHeroHeight - paddingY - artistHeight - actionsHeight - safetyGap);
-
-        let chosen = maxSize;
-        for (let size = maxSize; size >= minSize; size -= 1) {
-          identity.style.setProperty("--tr-hero-title-size", `${size}px`);
-          const fitsHeight = title.scrollHeight <= availableTitleHeight + 2;
-          const fitsWidth = title.scrollWidth <= title.clientWidth + 2;
-          if (fitsHeight && fitsWidth) {
-            chosen = size;
-            break;
-          }
-          chosen = size;
-        }
-        identity.style.setProperty("--tr-hero-title-size", `${chosen}px`);
-      });
-    };
-
-    fitHeroTitle();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fitHeroTitle) : null;
-    observer?.observe(identity);
-    window.addEventListener("resize", fitHeroTitle);
-    return () => {
-      window.cancelAnimationFrame(raf);
-      observer?.disconnect();
-      window.removeEventListener("resize", fitHeroTitle);
-    };
-  }, [track?.title, track?.artist]);
-
   function openSavePresetDialog(preferredSlot?: MusicCustomPresetSlot) {
     const firstEmpty = DSP_SLOTS.find((slot) => !dspProfiles[slot]);
     const slot = preferredSlot ?? firstEmpty ?? activeCustomSlot ?? "custom_1";
@@ -1562,6 +957,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setSavePresetOpen(true);
   }
 
+  const track = player.currentTrack;
   const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
   const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
   const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
@@ -1571,13 +967,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const presetStatusLabel = activeSavedProfile
     ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
     : player.eqPreset === "custom" ? "Unsaved custom DSP" : "Built-in preset";
-  const dspOutputStatus = MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel;
-  const activeBuiltInEq = (MUSIC_EQ_PRESETS as Record<string, { label: string }>)[player.eqPreset]?.label;
-  const dspEqStatus = player.outputProfile === "reference" || player.dspBypass
-    ? "REFERENCE"
-    : !player.eqEnabled
-      ? "FLAT"
-      : activeSavedProfile?.name || activeBuiltInEq || "CUSTOM";
 
   return (
     <section
@@ -1586,37 +975,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     >
 
       <div className="tr-playerHero">
-        <MusicHeroSceneEngine
-          playing={player.playing}
-          trackKey={track?.id || `${track?.title || "music"}:${track?.artist || "unknown"}`}
-          artworkUrl={artworkUrl}
-        />
+        <div className="tr-playerAurora" aria-hidden="true">
+          {artworkUrl ? <img className="tr-playerAuroraArt" src={artworkUrl} alt="" /> : null}
+          <MusicHeroFluidMotion playing={player.playing} />
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--one" />
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--two" />
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--three" />
+        </div>
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
-        <div ref={heroIdentityRef} className="tr-audioIdentity">
-          <button type="button" className="tr-audioIdentityMain" onClick={() => navigate("/music")} aria-label="Open current song in music library">
-            <strong ref={heroTitleRef}>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
-            <small ref={heroArtistRef}>{track?.artist || "Unknown Artist"}</small>
-          </button>
-          <div ref={heroActionsRef} className="tr-heroPreferenceStage" aria-label="Track preference controls">
-            <button type="button" className={`tr-heroPrefButton tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
-              if (!track) return;
-              void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
-            }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /><span>{track?.favorite ? "Liked" : "Like"}</span></button>
-            <button type="button" className={`tr-heroPrefButton tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
-              if (!track) return;
-              void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
-            }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /><span>Play Less</span></button>
-            <button type="button" className={`tr-heroPrefButton tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
-              if (!track) return;
-              setDiscoverMessage("SEARCHING…");
-              void discoverMoreFromTrack(track, player.libraryTracks)
-                .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
-                .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
-            }} aria-label="Rediscover music"><PlayerIcon name="discover" /><span>Rediscover</span></button>
-          </div>
-        </div>
+        <button type="button" className="tr-audioIdentity" onClick={() => navigate("/music")}>
+          <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
+          <small>{track?.artist || "Unknown Artist"}</small>
+        </button>
       </div>
 
       <div className="tr-audioTimeline">
@@ -1637,8 +1009,25 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
       </div>
 
-      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} />
+      <MusicActivityRta playing={player.playing} />
 
+      <div className="tr-playerPreferenceStage tr-trackPreference" aria-label="Track preference">
+        <button type="button" className={`tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
+          if (!track) return;
+          void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
+        }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /><span>Like</span></button>
+        <button type="button" className={`tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
+          if (!track) return;
+          void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
+        }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /><span>Play Less</span></button>
+        <button type="button" className={`tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
+          if (!track) return;
+          setDiscoverMessage("SEARCHING…");
+          void discoverMoreFromTrack(track, player.libraryTracks)
+            .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+            .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
+        }} aria-label="Rediscover music"><PlayerIcon name="discover" /><span>Rediscover</span></button>
+      </div>
 
       <div className="tr-playerUtilityRow">
         <label className="tr-playerVolume">
@@ -1657,10 +1046,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
             </select>
           </label>
-          <button type="button" className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
-            <span className="tr-dspStatusIcon"><PlayerIcon name="equalizer" /></span>
-            <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
-            <i className={`tr-dspStatusLed ${player.dspStatus === "active" ? "is-live" : ""}`} aria-hidden />
+          <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
+            <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
           </button>
         </div>
       </div>
@@ -1669,34 +1056,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       {eqOpen ? (
         <section className="tr-audioEqPanel tr-audioEqPanel--pro7">
-          <div className="tr-outputProfilePanel">
-            <div className="tr-outputProfileIntro">
-              <small>HIGH-FIDELITY OUTPUT</small>
-              <strong>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</strong>
-              <p>{MUSIC_OUTPUT_PROFILES[player.outputProfile].description}</p>
-            </div>
-            <label className="tr-outputProfileSelect">
-              <span>OUTPUT PROFILE</span>
-              <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicOutputProfile(event.target.value as MusicOutputProfile)}>
-                {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
-              </select>
-            </label>
-            <div className="tr-outputProfileTelemetry">
-              <span className={player.outputProfile === "car_hifi" ? "is-car" : ""}>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span>
-              <span>AUTO HEADROOM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
-              <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
-              <span>NORMALIZER <b>OFF</b></span>
-              <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
-            </div>
-          </div>
-
           <div className="tr-audioEqHead">
-            <div><strong>31-Band Hi-Fi EQ</strong></div>
+            <div><strong>31-Band EQ + Headphone DSP</strong></div>
             <div className="tr-dspAbControls">
-              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
-              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
+              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.eqEnabled ? "ON" : "FLAT"}</span></label>
+              <button type="button" className={`tr-dspBypassButton ${player.dspBypass ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>A/B {player.dspBypass ? "BYPASSED" : "PROCESSED"}</button>
             </div>
-            <label className="tr-audioEqPreset"><span>EQ PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
+            <label className="tr-audioEqPreset"><span>EQ PRESET</span><select value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
               {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
               {DSP_SLOTS.map((slot) => <option key={slot} value={slot}>{dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}</option>)}
               <option value="custom">{activeSavedProfile && activeProfileDirty ? `${activeSavedProfile.name} • Modified` : "Unsaved Custom"}</option>
@@ -1729,15 +1095,15 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <section className={`tr-headphoneProcessor ${player.outputProfile !== "headphones" ? "is-disabled" : ""}`}>
-            <header><div><strong>Headphone Immersion</strong><small>{player.outputProfile === "headphones" ? "Headphone-only processing path" : "Disabled outside Headphones profile to preserve stereo fidelity"}</small></div><label><span>MODE</span><select disabled={player.outputProfile !== "headphones"} value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
-            <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
+          <section className="tr-headphoneProcessor">
+            <header><div><strong>Headphone Immersion</strong></div><label><span>MODE</span><select value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
+            <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
             <div className="tr-headphoneControls">
-              <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneWidth(Number(event.target.value)))} /></label>
-              <label><span>DEPTH <b>{player.headphoneDepth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneDepth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneDepth(Number(event.target.value)))} /></label>
-              <label><span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCrossfeed} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCrossfeed(Number(event.target.value)))} /></label>
-              <label><span>CENTER <b>{player.headphoneCenter}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCenter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCenter(Number(event.target.value)))} /></label>
-              <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneBassImpact(Number(event.target.value)))} /></label>
+              <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneWidth(Number(event.target.value)))} /></label>
+              <label><span>DEPTH <b>{player.headphoneDepth}%</b></span><input type="range" min="0" max="100" value={player.headphoneDepth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneDepth(Number(event.target.value)))} /></label>
+              <label><span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span><input type="range" min="0" max="100" value={player.headphoneCrossfeed} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCrossfeed(Number(event.target.value)))} /></label>
+              <label><span>CENTER <b>{player.headphoneCenter}%</b></span><input type="range" min="0" max="100" value={player.headphoneCenter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCenter(Number(event.target.value)))} /></label>
+              <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneBassImpact(Number(event.target.value)))} /></label>
             </div>
           </section>
         </section>
@@ -1749,7 +1115,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
             <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
-            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • 31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
           </section>
         </div>
@@ -2498,6 +1864,199 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
 
+        /* AUG 13 LIVE PLAYER AURORA: artwork-derived color shift + premium motion */
+        .tr-playerHero{
+          isolation:isolate!important;
+          background:#040a0e!important;
+        }
+        .tr-playerAurora{
+          position:absolute!important;
+          inset:0!important;
+          z-index:0!important;
+          overflow:hidden!important;
+          pointer-events:none!important;
+          background:
+            radial-gradient(70% 90% at 72% 42%,rgba(37,186,225,.12),transparent 72%),
+            radial-gradient(52% 72% at 92% 16%,rgba(112,82,220,.08),transparent 74%),
+            #040a0e!important;
+        }
+        .tr-playerAurora:after{
+          content:"";
+          position:absolute;
+          inset:0;
+          pointer-events:none;
+          background:
+            linear-gradient(90deg,rgba(2,7,10,.48) 0%,rgba(2,7,10,.10) 36%,rgba(2,7,10,.26) 100%),
+            radial-gradient(80% 120% at 64% 50%,transparent 28%,rgba(1,5,8,.42) 100%);
+          z-index:5;
+        }
+        .tr-playerAuroraArt{
+          position:absolute!important;
+          left:20%!important;
+          top:-28%!important;
+          width:100%!important;
+          height:156%!important;
+          object-fit:cover!important;
+          object-position:center!important;
+          opacity:.34!important;
+          transform:translate3d(0,0,0) scale(1.20)!important;
+          filter:blur(34px) saturate(1.85) contrast(1.07) brightness(.58) hue-rotate(-8deg)!important;
+          will-change:transform,filter,opacity;
+          animation:trAuroraArtworkDrift 34s ease-in-out infinite alternate!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
+          opacity:.46!important;
+          animation-duration:17s!important;
+        }
+        .tr-playerAuroraVeil{
+          position:absolute!important;
+          display:block!important;
+          pointer-events:none!important;
+          mix-blend-mode:screen!important;
+          will-change:transform,opacity;
+          opacity:.17;
+          filter:blur(18px);
+        }
+        .tr-playerAuroraVeil--one{
+          width:62%;height:82%;right:-8%;top:-20%;
+          border-radius:46% 54% 62% 38%;
+          background:
+            radial-gradient(ellipse at 34% 48%,rgba(58,224,255,.38) 0%,rgba(42,146,255,.16) 31%,transparent 68%);
+          transform:rotate(-10deg) translate3d(0,0,0);
+          animation:trAuroraRibbonOne 22s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+        }
+        .tr-playerAuroraVeil--two{
+          width:70%;height:62%;right:3%;bottom:-27%;
+          border-radius:55% 45% 38% 62%;
+          background:
+            radial-gradient(ellipse at 56% 40%,rgba(118,91,255,.28) 0%,rgba(49,198,234,.20) 36%,transparent 70%);
+          transform:rotate(7deg) translate3d(0,0,0);
+          animation:trAuroraRibbonTwo 29s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+        }
+        .tr-playerAuroraVeil--three{
+          width:52%;height:46%;right:22%;top:28%;
+          border-radius:50%;
+          background:
+            linear-gradient(112deg,transparent 4%,rgba(104,237,255,.05) 18%,rgba(118,208,255,.26) 44%,rgba(171,110,255,.16) 64%,transparent 88%);
+          transform:rotate(-15deg) skewX(-11deg) translate3d(0,0,0);
+          animation:trAuroraRibbonThree 19s ease-in-out infinite alternate;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.27;animation-duration:13s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.24;animation-duration:17s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.29;animation-duration:11s}
+        .tr-playerHero .tr-audioArtwork{
+          z-index:3!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          z-index:3!important;
+          background:
+            linear-gradient(90deg,rgba(4,13,18,.70) 0%,rgba(4,12,17,.44) 46%,rgba(3,9,13,.62) 100%)!important;
+          text-shadow:0 2px 16px rgba(0,0,0,.78)!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          content:"";
+          position:absolute;
+          inset:0;
+          z-index:-1;
+          pointer-events:none;
+          background:
+            radial-gradient(70% 84% at 21% 50%,rgba(0,0,0,.18),transparent 72%),
+            linear-gradient(90deg,rgba(2,7,10,.20),transparent 52%,rgba(2,7,10,.12));
+        }
+        @keyframes trAuroraArtworkDrift{
+          0%{transform:translate3d(-3%,-1%,0) scale(1.20);filter:blur(34px) saturate(1.78) contrast(1.06) brightness(.56) hue-rotate(-10deg)}
+          48%{transform:translate3d(3%,2%,0) scale(1.26);filter:blur(36px) saturate(1.96) contrast(1.08) brightness(.61) hue-rotate(8deg)}
+          100%{transform:translate3d(-1%,4%,0) scale(1.22);filter:blur(34px) saturate(1.88) contrast(1.07) brightness(.58) hue-rotate(19deg)}
+        }
+        @keyframes trAuroraRibbonOne{
+          0%{transform:rotate(-12deg) translate3d(-8%,-4%,0) scale(.94)}
+          50%{transform:rotate(-5deg) translate3d(5%,7%,0) scale(1.08)}
+          100%{transform:rotate(-15deg) translate3d(11%,-1%,0) scale(1.02)}
+        }
+        @keyframes trAuroraRibbonTwo{
+          0%{transform:rotate(9deg) translate3d(8%,5%,0) scale(.96)}
+          50%{transform:rotate(2deg) translate3d(-6%,-7%,0) scale(1.10)}
+          100%{transform:rotate(12deg) translate3d(-1%,-2%,0) scale(1.03)}
+        }
+        @keyframes trAuroraRibbonThree{
+          0%{transform:rotate(-17deg) skewX(-11deg) translate3d(-10%,1%,0) scale(.92)}
+          50%{transform:rotate(-9deg) skewX(-7deg) translate3d(6%,-5%,0) scale(1.12)}
+          100%{transform:rotate(-19deg) skewX(-13deg) translate3d(12%,6%,0) scale(1.00)}
+        }
+        @media(max-width:650px){
+          .tr-playerAuroraArt{left:10%!important;top:-18%!important;width:112%!important;height:138%!important;filter:blur(24px) saturate(1.65) contrast(1.05) brightness(.52) hue-rotate(-6deg)!important;opacity:.30!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.39!important;animation-duration:21s!important}
+          .tr-playerAuroraVeil--one{width:70%;height:90%;right:-22%;top:-26%;filter:blur(13px)}
+          .tr-playerAuroraVeil--two{width:74%;height:68%;right:-10%;bottom:-30%;filter:blur(14px)}
+          .tr-playerAuroraVeil--three{display:none!important}
+          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(4,13,18,.66),rgba(3,10,14,.49) 55%,rgba(2,7,10,.67))!important}
+        }
+        @media(prefers-reduced-motion:reduce){
+          .tr-playerAuroraArt,.tr-playerAuroraVeil{animation:none!important}
+        }
+
+
+        /* AUG 13 FLUID MOTION ENGINE: always-visible canvas movement + audio reactive depth */
+        .tr-playerAurora{
+          opacity:1!important;
+          background:#02070b!important;
+        }
+        .tr-playerFluidCanvas{
+          position:absolute!important;
+          inset:-4%!important;
+          z-index:4!important;
+          display:block!important;
+          width:108%!important;
+          height:108%!important;
+          max-width:none!important;
+          pointer-events:none!important;
+          opacity:.96!important;
+          transform:translate3d(0,0,0) scale(1.02)!important;
+          filter:saturate(1.18) contrast(1.06)!important;
+          will-change:contents;
+        }
+        .tr-playerAuroraArt{
+          z-index:1!important;
+          opacity:.24!important;
+          filter:blur(42px) saturate(1.95) contrast(1.08) brightness(.48)!important;
+          animation:trAuroraArtworkDrift 16s ease-in-out infinite alternate!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
+          opacity:.34!important;
+          animation-duration:10s!important;
+        }
+        .tr-playerAuroraVeil{z-index:3!important;filter:blur(15px)!important}
+        .tr-playerAuroraVeil--one{opacity:.24!important;animation-duration:10s!important}
+        .tr-playerAuroraVeil--two{opacity:.20!important;animation-duration:13s!important}
+        .tr-playerAuroraVeil--three{opacity:.24!important;animation-duration:8s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.31!important;animation-duration:7s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.27!important;animation-duration:9s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.33!important;animation-duration:6s!important}
+        .tr-playerAurora:after{
+          z-index:5!important;
+          background:
+            linear-gradient(90deg,rgba(1,5,8,.34) 0%,rgba(1,5,8,.03) 38%,rgba(1,5,8,.16) 100%),
+            radial-gradient(90% 130% at 67% 50%,transparent 24%,rgba(1,5,8,.26) 100%)!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          background:
+            linear-gradient(90deg,rgba(3,11,16,.43) 0%,rgba(3,10,15,.18) 48%,rgba(2,7,11,.36) 100%)!important;
+          backdrop-filter:none!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          background:
+            radial-gradient(78% 92% at 18% 50%,rgba(0,0,0,.17),transparent 72%),
+            linear-gradient(90deg,rgba(1,5,8,.16),transparent 52%,rgba(1,5,8,.07))!important;
+        }
+        @media(max-width:650px){
+          .tr-playerFluidCanvas{inset:-8%!important;width:116%!important;height:116%!important;opacity:.92!important}
+          .tr-playerAuroraArt{opacity:.20!important;filter:blur(30px) saturate(1.82) contrast(1.06) brightness(.45)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.28!important}
+          .tr-playerHero .tr-audioIdentity{
+            background:linear-gradient(90deg,rgba(3,11,16,.39),rgba(2,8,12,.17) 55%,rgba(1,6,9,.35))!important;
+          }
+        }
+
         /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
         .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button{
           height:30px!important;min-height:30px!important;padding:0 9px!important;gap:6px!important;
@@ -2543,981 +2102,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             grid-column:1/-1!important;width:min(54%,170px)!important;justify-self:center!important;
           }
         }
-
-        /* AUG 14 V6 GPU AURORA CORE: seamless premium media stage + WebGL scene engine */
-        .tr-audioDeck--pro7{
-          position:relative!important;
-          overflow:hidden!important;
-          background:
-            radial-gradient(120% 58% at 50% 0%,rgba(39,112,139,.065),transparent 68%),
-            linear-gradient(180deg,#03090d 0%,#02070a 38%,#020609 100%)!important;
-          border:1px solid rgba(83,177,208,.18)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 20px 60px rgba(0,0,0,.34)!important;
-        }
-        .tr-playerHero{
-          position:relative!important;
-          isolation:isolate!important;
-          overflow:hidden!important;
-          border:0!important;
-          border-bottom:0!important;
-          background:transparent!important;
-          box-shadow:none!important;
-          margin:0!important;
-        }
-        .tr-playerHero::before{
-          content:""!important;
-          position:absolute!important;
-          z-index:2!important;
-          inset:0!important;
-          pointer-events:none!important;
-          background:
-            linear-gradient(90deg,rgba(1,4,6,.10) 0%,rgba(1,4,6,.025) 30%,transparent 62%,rgba(1,4,6,.055) 100%),
-            radial-gradient(80% 125% at 82% 50%,transparent 38%,rgba(0,0,0,.09) 100%)!important;
-        }
-        .tr-playerHero::after{
-          content:""!important;
-          position:absolute!important;
-          z-index:3!important;
-          left:0!important;right:0!important;bottom:-1px!important;height:42px!important;
-          pointer-events:none!important;
-          background:linear-gradient(180deg,transparent 0%,rgba(2,6,9,.28) 48%,#020609 100%)!important;
-          box-shadow:none!important;
-        }
-        .tr-playerVisualEngine{
-          position:absolute!important;
-          z-index:0!important;
-          inset:0!important;
-          overflow:hidden!important;
-          pointer-events:none!important;
-          background:#020609!important;
-        }
-        .tr-playerVisualArtwork{
-          position:absolute!important;
-          z-index:0!important;
-          left:6%!important;top:-44%!important;
-          width:118%!important;height:188%!important;
-          object-fit:cover!important;
-          object-position:center!important;
-          opacity:.30!important;
-          filter:blur(62px) saturate(1.58) contrast(1.04) brightness(.64)!important;
-          transform:scale(1.10)!important;
-          transform-origin:center!important;
-          animation:none!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.33!important}
-        .tr-playerVisualEngine canvas{
-          position:absolute!important;
-          z-index:1!important;
-          inset:0!important;
-          width:100%!important;height:100%!important;
-          display:block!important;
-          opacity:1!important;
-          mix-blend-mode:normal!important;
-          filter:saturate(1.04) contrast(1.02)!important;
-          transform:translateZ(0)!important;
-        }
-        .tr-playerVisualGlass{
-          position:absolute!important;
-          z-index:2!important;
-          inset:0!important;
-          pointer-events:none!important;
-          background:
-            linear-gradient(90deg,rgba(1,5,8,.10) 0%,rgba(1,5,8,.015) 25%,transparent 67%,rgba(0,3,5,.07) 100%),
-            linear-gradient(180deg,rgba(255,255,255,.018) 0%,transparent 28%,rgba(0,0,0,.10) 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.018)!important;
-        }
-        .tr-playerHero .tr-audioArtwork{
-          position:relative!important;
-          z-index:5!important;
-          box-shadow:none!important;
-          border:0!important;
-          outline:0!important;
-        }
-        .tr-playerHero .tr-audioArtwork::after{
-          content:""!important;
-          position:absolute!important;
-          z-index:2!important;
-          top:0!important;right:-1px!important;bottom:0!important;width:24px!important;
-          pointer-events:none!important;
-          background:linear-gradient(90deg,transparent,rgba(2,6,9,.16))!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          position:relative!important;
-          z-index:5!important;
-          background:transparent!important;
-          border:0!important;
-          box-shadow:none!important;
-          text-shadow:0 3px 20px rgba(0,0,0,.96),0 1px 4px rgba(0,0,0,.90)!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          content:""!important;
-          position:absolute!important;
-          z-index:-1!important;
-          inset:-18% -8% -18% -4%!important;
-          pointer-events:none!important;
-          background:radial-gradient(60% 70% at 18% 50%,rgba(0,0,0,.22),transparent 76%)!important;
-          filter:blur(10px)!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioTimeline{
-          position:relative!important;
-          z-index:6!important;
-          margin-top:5px!important;
-        }
-        @media(max-width:650px){
-          .tr-playerVisualArtwork{
-            left:0!important;top:-34%!important;width:130%!important;height:168%!important;
-            opacity:.29!important;filter:blur(38px) saturate(1.48) contrast(1.035) brightness(.62)!important;
-          }
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.31!important}
-          .tr-playerHero::after{height:30px!important}
-          .tr-playerHero .tr-audioArtwork::after{width:16px!important}
-        }
-        @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
-
-
-        /* AUG 14 V7: ONE SEAMLESS PLAYER + ARTWORK-OWNED COLOR + TOP-ONLY PREMIUM ACTIONS */
-        .tr-audioDeck--pro7{
-          padding:0!important;
-          overflow:hidden!important;
-          border-radius:16px!important;
-          background:linear-gradient(180deg,#050b0f 0%,#020609 52%,#010405 100%)!important;
-        }
-        .tr-playerHero{
-          position:relative!important;
-          width:100%!important;
-          margin:0!important;
-          padding:0!important;
-          display:grid!important;
-          grid-template-columns:clamp(235px,30%,305px) minmax(0,1fr)!important;
-          align-items:stretch!important;
-          gap:0!important;
-          overflow:hidden!important;
-          border:0!important;
-          border-radius:15px 15px 0 0!important;
-          background:#020609!important;
-          box-shadow:none!important;
-        }
-        .tr-playerHero::before{
-          z-index:3!important;
-          background:
-            radial-gradient(75% 110% at 72% 48%,transparent 30%,rgba(0,0,0,.12) 100%),
-            linear-gradient(90deg,rgba(0,0,0,.02),transparent 35%,rgba(0,0,0,.05))!important;
-        }
-        .tr-playerHero::after{
-          z-index:4!important;
-          left:0!important;right:0!important;bottom:-1px!important;height:28px!important;
-          background:linear-gradient(180deg,transparent 0%,rgba(2,6,9,.14) 48%,#020609 100%)!important;
-        }
-        .tr-playerVisualEngine{inset:0!important;background:#020609!important}
-        .tr-playerVisualArtwork{
-          left:-16%!important;top:-58%!important;width:155%!important;height:216%!important;
-          opacity:.19!important;
-          filter:blur(96px) saturate(1.72) contrast(1.04) brightness(.78)!important;
-          transform:scale(1.34)!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.21!important}
-        .tr-playerVisualEngine canvas{filter:saturate(1.12) contrast(1.015)!important}
-        .tr-playerVisualGlass{
-          background:
-            radial-gradient(60% 95% at 36% 48%,rgba(255,255,255,.016),transparent 70%),
-            linear-gradient(90deg,rgba(0,0,0,.03),transparent 34%,rgba(0,0,0,.055))!important;
-          box-shadow:none!important;
-        }
-        .tr-playerHero .tr-audioArtwork{
-          position:relative!important;z-index:6!important;
-          width:100%!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
-          aspect-ratio:1/1!important;margin:0!important;padding:0!important;
-          border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:hidden!important;
-        }
-        .tr-playerHero .tr-audioArtwork::after{display:none!important;content:none!important}
-        .tr-playerHero .tr-audioArtworkImage{
-          width:100%!important;height:100%!important;display:block!important;object-fit:cover!important;object-position:center!important;
-          -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 86%,rgba(0,0,0,.96) 91%,rgba(0,0,0,.78) 96%,rgba(0,0,0,.46) 100%)!important;
-          mask-image:linear-gradient(90deg,#000 0%,#000 86%,rgba(0,0,0,.96) 91%,rgba(0,0,0,.78) 96%,rgba(0,0,0,.46) 100%)!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          position:relative!important;z-index:7!important;
-          width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;min-height:0!important;
-          margin:0!important;padding:clamp(26px,3vw,40px) clamp(22px,3.4vw,48px)!important;
-          display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;
-          text-align:left!important;overflow:hidden!important;border:0!important;background:transparent!important;box-shadow:none!important;
-          text-shadow:none!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          inset:2% -8% 2% -10%!important;
-          background:radial-gradient(68% 88% at 12% 50%,rgba(0,0,0,.32),rgba(0,0,0,.12) 48%,transparent 78%)!important;
-          filter:blur(18px)!important;
-        }
-        .tr-audioIdentityMain{
-          position:relative;z-index:2;width:100%;min-width:0;margin:0;padding:0;
-          display:block;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;
-          font:inherit;appearance:none;-webkit-appearance:none;
-        }
-        .tr-playerHero .tr-audioIdentityMain strong,
-        .tr-playerHero .tr-audioIdentity strong{
-          display:block!important;width:100%!important;margin:0!important;padding:0!important;
-          color:#fff!important;font-size:clamp(31px,4vw,52px)!important;line-height:1.03!important;font-weight:1000!important;letter-spacing:-.043em!important;
-          white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;
-          text-shadow:0 3px 22px rgba(0,0,0,.88),0 1px 4px rgba(0,0,0,.92)!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain small,
-        .tr-playerHero .tr-audioIdentity small{
-          display:block!important;width:100%!important;margin-top:10px!important;padding:0!important;
-          color:#c7d9e0!important;font-size:clamp(15px,1.5vw,20px)!important;line-height:1.2!important;font-weight:850!important;
-          white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
-          text-shadow:0 2px 12px rgba(0,0,0,.92)!important;
-        }
-        .tr-heroPreferenceStage{
-          position:relative;z-index:3;
-          width:min(520px,100%);margin-top:clamp(20px,2.4vw,30px);
-          display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
-        }
-        .tr-heroPrefButton{
-          position:relative;isolation:isolate;overflow:hidden;
-          height:42px;min-height:42px;min-width:0;padding:0 14px;
-          display:flex;align-items:center;justify-content:center;gap:8px;
-          border:1px solid rgba(190,219,230,.19);border-radius:11px;
-          background:linear-gradient(180deg,rgba(25,39,47,.68),rgba(5,12,17,.72));
-          color:#edf7fa;font-size:9px;font-weight:1000;letter-spacing:.045em;white-space:nowrap;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.065),inset 0 -1px 0 rgba(0,0,0,.46),0 7px 20px rgba(0,0,0,.22);
-          backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);
-          cursor:pointer;transition:transform .16s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease;
-        }
-        .tr-heroPrefButton::before{
-          content:"";position:absolute;z-index:-1;left:12%;right:12%;top:0;height:1px;
-          background:linear-gradient(90deg,transparent,rgba(213,244,255,.28),transparent);
-        }
-        .tr-heroPrefButton:hover:not(:disabled){
-          transform:translateY(-1px);border-color:rgba(110,220,248,.42);
-          background:linear-gradient(180deg,rgba(23,53,65,.78),rgba(5,20,27,.80));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 9px 22px rgba(0,0,0,.25),0 0 18px rgba(70,204,239,.08);
-        }
-        .tr-heroPrefButton:active:not(:disabled){transform:translateY(0) scale(.985)}
-        .tr-heroPrefButton:disabled{opacity:.42;cursor:default}
-        .tr-heroPrefButton svg{width:16px;height:16px;flex:0 0 16px;fill:currentColor}
-        .tr-heroPrefButton span{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis}
-        .tr-heroPrefButton.tr-prefLike.is-liked{
-          color:#effff7;border-color:rgba(78,231,161,.54);
-          background:linear-gradient(180deg,rgba(19,125,82,.82),rgba(7,74,47,.84));
-          box-shadow:inset 0 1px rgba(255,255,255,.12),0 0 0 1px rgba(75,229,158,.10),0 8px 22px rgba(0,0,0,.22),0 0 18px rgba(55,219,145,.14);
-        }
-        .tr-heroPrefButton.tr-prefLess.is-disliked{
-          color:#fff4f4;border-color:rgba(255,104,111,.55);
-          background:linear-gradient(180deg,rgba(151,45,52,.82),rgba(91,18,24,.86));
-          box-shadow:inset 0 1px rgba(255,255,255,.10),0 8px 22px rgba(0,0,0,.22),0 0 18px rgba(236,67,79,.12);
-        }
-        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
-          color:#f5fdff;border-color:rgba(104,222,255,.58);
-          background:linear-gradient(180deg,rgba(18,112,145,.84),rgba(6,62,84,.88));
-          box-shadow:inset 0 1px rgba(255,255,255,.13),0 8px 22px rgba(0,0,0,.22),0 0 20px rgba(66,205,243,.14);
-        }
-        .tr-playerPreferenceStage{display:none!important}
-
-        /* Desktop sizing: intentionally substantial without becoming oversized. */
-        @media(min-width:1100px){
-          .tr-playerHero{grid-template-columns:300px minmax(0,1fr)!important}
-          .tr-playerHero .tr-audioIdentity{padding:34px 52px!important}
-          .tr-heroPreferenceStage{width:min(540px,82%);gap:11px;margin-top:28px}
-          .tr-heroPrefButton{height:44px;min-height:44px;font-size:9.5px}
-        }
-        @media(min-width:651px) and (max-width:900px){
-          .tr-playerHero{grid-template-columns:230px minmax(0,1fr)!important}
-          .tr-playerHero .tr-audioIdentity{padding:24px 26px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(27px,4.2vw,38px)!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:14px!important;margin-top:8px!important}
-          .tr-heroPreferenceStage{margin-top:19px;gap:7px;width:100%}
-          .tr-heroPrefButton{height:38px;min-height:38px;padding:0 9px;font-size:8px;gap:6px}
-          .tr-heroPrefButton svg{width:14px;height:14px;flex-basis:14px}
-        }
-
-        /* Mobile: large enough to feel intentional, while keeping all three actions readable. */
-        @media(max-width:650px){
-          .tr-audioDeck--pro7{border-radius:13px!important}
-          .tr-playerHero{
-            grid-template-columns:116px minmax(0,1fr)!important;
-            min-height:116px!important;
-            border-radius:12px 12px 0 0!important;
-          }
-          .tr-playerHero .tr-audioArtwork{
-            width:116px!important;height:116px!important;min-width:116px!important;min-height:116px!important;max-width:116px!important;max-height:116px!important;
-          }
-          .tr-playerHero .tr-audioArtworkImage{
-            -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 90%,rgba(0,0,0,.82) 96%,rgba(0,0,0,.56) 100%)!important;
-            mask-image:linear-gradient(90deg,#000 0%,#000 90%,rgba(0,0,0,.82) 96%,rgba(0,0,0,.56) 100%)!important;
-          }
-          .tr-playerHero .tr-audioIdentity{
-            height:116px!important;min-height:116px!important;padding:10px 10px 9px 13px!important;justify-content:center!important;
-          }
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(19px,5.8vw,24px)!important;line-height:1.02!important;letter-spacing:-.03em!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:11.5px!important;margin-top:5px!important;line-height:1.15!important}
-          .tr-heroPreferenceStage{width:100%;margin-top:10px;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
-          .tr-heroPrefButton{height:32px;min-height:32px;padding:0 5px;border-radius:8px;gap:4px;font-size:7.2px;letter-spacing:0}
-          .tr-heroPrefButton svg{width:13px;height:13px;flex:0 0 13px}
-          .tr-playerVisualArtwork{left:-22%!important;top:-66%!important;width:176%!important;height:234%!important;opacity:.17!important;filter:blur(64px) saturate(1.68) brightness(.76)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.19!important}
-          .tr-playerHero::after{height:20px!important}
-        }
-        @media(max-width:390px){
-          .tr-playerHero{grid-template-columns:108px minmax(0,1fr)!important;min-height:108px!important}
-          .tr-playerHero .tr-audioArtwork{width:108px!important;height:108px!important;min-width:108px!important;min-height:108px!important;max-width:108px!important;max-height:108px!important}
-          .tr-playerHero .tr-audioIdentity{height:108px!important;min-height:108px!important;padding:8px 7px 7px 10px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:18px!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:10.5px!important;margin-top:4px!important}
-          .tr-heroPreferenceStage{margin-top:8px;gap:3px}
-          .tr-heroPrefButton{height:29px;min-height:29px;padding:0 3px;font-size:6.6px;gap:3px}
-          .tr-heroPrefButton svg{width:12px;height:12px;flex-basis:12px}
-        }
-
-
-        /* AUG 14 V8 ULTRA: authoritative seamless media stage, album-owned color, fluid GPU motion */
-        .tr-audioDeck--pro7{
-          position:relative!important;
-          padding:0!important;
-          overflow:hidden!important;
-          border:1px solid rgba(86,174,205,.18)!important;
-          border-radius:17px!important;
-          background:linear-gradient(180deg,#050b0f 0%,#020609 46%,#010405 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.028),0 18px 55px rgba(0,0,0,.30)!important;
-        }
-        .tr-playerHero{
-          position:relative!important;
-          isolation:isolate!important;
-          width:100%!important;
-          min-width:0!important;
-          margin:0!important;
-          padding:0!important;
-          display:grid!important;
-          grid-template-columns:clamp(240px,28%,290px) minmax(0,1fr)!important;
-          align-items:stretch!important;
-          gap:0!important;
-          overflow:hidden!important;
-          border:0!important;
-          border-radius:0!important;
-          background:transparent!important;
-          box-shadow:none!important;
-          text-align:left!important;
-        }
-        .tr-playerHero::before,.tr-playerHero::after{display:none!important;content:none!important;background:none!important;box-shadow:none!important}
-        .tr-playerVisualEngine{
-          position:absolute!important;z-index:0!important;inset:0!important;
-          overflow:hidden!important;pointer-events:none!important;
-          background:linear-gradient(180deg,#04090c 0%,#020609 100%)!important;
-        }
-        .tr-playerVisualArtwork{
-          position:absolute!important;z-index:0!important;
-          left:-14%!important;top:-40%!important;width:136%!important;height:184%!important;
-          object-fit:cover!important;object-position:center!important;
-          opacity:.50!important;
-          filter:blur(82px) saturate(1.74) contrast(1.035) brightness(.72)!important;
-          transform:scale(1.18)!important;transform-origin:center!important;
-          animation:none!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.52!important}
-        .tr-playerVisualEngine canvas{
-          position:absolute!important;z-index:1!important;inset:0!important;
-          width:100%!important;height:100%!important;display:block!important;
-          opacity:.90!important;mix-blend-mode:normal!important;
-          filter:saturate(1.10) contrast(1.015)!important;
-          transform:translateZ(0)!important;will-change:contents!important;
-        }
-        .tr-playerVisualGlass{
-          position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
-          background:
-            radial-gradient(78% 125% at 84% 46%,transparent 30%,rgba(0,0,0,.10) 100%),
-            linear-gradient(90deg,rgba(0,0,0,.015) 0%,transparent 46%,rgba(0,0,0,.035) 100%)!important;
-          box-shadow:none!important;
-        }
-        .tr-playerHero .tr-audioArtwork{
-          position:relative!important;z-index:6!important;
-          width:calc(100% + 68px)!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
-          aspect-ratio:1/1!important;margin:0 -68px 0 0!important;padding:0!important;
-          border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:hidden!important;
-        }
-        .tr-playerHero .tr-audioArtwork::after{display:none!important;content:none!important}
-        .tr-playerHero .tr-audioArtworkImage{
-          display:block!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important;
-          -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 76%,rgba(0,0,0,.98) 82%,rgba(0,0,0,.82) 89%,rgba(0,0,0,.48) 95%,transparent 100%)!important;
-          mask-image:linear-gradient(90deg,#000 0%,#000 76%,rgba(0,0,0,.98) 82%,rgba(0,0,0,.82) 89%,rgba(0,0,0,.48) 95%,transparent 100%)!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          position:relative!important;z-index:7!important;
-          width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;min-height:0!important;
-          margin:0!important;padding:clamp(28px,3.2vw,42px) clamp(26px,3.8vw,54px) clamp(26px,3vw,38px) clamp(54px,6vw,78px)!important;
-          display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;
-          text-align:left!important;overflow:hidden!important;border:0!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          content:""!important;display:block!important;position:absolute!important;z-index:-1!important;
-          inset:6% -4% 6% -14%!important;pointer-events:none!important;
-          background:radial-gradient(62% 86% at 20% 50%,rgba(0,0,0,.33),rgba(0,0,0,.12) 50%,transparent 80%)!important;
-          filter:blur(22px)!important;
-        }
-        .tr-audioIdentityMain{width:100%!important;min-width:0!important;position:relative!important;z-index:2!important}
-        .tr-playerHero .tr-audioIdentityMain strong{
-          display:block!important;width:100%!important;margin:0!important;padding:0!important;
-          color:#fff!important;font-size:clamp(30px,3.8vw,50px)!important;line-height:1.02!important;font-weight:1000!important;letter-spacing:-.043em!important;
-          white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;
-          text-shadow:0 3px 22px rgba(0,0,0,.90),0 1px 4px rgba(0,0,0,.88)!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain small{
-          display:block!important;width:100%!important;margin-top:9px!important;padding:0!important;
-          color:#d0e0e6!important;font-size:clamp(14px,1.45vw,19px)!important;line-height:1.18!important;font-weight:850!important;
-          text-shadow:0 2px 12px rgba(0,0,0,.88)!important;
-        }
-        .tr-heroPreferenceStage{
-          position:relative!important;z-index:3!important;width:auto!important;max-width:100%!important;margin-top:22px!important;
-          display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:8px!important;flex-wrap:nowrap!important;
-        }
-        .tr-heroPrefButton{
-          position:relative!important;isolation:isolate!important;overflow:hidden!important;
-          width:auto!important;min-width:0!important;height:36px!important;min-height:36px!important;padding:0 14px!important;
-          display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;
-          border:1px solid rgba(192,220,230,.18)!important;border-radius:11px!important;
-          background:linear-gradient(180deg,rgba(26,39,47,.54),rgba(5,11,16,.62))!important;
-          color:#edf7fa!important;font-size:8.5px!important;font-weight:1000!important;letter-spacing:.035em!important;white-space:nowrap!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.065),inset 0 -1px 0 rgba(0,0,0,.42),0 7px 18px rgba(0,0,0,.18)!important;
-          backdrop-filter:blur(16px) saturate(1.12)!important;-webkit-backdrop-filter:blur(16px) saturate(1.12)!important;
-          cursor:pointer!important;transition:transform .16s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease!important;
-        }
-        .tr-heroPrefButton:nth-child(1){min-width:92px!important}.tr-heroPrefButton:nth-child(2){min-width:112px!important}.tr-heroPrefButton:nth-child(3){min-width:126px!important}
-        .tr-heroPrefButton::before{
-          content:""!important;position:absolute!important;z-index:-1!important;left:10%!important;right:10%!important;top:0!important;height:1px!important;
-          background:linear-gradient(90deg,transparent,rgba(218,245,255,.25),transparent)!important;
-        }
-        .tr-heroPrefButton:hover:not(:disabled){
-          transform:translateY(-1px)!important;border-color:rgba(112,219,246,.40)!important;
-          background:linear-gradient(180deg,rgba(25,55,67,.66),rgba(5,20,27,.70))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 8px 20px rgba(0,0,0,.20),0 0 16px rgba(67,204,241,.07)!important;
-        }
-        .tr-heroPrefButton:active:not(:disabled){transform:translateY(0) scale(.985)!important}
-        .tr-heroPrefButton:disabled{opacity:.40!important;cursor:default!important}
-        .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex:0 0 15px!important;fill:currentColor!important}
-        .tr-heroPrefButton span{display:block!important;overflow:visible!important;text-overflow:clip!important}
-        .tr-heroPrefButton.tr-prefLike.is-liked{color:#effff8!important;border-color:rgba(76,230,159,.54)!important;background:linear-gradient(180deg,rgba(18,118,78,.78),rgba(6,67,43,.82))!important;box-shadow:inset 0 1px rgba(255,255,255,.11),0 0 18px rgba(53,218,143,.12)!important}
-        .tr-heroPrefButton.tr-prefLess.is-disliked{color:#fff5f5!important;border-color:rgba(255,103,111,.54)!important;background:linear-gradient(180deg,rgba(143,42,49,.78),rgba(82,16,22,.84))!important;box-shadow:inset 0 1px rgba(255,255,255,.10),0 0 18px rgba(234,65,77,.10)!important}
-        .tr-heroPrefButton.tr-prefDiscover.is-confirming{color:#f5fdff!important;border-color:rgba(100,219,253,.56)!important;background:linear-gradient(180deg,rgba(17,105,137,.80),rgba(5,57,77,.85))!important;box-shadow:inset 0 1px rgba(255,255,255,.12),0 0 18px rgba(62,200,239,.11)!important}
-        .tr-playerPreferenceStage{display:none!important}
-        .tr-audioDeck--pro7 .tr-audioTimeline{
-          position:relative!important;z-index:8!important;width:calc(100% - 24px)!important;max-width:none!important;
-          margin:0 auto 6px!important;padding-top:10px!important;min-height:34px!important;
-          background:transparent!important;border:0!important;box-shadow:none!important;
-        }
-
-        @media(min-width:1100px){
-          .tr-playerHero{grid-template-columns:290px minmax(0,1fr)!important}
-          .tr-playerHero .tr-audioIdentity{padding:36px 56px 34px 76px!important}
-          .tr-heroPreferenceStage{margin-top:24px!important;gap:9px!important}
-          .tr-heroPrefButton{height:38px!important;min-height:38px!important;font-size:9px!important}
-        }
-        @media(min-width:651px) and (max-width:900px){
-          .tr-playerHero{grid-template-columns:235px minmax(0,1fr)!important}
-          .tr-playerHero .tr-audioArtwork{width:calc(100% + 54px)!important;margin-right:-54px!important}
-          .tr-playerHero .tr-audioIdentity{padding:24px 26px 22px 58px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(27px,4.2vw,38px)!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:14px!important;margin-top:7px!important}
-          .tr-heroPreferenceStage{margin-top:18px!important;gap:6px!important}
-          .tr-heroPrefButton{height:34px!important;min-height:34px!important;padding:0 10px!important;font-size:7.8px!important;gap:5px!important}
-          .tr-heroPrefButton:nth-child(1){min-width:78px!important}.tr-heroPrefButton:nth-child(2){min-width:96px!important}.tr-heroPrefButton:nth-child(3){min-width:110px!important}
-        }
-        @media(max-width:650px){
-          .tr-audioDeck--pro7{border-radius:14px!important}
-          .tr-playerHero{grid-template-columns:128px minmax(0,1fr)!important;min-height:128px!important}
-          .tr-playerHero .tr-audioArtwork{width:calc(128px + 34px)!important;height:128px!important;min-width:0!important;min-height:128px!important;max-width:none!important;max-height:128px!important;margin-right:-34px!important;aspect-ratio:auto!important}
-          .tr-playerHero .tr-audioArtworkImage{
-            -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 75%,rgba(0,0,0,.96) 83%,rgba(0,0,0,.70) 92%,transparent 100%)!important;
-            mask-image:linear-gradient(90deg,#000 0%,#000 75%,rgba(0,0,0,.96) 83%,rgba(0,0,0,.70) 92%,transparent 100%)!important;
-          }
-          .tr-playerHero .tr-audioIdentity{height:128px!important;min-height:128px!important;padding:10px 8px 9px 36px!important;justify-content:center!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(18px,5.3vw,23px)!important;line-height:1.03!important;letter-spacing:-.03em!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:11px!important;margin-top:5px!important;line-height:1.12!important}
-          .tr-heroPreferenceStage{width:100%!important;margin-top:10px!important;gap:4px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
-          .tr-heroPrefButton{width:100%!important;min-width:0!important;height:31px!important;min-height:31px!important;padding:0 4px!important;border-radius:8px!important;gap:3px!important;font-size:7px!important;letter-spacing:0!important}
-          .tr-heroPrefButton:nth-child(n){min-width:0!important}
-          .tr-heroPrefButton svg{width:12px!important;height:12px!important;flex-basis:12px!important}
-          .tr-playerVisualArtwork{left:-20%!important;top:-46%!important;width:150%!important;height:194%!important;opacity:.48!important;filter:blur(54px) saturate(1.70) brightness(.72)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.50!important}
-          .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 14px)!important;padding-top:8px!important}
-        }
-        @media(max-width:390px){
-          .tr-playerHero{grid-template-columns:118px minmax(0,1fr)!important;min-height:118px!important}
-          .tr-playerHero .tr-audioArtwork{width:calc(118px + 30px)!important;height:118px!important;min-height:118px!important;max-height:118px!important;margin-right:-30px!important}
-          .tr-playerHero .tr-audioIdentity{height:118px!important;min-height:118px!important;padding:8px 6px 7px 31px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:17.5px!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:10.2px!important;margin-top:4px!important}
-          .tr-heroPreferenceStage{margin-top:8px!important;gap:3px!important}
-          .tr-heroPrefButton{height:28px!important;min-height:28px!important;padding:0 2px!important;font-size:6.3px!important;gap:2px!important}
-          .tr-heroPrefButton svg{width:11px!important;height:11px!important;flex-basis:11px!important}
-        }
-        @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
-
-
-        /* AUG 14 V9 HERO POLISH: stronger album-owned visuals + centered premium media controls */
-        .tr-playerVisualArtwork{
-          opacity:.36!important;
-          filter:blur(78px) saturate(1.92) contrast(1.05) brightness(.76)!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.38!important}
-        .tr-playerVisualEngine canvas{
-          opacity:.99!important;
-          filter:saturate(1.24) contrast(1.065) brightness(1.08)!important;
-        }
-        .tr-playerVisualGlass{
-          background:
-            radial-gradient(82% 130% at 84% 46%,transparent 34%,rgba(0,0,0,.055) 100%),
-            linear-gradient(90deg,rgba(0,0,0,.008) 0%,transparent 50%,rgba(0,0,0,.018) 100%)!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          padding:clamp(28px,3.1vw,42px) clamp(28px,3.4vw,50px) clamp(28px,3vw,40px) clamp(46px,5vw,64px)!important;
-          align-items:center!important;
-          justify-content:center!important;
-          text-align:center!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          inset:4% 2% 4% -10%!important;
-          background:radial-gradient(66% 86% at 48% 50%,rgba(0,0,0,.20),rgba(0,0,0,.075) 52%,transparent 82%)!important;
-          filter:blur(25px)!important;
-        }
-        .tr-audioIdentityMain{
-          width:100%!important;
-          display:flex!important;
-          flex-direction:column!important;
-          align-items:center!important;
-          justify-content:center!important;
-          text-align:center!important;
-          border:0!important;
-          background:transparent!important;
-          padding:0!important;
-          color:inherit!important;
-          cursor:pointer!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain strong{
-          width:100%!important;
-          max-width:760px!important;
-          margin-inline:auto!important;
-          text-align:center!important;
-          font-size:clamp(38px,4.6vw,58px)!important;
-          line-height:1.00!important;
-          letter-spacing:-.046em!important;
-          text-wrap:balance!important;
-          text-shadow:0 4px 24px rgba(0,0,0,.84),0 1px 5px rgba(0,0,0,.88)!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain small{
-          width:100%!important;
-          margin-top:11px!important;
-          text-align:center!important;
-          color:#d9e8ed!important;
-          font-size:clamp(17px,1.7vw,22px)!important;
-          line-height:1.14!important;
-          font-weight:900!important;
-          text-shadow:0 2px 14px rgba(0,0,0,.82)!important;
-        }
-        .tr-heroPreferenceStage{
-          width:auto!important;
-          max-width:100%!important;
-          margin-top:26px!important;
-          display:flex!important;
-          align-items:center!important;
-          justify-content:center!important;
-          gap:11px!important;
-          flex-wrap:nowrap!important;
-        }
-        .tr-heroPrefButton{
-          height:44px!important;
-          min-height:44px!important;
-          padding:0 18px!important;
-          gap:8px!important;
-          border:1px solid rgba(206,235,244,.23)!important;
-          border-radius:14px!important;
-          background:
-            linear-gradient(180deg,rgba(47,62,71,.72) 0%,rgba(18,29,36,.61) 47%,rgba(5,12,17,.76) 100%)!important;
-          color:#f3fbfd!important;
-          font-size:10px!important;
-          font-weight:1000!important;
-          letter-spacing:.025em!important;
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.13),
-            inset 0 -1px 0 rgba(0,0,0,.60),
-            0 10px 24px rgba(0,0,0,.25),
-            0 0 0 1px rgba(255,255,255,.012)!important;
-          backdrop-filter:blur(22px) saturate(1.24)!important;
-          -webkit-backdrop-filter:blur(22px) saturate(1.24)!important;
-        }
-        .tr-heroPrefButton:nth-child(1){min-width:108px!important}
-        .tr-heroPrefButton:nth-child(2){min-width:132px!important}
-        .tr-heroPrefButton:nth-child(3){min-width:148px!important}
-        .tr-heroPrefButton::before{
-          left:12%!important;right:12%!important;height:1px!important;
-          background:linear-gradient(90deg,transparent,rgba(232,250,255,.48),transparent)!important;
-        }
-        .tr-heroPrefButton::after{
-          content:""!important;
-          position:absolute!important;
-          z-index:-1!important;
-          left:18%!important;right:18%!important;bottom:-28%!important;height:58%!important;
-          border-radius:50%!important;
-          background:radial-gradient(ellipse,rgba(92,210,244,.095),transparent 70%)!important;
-          filter:blur(7px)!important;
-          pointer-events:none!important;
-        }
-        .tr-heroPrefButton svg{width:17px!important;height:17px!important;flex:0 0 17px!important}
-        .tr-heroPrefButton:hover:not(:disabled){
-          transform:translateY(-1px)!important;
-          border-color:rgba(126,224,249,.50)!important;
-          background:linear-gradient(180deg,rgba(43,76,89,.78),rgba(11,36,46,.70) 54%,rgba(4,17,23,.80))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 11px 26px rgba(0,0,0,.27),0 0 20px rgba(67,204,241,.09)!important;
-        }
-        .tr-heroPrefButton.tr-prefLike.is-liked{
-          color:#f2fff8!important;
-          border-color:rgba(77,227,158,.60)!important;
-          background:linear-gradient(180deg,rgba(19,126,82,.86),rgba(7,74,47,.88))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 10px 22px rgba(0,0,0,.22),0 0 20px rgba(48,218,139,.15)!important;
-        }
-        .tr-heroPrefButton.tr-prefLess.is-disliked{
-          color:#fff7f7!important;
-          border-color:rgba(226,91,103,.60)!important;
-          background:linear-gradient(180deg,rgba(126,34,44,.88),rgba(67,13,22,.90))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 10px 22px rgba(0,0,0,.22),0 0 18px rgba(205,57,72,.13)!important;
-        }
-        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
-          color:#f4fdff!important;
-          border-color:rgba(103,219,249,.64)!important;
-          background:linear-gradient(180deg,rgba(17,112,145,.88),rgba(5,64,84,.90))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 10px 22px rgba(0,0,0,.22),0 0 20px rgba(64,199,235,.14)!important;
-        }
-
-        @media(min-width:1100px){
-          .tr-playerHero .tr-audioIdentity{padding:34px 50px 34px 62px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:58px!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:21px!important}
-          .tr-heroPreferenceStage{margin-top:28px!important;gap:12px!important}
-          .tr-heroPrefButton{height:46px!important;min-height:46px!important;font-size:10.5px!important}
-        }
-        @media(min-width:651px) and (max-width:900px){
-          .tr-playerHero .tr-audioIdentity{padding:22px 20px 22px 48px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(34px,5vw,44px)!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:16px!important;margin-top:8px!important}
-          .tr-heroPreferenceStage{margin-top:21px!important;gap:7px!important}
-          .tr-heroPrefButton{height:39px!important;min-height:39px!important;padding:0 12px!important;font-size:8.6px!important;gap:6px!important}
-          .tr-heroPrefButton:nth-child(1){min-width:88px!important}.tr-heroPrefButton:nth-child(2){min-width:106px!important}.tr-heroPrefButton:nth-child(3){min-width:120px!important}
-          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
-        }
-        @media(max-width:650px){
-          .tr-playerHero{grid-template-columns:148px minmax(0,1fr)!important;min-height:148px!important}
-          .tr-playerHero .tr-audioArtwork{width:calc(148px + 38px)!important;height:148px!important;min-height:148px!important;max-height:148px!important;margin-right:-38px!important}
-          .tr-playerHero .tr-audioIdentity{height:148px!important;min-height:148px!important;padding:10px 8px 9px 25px!important;align-items:center!important;text-align:center!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(22px,6.5vw,29px)!important;line-height:1.00!important;letter-spacing:-.034em!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:13.5px!important;margin-top:6px!important;line-height:1.10!important}
-          .tr-heroPreferenceStage{width:100%!important;margin-top:14px!important;gap:5px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){width:100%!important;min-width:0!important;height:35px!important;min-height:35px!important;padding:0 5px!important;border-radius:10px!important;gap:4px!important;font-size:7.6px!important;letter-spacing:0!important}
-          .tr-heroPrefButton svg{width:13.5px!important;height:13.5px!important;flex:0 0 13.5px!important}
-          .tr-playerVisualArtwork{opacity:.35!important;filter:blur(52px) saturate(1.88) brightness(.76)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.37!important}
-          .tr-playerVisualEngine canvas{filter:saturate(1.22) contrast(1.06) brightness(1.08)!important}
-        }
-        @media(max-width:390px){
-          .tr-playerHero{grid-template-columns:136px minmax(0,1fr)!important;min-height:136px!important}
-          .tr-playerHero .tr-audioArtwork{width:calc(136px + 34px)!important;height:136px!important;min-height:136px!important;max-height:136px!important;margin-right:-34px!important}
-          .tr-playerHero .tr-audioIdentity{height:136px!important;min-height:136px!important;padding:8px 5px 7px 22px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:22px!important;line-height:1.0!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:12.5px!important;margin-top:5px!important}
-          .tr-heroPreferenceStage{margin-top:11px!important;gap:4px!important}
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:33px!important;min-height:33px!important;padding:0 3px!important;font-size:7.4px!important;gap:3px!important}
-          .tr-heroPrefButton svg{width:12.5px!important;height:12.5px!important;flex-basis:12.5px!important}
-        }
-
-
-        /* AUG 14 V10 ULTRA VISUAL + MOBILE CONTROL LOCK
-           Authoritative final hero rules. Keeps the seamless shell from V9. */
-        .tr-playerVisualArtwork{
-          opacity:.22!important;
-          filter:blur(88px) saturate(2.08) contrast(1.05) brightness(.72)!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.24!important}
-        .tr-playerVisualEngine canvas{
-          opacity:1!important;
-          filter:saturate(1.38) contrast(1.12) brightness(1.20)!important;
-        }
-        .tr-playerVisualGlass{
-          background:
-            radial-gradient(55% 74% at 52% 48%,rgba(0,0,0,.02),rgba(0,0,0,.06) 68%,rgba(0,0,0,.11) 100%),
-            linear-gradient(90deg,rgba(0,0,0,.005),transparent 58%,rgba(0,0,0,.018))!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          inset:10% 5% 10% 0!important;
-          background:radial-gradient(62% 78% at 50% 48%,rgba(0,0,0,.24),rgba(0,0,0,.085) 54%,transparent 82%)!important;
-          filter:blur(28px)!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain strong{
-          font-size:var(--tr-hero-title-size,clamp(42px,4.9vw,62px))!important;
-          line-height:.98!important;
-          letter-spacing:-.048em!important;
-        }
-        .tr-playerHero .tr-audioIdentityMain small{
-          margin-top:12px!important;
-          font-size:clamp(18px,1.8vw,23px)!important;
-          line-height:1.12!important;
-        }
-        .tr-heroPreferenceStage{
-          margin-top:25px!important;
-          gap:10px!important;
-        }
-        .tr-heroPrefButton{
-          position:relative!important;
-          isolation:isolate!important;
-          overflow:visible!important;
-          height:46px!important;
-          min-height:46px!important;
-          padding:0 18px!important;
-          border:1px solid rgba(208,239,248,.30)!important;
-          border-radius:13px!important;
-          background:
-            linear-gradient(180deg,rgba(51,68,78,.74) 0%,rgba(22,34,42,.70) 50%,rgba(7,15,20,.84) 100%)!important;
-          color:#f5fbfd!important;
-          font-size:10.5px!important;
-          font-weight:1000!important;
-          letter-spacing:.02em!important;
-          white-space:nowrap!important;
-          text-overflow:clip!important;
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.16),
-            inset 0 -1px 0 rgba(0,0,0,.70),
-            0 10px 24px rgba(0,0,0,.30),
-            0 0 0 1px rgba(255,255,255,.015)!important;
-          backdrop-filter:blur(24px) saturate(1.34)!important;
-          -webkit-backdrop-filter:blur(24px) saturate(1.34)!important;
-        }
-        .tr-heroPrefButton>span{
-          display:block!important;
-          flex:0 0 auto!important;
-          min-width:max-content!important;
-          max-width:none!important;
-          overflow:visible!important;
-          white-space:nowrap!important;
-          text-overflow:clip!important;
-        }
-        .tr-heroPrefButton svg{width:17px!important;height:17px!important;flex:0 0 17px!important}
-        .tr-heroPrefButton:nth-child(1){min-width:110px!important}
-        .tr-heroPrefButton:nth-child(2){min-width:132px!important}
-        .tr-heroPrefButton:nth-child(3){min-width:150px!important}
-        .tr-heroPrefButton:before{
-          content:""!important;
-          position:absolute!important;
-          left:14%!important;right:14%!important;top:0!important;height:1px!important;
-          background:linear-gradient(90deg,transparent,rgba(240,252,255,.62),transparent)!important;
-          opacity:.78!important;
-          pointer-events:none!important;
-        }
-        .tr-heroPrefButton:after{
-          content:""!important;
-          position:absolute!important;
-          z-index:-1!important;
-          left:14%!important;right:14%!important;bottom:-9px!important;height:18px!important;
-          border-radius:50%!important;
-          background:radial-gradient(ellipse,rgba(80,210,245,.14),transparent 72%)!important;
-          filter:blur(7px)!important;
-          pointer-events:none!important;
-        }
-        .tr-heroPrefButton.tr-prefLike.is-liked{
-          color:#effff7!important;
-          border-color:rgba(73,229,156,.66)!important;
-          background:linear-gradient(180deg,rgba(15,118,75,.84),rgba(6,59,39,.90))!important;
-          box-shadow:inset 0 1px rgba(255,255,255,.15),0 10px 24px rgba(0,0,0,.27),0 0 20px rgba(54,219,142,.17)!important;
-        }
-        .tr-heroPrefButton.tr-prefLess.is-disliked{
-          color:#fff6f7!important;
-          border-color:rgba(233,93,105,.66)!important;
-          background:linear-gradient(180deg,rgba(126,31,42,.88),rgba(61,12,20,.92))!important;
-        }
-        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
-          color:#f2fcff!important;
-          border-color:rgba(87,216,249,.70)!important;
-          background:linear-gradient(180deg,rgba(11,111,145,.88),rgba(4,55,75,.92))!important;
-        }
-
-        @media(min-width:1100px){
-          .tr-playerHero .tr-audioIdentity{padding:34px 48px 34px 64px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,62px)!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:22px!important}
-          .tr-heroPreferenceStage{margin-top:28px!important;gap:12px!important}
-          .tr-heroPrefButton{height:48px!important;min-height:48px!important;font-size:11px!important}
-        }
-
-        @media(min-width:651px) and (max-width:900px){
-          .tr-playerHero .tr-audioIdentity{padding:22px 20px 22px 48px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,clamp(34px,5.2vw,46px))!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:16.5px!important}
-          .tr-heroPreferenceStage{margin-top:20px!important;gap:7px!important}
-          .tr-heroPrefButton{height:40px!important;min-height:40px!important;padding:0 12px!important;font-size:8.8px!important;gap:6px!important}
-          .tr-heroPrefButton:nth-child(1){min-width:90px!important}
-          .tr-heroPrefButton:nth-child(2){min-width:108px!important}
-          .tr-heroPrefButton:nth-child(3){min-width:124px!important}
-          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
-        }
-
-        @media(max-width:650px){
-          /* V11 mobile: more room for metadata, flexible height, and full action labels at every supported width. */
-          .tr-playerHero{grid-template-columns:40% minmax(0,1fr)!important;min-height:216px!important;align-items:stretch!important}
-          .tr-playerHero .tr-audioArtwork{
-            width:calc(100% + 22px)!important;height:100%!important;min-height:216px!important;max-height:none!important;
-            margin-right:-22px!important;aspect-ratio:auto!important;align-self:stretch!important;
-          }
-          .tr-playerHero .tr-audioArtworkImage{object-fit:cover!important;object-position:center!important}
-          .tr-playerHero .tr-audioIdentity{
-            height:auto!important;min-height:216px!important;
-            padding:14px 10px 13px 22px!important;
-            align-items:center!important;justify-content:center!important;text-align:center!important;overflow:visible!important;
-          }
-          .tr-playerHero .tr-audioIdentity:before{
-            inset:4% 0 4% -8%!important;
-            background:radial-gradient(76% 86% at 52% 48%,rgba(0,0,0,.25),rgba(0,0,0,.075) 60%,transparent 86%)!important;
-          }
-          .tr-playerHero .tr-audioIdentityMain{
-            width:100%!important;min-width:0!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;
-          }
-          .tr-playerHero .tr-audioIdentityMain strong{
-            width:100%!important;max-width:100%!important;
-            font-size:var(--tr-hero-title-size,clamp(21px,6.2vw,28px))!important;
-            line-height:1.04!important;letter-spacing:-.034em!important;
-            white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
-            overflow-wrap:anywhere!important;word-break:normal!important;
-          }
-          .tr-playerHero .tr-audioIdentityMain small{
-            width:100%!important;margin-top:6px!important;font-size:14px!important;line-height:1.12!important;
-            white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
-          }
-          .tr-heroPreferenceStage{
-            width:100%!important;max-width:270px!important;margin-top:13px!important;
-            display:grid!important;grid-template-columns:minmax(max-content,1fr) minmax(max-content,1.18fr)!important;
-            gap:7px!important;align-items:center!important;justify-content:center!important;
-          }
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
-            width:100%!important;min-width:max-content!important;max-width:none!important;
-            height:41px!important;min-height:41px!important;
-            padding:0 10px!important;gap:6px!important;border-radius:11px!important;
-            font-size:10.6px!important;letter-spacing:0!important;line-height:1!important;
-            white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;
-          }
-          .tr-heroPrefButton:nth-child(3){
-            grid-column:1/-1!important;
-            width:max-content!important;min-width:142px!important;justify-self:center!important;
-          }
-          .tr-heroPrefButton>span{
-            display:block!important;min-width:max-content!important;max-width:none!important;
-            overflow:visible!important;white-space:nowrap!important;text-overflow:clip!important;
-          }
-          .tr-heroPrefButton svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
-          .tr-playerVisualArtwork{opacity:.18!important;filter:blur(54px) saturate(2.08) brightness(.76)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.20!important}
-          .tr-playerVisualEngine canvas{filter:saturate(1.46) contrast(1.15) brightness(1.25)!important}
-        }
-
-        @media(max-width:390px){
-          .tr-playerHero{grid-template-columns:38% minmax(0,1fr)!important;min-height:218px!important}
-          .tr-playerHero .tr-audioArtwork{min-height:218px!important}
-          .tr-playerHero .tr-audioIdentity{min-height:218px!important;padding:12px 7px 11px 18px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,clamp(18px,5.8vw,24px))!important;line-height:1.05!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:13px!important;margin-top:5px!important;line-height:1.12!important}
-          .tr-heroPreferenceStage{max-width:244px!important;gap:6px!important;margin-top:11px!important;grid-template-columns:minmax(max-content,1fr) minmax(max-content,1.16fr)!important}
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:39px!important;min-height:39px!important;padding:0 8px!important;font-size:10px!important;gap:5px!important}
-          .tr-heroPrefButton:nth-child(3){min-width:136px!important;width:max-content!important}
-          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
-        }
-
-        @media(max-width:350px){
-          .tr-playerHero{grid-template-columns:36% minmax(0,1fr)!important;min-height:246px!important}
-          .tr-playerHero .tr-audioArtwork{min-height:246px!important}
-          .tr-playerHero .tr-audioIdentity{min-height:246px!important;padding:11px 6px 11px 16px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,20px)!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:12.5px!important}
-          .tr-heroPreferenceStage{width:100%!important;max-width:154px!important;grid-template-columns:1fr!important;gap:5px!important;margin-top:10px!important}
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){grid-column:1!important;width:100%!important;min-width:0!important;height:37px!important;min-height:37px!important;padding:0 9px!important;font-size:10px!important}
-          .tr-heroPrefButton:nth-child(3){width:100%!important;min-width:0!important}
-        }
-
-
-        /* V12 AUDIO FIDELITY OUTPUT PROFILES */
-        .tr-outputProfilePanel{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(190px,250px)!important;gap:14px 18px!important;align-items:center!important;margin:0 0 14px!important;padding:14px 16px!important;border:1px solid rgba(88,193,226,.18)!important;border-radius:11px!important;background:linear-gradient(135deg,rgba(6,24,32,.94),rgba(3,11,16,.97))!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 10px 30px rgba(0,0,0,.20)!important}
-        .tr-outputProfileIntro{min-width:0!important}.tr-outputProfileIntro small{display:block!important;margin-bottom:4px!important;color:#65d8fa!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.12em!important}.tr-outputProfileIntro strong{display:block!important;color:#f4fbfe!important;font-size:16px!important;line-height:1.1!important;font-weight:1000!important}.tr-outputProfileIntro p{margin:5px 0 0!important;max-width:720px!important;color:#8ba6b1!important;font-size:9px!important;line-height:1.4!important;font-weight:700!important}
-        .tr-outputProfileSelect{display:grid!important;gap:5px!important;min-width:0!important}.tr-outputProfileSelect span{color:#7998a4!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.09em!important}.tr-outputProfileSelect select{width:100%!important;height:38px!important;padding:0 11px!important;border:1px solid rgba(86,196,232,.27)!important;border-radius:8px!important;background:#06151c!important;color:#eefbff!important;font-size:10px!important;font-weight:900!important;outline:none!important}.tr-outputProfileSelect select:focus{border-color:rgba(84,218,255,.66)!important;box-shadow:0 0 0 2px rgba(62,197,237,.10)!important}
-        .tr-outputProfileTelemetry{grid-column:1/-1!important;display:flex!important;gap:6px!important;align-items:center!important;flex-wrap:wrap!important}.tr-outputProfileTelemetry>span{display:inline-flex!important;align-items:center!important;gap:5px!important;min-height:25px!important;padding:0 8px!important;border:1px solid rgba(93,164,189,.14)!important;border-radius:6px!important;background:rgba(1,8,12,.55)!important;color:#7996a1!important;font-size:6.5px!important;font-weight:950!important;letter-spacing:.055em!important;white-space:nowrap!important}.tr-outputProfileTelemetry>span:first-child{color:#eafaff!important;border-color:rgba(73,204,244,.34)!important;background:rgba(10,77,98,.22)!important}.tr-outputProfileTelemetry>span.is-car{color:#9ff1ff!important;border-color:rgba(71,215,251,.48)!important;box-shadow:inset 0 0 14px rgba(27,159,197,.09)!important}.tr-outputProfileTelemetry b{color:#dcecf2!important;font-weight:1000!important}
-        .tr-headphoneProcessor.is-disabled{opacity:.48!important;filter:saturate(.55)!important}.tr-headphoneProcessor.is-disabled:before{content:"HEADPHONE PROCESSING BYPASSED"!important;display:block!important;margin:0 0 10px!important;padding:7px 9px!important;border:1px solid rgba(85,173,204,.13)!important;border-radius:7px!important;background:rgba(1,8,12,.48)!important;color:#7e9ba6!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.09em!important}.tr-headphoneProcessor header>div>small{display:block!important;margin-top:4px!important;color:#718b95!important;font-size:7px!important;font-weight:750!important}
-        .tr-audioEqPanel select:disabled,.tr-audioEqPanel input:disabled,.tr-audioEqPanel button:disabled{cursor:not-allowed!important;opacity:.50!important}
-        @media(max-width:650px){.tr-outputProfilePanel{grid-template-columns:1fr!important;gap:10px!important;padding:12px!important}.tr-outputProfileTelemetry{grid-column:1!important;gap:5px!important}.tr-outputProfileTelemetry>span{font-size:6px!important;padding:0 6px!important}.tr-outputProfileIntro strong{font-size:14px!important}.tr-outputProfileIntro p{font-size:8.5px!important}.tr-outputProfileSelect select{height:40px!important;font-size:11px!important}}
-
-
-        /* V12.4 TRUE-FIDELITY DSP + RTA READABILITY PASS */
-        .tr-rtaFidelity{
-          width:calc(100% - 18px)!important;height:154px!important;margin:0 auto 9px!important;
-          border:1px solid rgba(105,209,238,.30)!important;border-top-color:rgba(176,237,252,.42)!important;border-radius:12px!important;
-          background:linear-gradient(180deg,#071219 0%,#02080c 48%,#010405 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.05),inset 0 -28px 40px rgba(0,0,0,.44),0 9px 26px rgba(0,0,0,.22)!important;
-          overflow:hidden!important;isolation:isolate!important;
-        }
-        .tr-rtaFidelity:before{
-          content:""!important;position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
-          background:linear-gradient(115deg,rgba(255,255,255,.05),transparent 18%,transparent 72%,rgba(82,207,239,.03))!important;
-          box-shadow:inset 0 0 0 1px rgba(255,255,255,.014)!important;
-        }
-        .tr-rtaFidelity canvas{z-index:0!important}
-        .tr-rtaFidelityHead{
-          position:absolute!important;z-index:3!important;left:13px!important;right:13px!important;top:8px!important;height:18px!important;
-          display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;pointer-events:none!important;
-          color:#9ab7c1!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.095em!important;line-height:1!important;
-        }
-        .tr-rtaFidelityHead>span{display:inline-flex!important;align-items:center!important;gap:7px!important;white-space:nowrap!important;color:#c7e0e8!important}
-        .tr-rtaFidelityHead>span i{width:6px!important;height:6px!important;border-radius:50%!important;background:#415961!important;box-shadow:0 0 0 3px rgba(75,105,116,.06)!important}
-        .tr-rtaFidelityHead>span i.is-live{background:#4fe4ff!important;box-shadow:0 0 10px rgba(79,228,255,.62),0 0 0 3px rgba(79,228,255,.07)!important}
-        .tr-rtaFidelityHead>strong{min-width:0!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;color:#8fe6fa!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.06em!important;text-align:right!important}
-        .tr-rtaFidelityHead>strong b{margin:0 6px!important;color:#587884!important;font-weight:1000!important}
-        .tr-rtaFidelity .tr-activityRtaLabels{left:40px!important;right:8px!important;bottom:5px!important;gap:clamp(7px,1vw,12px)!important;z-index:3!important}
-        .tr-rtaFidelity .tr-activityRtaLabels span{color:#d3e7ed!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.01em!important;text-shadow:0 1px 0 #000!important}
-
-        .tr-playerSourceTools{grid-template-columns:minmax(180px,1fr) 176px!important;gap:9px!important}
-        .tr-playerSourceTools .tr-dspStatusToggle{
-          position:relative!important;width:176px!important;min-width:176px!important;max-width:176px!important;height:50px!important;min-height:50px!important;
-          padding:0 12px!important;display:grid!important;grid-template-columns:29px minmax(0,1fr) 7px!important;gap:9px!important;align-items:center!important;justify-content:stretch!important;
-          overflow:hidden!important;border:1px solid rgba(102,206,238,.32)!important;border-top-color:rgba(179,234,250,.40)!important;border-radius:11px!important;
-          background:linear-gradient(180deg,rgba(17,37,47,.99),rgba(5,17,23,.99))!important;color:#eefaff!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.065),inset 0 -1px 0 rgba(0,0,0,.68),0 8px 20px rgba(0,0,0,.24)!important;
-          backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
-        }
-        .tr-playerSourceTools .tr-dspStatusToggle:before{
-          content:""!important;position:absolute!important;left:13%!important;right:13%!important;top:0!important;height:1px!important;
-          background:linear-gradient(90deg,transparent,rgba(209,246,255,.58),transparent)!important;pointer-events:none!important;
-        }
-        .tr-playerSourceTools .tr-dspStatusToggle:hover{border-color:rgba(84,220,255,.58)!important;background:linear-gradient(180deg,#12313e,#071c24)!important}
-        .tr-playerSourceTools .tr-dspStatusToggle.is-active{border-color:rgba(74,219,255,.72)!important;background:linear-gradient(180deg,#0e3949,#071f2a)!important;box-shadow:inset 0 1px rgba(255,255,255,.08),0 0 20px rgba(50,199,239,.14)!important}
-        .tr-dspStatusIcon{width:29px!important;height:29px!important;display:grid!important;place-items:center!important;border:1px solid rgba(100,202,232,.22)!important;border-radius:8px!important;background:linear-gradient(180deg,rgba(14,50,63,.9),rgba(4,18,25,.94))!important;color:#9cecff!important;box-shadow:inset 0 1px rgba(255,255,255,.04)!important}
-        .tr-dspStatusIcon svg{width:17px!important;height:17px!important;fill:currentColor!important}
-        .tr-dspStatusCopy{min-width:0!important;display:grid!important;gap:3px!important;text-align:left!important;line-height:1!important}
-        .tr-dspStatusCopy b{display:block!important;color:#f7fcfe!important;font-size:10px!important;font-weight:1000!important;letter-spacing:.05em!important;white-space:nowrap!important}
-        .tr-dspStatusCopy small{display:block!important;min-width:0!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;color:#82d8ec!important;font-size:7.2px!important;font-weight:1000!important;letter-spacing:.025em!important}
-        .tr-dspStatusLed{width:6px!important;height:6px!important;border-radius:50%!important;background:#43555c!important;box-shadow:0 0 0 3px rgba(70,91,99,.07)!important}
-        .tr-dspStatusLed.is-live{background:#56e6b0!important;box-shadow:0 0 8px rgba(86,230,176,.46),0 0 0 3px rgba(86,230,176,.05)!important}
-
-        @media(max-width:650px){
-          .tr-rtaFidelity{width:calc(100% - 10px)!important;height:124px!important;margin:0 auto 7px!important;border-radius:10px!important}
-          .tr-rtaFidelityHead{left:8px!important;right:8px!important;top:6px!important;height:17px!important;font-size:6.7px!important;letter-spacing:.055em!important;gap:7px!important}
-          .tr-rtaFidelityHead>span{gap:5px!important}.tr-rtaFidelityHead>span i{width:5px!important;height:5px!important}
-          .tr-rtaFidelityHead>strong{font-size:6.6px!important;letter-spacing:.015em!important;max-width:none!important;overflow:visible!important;text-overflow:clip!important}
-          .tr-rtaFidelityHead>strong b{margin:0 3px!important}
-          .tr-rtaFidelity .tr-activityRtaLabels{left:27px!important;right:5px!important;bottom:4px!important;gap:2px!important}
-          .tr-rtaFidelity .tr-activityRtaLabels span{font-size:7.1px!important;letter-spacing:-.025em!important}
-          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 146px!important;gap:7px!important}
-          .tr-playerSourceTools .tr-dspStatusToggle{width:146px!important;min-width:146px!important;max-width:146px!important;height:46px!important;min-height:46px!important;padding:0 8px!important;grid-template-columns:25px minmax(0,1fr) 6px!important;gap:7px!important;border-radius:10px!important}
-          .tr-dspStatusIcon{width:25px!important;height:25px!important;border-radius:7px!important}.tr-dspStatusIcon svg{width:15px!important;height:15px!important}
-          .tr-dspStatusCopy b{font-size:8.8px!important}.tr-dspStatusCopy small{font-size:6.3px!important;letter-spacing:0!important;overflow:visible!important;text-overflow:clip!important}.tr-dspStatusLed{width:5px!important;height:5px!important}
-        }
-        @media(max-width:380px){
-          .tr-rtaFidelity{height:118px!important}
-          .tr-rtaFidelityHead{font-size:6.3px!important}.tr-rtaFidelityHead>strong{font-size:6.1px!important}
-          .tr-rtaFidelity .tr-activityRtaLabels span{font-size:6.7px!important}
-          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 136px!important}
-          .tr-playerSourceTools .tr-dspStatusToggle{width:136px!important;min-width:136px!important;max-width:136px!important;height:44px!important;min-height:44px!important;padding:0 7px!important;grid-template-columns:24px minmax(0,1fr) 5px!important;gap:6px!important}
-          .tr-dspStatusIcon{width:24px!important;height:24px!important}.tr-dspStatusCopy b{font-size:8.3px!important}.tr-dspStatusCopy small{font-size:5.9px!important}
-        }
-
-
       `}</style>
     </section>
   );
