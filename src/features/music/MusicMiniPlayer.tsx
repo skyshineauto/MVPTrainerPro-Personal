@@ -386,8 +386,8 @@ type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
 
 const HERO_SCENE_COUNT = 5;
-const HERO_SCENE_MS = 9000;
-const HERO_CROSSFADE_MS = 3200;
+const HERO_SCENE_MS = 8500;
+const HERO_CROSSFADE_MS = 2800;
 const HERO_ENGINE_EPOCH_MS = Date.now();
 const HERO_NEUTRAL_PALETTE: HeroPalette = [
   { r: 196, g: 216, b: 220 },
@@ -634,12 +634,12 @@ const HERO_FRAGMENT_SHADER = `
       q=flowWarp(q,t+z*1.7,0.36+z*0.16);
       float n=fbm(q*1.32+vec2(z*5.3,-z*3.8));
       float d=smoothstep(0.44,0.77,n)*(1.0-z*0.38);
-      float w=(0.038+z*0.010)*(1.0+u_audio.x*0.035);
+      float w=(0.066+z*0.014)*(1.0+u_audio.x*0.030);
       col+=album(n*0.54+z*0.19+u_character*0.13)*d*w;
       total+=d*w;
     }
     float bloom=smoothstep(0.18,0.52,total);
-    col+=album(total*1.7+0.16)*bloom*(0.035+u_audio.w*0.012);
+    col+=album(total*1.7+0.16)*bloom*(0.072+u_audio.w*0.010);
     return col;
   }
 
@@ -659,9 +659,9 @@ const HERO_FRAGMENT_SHADER = `
     vec3 light=normalize(vec3(-0.38,0.30,1.0));
     float spec=pow(max(0.0,dot(nrm,light)),22.0);
     float rim=pow(1.0-max(0.0,nrm.z),2.4);
-    vec3 col=mix(darkBase(),album(under*0.62+depth*0.21+0.08),0.30+under*0.40);
-    col+=u_c3*spec*(0.085+u_audio.z*0.012);
-    col+=album(depth+0.38)*rim*0.075;
+    vec3 col=mix(darkBase(),album(under*0.62+depth*0.21+0.08),0.42+under*0.46);
+    col+=u_c3*spec*(0.145+u_audio.z*0.010);
+    col+=album(depth+0.38)*rim*0.125;
     return col;
   }
 
@@ -683,8 +683,8 @@ const HERO_FRAGMENT_SHADER = `
     float sheen=pow(max(0.0,dot(nrm,normalize(vec3(0.30,-0.15,1.0)))),18.0);
     float tint=fbm(p*0.74+vec2(-t*0.045,t*0.052));
     vec3 surface=album(tint*0.58+h*0.13+u_character*0.08);
-    vec3 col=mix(darkBase(),surface,diff*0.48);
-    col+=u_c3*sheen*(0.055+u_audio.z*0.008);
+    vec3 col=mix(darkBase(),surface,0.18+diff*0.60);
+    col+=u_c3*sheen*(0.115+u_audio.z*0.006);
     return col;
   }
 
@@ -692,7 +692,7 @@ const HERO_FRAGMENT_SHADER = `
   vec3 scenePhotons(vec2 uv,float t){
     vec2 p=cuv(uv);
     float haze=fbm(flowWarp(p*0.92,t,0.22)+vec2(t*0.045,-t*0.035));
-    vec3 col=mix(darkBase(),album(haze*0.42+0.10),smoothstep(0.30,0.82,haze)*0.19);
+    vec3 col=mix(darkBase(),album(haze*0.42+0.10),smoothstep(0.25,0.82,haze)*0.32);
     for(int layer=0;layer<4;layer++){
       float lf=float(layer);
       float scale=8.0+lf*6.5;
@@ -705,11 +705,11 @@ const HERO_FRAGMENT_SHADER = `
       vec2 rnd=hash22(id+lf*71.3);
       vec2 pos=(rnd-0.5)*0.80;
       float d=length(gv-pos);
-      float point=smoothstep(0.055+lf*0.004,0.0,d)*step(0.56-lf*0.045,rnd.x);
+      float point=smoothstep(0.070+lf*0.005,0.0,d)*step(0.48-lf*0.040,rnd.x);
       float halo=smoothstep(0.18,0.0,d)*0.10*point;
       float twinkle=0.82+0.18*sin(t*(0.32+rnd.y*0.18)+rnd.x*14.0);
       vec3 pc=album(rnd.y+lf*0.17+u_character*0.09);
-      col+=pc*(point*twinkle*(0.11+lf*0.018+u_audio.z*0.008)+halo*0.05);
+      col+=pc*(point*twinkle*(0.19+lf*0.024+u_audio.z*0.006)+halo*0.09);
     }
     return col;
   }
@@ -723,8 +723,8 @@ const HERO_FRAGMENT_SHADER = `
     float c=fbm(p*0.62+vec2(t*0.048,t*0.042)+8.2);
     float field=sat(a*0.56+b*0.34+c*0.22);
     float caustic=pow(smoothstep(0.48,0.82,abs(a-b)*1.45),1.35);
-    vec3 col=mix(darkBase(),album(field*0.64+c*0.18+u_character*0.11),0.28+field*0.45);
-    col+=album(field+0.31)*caustic*(0.065+u_audio.w*0.012);
+    vec3 col=mix(darkBase(),album(field*0.64+c*0.18+u_character*0.11),0.40+field*0.50);
+    col+=album(field+0.31)*caustic*(0.135+u_audio.w*0.008);
     return col;
   }
 
@@ -739,7 +739,7 @@ const HERO_FRAGMENT_SHADER = `
   void main(){
     vec2 uv=gl_FragCoord.xy/u_resolution.xy;
     // The scene world owns its motion. Audio never changes the clock, so strong songs cannot make it jump.
-    float visualTime=u_time*1.20;
+    float visualTime=u_time*1.34;
     vec3 color=renderScene(u_sceneA,uv,visualTime);
     if(u_blend>0.001){
       vec3 incoming=renderScene(u_sceneB,uv,visualTime);
@@ -751,16 +751,25 @@ const HERO_FRAGMENT_SHADER = `
     float paletteFlow=fbm(ap+vec2(visualTime*0.026,-visualTime*0.021));
     vec3 albumWash=mix(u_c0,u_c1,smoothstep(0.08,0.92,uv.y+0.12*sin(uv.x*3.2+visualTime*0.10)));
     albumWash=mix(albumWash,u_c2,smoothstep(0.42,0.88,paletteFlow));
-    color+=albumWash*(0.040+0.026*paletteFlow);
+    color+=albumWash*(0.078+0.050*paletteFlow);
+
+    // Premium caustic detail: always fluid, always album-colored, never beat-driven.
+    vec2 detailUv=cuv(uv)*0.92;
+    float caA=fbm(flowWarp(detailUv,visualTime*0.72,0.28)+vec2(visualTime*0.028,-visualTime*0.021));
+    float caB=fbm(rot(detailUv,0.74)*1.18+vec2(-visualTime*0.022,visualTime*0.026)+5.4);
+    float caustic=pow(smoothstep(0.12,0.56,abs(caA-caB)),1.65);
+    float veil=smoothstep(0.34,0.84,fbm(detailUv*0.58+vec2(visualTime*0.018,visualTime*0.014)+9.0));
+    color+=album(caA*0.72+caB*0.28+0.17)*caustic*0.115;
+    color+=album(caB+0.53)*veil*0.045;
 
     float vig=smoothstep(1.05,0.20,length((uv-0.5)*vec2(0.88,1.02)));
-    color=mix(darkBase(),color,0.84+vig*0.16);
+    color=mix(darkBase(),color,0.92+vig*0.08);
     color=mix(color,color*(0.84+u_c0*0.38),0.16);
     float luminance=dot(color,vec3(0.2126,0.7152,0.0722));
-    color=mix(vec3(luminance),color,1.18);
-    color=1.0-exp(-color*1.36);
+    color=mix(vec3(luminance),color,1.34);
+    color=1.0-exp(-color*1.62);
     color=pow(max(color,vec3(0.0)),vec3(0.94));
-    gl_FragColor=vec4(color,0.90);
+    gl_FragColor=vec4(color,0.97);
   }
 `;
 
@@ -2908,6 +2917,197 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-heroPreferenceStage{margin-top:11px!important;gap:4px!important}
           .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:33px!important;min-height:33px!important;padding:0 3px!important;font-size:7.4px!important;gap:3px!important}
           .tr-heroPrefButton svg{width:12.5px!important;height:12.5px!important;flex-basis:12.5px!important}
+        }
+
+
+        /* AUG 14 V10 ULTRA VISUAL + MOBILE CONTROL LOCK
+           Authoritative final hero rules. Keeps the seamless shell from V9. */
+        .tr-playerVisualArtwork{
+          opacity:.22!important;
+          filter:blur(88px) saturate(2.08) contrast(1.05) brightness(.72)!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.24!important}
+        .tr-playerVisualEngine canvas{
+          opacity:1!important;
+          filter:saturate(1.38) contrast(1.12) brightness(1.20)!important;
+        }
+        .tr-playerVisualGlass{
+          background:
+            radial-gradient(55% 74% at 52% 48%,rgba(0,0,0,.02),rgba(0,0,0,.06) 68%,rgba(0,0,0,.11) 100%),
+            linear-gradient(90deg,rgba(0,0,0,.005),transparent 58%,rgba(0,0,0,.018))!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          inset:10% 5% 10% 0!important;
+          background:radial-gradient(62% 78% at 50% 48%,rgba(0,0,0,.24),rgba(0,0,0,.085) 54%,transparent 82%)!important;
+          filter:blur(28px)!important;
+        }
+        .tr-playerHero .tr-audioIdentityMain strong{
+          font-size:clamp(42px,4.9vw,62px)!important;
+          line-height:.98!important;
+          letter-spacing:-.048em!important;
+        }
+        .tr-playerHero .tr-audioIdentityMain small{
+          margin-top:12px!important;
+          font-size:clamp(18px,1.8vw,23px)!important;
+          line-height:1.12!important;
+        }
+        .tr-heroPreferenceStage{
+          margin-top:25px!important;
+          gap:10px!important;
+        }
+        .tr-heroPrefButton{
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:visible!important;
+          height:46px!important;
+          min-height:46px!important;
+          padding:0 18px!important;
+          border:1px solid rgba(208,239,248,.30)!important;
+          border-radius:13px!important;
+          background:
+            linear-gradient(180deg,rgba(51,68,78,.74) 0%,rgba(22,34,42,.70) 50%,rgba(7,15,20,.84) 100%)!important;
+          color:#f5fbfd!important;
+          font-size:10.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.02em!important;
+          white-space:nowrap!important;
+          text-overflow:clip!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.16),
+            inset 0 -1px 0 rgba(0,0,0,.70),
+            0 10px 24px rgba(0,0,0,.30),
+            0 0 0 1px rgba(255,255,255,.015)!important;
+          backdrop-filter:blur(24px) saturate(1.34)!important;
+          -webkit-backdrop-filter:blur(24px) saturate(1.34)!important;
+        }
+        .tr-heroPrefButton>span{
+          display:block!important;
+          flex:0 0 auto!important;
+          min-width:max-content!important;
+          max-width:none!important;
+          overflow:visible!important;
+          white-space:nowrap!important;
+          text-overflow:clip!important;
+        }
+        .tr-heroPrefButton svg{width:17px!important;height:17px!important;flex:0 0 17px!important}
+        .tr-heroPrefButton:nth-child(1){min-width:110px!important}
+        .tr-heroPrefButton:nth-child(2){min-width:132px!important}
+        .tr-heroPrefButton:nth-child(3){min-width:150px!important}
+        .tr-heroPrefButton:before{
+          content:""!important;
+          position:absolute!important;
+          left:14%!important;right:14%!important;top:0!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(240,252,255,.62),transparent)!important;
+          opacity:.78!important;
+          pointer-events:none!important;
+        }
+        .tr-heroPrefButton:after{
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          left:14%!important;right:14%!important;bottom:-9px!important;height:18px!important;
+          border-radius:50%!important;
+          background:radial-gradient(ellipse,rgba(80,210,245,.14),transparent 72%)!important;
+          filter:blur(7px)!important;
+          pointer-events:none!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked{
+          color:#effff7!important;
+          border-color:rgba(73,229,156,.66)!important;
+          background:linear-gradient(180deg,rgba(15,118,75,.84),rgba(6,59,39,.90))!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.15),0 10px 24px rgba(0,0,0,.27),0 0 20px rgba(54,219,142,.17)!important;
+        }
+        .tr-heroPrefButton.tr-prefLess.is-disliked{
+          color:#fff6f7!important;
+          border-color:rgba(233,93,105,.66)!important;
+          background:linear-gradient(180deg,rgba(126,31,42,.88),rgba(61,12,20,.92))!important;
+        }
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          color:#f2fcff!important;
+          border-color:rgba(87,216,249,.70)!important;
+          background:linear-gradient(180deg,rgba(11,111,145,.88),rgba(4,55,75,.92))!important;
+        }
+
+        @media(min-width:1100px){
+          .tr-playerHero .tr-audioIdentity{padding:34px 48px 34px 64px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:62px!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:22px!important}
+          .tr-heroPreferenceStage{margin-top:28px!important;gap:12px!important}
+          .tr-heroPrefButton{height:48px!important;min-height:48px!important;font-size:11px!important}
+        }
+
+        @media(min-width:651px) and (max-width:900px){
+          .tr-playerHero .tr-audioIdentity{padding:22px 20px 22px 48px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(34px,5.2vw,46px)!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:16.5px!important}
+          .tr-heroPreferenceStage{margin-top:20px!important;gap:7px!important}
+          .tr-heroPrefButton{height:40px!important;min-height:40px!important;padding:0 12px!important;font-size:8.8px!important;gap:6px!important}
+          .tr-heroPrefButton:nth-child(1){min-width:90px!important}
+          .tr-heroPrefButton:nth-child(2){min-width:108px!important}
+          .tr-heroPrefButton:nth-child(3){min-width:124px!important}
+          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
+        }
+
+        @media(max-width:650px){
+          /* Mobile gets a taller hero so title + full labels never have to squeeze. */
+          .tr-playerHero{grid-template-columns:44% minmax(0,1fr)!important;min-height:184px!important}
+          .tr-playerHero .tr-audioArtwork{
+            width:calc(100% + 34px)!important;height:184px!important;min-height:184px!important;max-height:184px!important;
+            margin-right:-34px!important;aspect-ratio:auto!important;
+          }
+          .tr-playerHero .tr-audioArtworkImage{object-fit:cover!important;object-position:center!important}
+          .tr-playerHero .tr-audioIdentity{
+            height:184px!important;min-height:184px!important;
+            padding:12px 8px 10px 30px!important;
+            align-items:center!important;justify-content:center!important;text-align:center!important;
+          }
+          .tr-playerHero .tr-audioIdentity:before{
+            inset:5% 0 5% -12%!important;
+            background:radial-gradient(72% 82% at 52% 47%,rgba(0,0,0,.27),rgba(0,0,0,.08) 58%,transparent 84%)!important;
+          }
+          .tr-playerHero .tr-audioIdentityMain strong{
+            font-size:clamp(27px,7.5vw,32px)!important;
+            line-height:.98!important;letter-spacing:-.038em!important;
+          }
+          .tr-playerHero .tr-audioIdentityMain small{
+            margin-top:7px!important;font-size:15px!important;line-height:1.10!important;
+          }
+          .tr-heroPreferenceStage{
+            width:100%!important;max-width:250px!important;margin-top:15px!important;
+            display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1.22fr)!important;
+            gap:7px!important;align-items:center!important;justify-content:center!important;
+          }
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
+            width:100%!important;min-width:0!important;max-width:none!important;
+            height:42px!important;min-height:42px!important;
+            padding:0 9px!important;gap:6px!important;border-radius:11px!important;
+            font-size:11px!important;letter-spacing:0!important;line-height:1!important;
+            white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;
+          }
+          .tr-heroPrefButton:nth-child(3){
+            grid-column:1/-1!important;
+            width:76%!important;min-width:128px!important;justify-self:center!important;
+          }
+          .tr-heroPrefButton>span{
+            display:block!important;min-width:max-content!important;max-width:none!important;
+            overflow:visible!important;white-space:nowrap!important;text-overflow:clip!important;
+          }
+          .tr-heroPrefButton svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
+          .tr-playerVisualArtwork{opacity:.20!important;filter:blur(58px) saturate(2.00) brightness(.74)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.22!important}
+          .tr-playerVisualEngine canvas{filter:saturate(1.42) contrast(1.13) brightness(1.22)!important}
+        }
+
+        @media(max-width:390px){
+          .tr-playerHero{grid-template-columns:43% minmax(0,1fr)!important;min-height:178px!important}
+          .tr-playerHero .tr-audioArtwork{height:178px!important;min-height:178px!important;max-height:178px!important}
+          .tr-playerHero .tr-audioIdentity{height:178px!important;min-height:178px!important;padding:10px 6px 9px 26px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:26px!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:14px!important;margin-top:6px!important}
+          .tr-heroPreferenceStage{max-width:226px!important;gap:6px!important;margin-top:13px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:40px!important;min-height:40px!important;padding:0 7px!important;font-size:10.5px!important;gap:5px!important}
+          .tr-heroPrefButton:nth-child(3){min-width:124px!important;width:80%!important}
+          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
         }
 
 
