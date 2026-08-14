@@ -1333,10 +1333,63 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     const onWorkoutPage = window.location.pathname.startsWith("/workout/");
     const workoutTarget = activeSessionId ? `/workout/${activeSessionId}` : "/";
 
-    if (hasActiveWorkout && !onWorkoutPage) {
+    if (hasActiveWorkout && (workoutPaused || !onWorkoutPage)) {
+      const resumeActiveWorkout = () => {
+        /*
+         * Do not merely navigate when the workout is paused. The real
+         * AppShell Resume button owns the pause bookkeeping, including
+         * paused-at time and accumulated paused seconds. Trigger that exact
+         * control first so the session actually resumes, then return to it.
+         */
+        const shellResumeButton =
+          document.querySelector<HTMLButtonElement>(
+            ".tr-sessionChronographPrimary.is-resume, .tr-commandButton.is-resume, .tr-seg--resumeGreen"
+          ) ??
+          Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+            (button) =>
+              !button.classList.contains("tr-proHeaderButton") &&
+              button.textContent?.trim().toUpperCase() === "RESUME WORKOUT" &&
+              !button.disabled
+          );
+
+        if (shellResumeButton) {
+          shellResumeButton.click();
+          window.setTimeout(() => navigate(workoutTarget), 0);
+          return;
+        }
+
+        /*
+         * Defensive fallback for layouts where the AppShell control is not
+         * currently mounted. Mirror the same local pause accounting, then
+         * force the shell's existing focus refresh.
+         */
+        const pausedAtISO = window.localStorage.getItem("mvp_paused_at_iso");
+        const pausedTotal =
+          Number(window.localStorage.getItem("mvp_paused_total_seconds") ?? "0") || 0;
+
+        if (pausedAtISO) {
+          const pausedAtMs = new Date(pausedAtISO).getTime();
+          if (Number.isFinite(pausedAtMs)) {
+            const addedSeconds = Math.max(
+              0,
+              Math.floor((Date.now() - pausedAtMs) / 1000)
+            );
+            window.localStorage.setItem(
+              "mvp_paused_total_seconds",
+              String(pausedTotal + addedSeconds)
+            );
+          }
+        }
+
+        window.localStorage.setItem("mvp_is_paused", "false");
+        window.localStorage.removeItem("mvp_paused_at_iso");
+        window.dispatchEvent(new Event("focus"));
+        navigate(workoutTarget);
+      };
+
       makeButton(
         workoutPaused ? "RESUME" : "RETURN TO WORKOUT",
-        () => navigate(workoutTarget),
+        workoutPaused ? resumeActiveWorkout : () => navigate(workoutTarget),
         "is-resume"
       );
     }
