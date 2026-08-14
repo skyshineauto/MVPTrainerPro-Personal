@@ -7,6 +7,7 @@ import {
   primeWorkoutAudio,
 } from "../../lib/workoutAudio";
 import { Card } from "../../ui/Card";
+import { PreWorkoutLaunch } from "./PreWorkoutLaunch";
 import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExerciseModal";
 import {
   effectiveHasMedia,
@@ -3389,31 +3390,14 @@ export function WorkoutPlayerPage({ params }: any) {
     return (
       <div style={{ display: "grid", gap: 12, paddingBottom: 156 }}>
         <Toast toast={toast} onClose={() => setToast((t) => ({ ...t, open: false }))} />
-        <Card title="Start Workout" tone="blue">
-          <div className="tr-rowbox" style={{ display: "grid", gap: 10 }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <div className="tr-kicker">WEIGHT (LB) — REQUIRED</div>
-              <div className="tr-sub">Enter your weight to start. Timer begins only after you start.</div>
-            </div>
-
-            <input
-              value={gateWeight}
-              onChange={(e) => setGateWeight(e.target.value.replace(/[^\d.]/g, ""))}
-              placeholder="e.g. 185"
-              style={{ height: 52, width: "min(320px, 100%)", fontSize: 18, fontWeight: 950 }}
-              inputMode="decimal"
-              autoFocus
-            />
-
-            <button className="tr-btn tr-btn--primary" style={{ height: 56 }} onClick={startWorkoutNow}>
-              START WORKOUT
-            </button>
-
-            <button className="tr-btn" onClick={() => (window.location.pathname = "/")}>
-              Cancel
-            </button>
-          </div>
-        </Card>
+        <PreWorkoutLaunch
+          sessionId={sessionId}
+          sessionLabel={sessionLabel}
+          weight={gateWeight}
+          onWeightChange={setGateWeight}
+          onStart={startWorkoutNow}
+          onCancel={() => (window.location.pathname = "/")}
+        />
       </div>
     );
   }
