@@ -79,6 +79,10 @@ type WorkerSignedUrlResponse = {
   error?: string;
 };
 
+type WorkerSignedObject = WorkerSignedUrlResponse & {
+  url: string;
+};
+
 type EmbeddedArtwork = {
   blob: Blob;
   mimeType: string;
@@ -153,6 +157,130 @@ async function requireAccessToken() {
   if (!accessToken) throw new Error("Sign in before playing music.");
 
   return accessToken;
+}
+
+async function readWorkerError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as {
+      error?: string;
+      detail?: string;
+    };
+
+    if (payload.error && payload.detail) {
+      return `${payload.error} ${payload.detail}`;
+    }
+
+    return payload.error || payload.detail || fallback;
+  } catch {
+    try {
+      const text = (await response.text()).trim();
+      return text || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+async function uploadWorkerObject(
+  key: string,
+  body: Blob,
+  contentType: string
+) {
+  const accessToken = await requireAccessToken();
+
+  const response = await fetch(
+    `${MUSIC_WORKER_URL}/object?key=${encodeURIComponent(key)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType,
+      },
+      body,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readWorkerError(
+        response,
+        `Music upload failed (${response.status}).`
+      )
+    );
+  }
+}
+
+async function deleteWorkerObject(key: string) {
+  const accessToken = await requireAccessToken();
+
+  const response = await fetch(
+    `${MUSIC_WORKER_URL}/object?key=${encodeURIComponent(key)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await readWorkerError(
+        response,
+        `Music delete failed (${response.status}).`
+      )
+    );
+  }
+}
+
+async function getWorkerSignedObjectUrl(
+  key: string
+): Promise<WorkerSignedObject> {
+  const accessToken = await requireAccessToken();
+
+  const response = await fetch(`${MUSIC_WORKER_URL}/sign`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key }),
+  });
+
+  let payload: WorkerSignedUrlResponse = {};
+
+  try {
+    payload = (await response.json()) as WorkerSignedUrlResponse;
+  } catch {
+    // Status-based error below.
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      payload.error ||
+        `Music stream authorization failed (${response.status}).`
+    );
+  }
+
+  if (!payload.url) {
+    throw new Error(
+      "Music stream did not return a signed object URL."
+    );
+  }
+
+  return payload as WorkerSignedObject;
+}
+
+function cacheExpiryFromWorker(expiresAt: number | undefined) {
+  const workerExpiresAt = Number(expiresAt);
+
+  return Number.isFinite(workerExpiresAt) &&
+    workerExpiresAt > Date.now()
+    ? Math.max(
+        Date.now() + 30_000,
+        workerExpiresAt - 5 * 60 * 1000
+      )
+    : Date.now() + 50 * 60 * 1000;
 }
 
 function normalizeTrack(row: MusicTrack): MusicTrack {
@@ -606,15 +734,11 @@ async function uploadArtworkBlob(
   const userId = await requireUserId();
   const artworkPath = `${userId}/artwork/${track.id}-${crypto.randomUUID()}.${extension}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from(MUSIC_BUCKET)
-    .upload(artworkPath, blob, {
-      upsert: false,
-      contentType: mimeType,
-      cacheControl: "86400",
-    });
-
-  if (uploadError) throw uploadError;
+  await uploadWorkerObject(
+    artworkPath,
+    blob,
+    mimeType
+  );
 
   const { data, error } = await supabase
     .from(MUSIC_TABLE)
@@ -629,15 +753,12 @@ async function uploadArtworkBlob(
     .single();
 
   if (error) {
-    await supabase.storage.from(MUSIC_BUCKET).remove([artworkPath]);
+    await deleteWorkerObject(artworkPath).catch(() => undefined);
     throw error;
   }
 
   if (track.artwork_path && track.artwork_path !== artworkPath) {
-    await supabase.storage
-      .from(MUSIC_BUCKET)
-      .remove([track.artwork_path])
-      .catch(() => undefined);
+    await deleteWorkerObject(track.artwork_path).catch(() => undefined);
   }
 
   artworkSignedUrlCache.delete(track.id);
@@ -674,10 +795,7 @@ export async function removeMusicArtwork(track: MusicTrack) {
   if (error) throw error;
 
   if (track.artwork_path) {
-    await supabase.storage
-      .from(MUSIC_BUCKET)
-      .remove([track.artwork_path])
-      .catch(() => undefined);
+    await deleteWorkerObject(track.artwork_path).catch(() => undefined);
   }
 
   artworkSignedUrlCache.delete(track.id);
@@ -714,15 +832,11 @@ export async function uploadMusicTrack(
     `${userId}/${Date.now()}-${crypto.randomUUID()}-${fileStem}.${extension}`;
   const mimeType = contentTypeFor(extension, file.type);
 
-  const { error: uploadError } = await supabase.storage
-    .from(MUSIC_BUCKET)
-    .upload(storagePath, file, {
-      upsert: false,
-      contentType: mimeType,
-      cacheControl: "86400",
-    });
-
-  if (uploadError) throw uploadError;
+  await uploadWorkerObject(
+    storagePath,
+    file,
+    mimeType
+  );
 
   const row = {
     user_id: userId,
@@ -768,7 +882,7 @@ export async function uploadMusicTrack(
     .single();
 
   if (error) {
-    await supabase.storage.from(MUSIC_BUCKET).remove([storagePath]);
+    await deleteWorkerObject(storagePath).catch(() => undefined);
     throw error;
   }
 
@@ -990,12 +1104,18 @@ export async function removeMusicTrack(trackId: string) {
   );
 
   if (paths.length) {
-    const { error: storageError } = await supabase.storage
-      .from(MUSIC_BUCKET)
-      .remove(paths);
+    const cleanupResults = await Promise.allSettled(
+      paths.map((path) => deleteWorkerObject(path))
+    );
 
-    if (storageError) {
-      console.warn("Music storage cleanup failed:", storageError.message);
+    const cleanupFailures = cleanupResults.filter(
+      (result) => result.status === "rejected"
+    );
+
+    if (cleanupFailures.length) {
+      console.warn(
+        `Music R2 cleanup failed for ${cleanupFailures.length} object(s).`
+      );
     }
   }
 
@@ -1008,43 +1128,13 @@ export async function getMusicTrackSignedUrl(
   const cached = signedUrlCache.get(track.id);
   if (cached && cached.expiresAt > Date.now()) return cached.url;
 
-  const accessToken = await requireAccessToken();
+  const payload = await getWorkerSignedObjectUrl(
+    track.storage_path
+  );
 
-  const response = await fetch(`${MUSIC_WORKER_URL}/sign`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      key: track.storage_path,
-    }),
-  });
-
-  let payload: WorkerSignedUrlResponse = {};
-
-  try {
-    payload = (await response.json()) as WorkerSignedUrlResponse;
-  } catch {
-    // Status-based error below.
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      payload.error ||
-        `Music stream authorization failed (${response.status}).`
-    );
-  }
-
-  if (!payload.url) {
-    throw new Error("Music stream did not return a playback URL.");
-  }
-
-  const workerExpiresAt = Number(payload.expiresAt);
-  const cacheExpiresAt =
-    Number.isFinite(workerExpiresAt) && workerExpiresAt > Date.now()
-      ? Math.max(Date.now() + 30_000, workerExpiresAt - 5 * 60 * 1000)
-      : Date.now() + 50 * 60 * 1000;
+  const cacheExpiresAt = cacheExpiryFromWorker(
+    payload.expiresAt
+  );
 
   signedUrlCache.set(track.id, {
     url: payload.url,
@@ -1062,16 +1152,18 @@ export async function getMusicArtworkSignedUrl(
   const cached = artworkSignedUrlCache.get(track.id);
   if (cached && cached.expiresAt > Date.now()) return cached.url;
 
-  const { data, error } = await supabase.storage
-    .from(MUSIC_BUCKET)
-    .createSignedUrl(track.artwork_path, 24 * 60 * 60);
+  const payload = await getWorkerSignedObjectUrl(
+    track.artwork_path
+  );
 
-  if (error) throw error;
+  const cacheExpiresAt = cacheExpiryFromWorker(
+    payload.expiresAt
+  );
 
   artworkSignedUrlCache.set(track.id, {
-    url: data.signedUrl,
-    expiresAt: Date.now() + 20 * 60 * 60 * 1000,
+    url: payload.url,
+    expiresAt: cacheExpiresAt,
   });
 
-  return data.signedUrl;
+  return payload.url;
 }
