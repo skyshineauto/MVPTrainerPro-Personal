@@ -559,6 +559,331 @@ function formatLoggedWeight(weight: number) {
   return Number.isInteger(weight) ? String(weight) : String(Number(weight.toFixed(2)));
 }
 
+type SessionIntelligence = {
+  weightTrend30: number | null;
+  lastSameSession: {
+    completedAt: string;
+    daysAgo: number;
+    durationMinutes: number | null;
+    completedSets: number;
+    plannedSets: number;
+    volume: number;
+    volumeDelta: number | null;
+  } | null;
+  week: {
+    completedWorkouts: number;
+    targetWorkouts: number | null;
+    trainingMinutes: number;
+  };
+};
+
+const EMPTY_SESSION_INTELLIGENCE: SessionIntelligence = {
+  weightTrend30: null,
+  lastSameSession: null,
+  week: {
+    completedWorkouts: 0,
+    targetWorkouts: null,
+    trainingMinutes: 0,
+  },
+};
+
+function normalizedSessionType(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function safeWorkoutDurationMinutes(row: any): number | null {
+  const summary = row?.workout_summary ?? {};
+
+  for (const value of [
+    summary?.duration_minutes,
+    summary?.session_duration_minutes,
+    summary?.total_minutes,
+    summary?.training_minutes,
+  ]) {
+    const minutes = Number(value);
+    if (Number.isFinite(minutes) && minutes > 0) return Math.max(1, Math.round(minutes));
+  }
+
+  for (const value of [
+    summary?.duration_seconds,
+    summary?.session_duration_seconds,
+    summary?.total_seconds,
+    summary?.elapsed_seconds,
+    summary?.total_time_seconds,
+  ]) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.max(1, Math.round(seconds / 60));
+    }
+  }
+
+  const startedAt = row?.started_at ? new Date(row.started_at).getTime() : NaN;
+  const completedAt = row?.completed_at ? new Date(row.completed_at).getTime() : NaN;
+
+  if (Number.isFinite(startedAt) && Number.isFinite(completedAt) && completedAt > startedAt) {
+    return Math.max(1, Math.round((completedAt - startedAt) / 60000));
+  }
+
+  return null;
+}
+
+function localStartOfWeekIso() {
+  const now = new Date();
+  const day = now.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(now);
+  start.setDate(now.getDate() + mondayOffset);
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+}
+
+function daysSinceLocal(timestamp: string) {
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return 0;
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.max(0, Math.round((todayStart - dateStart) / 86400000));
+}
+
+function compactDate(timestamp: string | null | undefined) {
+  if (!timestamp) return "";
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase();
+}
+
+function formatMinutesCompact(minutes: number | null | undefined) {
+  const safe = Math.max(0, Math.round(Number(minutes ?? 0)));
+  if (!safe) return "—";
+  if (safe < 60) return `${safe} MIN`;
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return m ? `${h}H ${m}M` : `${h}H`;
+}
+
+function formatVolumeLb(value: number | null | undefined) {
+  const safe = Math.max(0, Math.round(Number(value ?? 0)));
+  return safe ? `${safe.toLocaleString()} LB` : "—";
+}
+
+async function loadWorkoutPerformanceSnapshot(workoutId: string) {
+  const { data: exerciseRows, error: exerciseError } = await supabase
+    .from("workout_exercises")
+    .select("id,prescription_snapshot")
+    .eq("workout_id", workoutId);
+
+  if (exerciseError) throw exerciseError;
+
+  const exercises = (exerciseRows ?? []) as any[];
+  const exerciseIds = exercises.map((row) => String(row.id ?? "")).filter(Boolean);
+
+  let plannedSets = 0;
+  for (const row of exercises) {
+    const prescription = row?.prescription_snapshot ?? {};
+    const timed =
+      Number(prescription?.duration_minutes ?? 0) > 0 ||
+      Number(prescription?.duration_seconds ?? 0) > 0;
+
+    if (!timed) {
+      const count = Number(prescription?.sets ?? 0);
+      if (Number.isFinite(count) && count > 0) plannedSets += Math.floor(count);
+    }
+  }
+
+  if (!exerciseIds.length) {
+    return { completedSets: 0, plannedSets, volume: 0 };
+  }
+
+  const setRows: any[] = [];
+  for (const chunk of chunkValues(exerciseIds)) {
+    const { data, error } = await supabase
+      .from("workout_sets")
+      .select("workout_exercise_id,set_index,reps,weight,rir")
+      .in("workout_exercise_id", chunk);
+
+    if (error) throw error;
+    setRows.push(...(data ?? []));
+  }
+
+  const completedRows = setRows.filter((row) => {
+    const reps = Number(row?.reps ?? 0);
+    const weight = Number(row?.weight ?? 0);
+    return reps > 0 && weight > 0;
+  });
+
+  const volume = completedRows.reduce(
+    (sum, row) =>
+      sum +
+      Math.max(0, Number(row?.reps ?? 0)) *
+        Math.max(0, Number(row?.weight ?? 0)),
+    0
+  );
+
+  return {
+    completedSets: completedRows.length,
+    plannedSets: Math.max(plannedSets, completedRows.length),
+    volume,
+  };
+}
+
+async function loadSessionIntelligence(params: {
+  userId: string;
+  currentWorkoutId: string;
+  currentSessionId: string;
+  programBlockId: string | null;
+  currentBodyWeight: number | null;
+}): Promise<SessionIntelligence> {
+  const {
+    userId,
+    currentWorkoutId,
+    currentSessionId,
+    programBlockId,
+    currentBodyWeight,
+  } = params;
+
+  let weightTrend30: number | null = null;
+
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+
+    const { data: weights, error: weightsError } = await supabase
+      .from("workouts")
+      .select("bodyweight_lb,completed_at")
+      .eq("user_id", userId)
+      .not("completed_at", "is", null)
+      .not("bodyweight_lb", "is", null)
+      .gte("completed_at", since.toISOString())
+      .order("completed_at", { ascending: true });
+
+    if (weightsError) throw weightsError;
+
+    const validWeights = (weights ?? [])
+      .map((row: any) => Number(row?.bodyweight_lb ?? 0))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    const reference = validWeights.length ? validWeights[0] : null;
+    const latest =
+      currentBodyWeight && currentBodyWeight > 0
+        ? currentBodyWeight
+        : validWeights.length
+          ? validWeights[validWeights.length - 1]
+          : null;
+
+    if (reference != null && latest != null) {
+      weightTrend30 = Number((latest - reference).toFixed(1));
+    }
+  } catch {
+    // Supplemental metric only.
+  }
+
+  if (!programBlockId) {
+    return { ...EMPTY_SESSION_INTELLIGENCE, weightTrend30 };
+  }
+
+  const { data: programSessions, error: programSessionsError } = await supabase
+    .from("scheduled_sessions")
+    .select("id,session_type")
+    .eq("user_id", userId)
+    .eq("program_block_id", programBlockId);
+
+  if (programSessionsError) throw programSessionsError;
+
+  const sessions = (programSessions ?? []) as any[];
+  const sessionIds = sessions.map((row) => String(row.id ?? "")).filter(Boolean);
+
+  if (!sessionIds.length) {
+    return { ...EMPTY_SESSION_INTELLIGENCE, weightTrend30 };
+  }
+
+  const currentSession = sessions.find(
+    (row) => String(row?.id ?? "") === String(currentSessionId)
+  );
+  const currentType = normalizedSessionType(currentSession?.session_type);
+
+  const sameSessionIds = new Set(
+    sessions
+      .filter((row) => {
+        if (!currentType) return String(row?.id ?? "") === String(currentSessionId);
+        return normalizedSessionType(row?.session_type) === currentType;
+      })
+      .map((row) => String(row.id))
+  );
+
+  const completedWorkouts: any[] = [];
+  for (const chunk of chunkValues(sessionIds)) {
+    const { data, error } = await supabase
+      .from("workouts")
+      .select("id,scheduled_session_id,started_at,completed_at,workout_summary")
+      .eq("user_id", userId)
+      .in("scheduled_session_id", chunk)
+      .not("completed_at", "is", null);
+
+    if (error) throw error;
+    completedWorkouts.push(...(data ?? []));
+  }
+
+  completedWorkouts.sort(
+    (a, b) =>
+      new Date(String(b?.completed_at ?? 0)).getTime() -
+      new Date(String(a?.completed_at ?? 0)).getTime()
+  );
+
+  const sameSessionWorkouts = completedWorkouts.filter(
+    (row) =>
+      String(row?.id ?? "") !== String(currentWorkoutId) &&
+      sameSessionIds.has(String(row?.scheduled_session_id ?? ""))
+  );
+
+  let lastSameSession: SessionIntelligence["lastSameSession"] = null;
+
+  if (sameSessionWorkouts.length) {
+    const latest = sameSessionWorkouts[0];
+    const prior = sameSessionWorkouts[1] ?? null;
+
+    const latestPerformance = await loadWorkoutPerformanceSnapshot(String(latest.id));
+    const priorPerformance = prior
+      ? await loadWorkoutPerformanceSnapshot(String(prior.id))
+      : null;
+
+    lastSameSession = {
+      completedAt: String(latest.completed_at),
+      daysAgo: daysSinceLocal(String(latest.completed_at)),
+      durationMinutes: safeWorkoutDurationMinutes(latest),
+      completedSets: latestPerformance.completedSets,
+      plannedSets: latestPerformance.plannedSets,
+      volume: latestPerformance.volume,
+      volumeDelta:
+        priorPerformance && priorPerformance.volume > 0
+          ? latestPerformance.volume - priorPerformance.volume
+          : null,
+    };
+  }
+
+  const weekStart = new Date(localStartOfWeekIso()).getTime();
+  const weekWorkouts = completedWorkouts.filter((row) => {
+    const completed = new Date(String(row?.completed_at ?? 0)).getTime();
+    return Number.isFinite(completed) && completed >= weekStart;
+  });
+
+  const weekMinutes = weekWorkouts.reduce(
+    (sum, row) => sum + (safeWorkoutDurationMinutes(row) ?? 0),
+    0
+  );
+
+  return {
+    weightTrend30,
+    lastSameSession,
+    week: {
+      completedWorkouts: weekWorkouts.length,
+      targetWorkouts: sessions.length || null,
+      trainingMinutes: weekMinutes,
+    },
+  };
+}
+
 type CompletedProgramWorkout = {
   id: string;
   scheduled_session_id: string | null;
@@ -2944,7 +3269,6 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [items, setItems] = useState<WorkoutExerciseRow[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [mobileProgressExpanded, setMobileProgressExpanded] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -2954,6 +3278,8 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const [startedWeight, setStartedWeight] = useState<number | null>(null);
   const [proteinTarget, setProteinTarget] = useState<number | null>(null);
+  const [sessionIntelligence, setSessionIntelligence] =
+    useState<SessionIntelligence>(EMPTY_SESSION_INTELLIGENCE);
 
   const [editing, setEditing] = useState(false);
   const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
@@ -3014,10 +3340,6 @@ export function WorkoutPlayerPage({ params }: any) {
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
-
-  useEffect(() => {
-    setMobileProgressExpanded(false);
-  }, [activeIdx]);
 
   useEffect(() => {
     if (!editing && !completeOverlayOpen) return;
@@ -3119,6 +3441,42 @@ export function WorkoutPlayerPage({ params }: any) {
       symptomKey,
     });
   }, [sessionType, payload?.session?.session_type, payload?.template?.name, goal, goalMode, symptomKey]);
+
+  useEffect(() => {
+    if (gateOpen || !workoutId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { data: u, error: uErr } = await supabase.auth.getUser();
+        if (uErr) throw uErr;
+        if (!u.user) return;
+
+        const next = await loadSessionIntelligence({
+          userId: u.user.id,
+          currentWorkoutId: workoutId,
+          currentSessionId: sessionId,
+          programBlockId,
+          currentBodyWeight: startedWeight,
+        });
+
+        if (!cancelled) setSessionIntelligence(next);
+      } catch (error) {
+        console.error("SESSION INTELLIGENCE LOAD FAILED:", error);
+        if (!cancelled) {
+          setSessionIntelligence((current) => ({
+            ...EMPTY_SESSION_INTELLIGENCE,
+            weightTrend30: current.weightTrend30,
+          }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gateOpen, workoutId, sessionId, programBlockId, startedWeight]);
 
   const toastTimer = useRef<any>(null);
   const addedTimer = useRef<any>(null);
@@ -3900,18 +4258,49 @@ export function WorkoutPlayerPage({ params }: any) {
     ? resolveFocusLabel(currentRunnerItem, currentTimed)
     : "Full Body";
   const currentRest = restOrDurationLabel(currentPrescription, currentTimed);
+  const previousExercise = activeIdx > 0 ? items[activeIdx - 1] : null;
+  const previousExerciseName =
+    previousExercise?.exercise?.name ??
+    previousExercise?.exercise?.title ??
+    "Start of workout";
+  const nextExercise = activeIdx < items.length - 1 ? items[activeIdx + 1] : null;
+  const nextExerciseName =
+    nextExercise?.exercise?.name ??
+    nextExercise?.exercise?.title ??
+    "End of workout";
   const nextIncompleteIndex = items.findIndex(
     (row, index) => index > activeIdx && !row.completed_at
   );
-  const nextIncomplete =
-    nextIncompleteIndex >= 0 ? items[nextIncompleteIndex] : null;
-  const nextIncompleteName =
-    nextIncomplete?.exercise?.name ??
-    nextIncomplete?.exercise?.title ??
-    (sessionComplete ? "Workout complete" : "End of workout");
-  const progressPercent = items.length
-    ? Math.round((doneCount / items.length) * 100)
-    : 0;
+  const lastSession = sessionIntelligence.lastSameSession;
+  const lastSessionAgo =
+    lastSession == null
+      ? "NO PRIOR SESSION"
+      : lastSession.daysAgo === 0
+        ? "TODAY"
+        : lastSession.daysAgo === 1
+          ? "1 DAY AGO"
+          : `${lastSession.daysAgo} DAYS AGO`;
+  const weightTrend = sessionIntelligence.weightTrend30;
+  const weightTrendText =
+    weightTrend == null
+      ? "30-DAY TREND BUILDING"
+      : `${weightTrend > 0 ? "+" : ""}${weightTrend.toFixed(1)} LB • 30-DAY TREND`;
+  const volumeDelta = lastSession?.volumeDelta ?? null;
+  const volumeDeltaText =
+    volumeDelta == null
+      ? "PRIOR COMPARISON BUILDING"
+      : volumeDelta === 0
+        ? "MATCHED PRIOR SESSION VOLUME"
+        : `${volumeDelta > 0 ? "+" : ""}${Math.round(volumeDelta).toLocaleString()} LB VS PRIOR`;
+  const weekTarget = sessionIntelligence.week.targetWorkouts;
+  const weekCompletionText =
+    weekTarget && weekTarget > 0
+      ? `${sessionIntelligence.week.completedWorkouts} / ${weekTarget}`
+      : String(sessionIntelligence.week.completedWorkouts);
+  const weekTrainingTime =
+    sessionIntelligence.week.trainingMinutes > 0
+      ? formatMinutesCompact(sessionIntelligence.week.trainingMinutes)
+      : "0 MIN";
 
   const prev = () => setActiveIdx((i) => Math.max(i - 1, 0));
   const next = () => setActiveIdx((i) => Math.min(i + 1, Math.max(0, items.length - 1)));
@@ -3988,22 +4377,114 @@ export function WorkoutPlayerPage({ params }: any) {
       />
 
       <div className="tr-workoutCheckinCard">
-        <Card title="Session Check-in" tone="blue">
-          <div className="tr-rowbox">
-            <div className="tr-checkinGrid tr-checkinGrid--tight">
-            <div className="tr-checkinTile tr-checkinTile--tight">
-              <div className="tr-kicker">WEIGHT (LB)</div>
-              <div className="tr-checkinValue tr-checkinValue--tight">
-                {startedWeight != null ? `${startedWeight} lb` : "Not set"}
+        <Card
+          title="Session Check-in"
+          tone="blue"
+          right={<div className="tr-checkinContext">{sessionLabel} • TODAY</div>}
+        >
+          <div className="tr-sessionIntel">
+            <div className="tr-sessionIntelPrimary">
+              <div className="tr-sessionIntelMetric is-weight">
+                <div className="tr-kicker">BODY WEIGHT</div>
+                <strong>
+                  {startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}
+                </strong>
+                <span
+                  className={`tr-sessionIntelTrend ${
+                    weightTrend != null && weightTrend > 0
+                      ? "is-positive"
+                      : weightTrend != null && weightTrend < 0
+                        ? "is-negative"
+                        : ""
+                  }`}
+                >
+                  {weightTrendText}
+                </span>
+              </div>
+
+              <div className="tr-sessionIntelMetric is-protein">
+                <div className="tr-kicker">PROTEIN TARGET</div>
+                <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
+                <span>DAILY TARGET</span>
+              </div>
+
+              <div className="tr-sessionIntelMetric is-last">
+                <div className="tr-kicker">LAST {sessionLabel.toUpperCase()}</div>
+                <strong>{lastSessionAgo}</strong>
+                <span>{lastSession ? compactDate(lastSession.completedAt) : "FIRST SESSION BASELINE"}</span>
               </div>
             </div>
 
-            <div className="tr-checkinTile tr-checkinTile--tight">
-              <div className="tr-kicker">PROTEIN TARGET</div>
-              <div className="tr-checkinValue tr-checkinValue--tight">
-                {proteinTarget != null ? `${proteinTarget}g` : "Not set"}
+            <div className="tr-sessionIntelPerformance">
+              <div className="tr-sessionIntelPerformanceHead">
+                <div>
+                  <div className="tr-kicker">LAST {sessionLabel.toUpperCase()} PERFORMANCE</div>
+                  <strong>{lastSession ? "YOUR PREVIOUS BENCHMARK" : "BUILDING YOUR BASELINE"}</strong>
+                </div>
+                {lastSession ? (
+                  <span className="tr-sessionIntelDate">{compactDate(lastSession.completedAt)}</span>
+                ) : null}
+              </div>
+
+              <div className="tr-sessionIntelPerformanceGrid">
+                <div>
+                  <strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong>
+                  <span>SESSION TIME</span>
+                </div>
+                <div>
+                  <strong>
+                    {lastSession
+                      ? `${lastSession.completedSets} / ${lastSession.plannedSets}`
+                      : "—"}
+                  </strong>
+                  <span>SETS COMPLETED</span>
+                </div>
+                <div>
+                  <strong>{formatVolumeLb(lastSession?.volume)}</strong>
+                  <span>TRAINING VOLUME</span>
+                </div>
+              </div>
+
+              <div
+                className={`tr-sessionIntelDelta ${
+                  volumeDelta != null && volumeDelta > 0
+                    ? "is-positive"
+                    : volumeDelta != null && volumeDelta < 0
+                      ? "is-negative"
+                      : ""
+                }`}
+              >
+                {lastSession ? volumeDeltaText : "COMPLETE THIS SESSION TO CREATE YOUR FIRST BENCHMARK"}
               </div>
             </div>
+
+            <div className="tr-sessionIntelWeek">
+              <div className="tr-sessionIntelWeekCopy">
+                <div className="tr-kicker">THIS WEEK</div>
+                <strong>{weekCompletionText}</strong>
+                <span>WORKOUTS COMPLETED</span>
+              </div>
+
+              <div className="tr-sessionIntelWeekRail" aria-hidden="true">
+                {Array.from({
+                  length: Math.max(
+                    1,
+                    weekTarget ?? Math.max(1, sessionIntelligence.week.completedWorkouts)
+                  ),
+                }).map((_, index) => (
+                  <span
+                    key={index}
+                    className={
+                      index < sessionIntelligence.week.completedWorkouts ? "is-complete" : ""
+                    }
+                  />
+                ))}
+              </div>
+
+              <div className="tr-sessionIntelWeekTime">
+                <strong>{weekTrainingTime}</strong>
+                <span>TRAINED</span>
+              </div>
             </div>
           </div>
         </Card>
@@ -4029,10 +4510,13 @@ export function WorkoutPlayerPage({ params }: any) {
               className="tr-sessionNavButton is-prev"
               onClick={prev}
               disabled={atFirst}
-              aria-label="Previous exercise"
+              aria-label={atFirst ? "Start of workout" : `Previous exercise: ${previousExerciseName}`}
             >
-              <span aria-hidden="true">←</span>
-              <strong>Prev</strong>
+              <span className="tr-sessionNavArrow" aria-hidden="true">←</span>
+              <span className="tr-sessionNavCopy">
+                <small>{atFirst ? "START OF WORKOUT" : "PREVIOUS"}</small>
+                <strong>{atFirst ? "NO PREVIOUS EXERCISE" : previousExerciseName}</strong>
+              </span>
             </button>
 
             <div className="tr-sessionCurrentPanel">
@@ -4055,10 +4539,6 @@ export function WorkoutPlayerPage({ params }: any) {
                 <span>{currentRest}</span>
               </div>
 
-              <div className="tr-sessionNextLine">
-                <span>NEXT</span>
-                <strong>{nextIncompleteName}</strong>
-              </div>
             </div>
 
             <button
@@ -4066,41 +4546,65 @@ export function WorkoutPlayerPage({ params }: any) {
               className="tr-sessionNavButton is-next"
               onClick={next}
               disabled={atLast}
-              aria-label="Next exercise"
+              aria-label={atLast ? "End of workout" : `Next exercise: ${nextExerciseName}`}
             >
-              <strong>Next</strong>
-              <span aria-hidden="true">→</span>
+              <span className="tr-sessionNavCopy">
+                <small>{atLast ? "END OF WORKOUT" : "NEXT"}</small>
+                <strong>{atLast ? "NO NEXT EXERCISE" : nextExerciseName}</strong>
+              </span>
+              <span className="tr-sessionNavArrow" aria-hidden="true">→</span>
             </button>
           </div>
 
           <section className="tr-exerciseProgressPanel" aria-label="Exercise progress">
             <div className="tr-exerciseProgressHeader">
-              <div>
+              <div className="tr-exerciseProgressTitle">
                 <div className="tr-kicker">EXERCISE PROGRESS</div>
+                <strong>WORKOUT ROADMAP</strong>
               </div>
 
-              <div className="tr-exerciseProgressCount">
-                <strong>{doneCount}</strong>
-                <span>/ {items.length} COMPLETE</span>
+              <div className="tr-exerciseProgressCount" aria-label={`${doneCount} of ${items.length} completed`}>
+                <strong>{doneCount}/{items.length}</strong>
+                <span>COMPLETED</span>
               </div>
             </div>
 
             <div
-              className="tr-exerciseProgressTrack"
+              className="tr-exerciseProgressSegments"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, items.length)}, minmax(0, 1fr))` }}
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={items.length || 1}
               aria-valuenow={doneCount}
-              aria-label={`${doneCount} of ${items.length} exercises complete`}
+              aria-label={`${doneCount} of ${items.length} exercises completed`}
             >
-              <span style={{ width: `${progressPercent}%` }} />
+              {items.map((row, index) => {
+                const isSelected = index === activeIdx;
+                const segmentState = row.completed_at
+                  ? "complete"
+                  : isSelected
+                    ? "current"
+                    : index === nextIncompleteIndex
+                      ? "next"
+                      : "remaining";
+
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className={`tr-exerciseProgressSegment is-${segmentState}`}
+                    onClick={() => setActiveIdx(index)}
+                    aria-label={`Exercise ${index + 1}: ${
+                      row.exercise?.name ?? row.exercise?.title ?? "Exercise"
+                    }`}
+                  >
+                    <span>{row.completed_at ? "✓" : index + 1}</span>
+                  </button>
+                );
+              })}
             </div>
 
-            <div
-              className={`tr-exerciseProgressGrid ${
-                mobileProgressExpanded ? "is-mobile-expanded" : "is-mobile-collapsed"
-              }`}
-            >
+            <div className="tr-exerciseProgressGrid">
               {items.map((row, index) => {
                 const isSelected = index === activeIdx;
                 const status = row.completed_at
@@ -4145,19 +4649,6 @@ export function WorkoutPlayerPage({ params }: any) {
               })}
             </div>
 
-            {items.length > 2 ? (
-              <button
-                type="button"
-                className="tr-exerciseProgressToggle"
-                onClick={() => setMobileProgressExpanded((value) => !value)}
-                aria-expanded={mobileProgressExpanded}
-              >
-                {mobileProgressExpanded
-                  ? "SHOW CURRENT + NEXT"
-                  : `VIEW ALL ${items.length} EXERCISES`}
-                <span aria-hidden="true">{mobileProgressExpanded ? "↑" : "↓"}</span>
-              </button>
-            ) : null}
           </section>
         </Card>
       </div>
@@ -5113,6 +5604,573 @@ export function WorkoutPlayerPage({ params }: any) {
           letter-spacing: .04em;
           color: rgba(255,255,255,.94);
         }
+
+        /* ============================================================
+           V13.6 PREMIUM WORKOUT UI
+           ============================================================ */
+        .tr-workoutCheckinCard .tr-card-head{
+          border-bottom-color:rgba(65,198,255,.10);
+        }
+        .tr-checkinContext{
+          color:rgba(150,217,245,.74);
+          font-size:9px;
+          font-weight:1000;
+          letter-spacing:.16em;
+          text-transform:uppercase;
+          white-space:nowrap;
+        }
+        .tr-sessionIntel{
+          display:grid;
+          gap:12px;
+        }
+        .tr-sessionIntelPrimary{
+          display:grid;
+          grid-template-columns:1.05fr .8fr 1.15fr;
+          gap:10px;
+        }
+        .tr-sessionIntelMetric{
+          min-width:0;
+          min-height:116px;
+          display:grid;
+          align-content:center;
+          gap:8px;
+          padding:16px 18px;
+          border:1px solid rgba(255,255,255,.085);
+          border-radius:17px;
+          background:
+            radial-gradient(280px 110px at 12% -20%, rgba(0,181,255,.105), transparent 68%),
+            linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.13));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 18px 42px rgba(0,0,0,.18);
+        }
+        .tr-sessionIntelMetric strong{
+          min-width:0;
+          color:#f9fcff;
+          font-size:clamp(24px,2.7vw,37px);
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:-.025em;
+          font-variant-numeric:tabular-nums;
+          overflow-wrap:anywhere;
+          text-shadow:0 2px 0 rgba(0,0,0,.68);
+        }
+        .tr-sessionIntelMetric.is-last strong{
+          font-size:clamp(20px,2.2vw,30px);
+          color:#ffd183;
+        }
+        .tr-sessionIntelMetric > span{
+          color:rgba(186,208,222,.62);
+          font-size:8.5px;
+          font-weight:950;
+          letter-spacing:.11em;
+          text-transform:uppercase;
+          line-height:1.3;
+        }
+        .tr-sessionIntelTrend.is-positive,
+        .tr-sessionIntelDelta.is-positive{ color:#7deca0 !important; }
+        .tr-sessionIntelTrend.is-negative,
+        .tr-sessionIntelDelta.is-negative{ color:#ffab70 !important; }
+
+        .tr-sessionIntelPerformance{
+          display:grid;
+          gap:13px;
+          padding:17px 18px;
+          border:1px solid rgba(63,199,255,.16);
+          border-radius:18px;
+          background:
+            radial-gradient(580px 170px at 0 -25%, rgba(0,174,255,.115), transparent 67%),
+            linear-gradient(180deg, rgba(10,20,28,.98), rgba(4,8,12,.99));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 20px 48px rgba(0,0,0,.22);
+        }
+        .tr-sessionIntelPerformanceHead{
+          display:flex;
+          align-items:end;
+          justify-content:space-between;
+          gap:16px;
+        }
+        .tr-sessionIntelPerformanceHead > div{
+          display:grid;
+          gap:5px;
+        }
+        .tr-sessionIntelPerformanceHead strong{
+          color:rgba(244,249,252,.9);
+          font-size:12px;
+          font-weight:950;
+          letter-spacing:.03em;
+        }
+        .tr-sessionIntelDate{
+          color:rgba(255,205,125,.74);
+          font-size:9px;
+          font-weight:1000;
+          letter-spacing:.14em;
+          white-space:nowrap;
+        }
+        .tr-sessionIntelPerformanceGrid{
+          display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          border-top:1px solid rgba(255,255,255,.07);
+          border-bottom:1px solid rgba(255,255,255,.07);
+        }
+        .tr-sessionIntelPerformanceGrid > div{
+          min-width:0;
+          display:grid;
+          gap:6px;
+          padding:14px 16px 13px;
+        }
+        .tr-sessionIntelPerformanceGrid > div + div{
+          border-left:1px solid rgba(255,255,255,.07);
+        }
+        .tr-sessionIntelPerformanceGrid strong{
+          color:#fff;
+          font-size:clamp(20px,2.4vw,31px);
+          line-height:1;
+          font-weight:1000;
+          letter-spacing:-.02em;
+          font-variant-numeric:tabular-nums;
+          overflow-wrap:anywhere;
+        }
+        .tr-sessionIntelPerformanceGrid span,
+        .tr-sessionIntelWeek span{
+          color:rgba(181,204,218,.58);
+          font-size:8px;
+          font-weight:1000;
+          letter-spacing:.12em;
+          text-transform:uppercase;
+        }
+        .tr-sessionIntelDelta{
+          color:rgba(196,218,230,.66);
+          font-size:9px;
+          font-weight:1000;
+          letter-spacing:.105em;
+          text-transform:uppercase;
+        }
+
+        .tr-sessionIntelWeek{
+          display:grid;
+          grid-template-columns:auto minmax(160px,1fr) auto;
+          align-items:center;
+          gap:18px;
+          padding:14px 17px;
+          border:1px solid rgba(255,255,255,.075);
+          border-radius:17px;
+          background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.12));
+        }
+        .tr-sessionIntelWeekCopy,
+        .tr-sessionIntelWeekTime{
+          display:grid;
+          gap:4px;
+        }
+        .tr-sessionIntelWeekCopy strong,
+        .tr-sessionIntelWeekTime strong{
+          color:#f6fbff;
+          font-size:20px;
+          line-height:1;
+          font-weight:1000;
+          font-variant-numeric:tabular-nums;
+        }
+        .tr-sessionIntelWeekTime{
+          justify-items:end;
+          text-align:right;
+        }
+        .tr-sessionIntelWeekRail{
+          min-width:0;
+          display:grid;
+          grid-auto-flow:column;
+          grid-auto-columns:minmax(18px,1fr);
+          gap:6px;
+        }
+        .tr-sessionIntelWeekRail span{
+          height:7px;
+          border-radius:999px;
+          background:rgba(255,255,255,.07);
+          box-shadow:inset 0 1px 2px rgba(0,0,0,.65);
+        }
+        .tr-sessionIntelWeekRail span.is-complete{
+          background:linear-gradient(90deg,#18b657,#6df19a);
+          box-shadow:0 0 14px rgba(68,229,128,.16);
+        }
+
+        .tr-sessionNavConsole{
+          grid-template-columns:minmax(155px,190px) minmax(0,1fr) minmax(155px,190px);
+          gap:12px;
+        }
+        .tr-sessionNavButton{
+          min-height:146px;
+          justify-content:flex-start;
+          gap:12px;
+          padding:16px 15px;
+          text-align:left;
+          overflow:hidden;
+        }
+        .tr-sessionNavButton.is-next{
+          justify-content:flex-end;
+          text-align:right;
+        }
+        .tr-sessionNavArrow{
+          flex:0 0 auto;
+          width:34px;
+          height:34px;
+          display:grid;
+          place-items:center;
+          border:1px solid rgba(80,207,255,.22);
+          border-radius:12px;
+          background:rgba(0,174,255,.06);
+          color:#8bdfff !important;
+          font-size:19px !important;
+        }
+        .tr-sessionNavButton.is-next .tr-sessionNavArrow{
+          border-color:rgba(255,172,54,.28);
+          background:rgba(255,148,0,.07);
+          color:#ffc164 !important;
+        }
+        .tr-sessionNavCopy{
+          min-width:0;
+          display:grid;
+          gap:7px;
+          text-transform:none;
+          letter-spacing:normal;
+        }
+        .tr-sessionNavCopy small{
+          color:rgba(164,201,220,.55);
+          font-size:7.5px;
+          font-weight:1000;
+          letter-spacing:.16em;
+          text-transform:uppercase;
+        }
+        .tr-sessionNavButton.is-next .tr-sessionNavCopy small{
+          color:rgba(255,192,96,.66);
+        }
+        .tr-sessionNavCopy strong{
+          min-width:0;
+          color:rgba(246,250,253,.93);
+          font-size:12px;
+          line-height:1.22;
+          font-weight:1000;
+          overflow-wrap:anywhere;
+          display:-webkit-box;
+          -webkit-box-orient:vertical;
+          -webkit-line-clamp:3;
+          overflow:hidden;
+        }
+        .tr-sessionNavButton:disabled{ opacity:.48; }
+        .tr-sessionNavButton:disabled .tr-sessionNavCopy strong{ color:rgba(196,211,220,.5); }
+        .tr-sessionCurrentPanel{ min-height:146px; }
+
+        .tr-exerciseProgressPanel{
+          gap:15px;
+          padding:18px;
+          border-color:rgba(54,199,255,.13);
+          background:
+            radial-gradient(720px 210px at 3% -28%, rgba(0,178,255,.11), transparent 64%),
+            linear-gradient(180deg, rgba(10,16,22,.98), rgba(4,8,12,.99));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 18px 46px rgba(0,0,0,.18);
+        }
+        .tr-exerciseProgressTitle{
+          display:grid;
+          gap:5px;
+        }
+        .tr-exerciseProgressTitle strong{
+          color:rgba(238,246,251,.82);
+          font-size:12px;
+          font-weight:950;
+          letter-spacing:.025em;
+        }
+        .tr-exerciseProgressCount{
+          display:grid;
+          justify-items:end;
+          gap:5px;
+          line-height:1;
+        }
+        .tr-exerciseProgressCount strong{
+          color:#fff;
+          font-size:34px;
+          line-height:.9;
+          font-weight:1000;
+          letter-spacing:-.045em;
+          text-shadow:0 2px 0 rgba(0,0,0,.74),0 0 24px rgba(255,190,74,.10);
+        }
+        .tr-exerciseProgressCount span{
+          color:#ffd080;
+          font-size:8px;
+          letter-spacing:.17em;
+        }
+        .tr-exerciseProgressSegments{
+          display:grid;
+          gap:7px;
+        }
+        .tr-exerciseProgressSegment{
+          min-width:0;
+          height:12px;
+          padding:0;
+          overflow:hidden;
+          border:1px solid rgba(255,255,255,.075);
+          border-radius:999px;
+          background:rgba(255,255,255,.05);
+          color:transparent;
+          cursor:pointer;
+          transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease,background .16s ease;
+        }
+        .tr-exerciseProgressSegment span{ opacity:0; }
+        .tr-exerciseProgressSegment.is-complete{
+          border-color:rgba(76,229,132,.42);
+          background:linear-gradient(90deg,#16a84f,#6df19b);
+          box-shadow:0 0 15px rgba(69,226,128,.14);
+        }
+        .tr-exerciseProgressSegment.is-current{
+          border-color:rgba(57,206,255,.72);
+          background:linear-gradient(90deg,#079bd7,#55d8ff);
+          box-shadow:0 0 18px rgba(21,187,244,.22);
+        }
+        .tr-exerciseProgressSegment.is-next{
+          border-color:rgba(255,179,68,.58);
+          background:linear-gradient(90deg,rgba(255,151,0,.72),rgba(255,201,104,.88));
+          box-shadow:0 0 15px rgba(255,159,29,.13);
+        }
+        .tr-exerciseProgressSegment:hover,
+        .tr-exerciseProgressSegment:focus-visible{ transform:scaleY(1.18); }
+
+        .tr-exerciseProgressGrid{
+          grid-template-columns:repeat(3,minmax(0,1fr));
+          gap:10px;
+        }
+        .tr-exerciseProgressCard{
+          min-height:92px;
+          grid-template-columns:46px minmax(0,1fr);
+          gap:12px;
+          padding:13px 14px;
+          border-radius:17px;
+        }
+        .tr-exerciseProgressCard.is-current,
+        .tr-exerciseProgressCard.is-selected.is-current{
+          transform:translateY(-1px);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.075),
+            0 17px 34px rgba(0,0,0,.22),
+            0 0 30px rgba(0,181,255,.14);
+        }
+        .tr-exerciseProgressNumber{
+          width:44px;
+          height:44px;
+          border-radius:14px;
+          font-size:13px;
+        }
+        .tr-exerciseProgressText strong{
+          font-size:14px;
+          line-height:1.2;
+        }
+        .tr-exerciseProgressText small{
+          font-size:7.5px;
+          letter-spacing:.15em;
+        }
+
+        @media (max-width:980px){
+          .tr-sessionIntelPrimary{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+          .tr-sessionNavConsole{ grid-template-columns:140px minmax(0,1fr) 140px; }
+        }
+
+        @media (max-width:720px){
+          .tr-workoutCheckinCard .tr-card-head{
+            display:grid !important;
+            grid-template-columns:minmax(0,1fr) auto !important;
+            align-items:center !important;
+            gap:8px !important;
+            padding:11px 12px 9px !important;
+          }
+          .tr-workoutCheckinCard .tr-card-title{
+            font-size:10.5px;
+            letter-spacing:.15em;
+          }
+          .tr-workoutCheckinCard .tr-card-right{ min-width:0; }
+          .tr-checkinContext{
+            max-width:138px;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            font-size:7px;
+            letter-spacing:.11em;
+          }
+          .tr-workoutCheckinCard .tr-card-body{ padding:10px !important; }
+          .tr-sessionIntel{ gap:9px; }
+          .tr-sessionIntelPrimary{
+            grid-template-columns:1fr 1fr;
+            gap:8px;
+          }
+          .tr-sessionIntelMetric{
+            min-height:92px;
+            padding:12px 11px;
+            gap:6px;
+            border-radius:15px;
+          }
+          .tr-sessionIntelMetric.is-last{
+            grid-column:1 / -1;
+            min-height:80px;
+            grid-template-columns:minmax(0,1fr) auto;
+            align-items:center;
+          }
+          .tr-sessionIntelMetric.is-last .tr-kicker,
+          .tr-sessionIntelMetric.is-last > span{ grid-column:1; }
+          .tr-sessionIntelMetric.is-last strong{
+            grid-column:2;
+            grid-row:1 / span 2;
+            justify-self:end;
+            text-align:right;
+            font-size:22px;
+          }
+          .tr-sessionIntelMetric strong{ font-size:25px; }
+          .tr-sessionIntelMetric > span{
+            font-size:7px;
+            letter-spacing:.085em;
+          }
+
+          .tr-sessionIntelPerformance{
+            gap:10px;
+            padding:13px 12px;
+            border-radius:16px;
+          }
+          .tr-sessionIntelPerformanceHead{ align-items:start; }
+          .tr-sessionIntelPerformanceHead strong{ font-size:10px; }
+          .tr-sessionIntelDate{ font-size:7px; }
+          .tr-sessionIntelPerformanceGrid{
+            grid-template-columns:repeat(3,minmax(0,1fr));
+          }
+          .tr-sessionIntelPerformanceGrid > div{
+            gap:5px;
+            padding:11px 8px 10px;
+          }
+          .tr-sessionIntelPerformanceGrid strong{
+            font-size:clamp(17px,5.1vw,22px);
+          }
+          .tr-sessionIntelPerformanceGrid span{
+            font-size:6.5px;
+            letter-spacing:.08em;
+          }
+          .tr-sessionIntelDelta{
+            font-size:7px;
+            line-height:1.35;
+            letter-spacing:.075em;
+          }
+
+          .tr-sessionIntelWeek{
+            grid-template-columns:auto minmax(70px,1fr) auto;
+            gap:10px;
+            padding:12px;
+            border-radius:15px;
+          }
+          .tr-sessionIntelWeekCopy strong,
+          .tr-sessionIntelWeekTime strong{ font-size:18px; }
+          .tr-sessionIntelWeekRail{ gap:4px; }
+          .tr-sessionIntelWeekRail span{ height:6px; }
+          .tr-sessionIntelWeek span{
+            font-size:6.5px;
+            letter-spacing:.08em;
+          }
+
+          .tr-sessionNavConsole{
+            grid-template-columns:1fr 1fr;
+            grid-template-areas:"current current" "prev next";
+            gap:9px;
+          }
+          .tr-sessionCurrentPanel{
+            grid-area:current;
+            min-height:0;
+          }
+          .tr-sessionNavButton{
+            min-height:68px;
+            padding:10px;
+            gap:8px;
+            border-radius:15px;
+          }
+          .tr-sessionNavButton.is-prev{ grid-area:prev; }
+          .tr-sessionNavButton.is-next{ grid-area:next; }
+          .tr-sessionNavArrow{
+            width:29px;
+            height:29px;
+            border-radius:10px;
+            font-size:16px !important;
+          }
+          .tr-sessionNavCopy{ gap:4px; }
+          .tr-sessionNavCopy small{
+            font-size:6.5px;
+            letter-spacing:.12em;
+          }
+          .tr-sessionNavCopy strong{
+            font-size:9.5px;
+            -webkit-line-clamp:2;
+          }
+
+          .tr-exerciseProgressPanel{
+            padding:13px 11px 12px;
+            gap:12px;
+          }
+          .tr-exerciseProgressHeader{
+            align-items:end !important;
+            flex-direction:row !important;
+          }
+          .tr-exerciseProgressTitle strong{ font-size:9px; }
+          .tr-exerciseProgressCount{ min-width:72px; }
+          .tr-exerciseProgressCount strong{ font-size:31px; }
+          .tr-exerciseProgressCount span{ font-size:7px; }
+          .tr-exerciseProgressSegments{ gap:5px; }
+          .tr-exerciseProgressSegment{ height:10px; }
+
+          .tr-exerciseProgressGrid{
+            display:flex !important;
+            gap:8px !important;
+            overflow-x:auto;
+            overflow-y:hidden;
+            overscroll-behavior-x:contain;
+            scroll-snap-type:x proximity;
+            padding:1px 2px 7px;
+            scrollbar-width:none;
+          }
+          .tr-exerciseProgressGrid::-webkit-scrollbar{ display:none; }
+          .tr-exerciseProgressCard{
+            flex:0 0 min(72vw,280px);
+            min-height:74px;
+            grid-template-columns:39px minmax(0,1fr);
+            padding:10px;
+            scroll-snap-align:start;
+          }
+          .tr-exerciseProgressCard.is-selected{
+            order:-1;
+            flex-basis:calc(100% - 2px);
+            min-height:88px;
+          }
+          .tr-exerciseProgressNumber{
+            width:38px;
+            height:38px;
+            border-radius:12px;
+          }
+          .tr-exerciseProgressCard.is-selected .tr-exerciseProgressNumber{
+            width:42px;
+            height:42px;
+          }
+          .tr-exerciseProgressText{
+            display:grid !important;
+            grid-template-columns:1fr !important;
+            align-items:start !important;
+            gap:6px !important;
+          }
+          .tr-exerciseProgressText strong{
+            font-size:12px;
+            -webkit-line-clamp:2;
+          }
+          .tr-exerciseProgressCard.is-selected .tr-exerciseProgressText strong{
+            font-size:14px;
+          }
+          .tr-exerciseProgressText small{
+            justify-self:start !important;
+            font-size:7px !important;
+          }
+        }
+
+        @media (max-width:390px){
+          .tr-sessionIntelMetric strong{ font-size:22px; }
+          .tr-sessionIntelMetric.is-last strong{ font-size:19px; }
+          .tr-sessionIntelPerformanceGrid strong{ font-size:16px; }
+          .tr-sessionIntelWeekCopy strong,
+          .tr-sessionIntelWeekTime strong{ font-size:16px; }
+          .tr-sessionNavCopy strong{ font-size:8.8px; }
+          .tr-exerciseProgressCount strong{ font-size:29px; }
+        }
         .tr-addedBadge{
           height: 34px;
           min-width: 96px;
@@ -5861,7 +6919,7 @@ function ExerciseRunner({
     return Array.from(labels);
   }, [sets, historyStats]);
 
-  const readyToLock = painTouched && (timed || allSetsLogged);
+  const readyToLock = timed || allSetsLogged;
   const finalExercise = exerciseIndex >= totalExercises;
 
   const upsertSet = async (idx: number, patch: any) => {
@@ -6152,15 +7210,12 @@ const markDone = async () => {
   primeWorkoutAudio();
   void preloadWorkoutAlerts();
 
-  if (!painTouched) {
-    showToast("LOG PAIN BEFORE LOCKING DONE.", "err");
-    return;
-  }
-
   if (!timed && !allSetsLogged) {
     showToast("COMPLETE EVERY SET WITH WEIGHT, REPS, AND AN EFFORT RATING.", "err");
     return;
   }
+
+  await savePain(pain);
 
   if (timed) {
     await saveTimedActualMinutes();
@@ -6303,11 +7358,6 @@ const unlock = async () => {
               {painText(pain)}
             </div>
 
-            {!painTouched && !isDone ? (
-              <div className="tr-painRequired">
-                Required: move the slider once (even if you leave it at 0).
-              </div>
-            ) : null}
           </div>
 
           {timed ? (
