@@ -381,6 +381,290 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
   );
 }
 
+
+function MusicHeroFluidMotion({ playing }: { playing: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let frame = 0;
+    let width = 1;
+    let height = 1;
+    let dpr = 1;
+    let bass = 0;
+    let mids = 0;
+    let highs = 0;
+    let energy = 0;
+
+    const particles = Array.from({ length: 52 }, (_, index) => ({
+      seed: index * 17.731 + 3.17,
+      x: ((index * 37) % 101) / 101,
+      y: ((index * 61) % 97) / 97,
+      size: 0.55 + ((index * 13) % 11) / 10,
+      depth: 0.35 + ((index * 29) % 67) / 100,
+      speed: 0.55 + ((index * 19) % 31) / 24,
+    }));
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = Math.max(1, Math.floor(rect.width));
+      height = Math.max(1, Math.floor(rect.height));
+      dpr = Math.min(1.75, window.devicePixelRatio || 1);
+      const pixelWidth = Math.max(1, Math.floor(width * dpr));
+      const pixelHeight = Math.max(1, Math.floor(height * dpr));
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+    };
+
+    resize();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    observer?.observe(canvas);
+
+    const drawGlow = (
+      ctx: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      radiusX: number,
+      radiusY: number,
+      color: string,
+      alpha: number,
+    ) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(Math.max(0.001, radiusX / Math.max(1, radiusY)), 1);
+      const radius = Math.max(1, radiusY);
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      glow.addColorStop(0, color.replace("ALPHA", String(alpha)));
+      glow.addColorStop(0.34, color.replace("ALPHA", String(alpha * 0.72)));
+      glow.addColorStop(0.68, color.replace("ALPHA", String(alpha * 0.24)));
+      glow.addColorStop(1, color.replace("ALPHA", "0"));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawRibbon = (
+      ctx: CanvasRenderingContext2D,
+      time: number,
+      baseY: number,
+      amplitude: number,
+      phase: number,
+      lineWidth: number,
+      colorA: string,
+      colorB: string,
+      alpha: number,
+      frequency: number,
+      drift: number,
+    ) => {
+      const gradient = ctx.createLinearGradient(0, 0, width, 0);
+      gradient.addColorStop(0, colorA.replace("ALPHA", "0"));
+      gradient.addColorStop(0.18, colorA.replace("ALPHA", String(alpha * 0.74)));
+      gradient.addColorStop(0.5, colorB.replace("ALPHA", String(alpha)));
+      gradient.addColorStop(0.82, colorA.replace("ALPHA", String(alpha * 0.68)));
+      gradient.addColorStop(1, colorB.replace("ALPHA", "0"));
+
+      ctx.save();
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.shadowColor = colorB.replace("ALPHA", String(alpha * 0.72));
+      ctx.shadowBlur = Math.max(8, lineWidth * 1.45);
+      ctx.beginPath();
+
+      const steps = Math.max(40, Math.ceil(width / 16));
+      for (let step = 0; step <= steps; step += 1) {
+        const ratio = step / steps;
+        const x = ratio * width;
+        const envelope = Math.sin(Math.PI * ratio);
+        const y =
+          baseY +
+          Math.sin(ratio * Math.PI * frequency + time * drift + phase) * amplitude * envelope +
+          Math.sin(ratio * Math.PI * (frequency * 0.53) - time * drift * 0.67 + phase * 1.7) * amplitude * 0.36;
+        if (step === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    const draw = (now: number) => {
+      frame = window.requestAnimationFrame(draw);
+      if (typeof document !== "undefined" && document.hidden) return;
+
+      resize();
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
+      const bassTarget = Math.max(0, Math.min(1, ((Number(raw[0]) || 0) + (Number(raw[1]) || 0) + (Number(raw[2]) || 0)) / 2.25));
+      const midsTarget = Math.max(0, Math.min(1, ((Number(raw[3]) || 0) + (Number(raw[4]) || 0) + (Number(raw[5]) || 0) + (Number(raw[6]) || 0)) / 2.7));
+      const highsTarget = Math.max(0, Math.min(1, ((Number(raw[7]) || 0) + (Number(raw[8]) || 0) + (Number(raw[9]) || 0)) / 2.15));
+      bass += (bassTarget - bass) * 0.13;
+      mids += (midsTarget - mids) * 0.11;
+      highs += (highsTarget - highs) * 0.14;
+      const energyTarget = playing ? Math.max(bassTarget, midsTarget * 0.88, highsTarget * 0.74) : 0;
+      energy += (energyTarget - energy) * 0.10;
+
+      const t = now * 0.001;
+      const idle = playing ? 1 : 0.72;
+      const speed = (0.58 + energy * 1.22) * idle;
+      const pulse = 0.5 + 0.5 * Math.sin(t * (1.15 + bass * 1.8));
+      const travel = t * speed;
+
+      const base = ctx.createLinearGradient(0, 0, width, height);
+      base.addColorStop(0, "#02070b");
+      base.addColorStop(0.42, "#061018");
+      base.addColorStop(1, "#020509");
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.globalCompositeOperation = "screen";
+
+      const x1 = width * (0.62 + Math.sin(travel * 0.47) * 0.18);
+      const y1 = height * (0.34 + Math.cos(travel * 0.63) * 0.22);
+      drawGlow(ctx, x1, y1, width * (0.42 + bass * 0.12), height * (0.78 + bass * 0.20), "rgba(22,214,255,ALPHA)", 0.31 + bass * 0.20);
+
+      const x2 = width * (0.84 + Math.cos(travel * 0.38 + 1.3) * 0.17);
+      const y2 = height * (0.64 + Math.sin(travel * 0.51 + 0.7) * 0.26);
+      drawGlow(ctx, x2, y2, width * (0.37 + mids * 0.10), height * (0.64 + mids * 0.20), "rgba(104,73,255,ALPHA)", 0.25 + mids * 0.18);
+
+      const x3 = width * (0.48 + Math.sin(travel * 0.31 + 2.4) * 0.22);
+      const y3 = height * (0.76 + Math.cos(travel * 0.42 + 1.1) * 0.17);
+      drawGlow(ctx, x3, y3, width * (0.31 + highs * 0.08), height * (0.47 + highs * 0.15), "rgba(255,45,174,ALPHA)", 0.16 + highs * 0.20);
+
+      const x4 = width * (0.72 + Math.cos(travel * 0.29 + 3.0) * 0.25);
+      const y4 = height * (0.15 + Math.sin(travel * 0.44 + 1.8) * 0.18);
+      drawGlow(ctx, x4, y4, width * 0.28, height * 0.40, "rgba(70,255,174,ALPHA)", 0.12 + mids * 0.12);
+
+      const breathingRadius = width * (0.18 + pulse * 0.08 + bass * 0.07);
+      drawGlow(
+        ctx,
+        width * (0.66 + Math.sin(travel * 0.25) * 0.05),
+        height * (0.50 + Math.cos(travel * 0.31) * 0.06),
+        breathingRadius * 1.65,
+        height * (0.26 + pulse * 0.08 + bass * 0.08),
+        "rgba(115,225,255,ALPHA)",
+        0.12 + pulse * 0.08 + bass * 0.11,
+      );
+
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.32 + Math.sin(travel * 0.37) * 0.05),
+        height * (0.13 + bass * 0.07),
+        0.2,
+        Math.max(12, height * (0.055 + bass * 0.025)),
+        "rgba(26,205,255,ALPHA)",
+        "rgba(107,99,255,ALPHA)",
+        0.22 + bass * 0.15,
+        3.1,
+        1.25,
+      );
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.58 + Math.cos(travel * 0.31) * 0.06),
+        height * (0.16 + mids * 0.07),
+        2.0,
+        Math.max(10, height * (0.042 + mids * 0.024)),
+        "rgba(78,107,255,ALPHA)",
+        "rgba(236,67,255,ALPHA)",
+        0.17 + mids * 0.16,
+        4.0,
+        -0.94,
+      );
+      drawRibbon(
+        ctx,
+        travel,
+        height * (0.77 + Math.sin(travel * 0.42 + 1.4) * 0.04),
+        height * (0.09 + highs * 0.06),
+        4.2,
+        Math.max(7, height * (0.028 + highs * 0.018)),
+        "rgba(70,255,208,ALPHA)",
+        "rgba(45,186,255,ALPHA)",
+        0.13 + highs * 0.16,
+        5.2,
+        1.48,
+      );
+
+      ctx.globalCompositeOperation = "lighter";
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const phase = travel * particle.speed + particle.seed;
+        const orbitX = Math.sin(phase * 0.29 + particle.seed) * 0.11;
+        const orbitY = Math.cos(phase * 0.37 + particle.seed * 0.7) * 0.16;
+        const driftY = ((particle.y + travel * 0.018 * particle.speed) % 1.18) - 0.09;
+        const x = width * (particle.x + orbitX);
+        const y = height * (driftY + orbitY * 0.28);
+        const depthPulse = 0.62 + 0.38 * Math.sin(phase * 1.8);
+        const alpha = (0.10 + particle.depth * 0.18 + highs * 0.22) * depthPulse;
+        const radius = particle.size * (0.55 + particle.depth * 0.75 + highs * 0.34);
+
+        if (x < -12 || x > width + 12 || y < -12 || y > height + 12) continue;
+        ctx.beginPath();
+        ctx.fillStyle = index % 5 === 0
+          ? `rgba(182,121,255,${alpha})`
+          : index % 3 === 0
+            ? `rgba(84,255,217,${alpha})`
+            : `rgba(157,233,255,${alpha})`;
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (playing && highs > 0.16 && index % 7 === 0) {
+          const streak = 5 + highs * 18 * particle.depth;
+          ctx.strokeStyle = `rgba(202,245,255,${alpha * 0.48})`;
+          ctx.lineWidth = Math.max(0.5, radius * 0.45);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - streak, y + streak * 0.18);
+          ctx.stroke();
+        }
+      }
+
+      ctx.globalCompositeOperation = "source-over";
+
+      const softVignette = ctx.createRadialGradient(
+        width * 0.64,
+        height * 0.48,
+        Math.min(width, height) * 0.06,
+        width * 0.64,
+        height * 0.48,
+        Math.max(width, height) * 0.76,
+      );
+      softVignette.addColorStop(0, "rgba(0,0,0,0)");
+      softVignette.addColorStop(0.58, "rgba(0,0,0,.05)");
+      softVignette.addColorStop(1, "rgba(0,0,0,.48)");
+      ctx.fillStyle = softVignette;
+      ctx.fillRect(0, 0, width, height);
+
+      const sheen = ctx.createLinearGradient(0, 0, width, height);
+      sheen.addColorStop(0, "rgba(255,255,255,.025)");
+      sheen.addColorStop(0.35, "rgba(255,255,255,0)");
+      sheen.addColorStop(0.72, `rgba(93,223,255,${0.018 + energy * 0.025})`);
+      sheen.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = sheen;
+      ctx.fillRect(0, 0, width, height);
+    };
+
+    frame = window.requestAnimationFrame(draw);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [playing]);
+
+  return <canvas ref={canvasRef} className="tr-playerFluidCanvas" aria-hidden="true" />;
+}
+
 export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
   const player = useMusicPlayer();
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
@@ -652,6 +936,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       <div className="tr-playerHero">
         <div className="tr-playerAurora" aria-hidden="true">
           {artworkUrl ? <img className="tr-playerAuroraArt" src={artworkUrl} alt="" /> : null}
+          <MusicHeroFluidMotion playing={player.playing} />
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--one" />
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--two" />
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--three" />
@@ -1667,6 +1952,68 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
         @media(prefers-reduced-motion:reduce){
           .tr-playerAuroraArt,.tr-playerAuroraVeil{animation:none!important}
+        }
+
+
+        /* AUG 13 FLUID MOTION ENGINE: always-visible canvas movement + audio reactive depth */
+        .tr-playerAurora{
+          opacity:1!important;
+          background:#02070b!important;
+        }
+        .tr-playerFluidCanvas{
+          position:absolute!important;
+          inset:-4%!important;
+          z-index:4!important;
+          display:block!important;
+          width:108%!important;
+          height:108%!important;
+          max-width:none!important;
+          pointer-events:none!important;
+          opacity:.96!important;
+          transform:translate3d(0,0,0) scale(1.02)!important;
+          filter:saturate(1.18) contrast(1.06)!important;
+          will-change:contents;
+        }
+        .tr-playerAuroraArt{
+          z-index:1!important;
+          opacity:.24!important;
+          filter:blur(42px) saturate(1.95) contrast(1.08) brightness(.48)!important;
+          animation:trAuroraArtworkDrift 16s ease-in-out infinite alternate!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
+          opacity:.34!important;
+          animation-duration:10s!important;
+        }
+        .tr-playerAuroraVeil{z-index:3!important;filter:blur(15px)!important}
+        .tr-playerAuroraVeil--one{opacity:.24!important;animation-duration:10s!important}
+        .tr-playerAuroraVeil--two{opacity:.20!important;animation-duration:13s!important}
+        .tr-playerAuroraVeil--three{opacity:.24!important;animation-duration:8s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.31!important;animation-duration:7s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.27!important;animation-duration:9s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.33!important;animation-duration:6s!important}
+        .tr-playerAurora:after{
+          z-index:5!important;
+          background:
+            linear-gradient(90deg,rgba(1,5,8,.34) 0%,rgba(1,5,8,.03) 38%,rgba(1,5,8,.16) 100%),
+            radial-gradient(90% 130% at 67% 50%,transparent 24%,rgba(1,5,8,.26) 100%)!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          background:
+            linear-gradient(90deg,rgba(3,11,16,.43) 0%,rgba(3,10,15,.18) 48%,rgba(2,7,11,.36) 100%)!important;
+          backdrop-filter:none!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          background:
+            radial-gradient(78% 92% at 18% 50%,rgba(0,0,0,.17),transparent 72%),
+            linear-gradient(90deg,rgba(1,5,8,.16),transparent 52%,rgba(1,5,8,.07))!important;
+        }
+        @media(max-width:650px){
+          .tr-playerFluidCanvas{inset:-8%!important;width:116%!important;height:116%!important;opacity:.92!important}
+          .tr-playerAuroraArt{opacity:.20!important;filter:blur(30px) saturate(1.82) contrast(1.06) brightness(.45)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.28!important}
+          .tr-playerHero .tr-audioIdentity{
+            background:linear-gradient(90deg,rgba(3,11,16,.39),rgba(2,8,12,.17) 55%,rgba(1,6,9,.35))!important;
+          }
         }
 
         /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
