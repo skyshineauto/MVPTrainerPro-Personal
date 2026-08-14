@@ -650,6 +650,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     >
 
       <div className="tr-playerHero">
+        <div className="tr-playerAurora" aria-hidden="true">
+          {artworkUrl ? <img className="tr-playerAuroraArt" src={artworkUrl} alt="" /> : null}
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--one" />
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--two" />
+          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--three" />
+        </div>
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
@@ -1529,6 +1535,138 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-playerPreferenceStage button svg{width:15px!important;height:15px!important}
           .tr-playerPreferenceStage button>span{font-size:9px!important;letter-spacing:.01em!important}
           .tr-playerPreferenceStage .tr-prefDiscover{grid-column:1/-1!important;width:min(56%,180px)!important;justify-self:center!important}
+        }
+
+
+        /* AUG 13 LIVE PLAYER AURORA: artwork-derived color shift + premium motion */
+        .tr-playerHero{
+          isolation:isolate!important;
+          background:#040a0e!important;
+        }
+        .tr-playerAurora{
+          position:absolute!important;
+          inset:0!important;
+          z-index:0!important;
+          overflow:hidden!important;
+          pointer-events:none!important;
+          background:
+            radial-gradient(70% 90% at 72% 42%,rgba(37,186,225,.12),transparent 72%),
+            radial-gradient(52% 72% at 92% 16%,rgba(112,82,220,.08),transparent 74%),
+            #040a0e!important;
+        }
+        .tr-playerAurora:after{
+          content:"";
+          position:absolute;
+          inset:0;
+          pointer-events:none;
+          background:
+            linear-gradient(90deg,rgba(2,7,10,.48) 0%,rgba(2,7,10,.10) 36%,rgba(2,7,10,.26) 100%),
+            radial-gradient(80% 120% at 64% 50%,transparent 28%,rgba(1,5,8,.42) 100%);
+          z-index:5;
+        }
+        .tr-playerAuroraArt{
+          position:absolute!important;
+          left:20%!important;
+          top:-28%!important;
+          width:100%!important;
+          height:156%!important;
+          object-fit:cover!important;
+          object-position:center!important;
+          opacity:.34!important;
+          transform:translate3d(0,0,0) scale(1.20)!important;
+          filter:blur(34px) saturate(1.85) contrast(1.07) brightness(.58) hue-rotate(-8deg)!important;
+          will-change:transform,filter,opacity;
+          animation:trAuroraArtworkDrift 34s ease-in-out infinite alternate!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
+          opacity:.46!important;
+          animation-duration:17s!important;
+        }
+        .tr-playerAuroraVeil{
+          position:absolute!important;
+          display:block!important;
+          pointer-events:none!important;
+          mix-blend-mode:screen!important;
+          will-change:transform,opacity;
+          opacity:.17;
+          filter:blur(18px);
+        }
+        .tr-playerAuroraVeil--one{
+          width:62%;height:82%;right:-8%;top:-20%;
+          border-radius:46% 54% 62% 38%;
+          background:
+            radial-gradient(ellipse at 34% 48%,rgba(58,224,255,.38) 0%,rgba(42,146,255,.16) 31%,transparent 68%);
+          transform:rotate(-10deg) translate3d(0,0,0);
+          animation:trAuroraRibbonOne 22s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+        }
+        .tr-playerAuroraVeil--two{
+          width:70%;height:62%;right:3%;bottom:-27%;
+          border-radius:55% 45% 38% 62%;
+          background:
+            radial-gradient(ellipse at 56% 40%,rgba(118,91,255,.28) 0%,rgba(49,198,234,.20) 36%,transparent 70%);
+          transform:rotate(7deg) translate3d(0,0,0);
+          animation:trAuroraRibbonTwo 29s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+        }
+        .tr-playerAuroraVeil--three{
+          width:52%;height:46%;right:22%;top:28%;
+          border-radius:50%;
+          background:
+            linear-gradient(112deg,transparent 4%,rgba(104,237,255,.05) 18%,rgba(118,208,255,.26) 44%,rgba(171,110,255,.16) 64%,transparent 88%);
+          transform:rotate(-15deg) skewX(-11deg) translate3d(0,0,0);
+          animation:trAuroraRibbonThree 19s ease-in-out infinite alternate;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.27;animation-duration:13s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.24;animation-duration:17s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.29;animation-duration:11s}
+        .tr-playerHero .tr-audioArtwork{
+          z-index:3!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          z-index:3!important;
+          background:
+            linear-gradient(90deg,rgba(4,13,18,.70) 0%,rgba(4,12,17,.44) 46%,rgba(3,9,13,.62) 100%)!important;
+          text-shadow:0 2px 16px rgba(0,0,0,.78)!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          content:"";
+          position:absolute;
+          inset:0;
+          z-index:-1;
+          pointer-events:none;
+          background:
+            radial-gradient(70% 84% at 21% 50%,rgba(0,0,0,.18),transparent 72%),
+            linear-gradient(90deg,rgba(2,7,10,.20),transparent 52%,rgba(2,7,10,.12));
+        }
+        @keyframes trAuroraArtworkDrift{
+          0%{transform:translate3d(-3%,-1%,0) scale(1.20);filter:blur(34px) saturate(1.78) contrast(1.06) brightness(.56) hue-rotate(-10deg)}
+          48%{transform:translate3d(3%,2%,0) scale(1.26);filter:blur(36px) saturate(1.96) contrast(1.08) brightness(.61) hue-rotate(8deg)}
+          100%{transform:translate3d(-1%,4%,0) scale(1.22);filter:blur(34px) saturate(1.88) contrast(1.07) brightness(.58) hue-rotate(19deg)}
+        }
+        @keyframes trAuroraRibbonOne{
+          0%{transform:rotate(-12deg) translate3d(-8%,-4%,0) scale(.94)}
+          50%{transform:rotate(-5deg) translate3d(5%,7%,0) scale(1.08)}
+          100%{transform:rotate(-15deg) translate3d(11%,-1%,0) scale(1.02)}
+        }
+        @keyframes trAuroraRibbonTwo{
+          0%{transform:rotate(9deg) translate3d(8%,5%,0) scale(.96)}
+          50%{transform:rotate(2deg) translate3d(-6%,-7%,0) scale(1.10)}
+          100%{transform:rotate(12deg) translate3d(-1%,-2%,0) scale(1.03)}
+        }
+        @keyframes trAuroraRibbonThree{
+          0%{transform:rotate(-17deg) skewX(-11deg) translate3d(-10%,1%,0) scale(.92)}
+          50%{transform:rotate(-9deg) skewX(-7deg) translate3d(6%,-5%,0) scale(1.12)}
+          100%{transform:rotate(-19deg) skewX(-13deg) translate3d(12%,6%,0) scale(1.00)}
+        }
+        @media(max-width:650px){
+          .tr-playerAuroraArt{left:10%!important;top:-18%!important;width:112%!important;height:138%!important;filter:blur(24px) saturate(1.65) contrast(1.05) brightness(.52) hue-rotate(-6deg)!important;opacity:.30!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.39!important;animation-duration:21s!important}
+          .tr-playerAuroraVeil--one{width:70%;height:90%;right:-22%;top:-26%;filter:blur(13px)}
+          .tr-playerAuroraVeil--two{width:74%;height:68%;right:-10%;bottom:-30%;filter:blur(14px)}
+          .tr-playerAuroraVeil--three{display:none!important}
+          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(4,13,18,.66),rgba(3,10,14,.49) 55%,rgba(2,7,10,.67))!important}
+        }
+        @media(prefers-reduced-motion:reduce){
+          .tr-playerAuroraArt,.tr-playerAuroraVeil{animation:none!important}
         }
 
         /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
