@@ -175,7 +175,15 @@ function PlayerIcon({ name }: { name: IconName }) {
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
 
-function MusicActivityRta({ playing }: { playing: boolean }) {
+function MusicActivityRta({
+  playing,
+  profileLabel,
+  eqLabel,
+}: {
+  playing: boolean;
+  profileLabel: string;
+  eqLabel: string;
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -201,12 +209,12 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 30) return;
+      if (!visible || (typeof document !== "undefined" && document.hidden) || now - lastDraw < 28) return;
       lastDraw = now;
 
       const width = Math.max(1, Math.floor(canvas.clientWidth));
       const height = Math.max(1, Math.floor(canvas.clientHeight));
-      const dpr = Math.min(1.6, window.devicePixelRatio || 1);
+      const dpr = Math.min(1.75, window.devicePixelRatio || 1);
       const pixelWidth = Math.floor(width * dpr);
       const pixelHeight = Math.floor(height * dpr);
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -220,19 +228,28 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       ctx.clearRect(0, 0, width, height);
 
       const compact = width < 520;
-      const plotLeft = compact ? 6 : 34;
-      const plotRight = 6;
-      const plotTop = 7;
-      const plotBottom = 19;
+      const plotLeft = compact ? 6 : 36;
+      const plotRight = 7;
+      const plotTop = compact ? 23 : 28;
+      const plotBottom = compact ? 19 : 20;
       const plotWidth = Math.max(1, width - plotLeft - plotRight);
       const plotHeight = Math.max(1, height - plotTop - plotBottom);
 
       const background = ctx.createLinearGradient(0, 0, 0, height);
-      background.addColorStop(0, "#09141a");
-      background.addColorStop(0.36, "#040b0f");
+      background.addColorStop(0, "#081319");
+      background.addColorStop(0.24, "#041016");
+      background.addColorStop(0.70, "#02080c");
       background.addColorStop(1, "#010405");
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, width, height);
+
+      // Recessed optical-glass crown. Purely visual and does not touch the audio signal.
+      const crown = ctx.createLinearGradient(0, 0, 0, Math.max(24, plotTop));
+      crown.addColorStop(0, "rgba(132,229,255,.055)");
+      crown.addColorStop(0.42, "rgba(51,132,157,.018)");
+      crown.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = crown;
+      ctx.fillRect(0, 0, width, plotTop + 4);
 
       const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
       let framePeak = 0;
@@ -243,33 +260,34 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
         frameSum += value;
       }
       const frameAverage = frameSum / 10;
-      const activity = Math.max(0, Math.min(1, (framePeak - 0.025) / 0.52));
-      const dynamicFloor = Math.min(framePeak * 0.46, Math.max(0.014, frameAverage * 0.52));
-      const dynamicRange = Math.max(0.075, framePeak - dynamicFloor);
+      const activity = Math.max(0, Math.min(1, (framePeak - 0.022) / 0.50));
+      const dynamicFloor = Math.min(framePeak * 0.44, Math.max(0.012, frameAverage * 0.48));
+      const dynamicRange = Math.max(0.078, framePeak - dynamicFloor);
 
       for (let index = 0; index < 10; index += 1) {
         const source = Math.max(0, Math.min(1, Number(raw[index]) || 0));
-        const opened = source < 0.014 ? 0 : Math.min(1, (source - 0.014) / 0.72);
-        const absoluteShape = Math.pow(opened, 1.02);
+        const opened = source < 0.012 ? 0 : Math.min(1, (source - 0.012) / 0.70);
+        const absoluteShape = Math.pow(opened, 1.015);
         const contrast = Math.max(0, Math.min(1, (source - dynamicFloor) / dynamicRange));
-        const contrastShape = Math.pow(contrast, 1.34) * activity;
+        const contrastShape = Math.pow(contrast, 1.30) * activity;
         const transient = playing ? Math.max(0, source - rawHistory[index]) : 0;
         rawHistory[index] = source;
 
-        // All three terms come from the real analyzer signal. The frame-relative contrast and
-        // short transient lift simply use more of the available meter travel so the display
-        // behaves like a lively hardware RTA instead of ten similarly tall columns.
-        const shaped = Math.min(1, absoluteShape * 0.62 + contrastShape * 0.31 + Math.min(0.16, transient * 1.65));
+        // Every movement term comes from the real analyzer signal. No fake/random motion.
+        const shaped = Math.min(1, absoluteShape * 0.66 + contrastShape * 0.28 + Math.min(0.12, transient * 1.35));
         const previous = displayed[index];
-        const attack = 0.97;
-        const release = playing ? 0.105 : 0.46;
+        const attack = 0.91;
+        // Bass decays with more physical weight; upper bands release faster and finer.
+        const frequencyRelease = 0.095 + index * 0.0105;
+        const release = playing ? frequencyRelease : 0.44;
         displayed[index] = previous + (shaped - previous) * (shaped > previous ? attack : release);
 
-        if (displayed[index] >= peaks[index] - 0.003) {
+        if (displayed[index] >= peaks[index] - 0.0025) {
           peaks[index] = displayed[index];
-          peakHoldUntil[index] = now + 680;
+          peakHoldUntil[index] = now + 720;
         } else if (now > peakHoldUntil[index]) {
-          peaks[index] = Math.max(displayed[index], peaks[index] - 0.013);
+          const peakFall = 0.0095 + index * 0.00075;
+          peaks[index] = Math.max(displayed[index], peaks[index] - peakFall);
         }
       }
 
@@ -278,17 +296,28 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
       gridRatios.forEach((ratio, index) => {
         const y = Math.round(plotTop + plotHeight * ratio) + 0.5;
         ctx.strokeStyle = index === 0 || index === gridRatios.length - 1
-          ? "rgba(127,207,231,.13)"
-          : "rgba(127,207,231,.072)";
+          ? "rgba(126,207,231,.135)"
+          : "rgba(126,207,231,.058)";
         ctx.beginPath();
         ctx.moveTo(plotLeft, y);
         ctx.lineTo(width - plotRight, y);
         ctx.stroke();
       });
 
+      // Fine subdivisions give the window studio-RTA precision without becoming graph paper.
+      for (let division = 1; division < 10; division += 1) {
+        if (division % 2 === 0) continue;
+        const y = Math.round(plotTop + plotHeight * (division / 10)) + 0.5;
+        ctx.strokeStyle = "rgba(105,185,210,.024)";
+        ctx.beginPath();
+        ctx.moveTo(plotLeft, y);
+        ctx.lineTo(width - plotRight, y);
+        ctx.stroke();
+      }
+
       if (!compact) {
         const dbLabels = ["0", "-12", "-24", "-36", "-48", "-60"];
-        ctx.fillStyle = "rgba(181,212,222,.56)";
+        ctx.fillStyle = "rgba(187,220,230,.58)";
         ctx.font = "800 8px system-ui, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
@@ -297,95 +326,85 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
         });
       }
 
-      const gap = Math.max(compact ? 3 : 6, Math.min(compact ? 6 : 10, plotWidth * 0.009));
+      const gap = Math.max(compact ? 3 : 7, Math.min(compact ? 6 : 12, plotWidth * 0.010));
       const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
-      const barWidth = Math.max(6, slotWidth * (compact ? 0.58 : 0.56));
-      const insetX = (slotWidth - barWidth) / 2;
-
-      const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
-      wellGradient.addColorStop(0, "rgba(36,23,12,.20)");
-      wellGradient.addColorStop(0.18, "rgba(22,30,18,.16)");
-      wellGradient.addColorStop(0.52, "rgba(5,29,35,.28)");
-      wellGradient.addColorStop(1, "rgba(1,11,17,.86)");
-
-      const meterGradient = ctx.createLinearGradient(0, plotTop + plotHeight, 0, plotTop);
-      meterGradient.addColorStop(0, "#057f9d");
-      meterGradient.addColorStop(0.20, "#0fb6d0");
-      meterGradient.addColorStop(0.42, "#25d4db");
-      meterGradient.addColorStop(0.62, "#55d58a");
-      meterGradient.addColorStop(0.78, "#d6d64a");
-      meterGradient.addColorStop(0.90, "#f0a43e");
-      meterGradient.addColorStop(1, "#f26f54");
 
       for (let band = 0; band < 10; band += 1) {
         const slotX = plotLeft + band * (slotWidth + gap);
-        const barX = slotX + insetX;
+        const widthRatio = Math.max(0.48, 0.64 - band * 0.014);
+        const barWidth = Math.max(5, slotWidth * (compact ? Math.max(0.50, widthRatio - 0.05) : widthRatio));
+        const barX = slotX + (slotWidth - barWidth) / 2;
 
+        // Smoked recessed meter well with a fine vertical spine.
+        const wellGradient = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight);
+        wellGradient.addColorStop(0, "rgba(40,69,79,.16)");
+        wellGradient.addColorStop(0.42, "rgba(7,30,38,.22)");
+        wellGradient.addColorStop(1, "rgba(1,9,13,.82)");
         ctx.fillStyle = wellGradient;
         ctx.fillRect(slotX, plotTop, slotWidth, plotHeight);
-        ctx.fillStyle = "rgba(255,255,255,.025)";
-        ctx.fillRect(slotX + 1, plotTop + 1, 1, plotHeight - 2);
-        ctx.fillStyle = "rgba(0,0,0,.28)";
-        ctx.fillRect(slotX + slotWidth - 2, plotTop + 1, 1, plotHeight - 2);
-        ctx.strokeStyle = "rgba(110,195,219,.105)";
+        ctx.strokeStyle = "rgba(111,196,221,.09)";
         ctx.strokeRect(Math.round(slotX) + 0.5, Math.round(plotTop) + 0.5, Math.max(1, Math.round(slotWidth) - 1), Math.max(1, Math.round(plotHeight) - 1));
+        ctx.fillStyle = "rgba(190,238,250,.025)";
+        ctx.fillRect(Math.round(slotX + slotWidth * 0.5), plotTop + 1, 1, plotHeight - 2);
 
         const level = Math.max(0, Math.min(1, displayed[band]));
         const activeHeight = Math.max(0, plotHeight * level);
         if (activeHeight > 0.5) {
           const activeY = plotTop + plotHeight - activeHeight;
-          ctx.fillStyle = meterGradient;
-          ctx.fillRect(barX, activeY, barWidth, activeHeight);
+          const segmentHeight = compact ? 2.2 : 2.7;
+          const segmentGap = compact ? 1.65 : 1.9;
+          const pitch = segmentHeight + segmentGap;
+          const segmentCount = Math.ceil(activeHeight / pitch);
 
-          // Narrow luminous core creates depth without an expensive full-canvas blur.
-          const coreWidth = Math.max(1, barWidth * 0.30);
-          ctx.fillStyle = level > 0.82 ? "rgba(255,236,170,.23)" : "rgba(198,249,255,.17)";
-          ctx.fillRect(barX + (barWidth - coreWidth) / 2, activeY, coreWidth, activeHeight);
-          ctx.fillStyle = "rgba(255,255,255,.17)";
-          ctx.fillRect(barX + 1, activeY, 1, activeHeight);
-          ctx.fillStyle = "rgba(0,0,0,.22)";
-          ctx.fillRect(barX + barWidth - 2, activeY, 1, activeHeight);
-          ctx.fillStyle = level > 0.78 ? "rgba(255,224,139,.62)" : "rgba(205,251,255,.48)";
-          ctx.fillRect(barX, Math.round(activeY), barWidth, compact ? 1 : 1.5);
+          ctx.save();
+          ctx.shadowColor = "rgba(45,211,242,.22)";
+          ctx.shadowBlur = compact ? 3 : 5;
+          for (let segment = 0; segment < segmentCount; segment += 1) {
+            const segmentY = plotTop + plotHeight - (segment + 1) * pitch;
+            if (segmentY + segmentHeight < activeY) continue;
+            const normalizedHeight = 1 - (segmentY - plotTop) / plotHeight;
+            let color = "rgba(31,205,229,.96)";
+            if (normalizedHeight > 0.88) color = "rgba(255,190,73,.98)";
+            else if (normalizedHeight > 0.76) color = "rgba(117,229,203,.98)";
+            else if (normalizedHeight > 0.54) color = "rgba(54,220,229,.98)";
+            ctx.fillStyle = color;
+            ctx.fillRect(barX, segmentY, barWidth, segmentHeight);
 
-          const division = compact ? 6 : 7;
-          ctx.strokeStyle = "rgba(0,5,8,.28)";
-          for (let y = plotTop + plotHeight - division; y > activeY; y -= division) {
-            ctx.beginPath();
-            ctx.moveTo(barX, Math.round(y) + 0.5);
-            ctx.lineTo(barX + barWidth, Math.round(y) + 0.5);
-            ctx.stroke();
+            // Fine luminous center keeps each segment dimensional rather than flat.
+            ctx.fillStyle = normalizedHeight > 0.88 ? "rgba(255,243,195,.24)" : "rgba(222,252,255,.19)";
+            const coreWidth = Math.max(1, barWidth * 0.28);
+            ctx.fillRect(barX + (barWidth - coreWidth) / 2, segmentY, coreWidth, segmentHeight);
           }
+          ctx.restore();
 
-          if (level > 0.72) {
-            const hotHeight = Math.min(activeHeight, plotHeight * 0.16);
-            ctx.fillStyle = "rgba(255,184,65,.10)";
-            ctx.fillRect(barX, activeY, barWidth, hotHeight);
-          }
+          // Gentle level cap. Amber only represents the upper operating range, never random decoration.
+          ctx.fillStyle = level > 0.86 ? "rgba(255,214,113,.78)" : "rgba(213,250,255,.46)";
+          ctx.fillRect(barX - 0.5, Math.round(activeY), barWidth + 1, compact ? 1 : 1.4);
         }
 
-        if (playing && peaks[band] > 0.025) {
+        if (playing && peaks[band] > 0.022) {
           const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peaks[band]));
           ctx.save();
-          ctx.fillStyle = peaks[band] > 0.82 ? "#ffd66e" : "#dffaff";
-          ctx.shadowColor = peaks[band] > 0.82 ? "rgba(255,183,61,.58)" : "rgba(97,226,255,.48)";
-          ctx.shadowBlur = compact ? 3 : 4;
-          ctx.fillRect(barX - 1, Math.round(peakY), barWidth + 2, compact ? 1.5 : 2);
+          const hotPeak = peaks[band] > 0.86;
+          ctx.fillStyle = hotPeak ? "#ffd66f" : "#e2fbff";
+          ctx.shadowColor = hotPeak ? "rgba(255,183,61,.62)" : "rgba(97,226,255,.50)";
+          ctx.shadowBlur = compact ? 3 : 5;
+          ctx.fillRect(barX - 1.5, Math.round(peakY), barWidth + 3, compact ? 1.35 : 1.7);
           ctx.restore();
         }
       }
 
-      const floorGlow = ctx.createLinearGradient(0, plotTop + plotHeight * 0.72, 0, plotTop + plotHeight);
-      floorGlow.addColorStop(0, "rgba(13,123,151,0)");
-      floorGlow.addColorStop(1, playing && framePeak > 0.08 ? "rgba(14,142,166,.075)" : "rgba(14,142,166,.02)");
+      const floorGlow = ctx.createLinearGradient(0, plotTop + plotHeight * 0.68, 0, plotTop + plotHeight);
+      floorGlow.addColorStop(0, "rgba(13,143,173,0)");
+      floorGlow.addColorStop(1, playing && framePeak > 0.075 ? "rgba(18,173,199,.075)" : "rgba(18,143,171,.018)");
       ctx.fillStyle = floorGlow;
-      ctx.fillRect(plotLeft, plotTop + plotHeight * 0.68, plotWidth, plotHeight * 0.32);
+      ctx.fillRect(plotLeft, plotTop + plotHeight * 0.66, plotWidth, plotHeight * 0.34);
 
-      const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.55);
-      glass.addColorStop(0, "rgba(255,255,255,.035)");
+      const glass = ctx.createLinearGradient(0, plotTop, 0, plotTop + plotHeight * 0.48);
+      glass.addColorStop(0, "rgba(255,255,255,.032)");
       glass.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = glass;
-      ctx.fillRect(plotLeft, plotTop, plotWidth, plotHeight * 0.55);
+      ctx.fillRect(plotLeft, plotTop, plotWidth, plotHeight * 0.48);
     };
 
     frame = window.requestAnimationFrame(draw);
@@ -396,15 +415,18 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
   }, [playing]);
 
   return (
-    <div ref={hostRef} className="tr-activityRta tr-activityRta--10band" aria-label="10 band real-time spectrum analyzer">
+    <div ref={hostRef} className="tr-activityRta tr-activityRta--10band tr-rtaFidelity" aria-label="10 band real-time spectrum analyzer">
       <canvas ref={canvasRef} />
+      <div className="tr-rtaFidelityHead" aria-hidden>
+        <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
+        <strong>{profileLabel}<b>•</b>{eqLabel}</strong>
+      </div>
       <div className="tr-activityRtaLabels" aria-hidden>
         {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
       </div>
     </div>
   );
 }
-
 
 type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
@@ -1525,6 +1547,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const presetStatusLabel = activeSavedProfile
     ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
     : player.eqPreset === "custom" ? "Unsaved custom DSP" : "Built-in preset";
+  const dspOutputStatus = MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel;
+  const activeBuiltInEq = (MUSIC_EQ_PRESETS as Record<string, { label: string }>)[player.eqPreset]?.label;
+  const dspEqStatus = player.outputProfile === "reference" || player.dspBypass
+    ? "REFERENCE"
+    : !player.eqEnabled
+      ? "FLAT"
+      : activeSavedProfile?.name || activeBuiltInEq || "CUSTOM";
 
   return (
     <section
@@ -1584,7 +1613,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
       </div>
 
-      <MusicActivityRta playing={player.playing} />
+      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} />
 
 
       <div className="tr-playerUtilityRow">
@@ -1604,8 +1633,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
             </select>
           </label>
-          <button type="button" className={`tr-audioEqToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
-            <PlayerIcon name="equalizer" /><span>DSP / EQ</span>
+          <button type="button" className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
+            <span className="tr-dspStatusIcon"><PlayerIcon name="equalizer" /></span>
+            <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
+            <i className={`tr-dspStatusLed ${player.dspStatus === "active" ? "is-live" : ""}`} aria-hidden />
           </button>
         </div>
       </div>
@@ -3388,6 +3419,75 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphoneProcessor.is-disabled{opacity:.48!important;filter:saturate(.55)!important}.tr-headphoneProcessor.is-disabled:before{content:"HEADPHONE PROCESSING BYPASSED"!important;display:block!important;margin:0 0 10px!important;padding:7px 9px!important;border:1px solid rgba(85,173,204,.13)!important;border-radius:7px!important;background:rgba(1,8,12,.48)!important;color:#7e9ba6!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.09em!important}.tr-headphoneProcessor header>div>small{display:block!important;margin-top:4px!important;color:#718b95!important;font-size:7px!important;font-weight:750!important}
         .tr-audioEqPanel select:disabled,.tr-audioEqPanel input:disabled,.tr-audioEqPanel button:disabled{cursor:not-allowed!important;opacity:.50!important}
         @media(max-width:650px){.tr-outputProfilePanel{grid-template-columns:1fr!important;gap:10px!important;padding:12px!important}.tr-outputProfileTelemetry{grid-column:1!important;gap:5px!important}.tr-outputProfileTelemetry>span{font-size:6px!important;padding:0 6px!important}.tr-outputProfileIntro strong{font-size:14px!important}.tr-outputProfileIntro p{font-size:8.5px!important}.tr-outputProfileSelect select{height:40px!important;font-size:11px!important}}
+
+
+        /* V12.3 TRUE-FIDELITY DSP STATUS + REAL-TIME SPECTRUM VISUAL PASS */
+        .tr-rtaFidelity{
+          width:calc(100% - 20px)!important;height:126px!important;margin:0 auto 8px!important;
+          border:1px solid rgba(105,209,238,.28)!important;border-top-color:rgba(176,237,252,.37)!important;border-radius:11px!important;
+          background:linear-gradient(180deg,#071219 0%,#02080c 48%,#010405 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.045),inset 0 -24px 34px rgba(0,0,0,.42),0 8px 24px rgba(0,0,0,.20)!important;
+          overflow:hidden!important;isolation:isolate!important;
+        }
+        .tr-rtaFidelity:before{
+          content:""!important;position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
+          background:linear-gradient(115deg,rgba(255,255,255,.045),transparent 18%,transparent 72%,rgba(82,207,239,.025))!important;
+          box-shadow:inset 0 0 0 1px rgba(255,255,255,.012)!important;
+        }
+        .tr-rtaFidelity canvas{z-index:0!important}
+        .tr-rtaFidelityHead{
+          position:absolute!important;z-index:3!important;left:11px!important;right:11px!important;top:6px!important;height:15px!important;
+          display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;pointer-events:none!important;
+          color:#91adb8!important;font-size:6.5px!important;font-weight:1000!important;letter-spacing:.10em!important;line-height:1!important;
+        }
+        .tr-rtaFidelityHead>span{display:inline-flex!important;align-items:center!important;gap:6px!important;white-space:nowrap!important;color:#b8d4de!important}
+        .tr-rtaFidelityHead>span i{width:5px!important;height:5px!important;border-radius:50%!important;background:#415961!important;box-shadow:0 0 0 3px rgba(75,105,116,.06)!important}
+        .tr-rtaFidelityHead>span i.is-live{background:#4fe4ff!important;box-shadow:0 0 8px rgba(79,228,255,.58),0 0 0 3px rgba(79,228,255,.065)!important}
+        .tr-rtaFidelityHead>strong{min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;color:#83dff5!important;font-size:6.7px!important;font-weight:1000!important;letter-spacing:.075em!important;text-align:right!important}
+        .tr-rtaFidelityHead>strong b{margin:0 5px!important;color:#4c6c78!important;font-weight:1000!important}
+        .tr-rtaFidelity .tr-activityRtaLabels{left:36px!important;right:7px!important;bottom:4px!important;gap:clamp(7px,1vw,12px)!important;z-index:3!important}
+        .tr-rtaFidelity .tr-activityRtaLabels span{color:#c2dbe3!important;font-size:7.8px!important;font-weight:1000!important;letter-spacing:.015em!important;text-shadow:0 1px 0 #000!important}
+
+        .tr-playerSourceTools{grid-template-columns:minmax(180px,1fr) 154px!important;gap:8px!important}
+        .tr-playerSourceTools .tr-dspStatusToggle{
+          position:relative!important;width:154px!important;min-width:154px!important;max-width:154px!important;height:43px!important;min-height:43px!important;
+          padding:0 11px!important;display:grid!important;grid-template-columns:25px minmax(0,1fr) 7px!important;gap:8px!important;align-items:center!important;justify-content:stretch!important;
+          overflow:hidden!important;border:1px solid rgba(102,206,238,.30)!important;border-top-color:rgba(179,234,250,.34)!important;border-radius:10px!important;
+          background:linear-gradient(180deg,rgba(16,34,43,.98),rgba(5,17,23,.99))!important;color:#eefaff!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.055),inset 0 -1px 0 rgba(0,0,0,.64),0 7px 18px rgba(0,0,0,.22)!important;
+          backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
+        }
+        .tr-playerSourceTools .tr-dspStatusToggle:before{
+          content:""!important;position:absolute!important;left:14%!important;right:14%!important;top:0!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(209,246,255,.52),transparent)!important;pointer-events:none!important;
+        }
+        .tr-playerSourceTools .tr-dspStatusToggle:hover{border-color:rgba(84,220,255,.54)!important;background:linear-gradient(180deg,#112d39,#071a22)!important}
+        .tr-playerSourceTools .tr-dspStatusToggle.is-active{border-color:rgba(74,219,255,.68)!important;background:linear-gradient(180deg,#0d3544,#071d27)!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 0 18px rgba(50,199,239,.13)!important}
+        .tr-dspStatusIcon{width:25px!important;height:25px!important;display:grid!important;place-items:center!important;border:1px solid rgba(100,202,232,.18)!important;border-radius:7px!important;background:linear-gradient(180deg,rgba(13,46,58,.86),rgba(4,18,25,.92))!important;color:#8ee8ff!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr-dspStatusIcon svg{width:15px!important;height:15px!important;fill:currentColor!important}
+        .tr-dspStatusCopy{min-width:0!important;display:grid!important;gap:2px!important;text-align:left!important;line-height:1!important}
+        .tr-dspStatusCopy b{display:block!important;color:#f4fbfe!important;font-size:8.7px!important;font-weight:1000!important;letter-spacing:.055em!important;white-space:nowrap!important}
+        .tr-dspStatusCopy small{display:block!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;color:#75cfe5!important;font-size:6.1px!important;font-weight:1000!important;letter-spacing:.035em!important}
+        .tr-dspStatusLed{width:6px!important;height:6px!important;border-radius:50%!important;background:#43555c!important;box-shadow:0 0 0 3px rgba(70,91,99,.07)!important}
+        .tr-dspStatusLed.is-live{background:#56e6b0!important;box-shadow:0 0 8px rgba(86,230,176,.52),0 0 0 3px rgba(86,230,176,.06)!important}
+
+        @media(max-width:650px){
+          .tr-rtaFidelity{width:calc(100% - 12px)!important;height:98px!important;margin:0 auto 6px!important;border-radius:9px!important}
+          .tr-rtaFidelityHead{left:8px!important;right:8px!important;top:5px!important;font-size:5.6px!important;letter-spacing:.07em!important}
+          .tr-rtaFidelityHead>strong{font-size:5.8px!important;letter-spacing:.035em!important;max-width:52%!important}
+          .tr-rtaFidelityHead>strong b{margin:0 3px!important}
+          .tr-rtaFidelity .tr-activityRtaLabels{left:6px!important;right:6px!important;bottom:3px!important;gap:4px!important}
+          .tr-rtaFidelity .tr-activityRtaLabels span{font-size:6.6px!important;letter-spacing:-.015em!important}
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 126px!important;gap:6px!important}
+          .tr-playerSourceTools .tr-dspStatusToggle{width:126px!important;min-width:126px!important;max-width:126px!important;height:40px!important;min-height:40px!important;padding:0 7px!important;grid-template-columns:22px minmax(0,1fr) 6px!important;gap:6px!important;border-radius:9px!important}
+          .tr-dspStatusIcon{width:22px!important;height:22px!important;border-radius:6px!important}.tr-dspStatusIcon svg{width:13px!important;height:13px!important}
+          .tr-dspStatusCopy b{font-size:7.8px!important}.tr-dspStatusCopy small{font-size:5.4px!important;letter-spacing:0!important}.tr-dspStatusLed{width:5px!important;height:5px!important}
+        }
+        @media(max-width:380px){
+          .tr-playerSourceTools{grid-template-columns:minmax(0,1fr) 116px!important}
+          .tr-playerSourceTools .tr-dspStatusToggle{width:116px!important;min-width:116px!important;max-width:116px!important;padding:0 6px!important;grid-template-columns:21px minmax(0,1fr) 5px!important;gap:5px!important}
+          .tr-dspStatusCopy small{font-size:5.1px!important}
+        }
 
 
       `}</style>
