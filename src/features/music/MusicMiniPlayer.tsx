@@ -384,18 +384,17 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
 type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
-type HeroSceneName = "fluid" | "silk" | "glass" | "neural" | "photons" | "plasma" | "space" | "drift";
-type HeroAudioShape = { low: number; mid: number; high: number; energy: number; depth: number; pulse: number; speed: number };
 
-const HERO_SCENES: HeroSceneName[] = ["fluid", "silk", "glass", "neural", "photons", "plasma", "space", "drift"];
+const HERO_SCENE_COUNT = 8;
 const HERO_SCENE_MS = 9000;
-const HERO_CROSSFADE_MS = 2200;
+const HERO_CROSSFADE_MS = 2000;
+const HERO_ENGINE_EPOCH_MS = Date.now();
 const HERO_NEUTRAL_PALETTE: HeroPalette = [
   { r: 196, g: 216, b: 220 },
   { r: 137, g: 164, b: 171 },
   { r: 194, g: 151, b: 114 },
   { r: 241, g: 235, b: 220 },
-  { r: 24, g: 31, b: 35 },
+  { r: 20, g: 27, b: 31 },
 ];
 
 function heroClamp(value: number, min = 0, max = 1) {
@@ -411,13 +410,6 @@ function heroHash(value: string) {
   return hash >>> 0;
 }
 
-function heroNoise(index: number, seed: number) {
-  let value = Math.imul(index + 1, 374761393) ^ Math.imul(seed + 23, 668265263);
-  value = (value ^ (value >>> 13)) >>> 0;
-  value = Math.imul(value, 1274126177) >>> 0;
-  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
-}
-
 function heroMix(left: HeroRgb, right: HeroRgb, amount: number): HeroRgb {
   const mix = heroClamp(amount);
   return {
@@ -425,10 +417,6 @@ function heroMix(left: HeroRgb, right: HeroRgb, amount: number): HeroRgb {
     g: left.g + (right.g - left.g) * mix,
     b: left.b + (right.b - left.b) * mix,
   };
-}
-
-function heroRgba(color: HeroRgb, alpha: number) {
-  return `rgba(${Math.round(color.r)},${Math.round(color.g)},${Math.round(color.b)},${heroClamp(alpha).toFixed(3)})`;
 }
 
 function heroLightness(color: HeroRgb) {
@@ -526,9 +514,300 @@ function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
     .sort((a, b) => (b.light * 1.5 + b.saturation * 0.35 + Math.sqrt(b.hits) * 0.03) - (a.light * 1.5 + a.saturation * 0.35 + Math.sqrt(a.hits) * 0.03))[0];
   const highlightBase = highlightCandidate?.color ?? chosen.reduce((best, color) => heroLightness(color) > heroLightness(best) ? color : best, chosen[0]);
   const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.18);
-  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.48), { r: 0, g: 0, b: 0 }, 0.80);
+  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.48), { r: 0, g: 0, b: 0 }, 0.82);
   return [chosen[0], chosen[1], chosen[2], highlight, shadow];
 }
+
+const HERO_VERTEX_SHADER = `
+  attribute vec2 a_position;
+  void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+  }
+`;
+
+const HERO_FRAGMENT_SHADER = `
+  precision highp float;
+
+  uniform vec2 u_resolution;
+  uniform float u_time;
+  uniform float u_sceneA;
+  uniform float u_sceneB;
+  uniform float u_blend;
+  uniform vec4 u_audio;
+  uniform float u_character;
+  uniform vec3 u_c0;
+  uniform vec3 u_c1;
+  uniform vec3 u_c2;
+  uniform vec3 u_c3;
+  uniform vec3 u_c4;
+
+  #define PI 3.14159265359
+
+  float sat(float value) { return clamp(value, 0.0, 1.0); }
+  vec2 rot(vec2 p, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat2(c, -s, s, c) * p;
+  }
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  vec2 hash22(vec2 p) {
+    float n = hash21(p);
+    return vec2(n, hash21(p + n + 19.19));
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
+
+  float fbm(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.52;
+    mat2 matrix = mat2(0.80, -0.60, 0.60, 0.80);
+    for (int i = 0; i < 5; i++) {
+      value += amplitude * noise(p);
+      p = matrix * p * 2.03 + vec2(17.1, 9.2);
+      amplitude *= 0.50;
+    }
+    return value;
+  }
+
+  float ridge(vec2 p) {
+    float n = fbm(p);
+    return 1.0 - abs(n * 2.0 - 1.0);
+  }
+
+  vec3 palette(float amount) {
+    float x = fract(amount) * 3.0;
+    if (x < 1.0) return mix(u_c0, u_c1, smoothstep(0.0, 1.0, x));
+    if (x < 2.0) return mix(u_c1, u_c2, smoothstep(0.0, 1.0, x - 1.0));
+    return mix(u_c2, u_c3, smoothstep(0.0, 1.0, x - 2.0));
+  }
+
+  vec3 baseDark() {
+    return mix(vec3(0.0035, 0.006, 0.008), u_c4, 0.70);
+  }
+
+  vec2 centeredUv(vec2 uv) {
+    vec2 p = uv - 0.5;
+    p.x *= u_resolution.x / max(1.0, u_resolution.y);
+    return p;
+  }
+
+  vec3 sceneFluid(vec2 uv, float t) {
+    vec2 p = centeredUv(uv) * 1.78;
+    float a = 0.055 + u_audio.x * 0.075;
+    vec2 q = vec2(
+      fbm(p + vec2(t * 0.18, -t * 0.13)),
+      fbm(p + vec2(5.2 - t * 0.12, 1.3 + t * 0.16))
+    );
+    vec2 r = vec2(
+      fbm(p + q * 2.10 + vec2(1.7, 9.2) + t * 0.12),
+      fbm(p + q * 2.25 + vec2(8.3, 2.8) - t * 0.14)
+    );
+    float f = fbm(p + r * (2.15 + a));
+    float glow = smoothstep(0.30, 0.86, f);
+    float core = smoothstep(0.55, 0.92, f + 0.11 * sin((p.x + p.y) * 1.7 + t * 0.42));
+    vec3 color = mix(baseDark(), palette(f + q.x * 0.18 + u_character * 0.17), 0.34 + glow * 0.58);
+    color += palette(f + 0.29) * core * (0.12 + u_audio.w * 0.045);
+    return color;
+  }
+
+  vec3 sceneGlass(vec2 uv, float t) {
+    vec2 p = centeredUv(uv) * 1.58;
+    float h = fbm(p * 1.35 + vec2(t * 0.14, -t * 0.11));
+    float e = 0.014;
+    float hx = fbm((p + vec2(e, 0.0)) * 1.35 + vec2(t * 0.14, -t * 0.11));
+    float hy = fbm((p + vec2(0.0, e)) * 1.35 + vec2(t * 0.14, -t * 0.11));
+    vec2 normal = vec2(h - hx, h - hy) / e;
+    normal = clamp(normal, vec2(-1.1), vec2(1.1));
+    vec2 refracted = p + normal * (0.12 + u_audio.y * 0.025);
+    float field = fbm(refracted * 1.72 - vec2(t * 0.10, t * 0.13));
+    float depth = fbm(refracted * 0.72 + vec2(-t * 0.07, t * 0.09));
+    vec3 lightDir = normalize(vec3(-0.42, 0.36, 1.0));
+    vec3 surfaceNormal = normalize(vec3(normal * 0.72, 1.0));
+    float spec = pow(max(0.0, dot(surfaceNormal, lightDir)), 16.0);
+    float fresnel = pow(1.0 - max(0.0, surfaceNormal.z), 2.0);
+    vec3 color = mix(baseDark(), palette(field + depth * 0.25 + u_character * 0.11), 0.26 + field * 0.47);
+    color += u_c3 * spec * (0.20 + u_audio.z * 0.06);
+    color += palette(depth + 0.44) * fresnel * 0.18;
+    return color;
+  }
+
+  vec3 sceneSilk(vec2 uv, float t) {
+    vec2 p = centeredUv(uv) * 1.28;
+    p = rot(p, -0.10 + sin(t * 0.11) * 0.10);
+    float warp = fbm(p * 1.08 + vec2(t * 0.13, -t * 0.09)) - 0.5;
+    float foldA = p.y + sin(p.x * 1.55 + t * 0.54 + warp * 2.2) * (0.22 + u_audio.y * 0.035);
+    float foldB = p.y - 0.25 + sin(p.x * 1.17 - t * 0.43 - warp * 1.8 + 2.2) * 0.28;
+    float foldC = p.y + 0.31 + sin(p.x * 1.38 + t * 0.37 + warp * 2.6 + 4.4) * 0.24;
+    float sheetA = exp(-abs(foldA) * 5.0);
+    float sheetB = exp(-abs(foldB) * 5.7);
+    float sheetC = exp(-abs(foldC) * 6.1);
+    float body = sat(sheetA * 0.78 + sheetB * 0.64 + sheetC * 0.58);
+    float translucency = fbm(p * 1.9 + vec2(-t * 0.08, t * 0.12));
+    vec3 color = baseDark();
+    color += palette(0.12 + translucency * 0.24) * sheetA * 0.26;
+    color += palette(0.47 + translucency * 0.21) * sheetB * 0.23;
+    color += palette(0.78 + translucency * 0.19) * sheetC * 0.21;
+    color += u_c3 * pow(body, 2.4) * (0.055 + u_audio.z * 0.018);
+    return color;
+  }
+
+  vec3 scenePlasma(vec2 uv, float t) {
+    vec2 p = centeredUv(uv) * 1.72;
+    vec2 warp = vec2(
+      fbm(p * 0.92 + vec2(t * 0.18, 2.6)),
+      fbm(p * 0.88 + vec2(-3.1, -t * 0.15))
+    ) - 0.5;
+    p += warp * (0.85 + u_audio.y * 0.10);
+    float v = sin(p.x * 2.05 + t * 0.67);
+    v += sin((p.y * 1.74 - t * 0.53) + sin(p.x * 0.78 + t * 0.31));
+    v += sin((p.x + p.y) * 1.24 + t * 0.44 + warp.x * 3.0);
+    v = v / 3.0 * 0.5 + 0.5;
+    float mist = fbm(p * 1.15 - vec2(t * 0.11, t * 0.07));
+    float energy = smoothstep(0.18, 0.92, v * 0.72 + mist * 0.42);
+    vec3 color = mix(baseDark(), palette(v + mist * 0.28 + u_character * 0.13), 0.24 + energy * 0.62);
+    color += palette(v + 0.34) * pow(energy, 2.2) * (0.09 + u_audio.w * 0.035);
+    return color;
+  }
+
+  vec3 scenePhotons(vec2 uv, float t) {
+    vec2 p = uv;
+    vec3 color = baseDark();
+    float haze = fbm(centeredUv(uv) * 1.15 + vec2(t * 0.06, -t * 0.05));
+    color += palette(haze * 0.38 + 0.1) * haze * 0.045;
+
+    for (int layer = 0; layer < 3; layer++) {
+      float lf = float(layer);
+      float scale = 8.0 + lf * 5.0;
+      vec2 flow = vec2(
+        sin(t * (0.20 + lf * 0.03) + uv.y * 3.0),
+        cos(t * (0.17 + lf * 0.025) + uv.x * 2.6)
+      ) * (0.08 + lf * 0.015);
+      vec2 grid = (p + flow) * scale;
+      vec2 id = floor(grid);
+      vec2 gv = fract(grid) - 0.5;
+      vec2 rnd = hash22(id + lf * 31.7);
+      vec2 point = (rnd - 0.5) * 0.72;
+      point += vec2(sin(t * 0.43 + rnd.x * 6.28), cos(t * 0.39 + rnd.y * 6.28)) * 0.055;
+      float d = length(gv - point);
+      float sparkle = smoothstep(0.10, 0.0, d) * (0.30 + 0.70 * pow(rnd.x, 2.0));
+      float halo = smoothstep(0.25, 0.0, d) * 0.16;
+      float trail = smoothstep(0.055, 0.0, abs((gv.y - point.y) + (gv.x - point.x) * (0.32 + rnd.y * 0.7))) * smoothstep(0.30, 0.0, abs(gv.x - point.x)) * 0.10;
+      vec3 photon = palette(rnd.y + lf * 0.21 + u_character * 0.12);
+      color += photon * (sparkle * (0.19 + u_audio.z * 0.035) + halo * 0.09 + trail * 0.05);
+    }
+    return color;
+  }
+
+  vec3 sceneSpace(vec2 uv, float t) {
+    vec2 p = centeredUv(uv);
+    vec3 color = baseDark();
+    float nebulaA = fbm(p * 1.22 + vec2(t * 0.045, -t * 0.038));
+    float nebulaB = fbm(rot(p, 0.62) * 1.65 - vec2(t * 0.035, t * 0.043));
+    float cloud = smoothstep(0.28, 0.88, nebulaA * 0.62 + nebulaB * 0.48);
+    color += palette(nebulaA * 0.42 + 0.18) * cloud * 0.11;
+
+    for (int layer = 0; layer < 4; layer++) {
+      float lf = float(layer);
+      float scale = 12.0 + lf * 10.0;
+      vec2 drift = vec2(t * (0.010 + lf * 0.002), -t * (0.007 + lf * 0.0015));
+      vec2 grid = (uv + drift) * scale;
+      vec2 id = floor(grid);
+      vec2 gv = fract(grid) - 0.5;
+      vec2 rnd = hash22(id + lf * 93.1);
+      vec2 pos = (rnd - 0.5) * 0.82;
+      float d = length(gv - pos);
+      float star = smoothstep(0.055 + lf * 0.006, 0.0, d) * step(0.78 - lf * 0.035, rnd.x);
+      float twinkle = 0.72 + 0.28 * sin(t * (0.55 + rnd.y * 0.35) + rnd.x * 18.0);
+      vec3 starColor = mix(u_c3, palette(rnd.y + 0.2), 0.42);
+      color += starColor * star * twinkle * (0.24 + lf * 0.05 + u_audio.z * 0.025);
+    }
+    return color;
+  }
+
+  vec3 sceneNeural(vec2 uv, float t) {
+    vec2 p = centeredUv(uv) * 1.72;
+    vec2 w = vec2(
+      fbm(p * 0.80 + vec2(t * 0.12, -t * 0.08)),
+      fbm(p * 0.84 + vec2(-t * 0.09, t * 0.10) + 4.1)
+    ) - 0.5;
+    vec2 q = p + w * 1.28;
+    float r1 = ridge(q * 1.54 + vec2(t * 0.12, 0.0));
+    float r2 = ridge(rot(q, 1.07) * 1.72 - vec2(0.0, t * 0.10));
+    float filament = pow(sat(r1 * r2 * 1.62), 5.2);
+    float ghost = pow(sat(r1 * 1.08), 8.0) * 0.35 + pow(sat(r2 * 1.08), 8.0) * 0.30;
+    vec3 color = mix(baseDark(), palette(fbm(q * 0.72) + u_character * 0.2), 0.12 + ghost * 0.30);
+    color += palette(r1 * 0.42 + r2 * 0.36 + 0.2) * filament * (0.28 + u_audio.y * 0.045);
+    color += u_c3 * pow(filament, 2.0) * (0.08 + u_audio.z * 0.018);
+    return color;
+  }
+
+  vec3 sceneDrift(vec2 uv, float t) {
+    vec2 p = centeredUv(uv);
+    vec3 color = baseDark();
+    float total = 0.0;
+    for (int i = 0; i < 11; i++) {
+      float z = float(i) / 10.0;
+      float depthScale = 0.72 + z * 1.38;
+      vec2 q = p * depthScale;
+      q = rot(q, 0.18 * sin(t * 0.10 + z * 2.2));
+      q += vec2(
+        sin(t * 0.19 + z * 4.8) * 0.23,
+        cos(t * 0.16 + z * 3.7) * 0.18
+      );
+      float density = fbm(q * (1.18 + z * 0.52) + vec2(z * 4.3, -z * 2.7));
+      density = smoothstep(0.42, 0.80, density);
+      float fade = (1.0 - z * 0.48) * 0.072;
+      vec3 fogColor = palette(density * 0.44 + z * 0.22 + u_character * 0.12);
+      color += fogColor * density * fade * (1.0 + u_audio.x * 0.08);
+      total += density * fade;
+    }
+    float shaft = smoothstep(0.72, 0.12, abs(p.x + sin(p.y * 1.8 + t * 0.23) * 0.16)) * fbm(p * 0.8 - vec2(t * 0.05, 0.0));
+    color += u_c3 * shaft * 0.035;
+    color = mix(color, palette(total * 0.8 + 0.1), sat(total * 0.10));
+    return color;
+  }
+
+  vec3 renderScene(float scene, vec2 uv, float t) {
+    if (scene < 0.5) return sceneFluid(uv, t);
+    if (scene < 1.5) return sceneGlass(uv, t);
+    if (scene < 2.5) return sceneSilk(uv, t);
+    if (scene < 3.5) return scenePlasma(uv, t);
+    if (scene < 4.5) return scenePhotons(uv, t);
+    if (scene < 5.5) return sceneSpace(uv, t);
+    if (scene < 6.5) return sceneNeural(uv, t);
+    return sceneDrift(uv, t);
+  }
+
+  void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    vec3 a = renderScene(u_sceneA, uv, u_time);
+    vec3 b = renderScene(u_sceneB, uv, u_time);
+    vec3 color = mix(a, b, u_blend);
+
+    float vignette = smoothstep(0.98, 0.18, length((uv - 0.5) * vec2(0.92, 1.04)));
+    color = mix(baseDark(), color, 0.73 + vignette * 0.27);
+    color *= 0.93 + vignette * 0.11;
+    color = 1.0 - exp(-color * 1.13);
+    color = pow(max(color, vec3(0.0)), vec3(0.94));
+
+    gl_FragColor = vec4(color, 0.88);
+  }
+`;
 
 function MusicHeroSceneEngine({
   playing,
@@ -541,7 +820,7 @@ function MusicHeroSceneEngine({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playingRef = useRef(playing);
-  const seedRef = useRef(heroHash(trackKey || "mvp-music"));
+  const targetCharacterRef = useRef((heroHash(trackKey || "mvp-music") % 10000) / 10000);
   const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
   const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
 
@@ -550,7 +829,7 @@ function MusicHeroSceneEngine({
   }, [playing]);
 
   useEffect(() => {
-    seedRef.current = heroHash(trackKey || "mvp-music");
+    targetCharacterRef.current = (heroHash(trackKey || "mvp-music") % 10000) / 10000;
   }, [trackKey]);
 
   useEffect(() => {
@@ -573,7 +852,6 @@ function MusicHeroSceneEngine({
         sample.height = size;
         const context = sample.getContext("2d", { willReadFrequently: true });
         if (!context) return;
-        context.clearRect(0, 0, size, size);
         context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, size, size);
         const palette = extractHeroPalette(context.getImageData(0, 0, size, size).data);
         if (!cancelled && palette) targetPaletteRef.current = palette;
@@ -592,437 +870,125 @@ function MusicHeroSceneEngine({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const gl = canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      powerPreference: "high-performance",
+    });
+    if (!gl) return;
+
+    const compileShader = (type: number, source: string) => {
+      const shader = gl.createShader(type);
+      if (!shader) return null;
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vertexShader = compileShader(gl.VERTEX_SHADER, HERO_VERTEX_SHADER);
+    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, HERO_FRAGMENT_SHADER);
+    if (!vertexShader || !fragmentShader) {
+      if (vertexShader) gl.deleteShader(vertexShader);
+      if (fragmentShader) gl.deleteShader(fragmentShader);
+      return;
+    }
+
+    const program = gl.createProgram();
+    if (!program) {
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      return;
+    }
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      return;
+    }
+
+    const buffer = gl.createBuffer();
+    if (!buffer) {
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+      return;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    gl.useProgram(program);
+
+    const positionLocation = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+    const timeLocation = gl.getUniformLocation(program, "u_time");
+    const sceneALocation = gl.getUniformLocation(program, "u_sceneA");
+    const sceneBLocation = gl.getUniformLocation(program, "u_sceneB");
+    const blendLocation = gl.getUniformLocation(program, "u_blend");
+    const audioLocation = gl.getUniformLocation(program, "u_audio");
+    const characterLocation = gl.getUniformLocation(program, "u_character");
+    const colorLocations = [0, 1, 2, 3, 4].map((index) => gl.getUniformLocation(program, `u_c${index}`));
+
     let frame = 0;
     let width = 1;
     let height = 1;
     let dpr = 1;
     let lastNow = performance.now();
-    const smoothed = { low: 0.10, mid: 0.10, high: 0.08, energy: 0.18, depth: 0.18, pulse: 0.10 };
+    let liveCharacter = targetCharacterRef.current;
+    const audioSmooth = { low: 0, mid: 0, high: 0, energy: 0 };
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       width = Math.max(1, Math.floor(rect.width));
       height = Math.max(1, Math.floor(rect.height));
-      dpr = Math.min(width < 560 ? 1.2 : 1.45, window.devicePixelRatio || 1);
+      const device = window.devicePixelRatio || 1;
+      dpr = Math.min(device, width < 620 ? 1.0 : 1.25);
       const pixelWidth = Math.max(1, Math.floor(width * dpr));
       const pixelHeight = Math.max(1, Math.floor(height * dpr));
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
         canvas.width = pixelWidth;
         canvas.height = pixelHeight;
       }
+      gl.viewport(0, 0, pixelWidth, pixelHeight);
     };
 
     resize();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
-    observer?.observe(canvas);
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    resizeObserver?.observe(canvas);
 
-    const smoothPath = (ctx: CanvasRenderingContext2D, points: Array<{ x: number; y: number }>) => {
-      if (points.length < 2) return;
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let index = 1; index < points.length - 1; index += 1) {
-        const current = points[index];
-        const next = points[index + 1];
-        ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
-      }
-      const last = points[points.length - 1];
-      ctx.lineTo(last.x, last.y);
+    const expApproach = (current: number, target: number, dtSeconds: number, tauSeconds: number) => {
+      const amount = 1 - Math.exp(-Math.max(0, dtSeconds) / tauSeconds);
+      return current + (target - current) * amount;
     };
 
-    const organicLoop = (
-      ctx: CanvasRenderingContext2D,
-      cx: number,
-      cy: number,
-      rx: number,
-      ry: number,
-      rotation: number,
-      t: number,
-      seed: number,
-      wobble: number,
-    ) => {
-      const points: Array<{ x: number; y: number }> = [];
-      const count = 14;
-      const cosR = Math.cos(rotation);
-      const sinR = Math.sin(rotation);
-      for (let index = 0; index < count; index += 1) {
-        const angle = (index / count) * Math.PI * 2;
-        const noise = 1 + Math.sin(angle * 3 + t * 0.52 + heroNoise(index + 1, seed) * 6.2) * wobble + Math.cos(angle * 5 - t * 0.34) * wobble * 0.45;
-        const lx = Math.cos(angle) * rx * noise;
-        const ly = Math.sin(angle) * ry * (1 + Math.sin(angle * 2 - t * 0.29) * wobble * 0.55);
-        points.push({ x: cx + lx * cosR - ly * sinR, y: cy + lx * sinR + ly * cosR });
-      }
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let index = 0; index < points.length; index += 1) {
-        const next = points[(index + 1) % points.length];
-        const after = points[(index + 2) % points.length];
-        ctx.quadraticCurveTo(next.x, next.y, (next.x + after.x) / 2, (next.y + after.y) / 2);
-      }
-      ctx.closePath();
-    };
-
-    const drawAmbient = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette) => {
-      ctx.save();
-      ctx.globalCompositeOperation = "screen";
-      for (let index = 0; index < 4; index += 1) {
-        const phase = t * (0.14 + index * 0.018) + index * 1.9;
-        const x = width * (0.23 + index * 0.19) + Math.sin(phase) * width * (0.07 + audio.depth * 0.025);
-        const y = height * (0.28 + (index % 2) * 0.42) + Math.cos(phase * 0.83) * height * 0.12;
-        const radius = Math.max(width, height) * (0.20 + index * 0.025);
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.050 + audio.energy * 0.020));
-        gradient.addColorStop(0.52, heroRgba(palette[(index + 1) % 4], 0.018));
-        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
-      }
-      ctx.restore();
-    };
-
-    const drawFluid = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 6 : 9;
-      for (let index = 0; index < count; index += 1) {
-        const p = heroNoise(index * 7 + 1, seed);
-        const q = heroNoise(index * 7 + 2, seed);
-        const r = heroNoise(index * 7 + 3, seed);
-        const phase = t * (0.38 + q * 0.10) + p * Math.PI * 2;
-        const x = width * (0.12 + p * 0.78) + Math.sin(phase) * width * (0.07 + audio.depth * 0.038);
-        const y = height * (0.15 + q * 0.70) + Math.cos(phase * 0.73 + r * 3.4) * height * (0.10 + audio.low * 0.026);
-        const radius = Math.max(width, height) * (0.14 + r * 0.14 + audio.depth * 0.032);
-        const gradient = ctx.createRadialGradient(x, y, radius * 0.03, x, y, radius);
-        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.22 + audio.energy * 0.055));
-        gradient.addColorStop(0.34, heroRgba(palette[(index + 1) % 4], 0.095 + audio.mid * 0.018));
-        gradient.addColorStop(0.74, heroRgba(palette[(index + 2) % 4], 0.025));
-        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        organicLoop(ctx, x, y, radius * (1.05 + audio.low * 0.08), radius * (0.62 + q * 0.28), phase * 0.18, t + index, seed + index * 31, 0.10 + audio.mid * 0.035);
-        ctx.fill();
-      }
-      ctx.restore();
-    };
-
-    const drawSilk = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const layers = width < 520 ? 3 : 5;
-      const pointCount = 18;
-      const maxDim = Math.max(width, height);
-      for (let layer = 0; layer < layers; layer += 1) {
-        const layerSeed = seed + layer * 97;
-        const baseAngle = -0.65 + layer * 0.31 + Math.sin(t * 0.18 + layer * 1.4) * 0.36;
-        const cx = width * (0.55 + Math.sin(t * 0.21 + layer * 1.1) * 0.10);
-        const cy = height * (0.50 + Math.cos(t * 0.17 + layer * 0.8) * 0.18);
-        const length = maxDim * (0.80 + heroNoise(layer + 1, layerSeed) * 0.24);
-        const amplitude = height * (0.08 + layer * 0.012 + audio.mid * 0.055);
-        const thickness = height * (0.020 + heroNoise(layer + 3, layerSeed) * 0.024 + audio.depth * 0.012);
-        const upper: Array<{ x: number; y: number }> = [];
-        const lower: Array<{ x: number; y: number }> = [];
-        const cosA = Math.cos(baseAngle);
-        const sinA = Math.sin(baseAngle);
-
-        for (let point = 0; point < pointCount; point += 1) {
-          const u = point / (pointCount - 1) - 0.5;
-          const bend = Math.sin(u * Math.PI * 2.6 + t * 0.48 + layer * 0.9) * amplitude
-            + Math.sin(u * Math.PI * 5.2 - t * 0.31 + heroNoise(point + 5, layerSeed) * 2.2) * amplitude * 0.30;
-          const along = u * length + Math.sin(t * 0.23 + point * 0.37 + layer) * width * 0.010;
-          const localX = cx + along * cosA - bend * sinA;
-          const localY = cy + along * sinA + bend * cosA;
-          const normalAngle = baseAngle + Math.PI / 2 + Math.sin(u * 5 + t * 0.36) * 0.18;
-          const localThickness = thickness * (0.70 + (1 - Math.abs(u) * 1.3) * 0.42 + Math.sin(t * 0.44 + point * 0.6) * 0.10);
-          upper.push({ x: localX + Math.cos(normalAngle) * localThickness, y: localY + Math.sin(normalAngle) * localThickness });
-          lower.push({ x: localX - Math.cos(normalAngle) * localThickness, y: localY - Math.sin(normalAngle) * localThickness });
-        }
-
-        ctx.beginPath();
-        smoothPath(ctx, upper);
-        for (let point = lower.length - 1; point >= 0; point -= 1) {
-          const current = lower[point];
-          if (point === lower.length - 1) ctx.lineTo(current.x, current.y);
-          else {
-            const next = lower[Math.max(0, point - 1)];
-            ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
-          }
-        }
-        ctx.closePath();
-        const gradient = ctx.createLinearGradient(cx - cosA * length * 0.42, cy - sinA * length * 0.42, cx + cosA * length * 0.42, cy + sinA * length * 0.42);
-        gradient.addColorStop(0, heroRgba(palette[layer % 4], 0.015));
-        gradient.addColorStop(0.30, heroRgba(palette[(layer + 1) % 4], 0.11 + audio.energy * 0.025));
-        gradient.addColorStop(0.58, heroRgba(palette[(layer + 3) % 4], 0.17 + audio.energy * 0.030));
-        gradient.addColorStop(1, heroRgba(palette[(layer + 2) % 4], 0.012));
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        const center = upper.map((point, index) => ({ x: (point.x + lower[index].x) / 2, y: (point.y + lower[index].y) / 2 }));
-        ctx.beginPath();
-        smoothPath(ctx, center);
-        ctx.strokeStyle = heroRgba(palette[(layer + 3) % 4], 0.10 + audio.high * 0.028);
-        ctx.lineWidth = 0.8 + layer * 0.14;
-        ctx.stroke();
-      }
-      ctx.restore();
-    };
-
-    const drawGlass = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 3 : 4;
-      for (let index = 0; index < count; index += 1) {
-        const p = heroNoise(index * 9 + 1, seed);
-        const q = heroNoise(index * 9 + 2, seed);
-        const phase = t * (0.30 + q * 0.08) + p * 6.28;
-        const cx = width * (0.18 + p * 0.66) + Math.sin(phase) * width * 0.10;
-        const cy = height * (0.20 + q * 0.62) + Math.cos(phase * 0.79) * height * 0.11;
-        const rx = Math.max(width, height) * (0.18 + heroNoise(index * 9 + 3, seed) * 0.11);
-        const ry = rx * (0.40 + heroNoise(index * 9 + 4, seed) * 0.24);
-        const rotation = phase * 0.20 + index * 0.7;
-        const fill = ctx.createRadialGradient(cx - rx * 0.18, cy - ry * 0.15, 0, cx, cy, rx);
-        fill.addColorStop(0, heroRgba(palette[3], 0.10 + audio.high * 0.018));
-        fill.addColorStop(0.22, heroRgba(palette[index % 4], 0.075 + audio.energy * 0.018));
-        fill.addColorStop(0.72, heroRgba(palette[(index + 1) % 4], 0.025));
-        fill.addColorStop(1, heroRgba(palette[index % 4], 0));
-        ctx.fillStyle = fill;
-        ctx.beginPath();
-        organicLoop(ctx, cx, cy, rx, ry, rotation, t + index * 0.7, seed + index * 43, 0.075 + audio.mid * 0.025);
-        ctx.fill();
-        ctx.strokeStyle = heroRgba(palette[3], 0.12 + audio.high * 0.020);
-        ctx.lineWidth = 0.8 + index * 0.20;
-        ctx.stroke();
-
-        ctx.beginPath();
-        organicLoop(ctx, cx - rx * 0.04, cy - ry * 0.05, rx * 0.88, ry * 0.84, rotation + 0.03, t + index * 0.7 + 0.3, seed + index * 43 + 5, 0.050);
-        ctx.strokeStyle = heroRgba(palette[(index + 2) % 4], 0.040);
-        ctx.lineWidth = 0.6;
-        ctx.stroke();
-      }
-      ctx.restore();
-    };
-
-    const drawNeural = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 58 : 104;
-      for (let index = 0; index < count; index += 1) {
-        const p = heroNoise(index * 6 + 1, seed);
-        const q = heroNoise(index * 6 + 2, seed);
-        const r = heroNoise(index * 6 + 3, seed);
-        const s = heroNoise(index * 6 + 4, seed);
-        const baseX = width * p;
-        const baseY = height * q;
-        const phase = t * (0.42 + r * 0.16) + s * Math.PI * 2;
-        const fieldX = Math.sin(baseY * 0.026 + phase) + Math.cos(baseX * 0.014 - phase * 0.67);
-        const fieldY = Math.cos(baseX * 0.021 - phase * 0.82) - Math.sin(baseY * 0.018 + phase * 0.56);
-        const x = (baseX + fieldX * width * (0.06 + audio.mid * 0.018) + width * 1.5) % width;
-        const y = (baseY + fieldY * height * (0.12 + audio.depth * 0.028) + height * 1.5) % height;
-        const angle = Math.atan2(fieldY, fieldX);
-        const len = 5 + r * 13 + audio.high * 3;
-        const color = palette[index % 4];
-        ctx.strokeStyle = heroRgba(color, 0.075 + r * 0.16 + audio.high * 0.015);
-        ctx.lineWidth = 0.45 + s * 0.85;
-        ctx.beginPath();
-        ctx.moveTo(x - Math.cos(angle) * len, y - Math.sin(angle) * len);
-        ctx.quadraticCurveTo(x - Math.cos(angle + 0.35) * len * 0.45, y - Math.sin(angle + 0.35) * len * 0.45, x, y);
-        ctx.stroke();
-        if (index % 7 === 0) {
-          ctx.fillStyle = heroRgba(palette[3], 0.20 + audio.high * 0.025);
-          ctx.beginPath();
-          ctx.arc(x, y, 0.65 + s * 0.9, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      ctx.restore();
-    };
-
-    const drawPhotons = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 90 : 158;
-      const cx = width * (0.57 + Math.sin(t * 0.15) * 0.05);
-      const cy = height * (0.49 + Math.cos(t * 0.13) * 0.07);
-      for (let index = 0; index < count; index += 1) {
-        const px = heroNoise(index * 5 + 1, seed) * 2 - 1;
-        const py = heroNoise(index * 5 + 2, seed) * 2 - 1;
-        const zSeed = heroNoise(index * 5 + 3, seed);
-        const sizeSeed = heroNoise(index * 5 + 4, seed);
-        const z = (zSeed + t * (0.13 + sizeSeed * 0.045)) % 1;
-        const perspective = 0.18 + z * z * 1.12;
-        const x = cx + px * width * 0.62 * perspective + Math.sin(t * 0.28 + index) * 2.2;
-        const y = cy + py * height * 0.88 * perspective + Math.cos(t * 0.23 + index * 0.7) * 1.7;
-        if (x < -20 || x > width + 20 || y < -20 || y > height + 20) continue;
-        const size = 0.45 + z * (1.45 + sizeSeed * 1.25) + audio.high * 0.30;
-        const color = palette[index % 4];
-        const brightness = 0.10 + z * 0.48;
-        ctx.fillStyle = heroRgba(color, brightness);
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-        if (z > 0.72) {
-          const dx = (x - cx) * (0.018 + audio.depth * 0.006);
-          const dy = (y - cy) * (0.018 + audio.depth * 0.006);
-          ctx.strokeStyle = heroRgba(color, 0.07 + z * 0.12);
-          ctx.lineWidth = Math.max(0.55, size * 0.46);
-          ctx.beginPath();
-          ctx.moveTo(x - dx * 3.2, y - dy * 3.2);
-          ctx.lineTo(x, y);
-          ctx.stroke();
-        }
-      }
-      ctx.restore();
-    };
-
-    const drawPlasma = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 7 : 11;
-      for (let index = 0; index < count; index += 1) {
-        const p = heroNoise(index * 8 + 1, seed);
-        const q = heroNoise(index * 8 + 2, seed);
-        const r = heroNoise(index * 8 + 3, seed);
-        const phase = t * (0.35 + r * 0.12) + index * 0.79;
-        const x = width * (0.08 + p * 0.84) + Math.sin(phase + q * 5) * width * 0.085;
-        const y = height * (0.10 + q * 0.78) + Math.cos(phase * 0.78 + p * 4) * height * 0.13;
-        const radius = Math.max(width, height) * (0.095 + r * 0.12 + audio.depth * 0.025);
-        const gradient = ctx.createRadialGradient(x, y, radius * 0.04, x, y, radius);
-        gradient.addColorStop(0, heroRgba(palette[(index + 3) % 4], 0.21 + audio.energy * 0.040));
-        gradient.addColorStop(0.32, heroRgba(palette[index % 4], 0.13 + audio.mid * 0.020));
-        gradient.addColorStop(0.68, heroRgba(palette[(index + 1) % 4], 0.040));
-        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        organicLoop(ctx, x, y, radius * 1.18, radius * (0.58 + q * 0.26), phase * 0.16, t * 1.2 + index, seed + index * 17, 0.13 + audio.mid * 0.035);
-        ctx.fill();
-      }
-      ctx.restore();
-    };
-
-    const drawSpace = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const hazeX = width * (0.60 + Math.sin(t * 0.12) * 0.10);
-      const hazeY = height * (0.50 + Math.cos(t * 0.10) * 0.14);
-      const haze = ctx.createRadialGradient(hazeX, hazeY, 0, hazeX, hazeY, Math.max(width, height) * 0.55);
-      haze.addColorStop(0, heroRgba(palette[1], 0.10 + audio.energy * 0.025));
-      haze.addColorStop(0.34, heroRgba(palette[2], 0.045));
-      haze.addColorStop(1, heroRgba(palette[0], 0));
-      ctx.fillStyle = haze;
-      ctx.fillRect(0, 0, width, height);
-
-      const count = width < 520 ? 105 : 180;
-      for (let index = 0; index < count; index += 1) {
-        const p = heroNoise(index * 5 + 1, seed);
-        const q = heroNoise(index * 5 + 2, seed);
-        const r = heroNoise(index * 5 + 3, seed);
-        const layer = heroNoise(index * 5 + 4, seed);
-        const drift = t * (0.018 + layer * 0.040);
-        const x = (p * width + Math.sin(drift + q * 8) * width * (0.012 + layer * 0.018) + width) % width;
-        const y = (q * height + Math.cos(drift * 0.83 + p * 7) * height * (0.025 + layer * 0.035) + height) % height;
-        const twinkle = 0.58 + Math.sin(t * (0.8 + r * 0.7) + index * 1.7) * 0.28;
-        const size = 0.35 + layer * 1.35 + (index % 41 === 0 ? 1.2 : 0);
-        ctx.fillStyle = heroRgba(index % 9 === 0 ? palette[3] : palette[index % 4], (0.08 + layer * 0.28) * twinkle + audio.high * 0.012);
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    };
-
-    const drawDrift = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const cx = width * (0.57 + Math.sin(t * 0.16) * 0.07);
-      const cy = height * (0.49 + Math.cos(t * 0.14) * 0.08);
-
-      for (let layer = 0; layer < 4; layer += 1) {
-        const phase = t * (0.20 + layer * 0.035) + layer * 1.7;
-        const x = width * (0.36 + layer * 0.13) + Math.sin(phase) * width * 0.16;
-        const y = height * (0.23 + (layer % 2) * 0.48) + Math.cos(phase * 0.77) * height * 0.16;
-        const radius = Math.max(width, height) * (0.24 + layer * 0.04);
-        const fog = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        fog.addColorStop(0, heroRgba(palette[layer % 4], 0.070 + audio.depth * 0.018));
-        fog.addColorStop(0.52, heroRgba(palette[(layer + 1) % 4], 0.022));
-        fog.addColorStop(1, heroRgba(palette[layer % 4], 0));
-        ctx.fillStyle = fog;
-        ctx.fillRect(0, 0, width, height);
-      }
-
-      const count = width < 520 ? 88 : 148;
-      for (let index = 0; index < count; index += 1) {
-        const px = heroNoise(index * 6 + 1, seed) * 2 - 1;
-        const py = heroNoise(index * 6 + 2, seed) * 2 - 1;
-        const zSeed = heroNoise(index * 6 + 3, seed);
-        const curve = heroNoise(index * 6 + 4, seed) * 2 - 1;
-        const sizeSeed = heroNoise(index * 6 + 5, seed);
-        const z = (zSeed + t * (0.085 + sizeSeed * 0.026)) % 1;
-        const persp = 0.12 + Math.pow(z, 1.85) * 1.26;
-        const swirl = (1 - z) * 0.34 + z * 0.06;
-        const angle = curve * 0.45 + Math.sin(t * 0.18 + index * 0.17) * swirl;
-        const cosA = Math.cos(angle);
-        const sinA = Math.sin(angle);
-        const rx = px * cosA - py * sinA;
-        const ry = px * sinA + py * cosA;
-        const x = cx + rx * width * 0.61 * persp;
-        const y = cy + ry * height * 0.91 * persp;
-        if (x < -25 || x > width + 25 || y < -25 || y > height + 25) continue;
-        const size = 0.4 + z * (1.25 + sizeSeed * 1.1);
-        const color = palette[index % 4];
-        ctx.fillStyle = heroRgba(color, 0.08 + z * 0.38);
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-        if (z > 0.68) {
-          const dx = (x - cx) * (0.012 + audio.depth * 0.010);
-          const dy = (y - cy) * (0.012 + audio.depth * 0.010);
-          ctx.strokeStyle = heroRgba(color, 0.060 + z * 0.10);
-          ctx.lineWidth = Math.max(0.45, size * 0.44);
-          ctx.beginPath();
-          ctx.moveTo(x - dx * 4.5, y - dy * 4.5);
-          ctx.lineTo(x, y);
-          ctx.stroke();
-        }
-      }
-      ctx.restore();
-    };
-
-    const drawScene = (
-      ctx: CanvasRenderingContext2D,
-      scene: HeroSceneName,
-      t: number,
-      audio: HeroAudioShape,
-      palette: HeroPalette,
-      alpha: number,
-      seed: number,
-    ) => {
-      if (alpha <= 0.002) return;
-      if (scene === "fluid") drawFluid(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "silk") drawSilk(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "glass") drawGlass(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "neural") drawNeural(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "photons") drawPhotons(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "plasma") drawPlasma(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "space") drawSpace(ctx, t, audio, palette, alpha, seed);
-      else drawDrift(ctx, t, audio, palette, alpha, seed);
+    const setColor = (location: WebGLUniformLocation | null, color: HeroRgb) => {
+      if (!location) return;
+      gl.uniform3f(location, color.r / 255, color.g / 255, color.b / 255);
     };
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (typeof document !== "undefined" && document.hidden) return;
-      if (width < 2 || height < 2) resize();
+      if (typeof document !== "undefined" && document.hidden) {
+        lastNow = now;
+        return;
+      }
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      const dt = heroClamp((now - lastNow) / 16.667, 0.2, 3);
+      const dtSeconds = heroClamp((now - lastNow) / 1000, 0, 0.08);
       lastNow = now;
+
       const raw = playingRef.current ? getMusicRtaLevels() : Array(10).fill(0);
       const average = (from: number, to: number) => {
         let sum = 0;
@@ -1033,87 +999,62 @@ function MusicHeroSceneEngine({
         }
         return count ? sum / count : 0;
       };
+
       const lowRaw = average(0, 2);
       const midRaw = average(3, 6);
       const highRaw = average(7, 9);
-      const overall = lowRaw * 0.40 + midRaw * 0.39 + highRaw * 0.21;
+      const energyRaw = lowRaw * 0.38 + midRaw * 0.42 + highRaw * 0.20;
 
-      const targets = playingRef.current ? {
-        low: heroClamp(0.12 + Math.tanh(lowRaw * 1.65) * 0.34, 0.12, 0.50),
-        mid: heroClamp(0.11 + Math.tanh(midRaw * 1.55) * 0.31, 0.11, 0.47),
-        high: heroClamp(0.08 + Math.tanh(highRaw * 1.45) * 0.28, 0.08, 0.41),
-        energy: heroClamp(0.25 + Math.tanh(overall * 1.70) * 0.28, 0.25, 0.56),
-        depth: heroClamp(0.20 + Math.tanh((lowRaw * 0.72 + overall * 0.28) * 1.55) * 0.28, 0.20, 0.52),
-      } : { low: 0.10, mid: 0.09, high: 0.07, energy: 0.17, depth: 0.16 };
+      const lowTarget = playingRef.current ? heroClamp(lowRaw * 1.12, 0, 0.72) : 0;
+      const midTarget = playingRef.current ? heroClamp(midRaw * 1.08, 0, 0.70) : 0;
+      const highTarget = playingRef.current ? heroClamp(highRaw * 1.04, 0, 0.66) : 0;
+      const energyTarget = playingRef.current ? heroClamp(energyRaw * 1.06, 0, 0.68) : 0;
 
-      const approach = (current: number, target: number) => {
-        const rate = target > current ? 1 - Math.pow(0.80, dt) : 1 - Math.pow(0.948, dt);
-        return current + (target - current) * rate;
-      };
-      smoothed.low = approach(smoothed.low, targets.low);
-      smoothed.mid = approach(smoothed.mid, targets.mid);
-      smoothed.high = approach(smoothed.high, targets.high);
-      smoothed.energy = approach(smoothed.energy, targets.energy);
-      smoothed.depth = approach(smoothed.depth, targets.depth);
-      smoothed.pulse = approach(smoothed.pulse, targets.low * 0.68 + targets.mid * 0.32);
+      // Long time constants are deliberate. The scene owns the motion; music only applies a gentle,
+      // heavily-smoothed pressure so kick drums and guitar transients can never jerk the geometry.
+      audioSmooth.low = expApproach(audioSmooth.low, lowTarget, dtSeconds, 0.82);
+      audioSmooth.mid = expApproach(audioSmooth.mid, midTarget, dtSeconds, 0.96);
+      audioSmooth.high = expApproach(audioSmooth.high, highTarget, dtSeconds, 0.68);
+      audioSmooth.energy = expApproach(audioSmooth.energy, energyTarget, dtSeconds, 1.08);
 
       const livePalette = livePaletteRef.current;
       const targetPalette = targetPaletteRef.current;
+      const paletteAmount = 1 - Math.exp(-dtSeconds / 1.65);
       for (let index = 0; index < livePalette.length; index += 1) {
-        livePalette[index] = heroMix(livePalette[index], targetPalette[index], 1 - Math.pow(0.955, dt));
+        livePalette[index] = heroMix(livePalette[index], targetPalette[index], paletteAmount);
       }
+      liveCharacter = expApproach(liveCharacter, targetCharacterRef.current, dtSeconds, 2.2);
 
-      const audio: HeroAudioShape = {
-        low: smoothed.low,
-        mid: smoothed.mid,
-        high: smoothed.high,
-        energy: smoothed.energy,
-        depth: smoothed.depth,
-        pulse: smoothed.pulse,
-        speed: playingRef.current ? 0.88 + smoothed.energy * 0.18 : 0.52,
-      };
-      const t = now * 0.001 * audio.speed;
-      const seed = seedRef.current;
-
-      const background = ctx.createLinearGradient(0, 0, width, height);
-      background.addColorStop(0, "rgba(0,0,0,.12)");
-      background.addColorStop(0.50, "rgba(0,0,0,.025)");
-      background.addColorStop(1, "rgba(0,0,0,.16)");
-      ctx.fillStyle = background;
-      ctx.fillRect(0, 0, width, height);
-      drawAmbient(ctx, t, audio, livePalette);
-
-      const absoluteNow = Date.now();
-      const sceneStep = Math.floor(absoluteNow / HERO_SCENE_MS);
-      const sceneElapsed = absoluteNow - sceneStep * HERO_SCENE_MS;
-      const sceneIndex = sceneStep % HERO_SCENES.length;
-      const nextIndex = (sceneIndex + 1) % HERO_SCENES.length;
+      const globalMs = Date.now() - HERO_ENGINE_EPOCH_MS;
+      const sceneStep = Math.floor(globalMs / HERO_SCENE_MS);
+      const sceneElapsed = globalMs - sceneStep * HERO_SCENE_MS;
+      const sceneA = sceneStep % HERO_SCENE_COUNT;
+      const sceneB = (sceneA + 1) % HERO_SCENE_COUNT;
       const fadeStart = HERO_SCENE_MS - HERO_CROSSFADE_MS;
-      const transitionLinear = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
-      const transition = 0.5 - Math.cos(transitionLinear * Math.PI) * 0.5;
-      const outgoingAlpha = transitionLinear > 0 ? Math.cos(transition * Math.PI * 0.5) : 1;
-      const incomingAlpha = transitionLinear > 0 ? Math.sin(transition * Math.PI * 0.5) : 0;
-      const currentScene = HERO_SCENES[sceneIndex];
-      const nextScene = HERO_SCENES[nextIndex];
+      const rawBlend = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
+      const blend = rawBlend * rawBlend * (3 - 2 * rawBlend);
 
-      // Scene seeds are tied to the scene type, not the cycle count. Every environment is already
-      // moving on the global timeline before it fades in, so transitions never reset or bounce.
-      drawScene(ctx, currentScene, t, audio, livePalette, outgoingAlpha, seed + sceneIndex * 1009);
-      if (incomingAlpha > 0.002) drawScene(ctx, nextScene, t, audio, livePalette, incomingAlpha, seed + nextIndex * 1009);
-
-      const glass = ctx.createLinearGradient(0, 0, width, 0);
-      glass.addColorStop(0, "rgba(0,0,0,.20)");
-      glass.addColorStop(0.20, "rgba(0,0,0,.035)");
-      glass.addColorStop(0.72, "rgba(0,0,0,.018)");
-      glass.addColorStop(1, "rgba(0,0,0,.15)");
-      ctx.fillStyle = glass;
-      ctx.fillRect(0, 0, width, height);
+      gl.useProgram(program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+      gl.uniform1f(timeLocation, now * 0.001);
+      gl.uniform1f(sceneALocation, sceneA);
+      gl.uniform1f(sceneBLocation, sceneB);
+      gl.uniform1f(blendLocation, blend);
+      gl.uniform4f(audioLocation, audioSmooth.low, audioSmooth.mid, audioSmooth.high, audioSmooth.energy);
+      gl.uniform1f(characterLocation, liveCharacter);
+      colorLocations.forEach((location, index) => setColor(location, livePalette[index]));
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
 
     frame = window.requestAnimationFrame(draw);
     return () => {
       window.cancelAnimationFrame(frame);
-      observer?.disconnect();
+      resizeObserver?.disconnect();
+      gl.deleteBuffer(buffer);
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
     };
   }, []);
 
@@ -2328,48 +2269,136 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           }
         }
 
-        /* AUG 14 V5 FUTURESCAPE: premium 8-scene engine, album palette, seamless transitions */
-        .tr-playerHero{isolation:isolate!important;background:#020609!important}
-        .tr-playerVisualDebug{display:none!important}
+        /* AUG 14 V6 GPU AURORA CORE: seamless premium media stage + WebGL scene engine */
+        .tr-audioDeck--pro7{
+          position:relative!important;
+          overflow:hidden!important;
+          background:
+            radial-gradient(120% 58% at 50% 0%,rgba(39,112,139,.065),transparent 68%),
+            linear-gradient(180deg,#03090d 0%,#02070a 38%,#020609 100%)!important;
+          border:1px solid rgba(83,177,208,.18)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 20px 60px rgba(0,0,0,.34)!important;
+        }
+        .tr-playerHero{
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:hidden!important;
+          border:0!important;
+          border-bottom:0!important;
+          background:transparent!important;
+          box-shadow:none!important;
+          margin:0!important;
+        }
+        .tr-playerHero::before{
+          content:""!important;
+          position:absolute!important;
+          z-index:2!important;
+          inset:0!important;
+          pointer-events:none!important;
+          background:
+            linear-gradient(90deg,rgba(1,4,6,.10) 0%,rgba(1,4,6,.025) 30%,transparent 62%,rgba(1,4,6,.055) 100%),
+            radial-gradient(80% 125% at 82% 50%,transparent 38%,rgba(0,0,0,.09) 100%)!important;
+        }
+        .tr-playerHero::after{
+          content:""!important;
+          position:absolute!important;
+          z-index:3!important;
+          left:0!important;right:0!important;bottom:-1px!important;height:42px!important;
+          pointer-events:none!important;
+          background:linear-gradient(180deg,transparent 0%,rgba(2,6,9,.28) 48%,#020609 100%)!important;
+          box-shadow:none!important;
+        }
         .tr-playerVisualEngine{
-          position:absolute!important;z-index:0!important;top:0!important;right:0!important;bottom:0!important;left:clamp(220px,30%,310px)!important;
-          overflow:hidden!important;pointer-events:none!important;background:#020609!important;contain:paint!important;
+          position:absolute!important;
+          z-index:0!important;
+          inset:0!important;
+          overflow:hidden!important;
+          pointer-events:none!important;
+          background:#020609!important;
         }
         .tr-playerVisualArtwork{
-          position:absolute!important;z-index:0!important;inset:-30% -24% -30% -16%!important;width:148%!important;height:162%!important;
-          object-fit:cover!important;object-position:center!important;opacity:.30!important;
-          filter:blur(50px) saturate(1.48) contrast(1.06) brightness(.62)!important;
-          transform:translate3d(0,0,0) scale(1.08)!important;transform-origin:center!important;
+          position:absolute!important;
+          z-index:0!important;
+          left:6%!important;top:-44%!important;
+          width:118%!important;height:188%!important;
+          object-fit:cover!important;
+          object-position:center!important;
+          opacity:.30!important;
+          filter:blur(62px) saturate(1.58) contrast(1.04) brightness(.64)!important;
+          transform:scale(1.10)!important;
+          transform-origin:center!important;
           animation:none!important;
         }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.34!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.33!important}
         .tr-playerVisualEngine canvas{
-          position:absolute!important;z-index:1!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;
-          opacity:1!important;mix-blend-mode:screen!important;filter:saturate(1.12) contrast(1.035)!important;
+          position:absolute!important;
+          z-index:1!important;
+          inset:0!important;
+          width:100%!important;height:100%!important;
+          display:block!important;
+          opacity:1!important;
+          mix-blend-mode:normal!important;
+          filter:saturate(1.04) contrast(1.02)!important;
+          transform:translateZ(0)!important;
         }
         .tr-playerVisualGlass{
-          position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
+          position:absolute!important;
+          z-index:2!important;
+          inset:0!important;
+          pointer-events:none!important;
           background:
-            radial-gradient(90% 120% at 46% 50%,transparent 36%,rgba(0,0,0,.12) 100%),
-            linear-gradient(90deg,rgba(1,5,8,.20) 0%,rgba(1,5,8,.025) 22%,rgba(1,5,8,.015) 76%,rgba(1,4,7,.14) 100%),
-            linear-gradient(180deg,rgba(255,255,255,.015),transparent 34%,rgba(0,0,0,.09) 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.022)!important;
+            linear-gradient(90deg,rgba(1,5,8,.10) 0%,rgba(1,5,8,.015) 25%,transparent 67%,rgba(0,3,5,.07) 100%),
+            linear-gradient(180deg,rgba(255,255,255,.018) 0%,transparent 28%,rgba(0,0,0,.10) 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.018)!important;
         }
-        .tr-playerHero .tr-audioArtwork{position:relative!important;z-index:4!important}
+        .tr-playerHero .tr-audioArtwork{
+          position:relative!important;
+          z-index:5!important;
+          box-shadow:none!important;
+          border:0!important;
+          outline:0!important;
+        }
+        .tr-playerHero .tr-audioArtwork::after{
+          content:""!important;
+          position:absolute!important;
+          z-index:2!important;
+          top:0!important;right:-1px!important;bottom:0!important;width:24px!important;
+          pointer-events:none!important;
+          background:linear-gradient(90deg,transparent,rgba(2,6,9,.16))!important;
+        }
         .tr-playerHero .tr-audioIdentity{
-          position:relative!important;z-index:4!important;
-          background:linear-gradient(90deg,rgba(2,7,10,.31) 0%,rgba(2,7,10,.10) 34%,rgba(2,7,10,.035) 70%,rgba(2,7,10,.10) 100%)!important;
-          text-shadow:0 2px 18px rgba(0,0,0,.94),0 1px 3px rgba(0,0,0,.82)!important;
+          position:relative!important;
+          z-index:5!important;
+          background:transparent!important;
+          border:0!important;
+          box-shadow:none!important;
+          text-shadow:0 3px 20px rgba(0,0,0,.96),0 1px 4px rgba(0,0,0,.90)!important;
         }
-        .tr-playerHero .tr-audioIdentity:before{background:radial-gradient(72% 95% at 10% 50%,rgba(0,0,0,.16),transparent 72%),linear-gradient(90deg,rgba(0,0,0,.045),transparent 58%)!important}
+        .tr-playerHero .tr-audioIdentity:before{
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          inset:-18% -8% -18% -4%!important;
+          pointer-events:none!important;
+          background:radial-gradient(60% 70% at 18% 50%,rgba(0,0,0,.22),transparent 76%)!important;
+          filter:blur(10px)!important;
+        }
+        .tr-audioDeck--pro7 .tr-audioTimeline{
+          position:relative!important;
+          z-index:6!important;
+          margin-top:5px!important;
+        }
         @media(max-width:650px){
-          .tr-playerVisualEngine{left:112px!important}
-          .tr-playerVisualArtwork{inset:-24% -30% -26% -14%!important;width:156%!important;height:154%!important;opacity:.28!important;filter:blur(32px) saturate(1.42) contrast(1.04) brightness(.60)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.32!important}
-          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(2,7,10,.30),rgba(2,7,10,.085) 62%,rgba(2,7,10,.13))!important}
+          .tr-playerVisualArtwork{
+            left:0!important;top:-34%!important;width:130%!important;height:168%!important;
+            opacity:.29!important;filter:blur(38px) saturate(1.48) contrast(1.035) brightness(.62)!important;
+          }
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.31!important}
+          .tr-playerHero::after{height:30px!important}
+          .tr-playerHero .tr-audioArtwork::after{width:16px!important}
         }
-        @media(max-width:380px){.tr-playerVisualEngine{left:102px!important}}
         @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
+
 
 
       `}</style>
