@@ -451,14 +451,14 @@ export function PreWorkoutLaunch({
         @keyframes trLaunchFallback{to{transform:scaleX(.55) translateX(14%);opacity:.28}}
         .tr-preLaunchVideoVignette{position:absolute;inset:0;background:linear-gradient(90deg,rgba(2,6,10,.92) 0%,rgba(2,6,10,.30) 31%,rgba(2,6,10,.20) 50%,rgba(2,6,10,.35) 69%,rgba(2,6,10,.94) 100%),linear-gradient(180deg,rgba(2,6,10,.22),rgba(2,6,10,.24) 48%,rgba(2,6,10,.92) 100%);pointer-events:none}
         .tr-preLaunchVideoScan{position:absolute;inset:0;opacity:.15;background:repeating-linear-gradient(180deg,rgba(255,255,255,.025) 0 1px,transparent 1px 4px);mix-blend-mode:screen;pointer-events:none}
-        .tr-preLaunchMotivation{position:relative;z-index:2;width:min(900px,88%);display:grid;justify-items:center;gap:10px;padding:44px 20px 52px;text-align:center;text-shadow:0 4px 24px rgba(0,0,0,.92)}
-        .tr-preLaunchMotivationEyebrow{color:rgba(181,229,247,.76);font-size:9px;font-weight:1000;letter-spacing:.27em}
-        .tr-preLaunchMotivation h1{margin:0;max-width:100%;font-size:clamp(42px,7vw,88px);line-height:.91;font-weight:1100;letter-spacing:-.045em;text-wrap:balance;animation:trLaunchTitleIn .72s cubic-bezier(.2,.8,.2,1) both}
-        .tr-preLaunchMotivation p{margin:3px 0 0;max-width:760px;color:rgba(246,250,252,.94);font-size:clamp(16px,2.05vw,23px);line-height:1.35;font-weight:820;text-wrap:balance;animation:trLaunchSpeechIn .75s .12s ease-out both}
+        .tr-preLaunchMotivation{position:relative;z-index:2;width:min(940px,90%);display:grid;justify-items:center;gap:12px;padding:44px 20px 52px;text-align:center;text-shadow:0 4px 24px rgba(0,0,0,.94)}
+        .tr-preLaunchMotivationEyebrow{display:inline-flex;align-items:center;justify-content:center;min-height:29px;padding:0 12px;border:1px solid rgba(100,220,255,.30);border-radius:999px;color:#9ce8ff;background:rgba(1,9,14,.62);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 8px 24px rgba(0,0,0,.34),0 0 18px rgba(0,174,255,.08);font-size:10px;font-weight:1100;letter-spacing:.22em;text-shadow:0 1px 0 rgba(0,0,0,.92),0 0 13px rgba(80,214,255,.22)}
+        .tr-preLaunchMotivation h1{margin:0;max-width:100%;font-size:clamp(44px,7.2vw,92px);line-height:.90;font-weight:1200;letter-spacing:-.048em;text-wrap:balance;background:linear-gradient(180deg,#fff5bf 0%,#ffd35d 42%,#ffad2f 76%,#ff8a22 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:drop-shadow(0 2px 0 rgba(77,39,0,.92)) drop-shadow(0 8px 22px rgba(0,0,0,.95)) drop-shadow(0 0 18px rgba(255,174,38,.24));animation:trLaunchTitleIn .72s cubic-bezier(.2,.8,.2,1) both}
+        .tr-preLaunchMotivation p{margin:2px 0 0;max-width:790px;padding:10px 16px;border:1px solid rgba(255,255,255,.12);border-radius:13px;color:#f7fbfd;background:rgba(2,7,11,.56);box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 12px 30px rgba(0,0,0,.32);font-size:clamp(17px,2.08vw,24px);line-height:1.34;font-weight:950;letter-spacing:-.012em;text-wrap:balance;text-shadow:0 2px 0 rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.88);animation:trLaunchSpeechIn .75s .12s ease-out both}
         @keyframes trLaunchTitleIn{from{opacity:0;transform:translateY(18px) scale(.975);filter:blur(7px)}to{opacity:1;transform:none;filter:none}}
         @keyframes trLaunchSpeechIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-        .tr-preLaunchRefresh{margin-top:11px;height:40px;padding:0 16px;border:1px solid rgba(180,229,246,.20);border-radius:999px;color:rgba(218,239,247,.72);background:rgba(3,9,14,.42);font-size:9px;font-weight:1000;letter-spacing:.13em;cursor:pointer;backdrop-filter:none}
-        .tr-preLaunchRefresh:hover{border-color:rgba(84,208,255,.46);color:#dff7ff}
+        .tr-preLaunchRefresh{margin-top:9px;height:42px;padding:0 17px;border:1px solid rgba(101,213,255,.32);border-radius:999px;color:#bfefff;background:rgba(2,10,16,.62);box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 9px 24px rgba(0,0,0,.28);font-size:9px;font-weight:1100;letter-spacing:.14em;cursor:pointer;backdrop-filter:none}
+        .tr-preLaunchRefresh:hover{border-color:rgba(84,208,255,.62);color:#effbff;background:rgba(0,174,255,.10)}
         .tr-preLaunchCommandDeck{position:relative;z-index:4;display:grid;gap:13px;padding:16px 19px 20px;border-top:1px solid rgba(255,255,255,.075);background:linear-gradient(180deg,rgba(4,9,14,.75),rgba(3,7,11,.985));backdrop-filter:none}
         .tr-preLaunchStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
         .tr-preLaunchStat{min-width:0;min-height:68px;padding:10px 12px;display:grid;align-content:center;gap:5px;border:1px solid rgba(255,255,255,.085);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.15));box-shadow:inset 0 1px 0 rgba(255,255,255,.035);text-align:center}
@@ -502,7 +502,8 @@ export function PreWorkoutLaunch({
           .tr-preLaunchReady{font-size:6.8px;padding:7px 8px}
           .tr-preLaunchHero{min-height:480px}
           .tr-preLaunchMotivation{padding-bottom:30px}
-          .tr-preLaunchMotivation p{font-size:15px}
+          .tr-preLaunchMotivationEyebrow{min-height:27px;padding:0 10px;font-size:8px;letter-spacing:.18em}
+          .tr-preLaunchMotivation p{padding:9px 11px;font-size:15.5px;font-weight:900}
           .tr-preLaunchCommandDeck{padding:12px}
           .tr-preLaunchStat{min-height:59px;padding:8px}
           .tr-preLaunchStat strong{font-size:11px}
