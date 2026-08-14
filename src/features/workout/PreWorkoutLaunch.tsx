@@ -149,7 +149,6 @@ export function PreWorkoutLaunch({
   onStart,
   onCancel,
 }: Props) {
-  const [videos, setVideos] = useState<MotivationVideoRecord[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<MotivationVideoRecord | null>(null);
   const [motivation, setMotivation] = useState<WorkoutMotivationPick>(() => pickWorkoutMotivation());
   const [preview, setPreview] = useState<LaunchPreview>({
@@ -194,12 +193,10 @@ export function PreWorkoutLaunch({
     void listActiveMotivationVideos()
       .then((records) => {
         if (cancelled) return;
-        setVideos(records);
         setSelectedVideo(pickMotivationVideo(records));
       })
       .catch(() => {
         if (!cancelled) {
-          setVideos([]);
           setSelectedVideo(null);
         }
       });
