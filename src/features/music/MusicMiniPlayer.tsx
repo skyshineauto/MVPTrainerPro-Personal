@@ -57,15 +57,6 @@ const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
 const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
 
-type HeroMotionEffect = "aurora" | "waves" | "stars" | "pulse" | "rings";
-const HERO_MOTION_EFFECTS: readonly HeroMotionEffect[] = [
-  "aurora",
-  "waves",
-  "stars",
-  "pulse",
-  "rings",
-];
-
 type IconName =
   | "back"
   | "next"
@@ -396,7 +387,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [eqOpen, setEqOpen] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
-  const [heroEffectIndex, setHeroEffectIndex] = useState(0);
   const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
   const [activeCustomSlot, setActiveCustomSlot] = useState<MusicCustomPresetSlot | null>(
     isCustomSlot(player.eqPreset) ? player.eqPreset : null
@@ -408,18 +398,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetName, setSavePresetName] = useState("");
   const restoredProfileRef = useRef<string>("");
 
-  useEffect(() => {
-    setHeroEffectIndex(0);
-  }, [player.currentTrack?.id]);
-
-  useEffect(() => {
-    if (!player.currentTrack) return;
-    const intervalMs = player.playing ? 10500 : 22000;
-    const timer = window.setInterval(() => {
-      setHeroEffectIndex((current) => (current + 1) % HERO_MOTION_EFFECTS.length);
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [player.playing, player.currentTrack?.id]);
 
   useEffect(() => {
     const title = document.querySelector<HTMLElement>(".tr-topTitle");
@@ -664,7 +642,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const presetStatusLabel = activeSavedProfile
     ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
     : player.eqPreset === "custom" ? "Unsaved custom DSP" : "Built-in preset";
-  const heroEffect = HERO_MOTION_EFFECTS[heroEffectIndex] ?? "aurora";
 
   return (
     <section
@@ -673,26 +650,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     >
 
       <div className="tr-playerHero">
-        <div className={`tr-playerAurora tr-playerFx tr-playerFx--${heroEffect}`} aria-hidden="true">
+        <div className="tr-playerAurora" aria-hidden="true">
           {artworkUrl ? <img className="tr-playerAuroraArt" src={artworkUrl} alt="" /> : null}
-
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--one" />
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--two" />
           <span className="tr-playerAuroraVeil tr-playerAuroraVeil--three" />
-
-          <span className="tr-playerWave tr-playerWave--one" />
-          <span className="tr-playerWave tr-playerWave--two" />
-          <span className="tr-playerWave tr-playerWave--three" />
-
-          <span className="tr-playerStars" />
-          <span className="tr-playerStarGlow" />
-
-          <span className="tr-playerPulseOrb tr-playerPulseOrb--one" />
-          <span className="tr-playerPulseOrb tr-playerPulseOrb--two" />
-
-          <span className="tr-playerRing tr-playerRing--one" />
-          <span className="tr-playerRing tr-playerRing--two" />
-          <span className="tr-playerRing tr-playerRing--three" />
         </div>
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
@@ -1576,7 +1538,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
 
-        /* AUG 13 LIVE PLAYER AURORA V2: clearly visible flowing glow, artwork-derived color motion */
+        /* AUG 13 LIVE PLAYER AURORA: artwork-derived color shift + premium motion */
         .tr-playerHero{
           isolation:isolate!important;
           background:#040a0e!important;
@@ -1588,182 +1550,82 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           overflow:hidden!important;
           pointer-events:none!important;
           background:
-            radial-gradient(72% 100% at 58% 42%,rgba(42,202,235,.15),transparent 68%),
-            radial-gradient(64% 88% at 92% 18%,rgba(126,80,235,.12),transparent 72%),
-            radial-gradient(62% 92% at 74% 90%,rgba(27,177,162,.10),transparent 72%),
+            radial-gradient(70% 90% at 72% 42%,rgba(37,186,225,.12),transparent 72%),
+            radial-gradient(52% 72% at 92% 16%,rgba(112,82,220,.08),transparent 74%),
             #040a0e!important;
-          background-size:115% 115%,125% 125%,120% 120%,auto!important;
-          will-change:background-position,filter;
-          animation:trAuroraBaseShift 18s ease-in-out infinite alternate!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAurora{
-          animation-duration:8s!important;
-        }
-        .tr-playerAurora:before{
-          content:"";
-          position:absolute;
-          z-index:2;
-          width:92%;
-          height:168%;
-          right:-20%;
-          top:-34%;
-          border-radius:42% 58% 61% 39% / 48% 45% 55% 52%;
-          background:
-            conic-gradient(
-              from 208deg at 48% 52%,
-              transparent 0deg,
-              rgba(48,218,255,.00) 42deg,
-              rgba(48,218,255,.27) 74deg,
-              rgba(92,121,255,.18) 112deg,
-              rgba(172,84,255,.22) 154deg,
-              rgba(58,226,197,.18) 208deg,
-              rgba(50,211,255,.24) 252deg,
-              transparent 318deg
-            );
-          filter:blur(30px) saturate(1.30);
-          mix-blend-mode:screen;
-          opacity:.44;
-          transform:translate3d(0,0,0) rotate(-10deg) scale(1.04);
-          transform-origin:52% 48%;
-          will-change:transform,opacity,filter;
-          animation:trAuroraCloudFlow 17s cubic-bezier(.45,.02,.55,.98) infinite alternate;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAurora:before{
-          opacity:.67;
-          animation-duration:7.2s!important;
         }
         .tr-playerAurora:after{
           content:"";
           position:absolute;
           inset:0;
           pointer-events:none;
-          z-index:8;
           background:
-            linear-gradient(90deg,rgba(2,7,10,.46) 0%,rgba(2,7,10,.08) 34%,rgba(2,7,10,.17) 72%,rgba(1,5,8,.30) 100%),
-            radial-gradient(85% 120% at 56% 50%,transparent 24%,rgba(1,5,8,.30) 100%);
+            linear-gradient(90deg,rgba(2,7,10,.48) 0%,rgba(2,7,10,.10) 36%,rgba(2,7,10,.26) 100%),
+            radial-gradient(80% 120% at 64% 50%,transparent 28%,rgba(1,5,8,.42) 100%);
+          z-index:5;
         }
-
         .tr-playerAuroraArt{
           position:absolute!important;
-          z-index:1!important;
-          left:13%!important;
-          top:-34%!important;
-          width:112%!important;
-          height:170%!important;
+          left:20%!important;
+          top:-28%!important;
+          width:100%!important;
+          height:156%!important;
           object-fit:cover!important;
           object-position:center!important;
-          opacity:.38!important;
-          transform:translate3d(-5%,0,0) scale(1.22)!important;
-          filter:blur(31px) saturate(2.10) contrast(1.08) brightness(.66) hue-rotate(-12deg)!important;
-          mix-blend-mode:screen!important;
+          opacity:.34!important;
+          transform:translate3d(0,0,0) scale(1.20)!important;
+          filter:blur(34px) saturate(1.85) contrast(1.07) brightness(.58) hue-rotate(-8deg)!important;
           will-change:transform,filter,opacity;
-          animation:trAuroraArtworkDrift 24s ease-in-out infinite alternate!important;
+          animation:trAuroraArtworkDrift 34s ease-in-out infinite alternate!important;
         }
         .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
-          opacity:.58!important;
-          animation-duration:9s!important;
+          opacity:.46!important;
+          animation-duration:17s!important;
         }
-
         .tr-playerAuroraVeil{
           position:absolute!important;
-          z-index:3!important;
           display:block!important;
           pointer-events:none!important;
           mix-blend-mode:screen!important;
-          will-change:transform,opacity,filter;
-          filter:blur(13px);
-          transform-origin:center;
+          will-change:transform,opacity;
+          opacity:.17;
+          filter:blur(18px);
         }
         .tr-playerAuroraVeil--one{
-          width:80%;
-          height:42%;
-          right:-14%;
-          top:4%;
-          border-radius:50%;
-          opacity:.27;
+          width:62%;height:82%;right:-8%;top:-20%;
+          border-radius:46% 54% 62% 38%;
           background:
-            linear-gradient(
-              105deg,
-              transparent 2%,
-              rgba(34,208,255,.00) 17%,
-              rgba(34,208,255,.30) 36%,
-              rgba(89,140,255,.23) 50%,
-              rgba(182,96,255,.18) 62%,
-              rgba(63,231,208,.15) 73%,
-              transparent 91%
-            );
-          transform:translate3d(-5%,0,0) rotate(-8deg) skewX(-13deg) scaleX(1.04);
-          animation:trAuroraRibbonOne 15s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+            radial-gradient(ellipse at 34% 48%,rgba(58,224,255,.38) 0%,rgba(42,146,255,.16) 31%,transparent 68%);
+          transform:rotate(-10deg) translate3d(0,0,0);
+          animation:trAuroraRibbonOne 22s cubic-bezier(.45,.05,.55,.95) infinite alternate;
         }
         .tr-playerAuroraVeil--two{
-          width:88%;
-          height:36%;
-          right:-20%;
-          bottom:1%;
-          border-radius:50%;
-          opacity:.24;
+          width:70%;height:62%;right:3%;bottom:-27%;
+          border-radius:55% 45% 38% 62%;
           background:
-            linear-gradient(
-              82deg,
-              transparent 0%,
-              rgba(95,86,255,.00) 16%,
-              rgba(95,86,255,.22) 34%,
-              rgba(44,199,237,.31) 50%,
-              rgba(69,233,176,.17) 67%,
-              transparent 91%
-            );
-          transform:translate3d(6%,0,0) rotate(8deg) skewX(15deg) scaleX(1.06);
-          animation:trAuroraRibbonTwo 19s cubic-bezier(.45,.05,.55,.95) infinite alternate;
+            radial-gradient(ellipse at 56% 40%,rgba(118,91,255,.28) 0%,rgba(49,198,234,.20) 36%,transparent 70%);
+          transform:rotate(7deg) translate3d(0,0,0);
+          animation:trAuroraRibbonTwo 29s cubic-bezier(.45,.05,.55,.95) infinite alternate;
         }
         .tr-playerAuroraVeil--three{
-          width:72%;
-          height:26%;
-          right:4%;
-          top:38%;
+          width:52%;height:46%;right:22%;top:28%;
           border-radius:50%;
-          opacity:.25;
           background:
-            linear-gradient(
-              98deg,
-              transparent 0%,
-              rgba(99,232,255,.00) 12%,
-              rgba(99,232,255,.24) 34%,
-              rgba(196,111,255,.20) 54%,
-              rgba(70,206,255,.20) 70%,
-              transparent 92%
-            );
-          filter:blur(9px);
-          transform:translate3d(-8%,0,0) rotate(-4deg) skewX(-18deg);
-          animation:trAuroraRibbonThree 13s ease-in-out infinite alternate;
+            linear-gradient(112deg,transparent 4%,rgba(104,237,255,.05) 18%,rgba(118,208,255,.26) 44%,rgba(171,110,255,.16) 64%,transparent 88%);
+          transform:rotate(-15deg) skewX(-11deg) translate3d(0,0,0);
+          animation:trAuroraRibbonThree 19s ease-in-out infinite alternate;
         }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{
-          opacity:.49!important;
-          animation-duration:6.8s!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{
-          opacity:.43!important;
-          animation-duration:8.6s!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{
-          opacity:.48!important;
-          animation-duration:5.9s!important;
-        }
-
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.27;animation-duration:13s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.24;animation-duration:17s}
+        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.29;animation-duration:11s}
         .tr-playerHero .tr-audioArtwork{
-          z-index:12!important;
+          z-index:3!important;
         }
         .tr-playerHero .tr-audioIdentity{
-          z-index:12!important;
+          z-index:3!important;
           background:
-            linear-gradient(
-              90deg,
-              rgba(3,10,14,.46) 0%,
-              rgba(3,10,14,.18) 43%,
-              rgba(2,8,12,.25) 72%,
-              rgba(2,7,10,.36) 100%
-            )!important;
-          text-shadow:0 2px 18px rgba(0,0,0,.88)!important;
-          backdrop-filter:none!important;
+            linear-gradient(90deg,rgba(4,13,18,.70) 0%,rgba(4,12,17,.44) 46%,rgba(3,9,13,.62) 100%)!important;
+          text-shadow:0 2px 16px rgba(0,0,0,.78)!important;
         }
         .tr-playerHero .tr-audioIdentity:before{
           content:"";
@@ -1772,336 +1634,39 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           z-index:-1;
           pointer-events:none;
           background:
-            radial-gradient(58% 90% at 17% 50%,rgba(0,0,0,.34),transparent 73%),
-            linear-gradient(90deg,rgba(2,7,10,.19),transparent 54%,rgba(2,7,10,.06));
-        }
-
-        @keyframes trAuroraBaseShift{
-          0%{
-            background-position:0% 42%,100% 0%,70% 100%,0 0;
-            filter:hue-rotate(-7deg) saturate(1.00);
-          }
-          50%{
-            background-position:16% 30%,83% 18%,88% 78%,0 0;
-            filter:hue-rotate(8deg) saturate(1.10);
-          }
-          100%{
-            background-position:4% 62%,100% 26%,58% 88%,0 0;
-            filter:hue-rotate(20deg) saturate(1.04);
-          }
-        }
-        @keyframes trAuroraCloudFlow{
-          0%{
-            transform:translate3d(-15%,-5%,0) rotate(-18deg) scale(.93);
-            filter:blur(30px) saturate(1.20) hue-rotate(-10deg);
-          }
-          45%{
-            transform:translate3d(5%,8%,0) rotate(7deg) scale(1.12);
-            filter:blur(36px) saturate(1.48) hue-rotate(14deg);
-          }
-          100%{
-            transform:translate3d(17%,-2%,0) rotate(19deg) scale(1.02);
-            filter:blur(29px) saturate(1.30) hue-rotate(31deg);
-          }
+            radial-gradient(70% 84% at 21% 50%,rgba(0,0,0,.18),transparent 72%),
+            linear-gradient(90deg,rgba(2,7,10,.20),transparent 52%,rgba(2,7,10,.12));
         }
         @keyframes trAuroraArtworkDrift{
-          0%{
-            transform:translate3d(-11%,-5%,0) scale(1.18);
-            filter:blur(31px) saturate(1.96) contrast(1.07) brightness(.61) hue-rotate(-16deg);
-          }
-          48%{
-            transform:translate3d(7%,5%,0) scale(1.32);
-            filter:blur(36px) saturate(2.25) contrast(1.10) brightness(.70) hue-rotate(12deg);
-          }
-          100%{
-            transform:translate3d(-1%,10%,0) scale(1.25);
-            filter:blur(32px) saturate(2.08) contrast(1.08) brightness(.65) hue-rotate(34deg);
-          }
+          0%{transform:translate3d(-3%,-1%,0) scale(1.20);filter:blur(34px) saturate(1.78) contrast(1.06) brightness(.56) hue-rotate(-10deg)}
+          48%{transform:translate3d(3%,2%,0) scale(1.26);filter:blur(36px) saturate(1.96) contrast(1.08) brightness(.61) hue-rotate(8deg)}
+          100%{transform:translate3d(-1%,4%,0) scale(1.22);filter:blur(34px) saturate(1.88) contrast(1.07) brightness(.58) hue-rotate(19deg)}
         }
         @keyframes trAuroraRibbonOne{
-          0%{transform:translate3d(-22%,-12%,0) rotate(-13deg) skewX(-17deg) scaleX(.92)}
-          50%{transform:translate3d(7%,18%,0) rotate(3deg) skewX(-8deg) scaleX(1.13)}
-          100%{transform:translate3d(24%,-2%,0) rotate(-9deg) skewX(-21deg) scaleX(1.02)}
+          0%{transform:rotate(-12deg) translate3d(-8%,-4%,0) scale(.94)}
+          50%{transform:rotate(-5deg) translate3d(5%,7%,0) scale(1.08)}
+          100%{transform:rotate(-15deg) translate3d(11%,-1%,0) scale(1.02)}
         }
         @keyframes trAuroraRibbonTwo{
-          0%{transform:translate3d(19%,12%,0) rotate(12deg) skewX(17deg) scaleX(.94)}
-          50%{transform:translate3d(-11%,-20%,0) rotate(-4deg) skewX(8deg) scaleX(1.16)}
-          100%{transform:translate3d(-25%,2%,0) rotate(10deg) skewX(21deg) scaleX(1.03)}
+          0%{transform:rotate(9deg) translate3d(8%,5%,0) scale(.96)}
+          50%{transform:rotate(2deg) translate3d(-6%,-7%,0) scale(1.10)}
+          100%{transform:rotate(12deg) translate3d(-1%,-2%,0) scale(1.03)}
         }
         @keyframes trAuroraRibbonThree{
-          0%{transform:translate3d(-26%,10%,0) rotate(-10deg) skewX(-22deg) scaleX(.88);opacity:.22}
-          50%{transform:translate3d(5%,-15%,0) rotate(5deg) skewX(-10deg) scaleX(1.20);opacity:.48}
-          100%{transform:translate3d(29%,8%,0) rotate(-6deg) skewX(-25deg) scaleX(.98);opacity:.28}
+          0%{transform:rotate(-17deg) skewX(-11deg) translate3d(-10%,1%,0) scale(.92)}
+          50%{transform:rotate(-9deg) skewX(-7deg) translate3d(6%,-5%,0) scale(1.12)}
+          100%{transform:rotate(-19deg) skewX(-13deg) translate3d(12%,6%,0) scale(1.00)}
         }
-
         @media(max-width:650px){
-          .tr-playerAuroraArt{
-            left:4%!important;
-            top:-22%!important;
-            width:124%!important;
-            height:148%!important;
-            filter:blur(23px) saturate(1.85) contrast(1.05) brightness(.60) hue-rotate(-7deg)!important;
-            opacity:.35!important;
-          }
-          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
-            opacity:.49!important;
-            animation-duration:11s!important;
-          }
-          .tr-playerAurora:before{
-            width:105%;
-            height:170%;
-            right:-40%;
-            top:-36%;
-            filter:blur(24px);
-            opacity:.38;
-          }
-          .tr-audioDeck--pro7.is-playing .tr-playerAurora:before{opacity:.53}
-          .tr-playerAuroraVeil--one{width:92%;height:43%;right:-34%;top:4%;filter:blur(10px)}
-          .tr-playerAuroraVeil--two{width:98%;height:36%;right:-38%;bottom:0;filter:blur(11px)}
+          .tr-playerAuroraArt{left:10%!important;top:-18%!important;width:112%!important;height:138%!important;filter:blur(24px) saturate(1.65) contrast(1.05) brightness(.52) hue-rotate(-6deg)!important;opacity:.30!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.39!important;animation-duration:21s!important}
+          .tr-playerAuroraVeil--one{width:70%;height:90%;right:-22%;top:-26%;filter:blur(13px)}
+          .tr-playerAuroraVeil--two{width:74%;height:68%;right:-10%;bottom:-30%;filter:blur(14px)}
           .tr-playerAuroraVeil--three{display:none!important}
-          .tr-playerHero .tr-audioIdentity{
-            background:linear-gradient(90deg,rgba(3,10,14,.45),rgba(2,8,12,.20) 58%,rgba(2,7,10,.35))!important;
-          }
+          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(4,13,18,.66),rgba(3,10,14,.49) 55%,rgba(2,7,10,.67))!important}
         }
-
-        /* Keep motion visible even when the OS asks for reduced motion because this is an
-           explicitly requested music-player visualization. It is slowed substantially instead. */
         @media(prefers-reduced-motion:reduce){
-          .tr-playerAurora{animation-duration:28s!important}
-          .tr-playerAuroraArt{animation-duration:34s!important}
-          .tr-playerAurora:before{animation-duration:30s!important}
-          .tr-playerAuroraVeil--one{animation-duration:26s!important}
-          .tr-playerAuroraVeil--two{animation-duration:30s!important}
-          .tr-playerAuroraVeil--three{animation-duration:24s!important}
-        }
-
-
-        /* AUG 13 CINEMATIC HERO FX ROTATION
-           The hero automatically rotates between five real effects:
-           aurora, flowing waves, starfield, breathing light, and expanding rings. */
-        .tr-playerFx{
-          --fx-cyan:rgba(58,218,255,.82);
-          --fx-blue:rgba(88,114,255,.72);
-          --fx-violet:rgba(186,88,255,.68);
-          --fx-green:rgba(65,235,188,.56);
-        }
-        .tr-playerFx:before{
-          transition:opacity 1.15s ease!important;
-        }
-        .tr-playerFx .tr-playerAuroraVeil,
-        .tr-playerFx .tr-playerWave,
-        .tr-playerFx .tr-playerStars,
-        .tr-playerFx .tr-playerStarGlow,
-        .tr-playerFx .tr-playerPulseOrb,
-        .tr-playerFx .tr-playerRing{
-          opacity:0!important;
-          transition:opacity 1.15s ease!important;
-        }
-
-        /* 1. Aurora */
-        .tr-playerFx--aurora:before{opacity:.52!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--aurora:before{opacity:.72!important}
-        .tr-playerFx--aurora .tr-playerAuroraVeil--one{opacity:.48!important}
-        .tr-playerFx--aurora .tr-playerAuroraVeil--two{opacity:.42!important}
-        .tr-playerFx--aurora .tr-playerAuroraVeil--three{opacity:.46!important}
-
-        /* 2. Flowing wave field */
-        .tr-playerWave{
-          position:absolute!important;
-          z-index:4!important;
-          right:-22%!important;
-          width:112%!important;
-          height:34%!important;
-          border-radius:50%!important;
-          pointer-events:none!important;
-          mix-blend-mode:screen!important;
-          filter:blur(10px) saturate(1.25)!important;
-          will-change:transform,opacity,filter!important;
-        }
-        .tr-playerWave--one{
-          top:7%!important;
-          background:linear-gradient(100deg,transparent 4%,rgba(50,218,255,.05) 16%,rgba(50,218,255,.46) 38%,rgba(109,117,255,.34) 57%,rgba(193,83,255,.22) 71%,transparent 93%)!important;
-          transform:rotate(-9deg) skewX(-19deg)!important;
-          animation:trHeroWaveOne 6.8s ease-in-out infinite alternate!important;
-        }
-        .tr-playerWave--two{
-          top:35%!important;
-          background:linear-gradient(84deg,transparent 1%,rgba(88,101,255,.02) 15%,rgba(88,101,255,.32) 34%,rgba(46,208,246,.50) 53%,rgba(54,231,186,.22) 70%,transparent 94%)!important;
-          transform:rotate(7deg) skewX(17deg)!important;
-          animation:trHeroWaveTwo 8.2s ease-in-out infinite alternate!important;
-        }
-        .tr-playerWave--three{
-          bottom:-4%!important;
-          background:linear-gradient(105deg,transparent 3%,rgba(188,82,255,.03) 17%,rgba(188,82,255,.29) 36%,rgba(70,147,255,.35) 55%,rgba(61,225,207,.18) 71%,transparent 92%)!important;
-          transform:rotate(-4deg) skewX(-14deg)!important;
-          animation:trHeroWaveThree 7.4s ease-in-out infinite alternate!important;
-        }
-        .tr-playerFx--waves .tr-playerWave--one{opacity:.58!important}
-        .tr-playerFx--waves .tr-playerWave--two{opacity:.56!important}
-        .tr-playerFx--waves .tr-playerWave--three{opacity:.45!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--waves .tr-playerWave--one{opacity:.78!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--waves .tr-playerWave--two{opacity:.74!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--waves .tr-playerWave--three{opacity:.62!important}
-
-        /* 3. Deep starfield */
-        .tr-playerStars{
-          position:absolute!important;
-          z-index:4!important;
-          inset:-18%!important;
-          pointer-events:none!important;
-          background-image:
-            radial-gradient(circle,rgba(255,255,255,.92) 0 1px,transparent 1.7px),
-            radial-gradient(circle,rgba(133,231,255,.80) 0 1px,transparent 1.9px),
-            radial-gradient(circle,rgba(189,156,255,.66) 0 .8px,transparent 1.6px),
-            radial-gradient(circle,rgba(255,255,255,.52) 0 .7px,transparent 1.5px)!important;
-          background-size:47px 53px,79px 71px,113px 97px,151px 127px!important;
-          background-position:0 0,23px 17px,61px 31px,84px 49px!important;
-          filter:drop-shadow(0 0 5px rgba(147,224,255,.26))!important;
-          animation:trHeroStarsDrift 16s linear infinite!important;
-          will-change:transform,background-position,opacity!important;
-        }
-        .tr-playerStars:after{
-          content:"";
-          position:absolute;
-          inset:0;
-          background:
-            radial-gradient(circle at 18% 34%,rgba(255,255,255,.95) 0 1.5px,rgba(104,222,255,.30) 2px,transparent 5px),
-            radial-gradient(circle at 51% 18%,rgba(255,255,255,.90) 0 1.2px,rgba(178,131,255,.27) 2px,transparent 4px),
-            radial-gradient(circle at 75% 61%,rgba(255,255,255,.90) 0 1.4px,rgba(89,211,255,.28) 2px,transparent 5px),
-            radial-gradient(circle at 90% 28%,rgba(255,255,255,.84) 0 1px,rgba(81,232,200,.24) 2px,transparent 4px);
-          animation:trHeroStarTwinkle 3.8s ease-in-out infinite alternate;
-        }
-        .tr-playerStarGlow{
-          position:absolute!important;
-          z-index:3!important;
-          inset:0!important;
-          background:
-            radial-gradient(55% 90% at 78% 45%,rgba(39,151,255,.18),transparent 70%),
-            radial-gradient(38% 64% at 58% 67%,rgba(152,73,255,.15),transparent 72%)!important;
-          animation:trHeroStarNebula 8s ease-in-out infinite alternate!important;
-        }
-        .tr-playerFx--stars .tr-playerStars{opacity:.74!important}
-        .tr-playerFx--stars .tr-playerStarGlow{opacity:.72!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--stars .tr-playerStars{opacity:.95!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--stars .tr-playerStarGlow{opacity:.90!important}
-
-        /* 4. Breathing in/out glow */
-        .tr-playerPulseOrb{
-          position:absolute!important;
-          z-index:4!important;
-          border-radius:50%!important;
-          pointer-events:none!important;
-          mix-blend-mode:screen!important;
-          will-change:transform,opacity,filter!important;
-        }
-        .tr-playerPulseOrb--one{
-          width:58%!important;height:120%!important;
-          right:1%!important;top:-10%!important;
-          background:radial-gradient(circle,rgba(82,224,255,.48) 0%,rgba(91,110,255,.28) 34%,rgba(160,70,255,.14) 56%,transparent 74%)!important;
-          filter:blur(18px)!important;
-          animation:trHeroPulseOne 5.6s ease-in-out infinite!important;
-        }
-        .tr-playerPulseOrb--two{
-          width:38%!important;height:82%!important;
-          right:31%!important;top:9%!important;
-          background:radial-gradient(circle,rgba(71,238,192,.32) 0%,rgba(56,180,255,.18) 45%,transparent 72%)!important;
-          filter:blur(15px)!important;
-          animation:trHeroPulseTwo 7.2s ease-in-out infinite reverse!important;
-        }
-        .tr-playerFx--pulse .tr-playerPulseOrb--one{opacity:.66!important}
-        .tr-playerFx--pulse .tr-playerPulseOrb--two{opacity:.48!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--pulse .tr-playerPulseOrb--one{opacity:.88!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--pulse .tr-playerPulseOrb--two{opacity:.70!important}
-
-        /* 5. Expanding dimensional rings */
-        .tr-playerRing{
-          position:absolute!important;
-          z-index:4!important;
-          width:50%!important;
-          aspect-ratio:1/1!important;
-          right:5%!important;
-          top:50%!important;
-          border-radius:50%!important;
-          border:1px solid rgba(89,220,255,.58)!important;
-          box-shadow:
-            inset 0 0 18px rgba(71,203,255,.10),
-            0 0 22px rgba(71,203,255,.15)!important;
-          transform:translateY(-50%) scale(.18)!important;
-          pointer-events:none!important;
-          mix-blend-mode:screen!important;
-          will-change:transform,opacity,filter!important;
-          animation:trHeroRingExpand 5.4s cubic-bezier(.18,.58,.32,1) infinite!important;
-        }
-        .tr-playerRing--two{
-          animation-delay:-1.8s!important;
-          border-color:rgba(152,97,255,.52)!important;
-          box-shadow:inset 0 0 18px rgba(152,97,255,.08),0 0 22px rgba(152,97,255,.13)!important;
-        }
-        .tr-playerRing--three{
-          animation-delay:-3.6s!important;
-          border-color:rgba(70,235,190,.43)!important;
-          box-shadow:inset 0 0 18px rgba(70,235,190,.07),0 0 22px rgba(70,235,190,.12)!important;
-        }
-        .tr-playerFx--rings .tr-playerRing{opacity:.78!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerFx--rings .tr-playerRing{opacity:1!important}
-
-        /* Dim the blurred album copy slightly for non-aurora modes so each mode reads as a
-           genuinely different visual rather than the same background with a small overlay. */
-        .tr-playerFx--waves .tr-playerAuroraArt{opacity:.28!important}
-        .tr-playerFx--stars .tr-playerAuroraArt{opacity:.19!important;filter:blur(38px) saturate(1.45) brightness(.46)!important}
-        .tr-playerFx--pulse .tr-playerAuroraArt{opacity:.24!important}
-        .tr-playerFx--rings .tr-playerAuroraArt{opacity:.20!important;filter:blur(36px) saturate(1.55) brightness(.48)!important}
-
-        @keyframes trHeroWaveOne{
-          0%{transform:translate3d(-22%,-16%,0) rotate(-11deg) skewX(-20deg) scaleX(.86)}
-          50%{transform:translate3d(4%,17%,0) rotate(2deg) skewX(-8deg) scaleX(1.16)}
-          100%{transform:translate3d(24%,-5%,0) rotate(-7deg) skewX(-23deg) scaleX(.98)}
-        }
-        @keyframes trHeroWaveTwo{
-          0%{transform:translate3d(19%,16%,0) rotate(10deg) skewX(18deg) scaleX(.92)}
-          50%{transform:translate3d(-8%,-18%,0) rotate(-3deg) skewX(8deg) scaleX(1.18)}
-          100%{transform:translate3d(-25%,4%,0) rotate(8deg) skewX(22deg) scaleX(1.02)}
-        }
-        @keyframes trHeroWaveThree{
-          0%{transform:translate3d(-18%,8%,0) rotate(-7deg) skewX(-17deg) scaleX(.90)}
-          50%{transform:translate3d(11%,-14%,0) rotate(5deg) skewX(-8deg) scaleX(1.14)}
-          100%{transform:translate3d(27%,7%,0) rotate(-5deg) skewX(-21deg) scaleX(.99)}
-        }
-        @keyframes trHeroStarsDrift{
-          0%{transform:translate3d(-2%,-3%,0) scale(1)}
-          50%{transform:translate3d(3%,2%,0) scale(1.035)}
-          100%{transform:translate3d(7%,6%,0) scale(1.07)}
-        }
-        @keyframes trHeroStarTwinkle{
-          0%{opacity:.35;filter:brightness(.72)}
-          55%{opacity:1;filter:brightness(1.35)}
-          100%{opacity:.58;filter:brightness(.92)}
-        }
-        @keyframes trHeroStarNebula{
-          0%{transform:translate3d(-7%,1%,0) scale(.96);filter:hue-rotate(-10deg)}
-          100%{transform:translate3d(8%,-4%,0) scale(1.09);filter:hue-rotate(24deg)}
-        }
-        @keyframes trHeroPulseOne{
-          0%,100%{transform:scale(.66) translate3d(13%,0,0);filter:blur(20px) hue-rotate(-10deg)}
-          50%{transform:scale(1.18) translate3d(-5%,0,0);filter:blur(27px) hue-rotate(22deg)}
-        }
-        @keyframes trHeroPulseTwo{
-          0%,100%{transform:scale(.72) translate3d(8%,5%,0)}
-          50%{transform:scale(1.32) translate3d(-8%,-7%,0)}
-        }
-        @keyframes trHeroRingExpand{
-          0%{transform:translateY(-50%) scale(.16);opacity:0}
-          18%{opacity:.78}
-          70%{opacity:.38}
-          100%{transform:translateY(-50%) scale(1.42);opacity:0}
-        }
-
-        @media(max-width:650px){
-          .tr-playerWave{right:-46%!important;width:135%!important;filter:blur(8px) saturate(1.15)!important}
-          .tr-playerStars{inset:-28%!important;background-size:43px 49px,73px 67px,107px 91px,143px 121px!important}
-          .tr-playerPulseOrb--one{width:84%!important;right:-20%!important}
-          .tr-playerPulseOrb--two{width:56%!important;right:12%!important}
-          .tr-playerRing{width:78%!important;right:-20%!important}
+          .tr-playerAuroraArt,.tr-playerAuroraVeil{animation:none!important}
         }
 
         /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
