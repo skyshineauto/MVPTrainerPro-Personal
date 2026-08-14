@@ -2850,6 +2850,26 @@ export function WorkoutPlayerPage({ params }: any) {
       if (uErr) throw uErr;
       if (!u.user) throw new Error("Sign in first.");
 
+      /*
+       * IMPORTANT START ORDER
+       * AppShell treats a started workout with zero workout_exercises as an
+       * invalid empty workout. Prepare/seed the workout first, then mark it
+       * started. This restores the persistent session timer, Pause/End controls,
+       * and cross-tab Resume behavior without changing AppShell.
+       */
+      await hydrateAfterStart(workoutId);
+
+      const { data: preparedExercises, error: preparedExercisesError } = await supabase
+        .from("workout_exercises")
+        .select("id")
+        .eq("workout_id", workoutId)
+        .limit(1);
+
+      if (preparedExercisesError) throw preparedExercisesError;
+      if (!preparedExercises?.length) {
+        throw new Error("Workout exercises could not be prepared. Try starting the session again.");
+      }
+
       const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from("workouts")
@@ -2862,6 +2882,14 @@ export function WorkoutPlayerPage({ params }: any) {
 
       if (error) throw error;
 
+      try {
+        localStorage.setItem("mvp_active_session_id", String(sessionId));
+        localStorage.setItem("mvp_active_workout_id", String(workoutId));
+        localStorage.setItem("mvp_is_paused", "false");
+        localStorage.removeItem("mvp_paused_at_iso");
+        localStorage.setItem("mvp_paused_total_seconds", "0");
+      } catch {}
+
       if (!workoutStartAlertPlayedRef.current) {
         workoutStartAlertPlayedRef.current = true;
         void playWorkoutAlert("workout_start");
@@ -2869,6 +2897,13 @@ export function WorkoutPlayerPage({ params }: any) {
 
       setGateOpen(false);
       setStartedWeight(w);
+
+      // AppShell already refreshes itself on window focus. Trigger that existing
+      // path immediately so the timer / Pause / End HUD appears without waiting
+      // for its normal inactive polling interval.
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event("focus"));
+      }, 0);
 
       const { data: sessionContext, error: sessionContextError } = await supabase
         .from("scheduled_sessions")
@@ -2903,8 +2938,6 @@ export function WorkoutPlayerPage({ params }: any) {
           ? roundProtein(w * proteinMultiplier(exactGoal))
           : null
       );
-
-      await hydrateAfterStart(workoutId);
     } catch (e: any) {
       setLoadErr(e?.message ?? String(e));
       setGateOpen(true);
