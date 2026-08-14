@@ -382,36 +382,241 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 }
 
 
-function MusicHeroFluidMotion({ playing }: { playing: boolean }) {
+type HeroRgb = { r: number; g: number; b: number };
+type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
+type HeroSceneName = "fluid" | "waves" | "stars" | "plasma" | "bloom" | "haze" | "tunnel" | "flow";
+type HeroAudioShape = { low: number; mid: number; high: number; energy: number; depth: number; pulse: number; speed: number };
+
+const HERO_SCENES: HeroSceneName[] = ["fluid", "stars", "plasma", "waves", "bloom", "haze", "tunnel", "flow"];
+const HERO_SCENE_MS = 9000;
+const HERO_CROSSFADE_MS = 1250;
+const HERO_ENGINE_VERSION = "AUG14-V4";
+
+function heroSceneDisplayName(scene: HeroSceneName) {
+  if (scene === "flow") return "PARTICLES";
+  if (scene === "haze") return "SMOKE";
+  return scene.toUpperCase();
+}
+const HERO_NEUTRAL_PALETTE: HeroPalette = [
+  { r: 225, g: 235, b: 239 },
+  { r: 170, g: 184, b: 190 },
+  { r: 118, g: 132, b: 140 },
+  { r: 245, g: 248, b: 250 },
+  { r: 64, g: 74, b: 80 },
+];
+
+function heroClamp(value: number, min = 0, max = 1) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function heroHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function heroNoise(index: number, seed: number) {
+  let value = Math.imul(index + 1, 374761393) ^ Math.imul(seed + 23, 668265263);
+  value = (value ^ (value >>> 13)) >>> 0;
+  value = Math.imul(value, 1274126177) >>> 0;
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+}
+
+function heroMix(left: HeroRgb, right: HeroRgb, amount: number): HeroRgb {
+  const mix = heroClamp(amount);
+  return {
+    r: left.r + (right.r - left.r) * mix,
+    g: left.g + (right.g - left.g) * mix,
+    b: left.b + (right.b - left.b) * mix,
+  };
+}
+
+function heroRgba(color: HeroRgb, alpha: number) {
+  return `rgba(${Math.round(color.r)},${Math.round(color.g)},${Math.round(color.b)},${heroClamp(alpha).toFixed(3)})`;
+}
+
+function heroLightness(color: HeroRgb) {
+  const max = Math.max(color.r, color.g, color.b) / 255;
+  const min = Math.min(color.r, color.g, color.b) / 255;
+  return (max + min) / 2;
+}
+
+function heroSaturation(color: HeroRgb) {
+  const r = color.r / 255;
+  const g = color.g / 255;
+  const b = color.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const light = (max + min) / 2;
+  const chroma = max - min;
+  return chroma === 0 ? 0 : heroClamp(chroma / (1 - Math.abs(2 * light - 1)));
+}
+
+function heroColorDistance(left: HeroRgb, right: HeroRgb) {
+  const dr = left.r - right.r;
+  const dg = left.g - right.g;
+  const db = left.b - right.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+function heroMakeVisible(color: HeroRgb) {
+  const light = heroLightness(color);
+  if (light < 0.18) return heroMix(color, { r: 255, g: 255, b: 255 }, 0.28);
+  if (light > 0.86) return heroMix(color, { r: 0, g: 0, b: 0 }, 0.14);
+  return color;
+}
+
+function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
+  type Bucket = { r: number; g: number; b: number; weight: number; hits: number };
+  const buckets = new Map<string, Bucket>();
+
+  for (let index = 0; index < data.length; index += 12) {
+    const alpha = data[index + 3] / 255;
+    if (alpha < 0.65) continue;
+    const color = { r: data[index], g: data[index + 1], b: data[index + 2] };
+    const light = heroLightness(color);
+    if (light < 0.035 || light > 0.97) continue;
+    const saturation = heroSaturation(color);
+    const q = 28;
+    const qr = Math.round(color.r / q) * q;
+    const qg = Math.round(color.g / q) * q;
+    const qb = Math.round(color.b / q) * q;
+    const key = `${qr}:${qg}:${qb}`;
+    const centerBias = 1 - Math.min(1, Math.abs(light - 0.48) * 1.35);
+    const weight = alpha * (0.72 + saturation * 1.35) * (0.68 + centerBias * 0.32);
+    const bucket = buckets.get(key) ?? { r: 0, g: 0, b: 0, weight: 0, hits: 0 };
+    bucket.r += color.r * weight;
+    bucket.g += color.g * weight;
+    bucket.b += color.b * weight;
+    bucket.weight += weight;
+    bucket.hits += 1;
+    buckets.set(key, bucket);
+  }
+
+  const ranked = Array.from(buckets.values())
+    .filter((bucket) => bucket.weight > 0)
+    .map((bucket) => ({
+      color: {
+        r: bucket.r / bucket.weight,
+        g: bucket.g / bucket.weight,
+        b: bucket.b / bucket.weight,
+      },
+      score: bucket.weight * Math.sqrt(bucket.hits),
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  if (!ranked.length) return null;
+  const chosen: HeroRgb[] = [];
+  for (const candidate of ranked) {
+    if (!chosen.length || chosen.every((existing) => heroColorDistance(existing, candidate.color) > 54)) {
+      chosen.push(heroMakeVisible(candidate.color));
+      if (chosen.length === 4) break;
+    }
+  }
+  while (chosen.length < 4) {
+    const fallback = ranked[Math.min(chosen.length, ranked.length - 1)]?.color ?? HERO_NEUTRAL_PALETTE[chosen.length];
+    chosen.push(heroMakeVisible(fallback));
+  }
+
+  const brightest = [...chosen].sort((a, b) => heroLightness(b) - heroLightness(a))[0];
+  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.42), { r: 0, g: 0, b: 0 }, 0.76);
+  return [chosen[0], chosen[1], chosen[2], heroMix(brightest, { r: 255, g: 255, b: 255 }, 0.20), shadow];
+}
+
+function MusicHeroSceneEngine({
+  playing,
+  trackKey,
+  artworkUrl,
+}: {
+  playing: boolean;
+  trackKey: string;
+  artworkUrl: string | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const playingRef = useRef(playing);
+  const seedRef = useRef(heroHash(trackKey || "mvp-music"));
+  const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
+  const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
+  const [debugScene, setDebugScene] = useState<HeroSceneName>(() => HERO_SCENES[Math.floor(Date.now() / HERO_SCENE_MS) % HERO_SCENES.length]);
+
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
+    seedRef.current = heroHash(trackKey || "mvp-music");
+  }, [trackKey]);
+
+  useEffect(() => {
+    const syncScene = () => {
+      const sceneStep = Math.floor(Date.now() / HERO_SCENE_MS);
+      setDebugScene(HERO_SCENES[sceneStep % HERO_SCENES.length]);
+    };
+    syncScene();
+    const timer = window.setInterval(syncScene, 250);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!artworkUrl || typeof document === "undefined") {
+      targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
+      return;
+    }
+
+    let cancelled = false;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.decoding = "async";
+
+    const sampleArtwork = () => {
+      if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
+      try {
+        const sample = document.createElement("canvas");
+        const size = 64;
+        sample.width = size;
+        sample.height = size;
+        const context = sample.getContext("2d", { willReadFrequently: true });
+        if (!context) return;
+        const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
+        const sourceWidth = size / scale;
+        const sourceHeight = size / scale;
+        const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
+        const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
+        context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, size, size);
+        const palette = extractHeroPalette(context.getImageData(0, 0, size, size).data);
+        if (!cancelled && palette) targetPaletteRef.current = palette;
+      } catch {
+        // The blurred artwork remains underneath the transparent canvas, so a CORS-blocked
+        // palette read still preserves the album's real colors instead of inventing a theme.
+        targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
+      }
+    };
+
+    image.onload = sampleArtwork;
+    image.src = artworkUrl;
+    if (image.complete) sampleArtwork();
+    return () => { cancelled = true; };
+  }, [artworkUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     let frame = 0;
+    let lastNow = performance.now();
     let width = 1;
     let height = 1;
     let dpr = 1;
-    let bass = 0;
-    let mids = 0;
-    let highs = 0;
-    let energy = 0;
-
-    const particles = Array.from({ length: 52 }, (_, index) => ({
-      seed: index * 17.731 + 3.17,
-      x: ((index * 37) % 101) / 101,
-      y: ((index * 61) % 97) / 97,
-      size: 0.55 + ((index * 13) % 11) / 10,
-      depth: 0.35 + ((index * 29) % 67) / 100,
-      speed: 0.55 + ((index * 19) % 31) / 24,
-    }));
+    const smoothed = { low: 0.11, mid: 0.10, high: 0.08, energy: 0.16, depth: 0.16, pulse: 0.10 };
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       width = Math.max(1, Math.floor(rect.width));
       height = Math.max(1, Math.floor(rect.height));
-      dpr = Math.min(1.75, window.devicePixelRatio || 1);
+      dpr = Math.min(width < 560 ? 1.2 : 1.45, window.devicePixelRatio || 1);
       const pixelWidth = Math.max(1, Math.floor(width * dpr));
       const pixelHeight = Math.max(1, Math.floor(height * dpr));
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -424,234 +629,356 @@ function MusicHeroFluidMotion({ playing }: { playing: boolean }) {
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     observer?.observe(canvas);
 
-    const drawGlow = (
-      ctx: CanvasRenderingContext2D,
-      x: number,
-      y: number,
-      radiusX: number,
-      radiusY: number,
-      color: string,
-      alpha: number,
-    ) => {
+    const smoothPath = (ctx: CanvasRenderingContext2D, points: Array<{ x: number; y: number }>) => {
+      if (points.length < 2) return;
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let index = 1; index < points.length - 1; index += 1) {
+        const current = points[index];
+        const next = points[index + 1];
+        ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
+      }
+      const last = points[points.length - 1];
+      ctx.lineTo(last.x, last.y);
+    };
+
+    const drawFluid = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(Math.max(0.001, radiusX / Math.max(1, radiusY)), 1);
-      const radius = Math.max(1, radiusY);
-      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
-      glow.addColorStop(0, color.replace("ALPHA", String(alpha)));
-      glow.addColorStop(0.34, color.replace("ALPHA", String(alpha * 0.72)));
-      glow.addColorStop(0.68, color.replace("ALPHA", String(alpha * 0.24)));
-      glow.addColorStop(1, color.replace("ALPHA", "0"));
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      for (let index = 0; index < 7; index += 1) {
+        const p = heroNoise(index * 7 + 1, seed);
+        const q = heroNoise(index * 7 + 2, seed);
+        const r = heroNoise(index * 7 + 3, seed);
+        const x = width * (0.12 + p * 0.78) + Math.sin(t * (0.18 + q * 0.07) + r * 6.28) * width * (0.04 + audio.depth * 0.055);
+        const y = height * (0.16 + q * 0.68) + Math.cos(t * (0.15 + r * 0.06) + p * 6.28) * height * (0.07 + audio.depth * 0.05);
+        const radius = Math.max(width, height) * (0.18 + r * 0.18 + audio.low * 0.055);
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.18 + audio.energy * 0.08));
+        gradient.addColorStop(0.42, heroRgba(palette[(index + 1) % 4], 0.07 + audio.mid * 0.04));
+        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.ellipse(x, y, radius * (1.0 + Math.sin(t * 0.21 + index) * 0.18), radius * (0.58 + q * 0.34), t * 0.07 + index, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     };
 
-    const drawRibbon = (
-      ctx: CanvasRenderingContext2D,
-      time: number,
-      baseY: number,
-      amplitude: number,
-      phase: number,
-      lineWidth: number,
-      colorA: string,
-      colorB: string,
-      alpha: number,
-      frequency: number,
-      drift: number,
-    ) => {
-      const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, colorA.replace("ALPHA", "0"));
-      gradient.addColorStop(0.18, colorA.replace("ALPHA", String(alpha * 0.74)));
-      gradient.addColorStop(0.5, colorB.replace("ALPHA", String(alpha)));
-      gradient.addColorStop(0.82, colorA.replace("ALPHA", String(alpha * 0.68)));
-      gradient.addColorStop(1, colorB.replace("ALPHA", "0"));
-
+    const drawWaves = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = lineWidth;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.shadowColor = colorB.replace("ALPHA", String(alpha * 0.72));
-      ctx.shadowBlur = Math.max(8, lineWidth * 1.45);
-      ctx.beginPath();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const layers = width < 520 ? 3 : 5;
+      const pointCount = 13;
+      for (let layer = 0; layer < layers; layer += 1) {
+        const upper: Array<{ x: number; y: number }> = [];
+        const lower: Array<{ x: number; y: number }> = [];
+        const layerSeed = seed + layer * 37;
+        const baseY = height * (0.25 + layer * (0.52 / Math.max(1, layers - 1)));
+        const thickness = height * (0.035 + heroNoise(layer + 2, layerSeed) * 0.045 + audio.depth * 0.022);
+        for (let point = 0; point < pointCount; point += 1) {
+          const u = point / (pointCount - 1);
+          const p = heroNoise(point * 5 + 1, layerSeed);
+          const q = heroNoise(point * 5 + 2, layerSeed);
+          const xDrift = Math.sin(t * (0.24 + q * 0.08) + point * 0.73 + layer * 1.17) * width * (0.012 + audio.mid * 0.014);
+          const fold = Math.sin(t * 0.31 + point * 0.55 + layer * 0.9) * height * (0.045 + audio.mid * 0.045);
+          const curl = Math.cos(t * 0.19 + point * 0.96 + p * 5.5) * height * (0.028 + audio.low * 0.035);
+          const swell = Math.sin(t * 0.11 + layer * 1.7) * height * 0.035;
+          const x = u * width + xDrift + Math.sin(t * 0.14 + point * 0.31 + layer) * width * 0.012;
+          const y = baseY + fold + curl + swell + Math.sin(u * Math.PI * 2 + layer) * height * 0.025;
+          const localThickness = thickness * (0.72 + q * 0.55) * (0.92 + Math.sin(t * 0.25 + point * 0.44) * 0.14);
+          upper.push({ x, y: y - localThickness });
+          lower.push({ x, y: y + localThickness });
+        }
 
-      const steps = Math.max(40, Math.ceil(width / 16));
-      for (let step = 0; step <= steps; step += 1) {
-        const ratio = step / steps;
-        const x = ratio * width;
-        const envelope = Math.sin(Math.PI * ratio);
-        const y =
-          baseY +
-          Math.sin(ratio * Math.PI * frequency + time * drift + phase) * amplitude * envelope +
-          Math.sin(ratio * Math.PI * (frequency * 0.53) - time * drift * 0.67 + phase * 1.7) * amplitude * 0.36;
-        if (step === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        ctx.beginPath();
+        smoothPath(ctx, upper);
+        for (let point = lower.length - 1; point >= 0; point -= 1) {
+          const current = lower[point];
+          if (point === lower.length - 1) ctx.lineTo(current.x, current.y);
+          else {
+            const next = lower[Math.max(0, point - 1)];
+            ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
+          }
+        }
+        ctx.closePath();
+        const gradient = ctx.createLinearGradient(0, baseY - height * 0.12, width, baseY + height * 0.12);
+        gradient.addColorStop(0, heroRgba(palette[layer % 4], 0.025));
+        gradient.addColorStop(0.32, heroRgba(palette[(layer + 1) % 4], 0.12 + audio.energy * 0.035));
+        gradient.addColorStop(0.72, heroRgba(palette[(layer + 2) % 4], 0.16 + audio.energy * 0.045));
+        gradient.addColorStop(1, heroRgba(palette[layer % 4], 0.018));
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        ctx.beginPath();
+        const center = upper.map((point, index) => ({ x: point.x, y: (point.y + lower[index].y) / 2 }));
+        smoothPath(ctx, center);
+        ctx.strokeStyle = heroRgba(palette[(layer + 3) % 4], 0.08 + audio.high * 0.035);
+        ctx.lineWidth = 0.8 + layer * 0.22;
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.restore();
+    };
+
+    const drawStars = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const count = width < 520 ? 72 : 132;
+      const cx = width * (0.54 + Math.sin(t * 0.08) * 0.055);
+      const cy = height * (0.50 + Math.cos(t * 0.07) * 0.07);
+      for (let index = 0; index < count; index += 1) {
+        const a = heroNoise(index * 4 + 1, seed) * Math.PI * 2;
+        const baseDepth = heroNoise(index * 4 + 2, seed);
+        const radiusSeed = heroNoise(index * 4 + 3, seed);
+        const depth = (baseDepth + t * (0.035 + radiusSeed * 0.02)) % 1;
+        const eased = depth * depth;
+        const radius = eased * Math.max(width, height) * (0.22 + radiusSeed * 0.48);
+        const angle = a + t * (0.018 + radiusSeed * 0.018) * (index % 2 ? 1 : -1);
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius * (0.48 + radiusSeed * 0.20);
+        const size = 0.5 + eased * (1.2 + audio.high * 0.7);
+        const color = palette[index % 4];
+        ctx.fillStyle = heroRgba(color, 0.12 + eased * 0.42);
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+        if (depth > 0.76 && playingRef.current) {
+          const trail = 3 + eased * 7;
+          ctx.strokeStyle = heroRgba(color, 0.05 + audio.high * 0.05);
+          ctx.lineWidth = Math.max(0.5, size * 0.48);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - Math.cos(angle) * trail, y - Math.sin(angle) * trail * 0.55);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    };
+
+    const drawPlasma = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      for (let index = 0; index < 9; index += 1) {
+        const p = heroNoise(index * 5 + 1, seed);
+        const q = heroNoise(index * 5 + 2, seed);
+        const x = width * (0.08 + p * 0.84) + Math.sin(t * (0.14 + q * 0.08) + index) * width * 0.06;
+        const y = height * (0.12 + q * 0.76) + Math.cos(t * (0.17 + p * 0.05) + index * 0.6) * height * 0.10;
+        const radius = Math.max(width, height) * (0.10 + heroNoise(index * 5 + 3, seed) * 0.12 + audio.depth * 0.035);
+        const gradient = ctx.createRadialGradient(x, y, radius * 0.03, x, y, radius);
+        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.21 + audio.energy * 0.06));
+        gradient.addColorStop(0.46, heroRgba(palette[(index + 2) % 4], 0.08));
+        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.ellipse(x, y, radius * (1.15 + Math.sin(t * 0.22 + index) * 0.22), radius * (0.72 + Math.cos(t * 0.18 + index) * 0.18), t * 0.11 + index, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    const drawBloom = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const cx = width * (0.58 + Math.sin(t * 0.09) * 0.05);
+      const cy = height * (0.50 + Math.cos(t * 0.08) * 0.06);
+      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.42);
+      halo.addColorStop(0, heroRgba(palette[0], 0.12 + audio.low * 0.05));
+      halo.addColorStop(0.38, heroRgba(palette[1], 0.055));
+      halo.addColorStop(1, heroRgba(palette[2], 0));
+      ctx.fillStyle = halo;
+      ctx.fillRect(0, 0, width, height);
+      for (let ring = 0; ring < 7; ring += 1) {
+        const progress = (ring / 7 + t * 0.035) % 1;
+        const radiusX = width * (0.05 + progress * 0.60) * (1 + audio.depth * 0.08);
+        const radiusY = height * (0.05 + progress * 0.52) * (1 + audio.low * 0.08);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, radiusX, radiusY, Math.sin(t * 0.11 + ring) * 0.10, 0, Math.PI * 2);
+        ctx.strokeStyle = heroRgba(palette[ring % 4], (1 - progress) * (0.11 + audio.energy * 0.045));
+        ctx.lineWidth = 0.8 + (1 - progress) * 2.2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const drawHaze = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      for (let wisp = 0; wisp < 7; wisp += 1) {
+        const base = height * (0.14 + heroNoise(wisp + 1, seed) * 0.72);
+        const points: Array<{ x: number; y: number }> = [];
+        for (let point = 0; point < 9; point += 1) {
+          const u = point / 8;
+          const x = width * u + Math.sin(t * 0.12 + point * 0.7 + wisp) * width * 0.02;
+          const y = base + Math.sin(t * (0.15 + wisp * 0.006) + point * 0.52 + wisp * 1.3) * height * (0.055 + audio.mid * 0.045) + Math.cos(t * 0.09 + point * 0.91) * height * 0.025;
+          points.push({ x, y });
+        }
+        ctx.beginPath();
+        smoothPath(ctx, points);
+        ctx.strokeStyle = heroRgba(palette[wisp % 4], 0.045 + audio.energy * 0.025);
+        ctx.lineWidth = height * (0.07 + heroNoise(wisp + 4, seed) * 0.06);
+        ctx.lineCap = "round";
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const drawTunnel = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const cx = width * (0.57 + Math.sin(t * 0.10) * 0.06);
+      const cy = height * (0.50 + Math.cos(t * 0.085) * 0.07);
+      for (let ring = 0; ring < 12; ring += 1) {
+        const phase = (ring / 12 + t * 0.025) % 1;
+        const scale = 0.06 + phase * 0.92;
+        ctx.beginPath();
+        ctx.ellipse(cx + Math.sin(t * 0.13 + ring * 0.3) * width * 0.02, cy + Math.cos(t * 0.11 + ring * 0.4) * height * 0.025, width * scale * 0.55, height * scale * 0.46, Math.sin(t * 0.07) * 0.08, 0, Math.PI * 2);
+        ctx.strokeStyle = heroRgba(palette[ring % 4], (1 - phase) * (0.09 + audio.high * 0.025));
+        ctx.lineWidth = 0.7 + (1 - phase) * 2.4;
+        ctx.stroke();
+      }
+      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(width, height) * 0.28);
+      core.addColorStop(0, heroRgba(palette[3], 0.10 + audio.low * 0.035));
+      core.addColorStop(1, heroRgba(palette[0], 0));
+      ctx.fillStyle = core;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    };
+
+    const drawFlow = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const count = width < 520 ? 74 : 128;
+      const cx = width * (0.55 + Math.sin(t * 0.08) * 0.09);
+      const cy = height * (0.50 + Math.cos(t * 0.065) * 0.10);
+      for (let index = 0; index < count; index += 1) {
+        const p = heroNoise(index * 5 + 1, seed);
+        const q = heroNoise(index * 5 + 2, seed);
+        const r = heroNoise(index * 5 + 3, seed);
+        const direction = index % 2 ? 1 : -1;
+        const angle = p * Math.PI * 2 + direction * t * (0.035 + r * 0.028) + Math.sin(t * 0.09 + q * 7) * 0.22;
+        const radius = Math.max(width, height) * (0.03 + q * 0.48) * (0.95 + Math.sin(t * 0.08 + p * 8) * 0.07);
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius * (0.42 + r * 0.28);
+        const tangent = angle + direction * Math.PI / 2;
+        const len = 3 + r * 10 + audio.high * 3;
+        ctx.strokeStyle = heroRgba(palette[index % 4], 0.07 + r * 0.18 + audio.high * 0.018);
+        ctx.lineWidth = 0.6 + r * 1.1;
+        ctx.beginPath();
+        ctx.moveTo(x - Math.cos(tangent) * len, y - Math.sin(tangent) * len);
+        ctx.quadraticCurveTo(x - Math.cos(tangent) * len * 0.3 + Math.cos(angle) * 4, y - Math.sin(tangent) * len * 0.3 + Math.sin(angle) * 3, x, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const drawScene = (ctx: CanvasRenderingContext2D, scene: HeroSceneName, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      if (alpha <= 0.002) return;
+      if (scene === "fluid") drawFluid(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "waves") drawWaves(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "stars") drawStars(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "plasma") drawPlasma(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "bloom") drawBloom(ctx, t, audio, palette, alpha);
+      else if (scene === "haze") drawHaze(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "tunnel") drawTunnel(ctx, t, audio, palette, alpha);
+      else drawFlow(ctx, t, audio, palette, alpha, seed);
     };
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
       if (typeof document !== "undefined" && document.hidden) return;
+      if (width < 2 || height < 2) resize();
 
-      resize();
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      const raw = playing ? getMusicRtaLevels() : Array(10).fill(0);
-      const bassTarget = Math.max(0, Math.min(1, ((Number(raw[0]) || 0) + (Number(raw[1]) || 0) + (Number(raw[2]) || 0)) / 2.25));
-      const midsTarget = Math.max(0, Math.min(1, ((Number(raw[3]) || 0) + (Number(raw[4]) || 0) + (Number(raw[5]) || 0) + (Number(raw[6]) || 0)) / 2.7));
-      const highsTarget = Math.max(0, Math.min(1, ((Number(raw[7]) || 0) + (Number(raw[8]) || 0) + (Number(raw[9]) || 0)) / 2.15));
-      bass += (bassTarget - bass) * 0.13;
-      mids += (midsTarget - mids) * 0.11;
-      highs += (highsTarget - highs) * 0.14;
-      const energyTarget = playing ? Math.max(bassTarget, midsTarget * 0.88, highsTarget * 0.74) : 0;
-      energy += (energyTarget - energy) * 0.10;
-
-      const t = now * 0.001;
-      const idle = playing ? 1 : 0.72;
-      const speed = (0.58 + energy * 1.22) * idle;
-      const pulse = 0.5 + 0.5 * Math.sin(t * (1.15 + bass * 1.8));
-      const travel = t * speed;
-
-      const base = ctx.createLinearGradient(0, 0, width, height);
-      base.addColorStop(0, "#02070b");
-      base.addColorStop(0.42, "#061018");
-      base.addColorStop(1, "#020509");
-      ctx.fillStyle = base;
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.globalCompositeOperation = "screen";
-
-      const x1 = width * (0.62 + Math.sin(travel * 0.47) * 0.18);
-      const y1 = height * (0.34 + Math.cos(travel * 0.63) * 0.22);
-      drawGlow(ctx, x1, y1, width * (0.42 + bass * 0.12), height * (0.78 + bass * 0.20), "rgba(22,214,255,ALPHA)", 0.31 + bass * 0.20);
-
-      const x2 = width * (0.84 + Math.cos(travel * 0.38 + 1.3) * 0.17);
-      const y2 = height * (0.64 + Math.sin(travel * 0.51 + 0.7) * 0.26);
-      drawGlow(ctx, x2, y2, width * (0.37 + mids * 0.10), height * (0.64 + mids * 0.20), "rgba(104,73,255,ALPHA)", 0.25 + mids * 0.18);
-
-      const x3 = width * (0.48 + Math.sin(travel * 0.31 + 2.4) * 0.22);
-      const y3 = height * (0.76 + Math.cos(travel * 0.42 + 1.1) * 0.17);
-      drawGlow(ctx, x3, y3, width * (0.31 + highs * 0.08), height * (0.47 + highs * 0.15), "rgba(255,45,174,ALPHA)", 0.16 + highs * 0.20);
-
-      const x4 = width * (0.72 + Math.cos(travel * 0.29 + 3.0) * 0.25);
-      const y4 = height * (0.15 + Math.sin(travel * 0.44 + 1.8) * 0.18);
-      drawGlow(ctx, x4, y4, width * 0.28, height * 0.40, "rgba(70,255,174,ALPHA)", 0.12 + mids * 0.12);
-
-      const breathingRadius = width * (0.18 + pulse * 0.08 + bass * 0.07);
-      drawGlow(
-        ctx,
-        width * (0.66 + Math.sin(travel * 0.25) * 0.05),
-        height * (0.50 + Math.cos(travel * 0.31) * 0.06),
-        breathingRadius * 1.65,
-        height * (0.26 + pulse * 0.08 + bass * 0.08),
-        "rgba(115,225,255,ALPHA)",
-        0.12 + pulse * 0.08 + bass * 0.11,
-      );
-
-      drawRibbon(
-        ctx,
-        travel,
-        height * (0.32 + Math.sin(travel * 0.37) * 0.05),
-        height * (0.13 + bass * 0.07),
-        0.2,
-        Math.max(12, height * (0.055 + bass * 0.025)),
-        "rgba(26,205,255,ALPHA)",
-        "rgba(107,99,255,ALPHA)",
-        0.22 + bass * 0.15,
-        3.1,
-        1.25,
-      );
-      drawRibbon(
-        ctx,
-        travel,
-        height * (0.58 + Math.cos(travel * 0.31) * 0.06),
-        height * (0.16 + mids * 0.07),
-        2.0,
-        Math.max(10, height * (0.042 + mids * 0.024)),
-        "rgba(78,107,255,ALPHA)",
-        "rgba(236,67,255,ALPHA)",
-        0.17 + mids * 0.16,
-        4.0,
-        -0.94,
-      );
-      drawRibbon(
-        ctx,
-        travel,
-        height * (0.77 + Math.sin(travel * 0.42 + 1.4) * 0.04),
-        height * (0.09 + highs * 0.06),
-        4.2,
-        Math.max(7, height * (0.028 + highs * 0.018)),
-        "rgba(70,255,208,ALPHA)",
-        "rgba(45,186,255,ALPHA)",
-        0.13 + highs * 0.16,
-        5.2,
-        1.48,
-      );
-
-      ctx.globalCompositeOperation = "lighter";
-      for (let index = 0; index < particles.length; index += 1) {
-        const particle = particles[index];
-        const phase = travel * particle.speed + particle.seed;
-        const orbitX = Math.sin(phase * 0.29 + particle.seed) * 0.11;
-        const orbitY = Math.cos(phase * 0.37 + particle.seed * 0.7) * 0.16;
-        const driftY = ((particle.y + travel * 0.018 * particle.speed) % 1.18) - 0.09;
-        const x = width * (particle.x + orbitX);
-        const y = height * (driftY + orbitY * 0.28);
-        const depthPulse = 0.62 + 0.38 * Math.sin(phase * 1.8);
-        const alpha = (0.10 + particle.depth * 0.18 + highs * 0.22) * depthPulse;
-        const radius = particle.size * (0.55 + particle.depth * 0.75 + highs * 0.34);
-
-        if (x < -12 || x > width + 12 || y < -12 || y > height + 12) continue;
-        ctx.beginPath();
-        ctx.fillStyle = index % 5 === 0
-          ? `rgba(182,121,255,${alpha})`
-          : index % 3 === 0
-            ? `rgba(84,255,217,${alpha})`
-            : `rgba(157,233,255,${alpha})`;
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (playing && highs > 0.16 && index % 7 === 0) {
-          const streak = 5 + highs * 18 * particle.depth;
-          ctx.strokeStyle = `rgba(202,245,255,${alpha * 0.48})`;
-          ctx.lineWidth = Math.max(0.5, radius * 0.45);
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x - streak, y + streak * 0.18);
-          ctx.stroke();
+      const dt = heroClamp((now - lastNow) / 16.667, 0.2, 3);
+      lastNow = now;
+      const raw = playingRef.current ? getMusicRtaLevels() : Array(10).fill(0);
+      const average = (from: number, to: number) => {
+        let sum = 0;
+        let count = 0;
+        for (let index = from; index <= to; index += 1) {
+          sum += heroClamp(Number(raw[index]) || 0);
+          count += 1;
         }
+        return count ? sum / count : 0;
+      };
+      const lowRaw = average(0, 2);
+      const midRaw = average(3, 6);
+      const highRaw = average(7, 9);
+      const overall = lowRaw * 0.38 + midRaw * 0.40 + highRaw * 0.22;
+
+      const targets = playingRef.current ? {
+        low: heroClamp(0.12 + lowRaw * 0.40, 0.12, 0.56),
+        mid: heroClamp(0.11 + midRaw * 0.37, 0.11, 0.52),
+        high: heroClamp(0.08 + highRaw * 0.34, 0.08, 0.46),
+        energy: heroClamp(0.23 + Math.tanh(overall * 1.85) * 0.32, 0.23, 0.58),
+        depth: heroClamp(0.18 + lowRaw * 0.25 + overall * 0.13, 0.18, 0.52),
+      } : { low: 0.105, mid: 0.095, high: 0.075, energy: 0.15, depth: 0.15 };
+
+      const approach = (current: number, target: number) => {
+        const rate = target > current ? 1 - Math.pow(0.83, dt) : 1 - Math.pow(0.956, dt);
+        return current + (target - current) * rate;
+      };
+      smoothed.low = approach(smoothed.low, targets.low);
+      smoothed.mid = approach(smoothed.mid, targets.mid);
+      smoothed.high = approach(smoothed.high, targets.high);
+      smoothed.energy = approach(smoothed.energy, targets.energy);
+      smoothed.depth = approach(smoothed.depth, targets.depth);
+      smoothed.pulse = approach(smoothed.pulse, targets.low * 0.72 + targets.mid * 0.28);
+
+      const livePalette = livePaletteRef.current;
+      const targetPalette = targetPaletteRef.current;
+      for (let index = 0; index < livePalette.length; index += 1) {
+        livePalette[index] = heroMix(livePalette[index], targetPalette[index], 1 - Math.pow(0.962, dt));
       }
 
-      ctx.globalCompositeOperation = "source-over";
+      // Real wall-clock timing means React renders/remounts cannot trap the visualizer on scene one.
+      const absoluteNow = Date.now();
+      const sceneStep = Math.floor(absoluteNow / HERO_SCENE_MS);
+      const sceneElapsed = absoluteNow - sceneStep * HERO_SCENE_MS;
+      const currentScene = HERO_SCENES[sceneStep % HERO_SCENES.length];
+      const nextScene = HERO_SCENES[(sceneStep + 1) % HERO_SCENES.length];
+      const fadeStart = HERO_SCENE_MS - HERO_CROSSFADE_MS;
+      const fadeLinear = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
+      const fade = fadeLinear * fadeLinear * (3 - 2 * fadeLinear);
+      const audio: HeroAudioShape = {
+        low: smoothed.low,
+        mid: smoothed.mid,
+        high: smoothed.high,
+        energy: smoothed.energy,
+        depth: smoothed.depth,
+        pulse: smoothed.pulse,
+        speed: playingRef.current ? 0.56 + smoothed.energy * 0.14 : 0.34,
+      };
+      const t = now * 0.001 * audio.speed;
+      const seed = seedRef.current;
 
-      const softVignette = ctx.createRadialGradient(
-        width * 0.64,
-        height * 0.48,
-        Math.min(width, height) * 0.06,
-        width * 0.64,
-        height * 0.48,
-        Math.max(width, height) * 0.76,
-      );
-      softVignette.addColorStop(0, "rgba(0,0,0,0)");
-      softVignette.addColorStop(0.58, "rgba(0,0,0,.05)");
-      softVignette.addColorStop(1, "rgba(0,0,0,.48)");
-      ctx.fillStyle = softVignette;
+      // Keep the canvas transparent so the blurred album art underneath is always the palette base.
+      const shade = ctx.createLinearGradient(0, 0, width, height);
+      shade.addColorStop(0, "rgba(0,0,0,.10)");
+      shade.addColorStop(0.55, "rgba(0,0,0,.035)");
+      shade.addColorStop(1, "rgba(0,0,0,.16)");
+      ctx.fillStyle = shade;
       ctx.fillRect(0, 0, width, height);
 
-      const sheen = ctx.createLinearGradient(0, 0, width, height);
-      sheen.addColorStop(0, "rgba(255,255,255,.025)");
-      sheen.addColorStop(0.35, "rgba(255,255,255,0)");
-      sheen.addColorStop(0.72, `rgba(93,223,255,${0.018 + energy * 0.025})`);
-      sheen.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = sheen;
+      drawScene(ctx, currentScene, t, audio, livePalette, 1 - fade * 0.88, seed + sceneStep * 41);
+      if (fade > 0) drawScene(ctx, nextScene, t + 0.61, audio, livePalette, fade, seed + (sceneStep + 1) * 41);
+
+      const edge = ctx.createLinearGradient(0, 0, width, 0);
+      edge.addColorStop(0, "rgba(0,0,0,.20)");
+      edge.addColorStop(0.22, "rgba(0,0,0,.03)");
+      edge.addColorStop(0.78, "rgba(0,0,0,.02)");
+      edge.addColorStop(1, "rgba(0,0,0,.18)");
+      ctx.fillStyle = edge;
       ctx.fillRect(0, 0, width, height);
     };
 
@@ -660,9 +987,21 @@ function MusicHeroFluidMotion({ playing }: { playing: boolean }) {
       window.cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-  }, [playing]);
+  }, []);
 
-  return <canvas ref={canvasRef} className="tr-playerFluidCanvas" aria-hidden="true" />;
+  return (
+    <>
+      <div className="tr-playerVisualEngine" aria-hidden="true">
+        {artworkUrl ? <img className="tr-playerVisualArtwork" src={artworkUrl} alt="" /> : null}
+        <canvas ref={canvasRef} />
+        <span className="tr-playerVisualGlass" />
+      </div>
+      <div className="tr-playerVisualDebug" aria-hidden="true">
+        <span>{HERO_ENGINE_VERSION}</span>
+        <strong>{heroSceneDisplayName(debugScene)}</strong>
+      </div>
+    </>
+  );
 }
 
 export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
@@ -934,13 +1273,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     >
 
       <div className="tr-playerHero">
-        <div className="tr-playerAurora" aria-hidden="true">
-          {artworkUrl ? <img className="tr-playerAuroraArt" src={artworkUrl} alt="" /> : null}
-          <MusicHeroFluidMotion playing={player.playing} />
-          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--one" />
-          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--two" />
-          <span className="tr-playerAuroraVeil tr-playerAuroraVeil--three" />
-        </div>
+        <MusicHeroSceneEngine
+          playing={player.playing}
+          trackKey={track?.id || `${track?.title || "music"}:${track?.artist || "unknown"}`}
+          artworkUrl={artworkUrl}
+        />
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
@@ -1823,199 +2160,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
 
-        /* AUG 13 LIVE PLAYER AURORA: artwork-derived color shift + premium motion */
-        .tr-playerHero{
-          isolation:isolate!important;
-          background:#040a0e!important;
-        }
-        .tr-playerAurora{
-          position:absolute!important;
-          inset:0!important;
-          z-index:0!important;
-          overflow:hidden!important;
-          pointer-events:none!important;
-          background:
-            radial-gradient(70% 90% at 72% 42%,rgba(37,186,225,.12),transparent 72%),
-            radial-gradient(52% 72% at 92% 16%,rgba(112,82,220,.08),transparent 74%),
-            #040a0e!important;
-        }
-        .tr-playerAurora:after{
-          content:"";
-          position:absolute;
-          inset:0;
-          pointer-events:none;
-          background:
-            linear-gradient(90deg,rgba(2,7,10,.48) 0%,rgba(2,7,10,.10) 36%,rgba(2,7,10,.26) 100%),
-            radial-gradient(80% 120% at 64% 50%,transparent 28%,rgba(1,5,8,.42) 100%);
-          z-index:5;
-        }
-        .tr-playerAuroraArt{
-          position:absolute!important;
-          left:20%!important;
-          top:-28%!important;
-          width:100%!important;
-          height:156%!important;
-          object-fit:cover!important;
-          object-position:center!important;
-          opacity:.34!important;
-          transform:translate3d(0,0,0) scale(1.20)!important;
-          filter:blur(34px) saturate(1.85) contrast(1.07) brightness(.58) hue-rotate(-8deg)!important;
-          will-change:transform,filter,opacity;
-          animation:trAuroraArtworkDrift 34s ease-in-out infinite alternate!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
-          opacity:.46!important;
-          animation-duration:17s!important;
-        }
-        .tr-playerAuroraVeil{
-          position:absolute!important;
-          display:block!important;
-          pointer-events:none!important;
-          mix-blend-mode:screen!important;
-          will-change:transform,opacity;
-          opacity:.17;
-          filter:blur(18px);
-        }
-        .tr-playerAuroraVeil--one{
-          width:62%;height:82%;right:-8%;top:-20%;
-          border-radius:46% 54% 62% 38%;
-          background:
-            radial-gradient(ellipse at 34% 48%,rgba(58,224,255,.38) 0%,rgba(42,146,255,.16) 31%,transparent 68%);
-          transform:rotate(-10deg) translate3d(0,0,0);
-          animation:trAuroraRibbonOne 22s cubic-bezier(.45,.05,.55,.95) infinite alternate;
-        }
-        .tr-playerAuroraVeil--two{
-          width:70%;height:62%;right:3%;bottom:-27%;
-          border-radius:55% 45% 38% 62%;
-          background:
-            radial-gradient(ellipse at 56% 40%,rgba(118,91,255,.28) 0%,rgba(49,198,234,.20) 36%,transparent 70%);
-          transform:rotate(7deg) translate3d(0,0,0);
-          animation:trAuroraRibbonTwo 29s cubic-bezier(.45,.05,.55,.95) infinite alternate;
-        }
-        .tr-playerAuroraVeil--three{
-          width:52%;height:46%;right:22%;top:28%;
-          border-radius:50%;
-          background:
-            linear-gradient(112deg,transparent 4%,rgba(104,237,255,.05) 18%,rgba(118,208,255,.26) 44%,rgba(171,110,255,.16) 64%,transparent 88%);
-          transform:rotate(-15deg) skewX(-11deg) translate3d(0,0,0);
-          animation:trAuroraRibbonThree 19s ease-in-out infinite alternate;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.27;animation-duration:13s}
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.24;animation-duration:17s}
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.29;animation-duration:11s}
-        .tr-playerHero .tr-audioArtwork{
-          z-index:3!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          z-index:3!important;
-          background:
-            linear-gradient(90deg,rgba(4,13,18,.70) 0%,rgba(4,12,17,.44) 46%,rgba(3,9,13,.62) 100%)!important;
-          text-shadow:0 2px 16px rgba(0,0,0,.78)!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          content:"";
-          position:absolute;
-          inset:0;
-          z-index:-1;
-          pointer-events:none;
-          background:
-            radial-gradient(70% 84% at 21% 50%,rgba(0,0,0,.18),transparent 72%),
-            linear-gradient(90deg,rgba(2,7,10,.20),transparent 52%,rgba(2,7,10,.12));
-        }
-        @keyframes trAuroraArtworkDrift{
-          0%{transform:translate3d(-3%,-1%,0) scale(1.20);filter:blur(34px) saturate(1.78) contrast(1.06) brightness(.56) hue-rotate(-10deg)}
-          48%{transform:translate3d(3%,2%,0) scale(1.26);filter:blur(36px) saturate(1.96) contrast(1.08) brightness(.61) hue-rotate(8deg)}
-          100%{transform:translate3d(-1%,4%,0) scale(1.22);filter:blur(34px) saturate(1.88) contrast(1.07) brightness(.58) hue-rotate(19deg)}
-        }
-        @keyframes trAuroraRibbonOne{
-          0%{transform:rotate(-12deg) translate3d(-8%,-4%,0) scale(.94)}
-          50%{transform:rotate(-5deg) translate3d(5%,7%,0) scale(1.08)}
-          100%{transform:rotate(-15deg) translate3d(11%,-1%,0) scale(1.02)}
-        }
-        @keyframes trAuroraRibbonTwo{
-          0%{transform:rotate(9deg) translate3d(8%,5%,0) scale(.96)}
-          50%{transform:rotate(2deg) translate3d(-6%,-7%,0) scale(1.10)}
-          100%{transform:rotate(12deg) translate3d(-1%,-2%,0) scale(1.03)}
-        }
-        @keyframes trAuroraRibbonThree{
-          0%{transform:rotate(-17deg) skewX(-11deg) translate3d(-10%,1%,0) scale(.92)}
-          50%{transform:rotate(-9deg) skewX(-7deg) translate3d(6%,-5%,0) scale(1.12)}
-          100%{transform:rotate(-19deg) skewX(-13deg) translate3d(12%,6%,0) scale(1.00)}
-        }
-        @media(max-width:650px){
-          .tr-playerAuroraArt{left:10%!important;top:-18%!important;width:112%!important;height:138%!important;filter:blur(24px) saturate(1.65) contrast(1.05) brightness(.52) hue-rotate(-6deg)!important;opacity:.30!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.39!important;animation-duration:21s!important}
-          .tr-playerAuroraVeil--one{width:70%;height:90%;right:-22%;top:-26%;filter:blur(13px)}
-          .tr-playerAuroraVeil--two{width:74%;height:68%;right:-10%;bottom:-30%;filter:blur(14px)}
-          .tr-playerAuroraVeil--three{display:none!important}
-          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(4,13,18,.66),rgba(3,10,14,.49) 55%,rgba(2,7,10,.67))!important}
-        }
-        @media(prefers-reduced-motion:reduce){
-          .tr-playerAuroraArt,.tr-playerAuroraVeil{animation:none!important}
-        }
-
-
-        /* AUG 13 FLUID MOTION ENGINE: always-visible canvas movement + audio reactive depth */
-        .tr-playerAurora{
-          opacity:1!important;
-          background:#02070b!important;
-        }
-        .tr-playerFluidCanvas{
-          position:absolute!important;
-          inset:-4%!important;
-          z-index:4!important;
-          display:block!important;
-          width:108%!important;
-          height:108%!important;
-          max-width:none!important;
-          pointer-events:none!important;
-          opacity:.96!important;
-          transform:translate3d(0,0,0) scale(1.02)!important;
-          filter:saturate(1.18) contrast(1.06)!important;
-          will-change:contents;
-        }
-        .tr-playerAuroraArt{
-          z-index:1!important;
-          opacity:.24!important;
-          filter:blur(42px) saturate(1.95) contrast(1.08) brightness(.48)!important;
-          animation:trAuroraArtworkDrift 16s ease-in-out infinite alternate!important;
-        }
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{
-          opacity:.34!important;
-          animation-duration:10s!important;
-        }
-        .tr-playerAuroraVeil{z-index:3!important;filter:blur(15px)!important}
-        .tr-playerAuroraVeil--one{opacity:.24!important;animation-duration:10s!important}
-        .tr-playerAuroraVeil--two{opacity:.20!important;animation-duration:13s!important}
-        .tr-playerAuroraVeil--three{opacity:.24!important;animation-duration:8s!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--one{opacity:.31!important;animation-duration:7s!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--two{opacity:.27!important;animation-duration:9s!important}
-        .tr-audioDeck--pro7.is-playing .tr-playerAuroraVeil--three{opacity:.33!important;animation-duration:6s!important}
-        .tr-playerAurora:after{
-          z-index:5!important;
-          background:
-            linear-gradient(90deg,rgba(1,5,8,.34) 0%,rgba(1,5,8,.03) 38%,rgba(1,5,8,.16) 100%),
-            radial-gradient(90% 130% at 67% 50%,transparent 24%,rgba(1,5,8,.26) 100%)!important;
-        }
-        .tr-playerHero .tr-audioIdentity{
-          background:
-            linear-gradient(90deg,rgba(3,11,16,.43) 0%,rgba(3,10,15,.18) 48%,rgba(2,7,11,.36) 100%)!important;
-          backdrop-filter:none!important;
-        }
-        .tr-playerHero .tr-audioIdentity:before{
-          background:
-            radial-gradient(78% 92% at 18% 50%,rgba(0,0,0,.17),transparent 72%),
-            linear-gradient(90deg,rgba(1,5,8,.16),transparent 52%,rgba(1,5,8,.07))!important;
-        }
-        @media(max-width:650px){
-          .tr-playerFluidCanvas{inset:-8%!important;width:116%!important;height:116%!important;opacity:.92!important}
-          .tr-playerAuroraArt{opacity:.20!important;filter:blur(30px) saturate(1.82) contrast(1.06) brightness(.45)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerAuroraArt{opacity:.28!important}
-          .tr-playerHero .tr-audioIdentity{
-            background:linear-gradient(90deg,rgba(3,11,16,.39),rgba(2,8,12,.17) 55%,rgba(1,6,9,.35))!important;
-          }
-        }
-
         /* AUG 9 REMAINING MUSIC FIXES: recommendation-card feedback controls */
         .tr-audioDeck--pro7 .tr-playerPreferenceStage.tr-trackPreference button{
           height:30px!important;min-height:30px!important;padding:0 9px!important;gap:6px!important;
@@ -2061,6 +2205,59 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             grid-column:1/-1!important;width:min(54%,170px)!important;justify-self:center!important;
           }
         }
+
+        /* AUG 14 AUTHORITATIVE GENERATIVE HERO V4: 8 scenes, artwork palette, visible test verification */
+        .tr-playerHero{isolation:isolate!important;background:#020609!important}
+        .tr-playerVisualDebug{
+          position:absolute!important;z-index:20!important;right:10px!important;top:9px!important;display:flex!important;align-items:center!important;gap:7px!important;
+          min-height:24px!important;padding:0 8px!important;border:1px solid rgba(255,255,255,.19)!important;border-radius:999px!important;
+          background:rgba(2,7,10,.72)!important;box-shadow:0 5px 16px rgba(0,0,0,.28)!important;backdrop-filter:blur(7px)!important;pointer-events:none!important;
+          color:#fff!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.08em!important;text-shadow:0 1px 3px rgba(0,0,0,.9)!important;
+        }
+        .tr-playerVisualDebug span{color:rgba(220,235,241,.72)!important}.tr-playerVisualDebug strong{color:#fff!important;font-size:8px!important;letter-spacing:.10em!important}
+        .tr-playerVisualEngine{
+          position:absolute!important;z-index:0!important;top:0!important;right:0!important;bottom:0!important;left:clamp(220px,30%,310px)!important;
+          overflow:hidden!important;pointer-events:none!important;background:#020609!important;contain:paint!important;
+        }
+        .tr-playerVisualArtwork{
+          position:absolute!important;z-index:0!important;inset:-34% -26% -34% -18%!important;width:152%!important;height:170%!important;
+          object-fit:cover!important;object-position:center!important;opacity:.43!important;
+          filter:blur(48px) saturate(1.95) contrast(1.08) brightness(.58)!important;
+          transform:translate3d(0,0,0) scale(1.10)!important;transform-origin:center!important;
+          animation:trVisualArtworkDrift 15s ease-in-out infinite alternate!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.50!important;animation-duration:11s!important}
+        .tr-playerVisualEngine canvas{
+          position:absolute!important;z-index:1!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;
+          opacity:1!important;mix-blend-mode:screen!important;filter:saturate(1.08) contrast(1.025)!important;
+        }
+        .tr-playerVisualGlass{
+          position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
+          background:linear-gradient(90deg,rgba(1,5,8,.18) 0%,rgba(1,5,8,.02) 24%,rgba(1,5,8,.015) 73%,rgba(1,4,7,.15) 100%),linear-gradient(180deg,rgba(255,255,255,.012),transparent 34%,rgba(0,0,0,.10) 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.02)!important;
+        }
+        .tr-playerHero .tr-audioArtwork{position:relative!important;z-index:4!important}
+        .tr-playerHero .tr-audioIdentity{
+          position:relative!important;z-index:4!important;
+          background:linear-gradient(90deg,rgba(2,7,10,.36) 0%,rgba(2,7,10,.14) 34%,rgba(2,7,10,.06) 68%,rgba(2,7,10,.13) 100%)!important;
+          text-shadow:0 2px 18px rgba(0,0,0,.94),0 1px 3px rgba(0,0,0,.80)!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{background:radial-gradient(72% 95% at 10% 50%,rgba(0,0,0,.17),transparent 72%),linear-gradient(90deg,rgba(0,0,0,.055),transparent 58%)!important}
+        @keyframes trVisualArtworkDrift{
+          0%{transform:translate3d(-2%,-2%,0) scale(1.08)}
+          50%{transform:translate3d(2%,2%,0) scale(1.15)}
+          100%{transform:translate3d(-1%,4%,0) scale(1.11)}
+        }
+        @media(max-width:650px){
+          .tr-playerVisualDebug{right:6px!important;top:6px!important;min-height:20px!important;padding:0 6px!important;gap:5px!important;font-size:5.5px!important}.tr-playerVisualDebug strong{font-size:6.5px!important}
+          .tr-playerVisualEngine{left:112px!important}
+          .tr-playerVisualArtwork{inset:-28% -32% -30% -16%!important;width:160%!important;height:160%!important;opacity:.39!important;filter:blur(31px) saturate(1.85) contrast(1.06) brightness(.56)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.46!important}
+          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(2,7,10,.34),rgba(2,7,10,.11) 62%,rgba(2,7,10,.16))!important}
+        }
+        @media(max-width:380px){.tr-playerVisualEngine{left:102px!important}}
+        @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
+
       `}</style>
     </section>
   );
