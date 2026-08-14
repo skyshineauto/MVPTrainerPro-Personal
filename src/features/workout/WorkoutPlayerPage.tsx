@@ -572,7 +572,6 @@ type SessionIntelligence = {
   } | null;
   week: {
     completedWorkouts: number;
-    targetWorkouts: number | null;
     trainingMinutes: number;
   };
 };
@@ -582,7 +581,6 @@ const EMPTY_SESSION_INTELLIGENCE: SessionIntelligence = {
   lastSameSession: null,
   week: {
     completedWorkouts: 0,
-    targetWorkouts: null,
     trainingMinutes: 0,
   },
 };
@@ -831,44 +829,90 @@ async function loadSessionIntelligence(params: {
       new Date(String(a?.completed_at ?? 0)).getTime()
   );
 
+  const performanceCache = new Map<
+    string,
+    Awaited<ReturnType<typeof loadWorkoutPerformanceSnapshot>>
+  >();
+
+  const getPerformance = async (row: any) => {
+    const id = String(row?.id ?? "");
+    const cached = performanceCache.get(id);
+    if (cached) return cached;
+    const performance = await loadWorkoutPerformanceSnapshot(id);
+    performanceCache.set(id, performance);
+    return performance;
+  };
+
+  const isMeaningfulCompletedWorkout = (
+    row: any,
+    performance: Awaited<ReturnType<typeof loadWorkoutPerformanceSnapshot>>
+  ) => {
+    const durationMinutes = safeWorkoutDurationMinutes(row) ?? 0;
+
+    // A completed strength workout must contain real work. This rejects
+    // accidentally completed / test / abandoned rows such as 1 min, 0 sets,
+    // no volume. Timed-only sessions can still qualify when they contain
+    // a meaningful duration and no prescribed strength sets.
+    return (
+      performance.completedSets > 0 ||
+      performance.volume > 0 ||
+      (performance.plannedSets === 0 && durationMinutes >= 10)
+    );
+  };
+
   const sameSessionWorkouts = completedWorkouts.filter(
     (row) =>
       String(row?.id ?? "") !== String(currentWorkoutId) &&
       sameSessionIds.has(String(row?.scheduled_session_id ?? ""))
   );
 
+  const meaningfulSameSession: Array<{
+    row: any;
+    performance: Awaited<ReturnType<typeof loadWorkoutPerformanceSnapshot>>;
+  }> = [];
+
+  for (const row of sameSessionWorkouts) {
+    const performance = await getPerformance(row);
+    if (!isMeaningfulCompletedWorkout(row, performance)) continue;
+    meaningfulSameSession.push({ row, performance });
+    if (meaningfulSameSession.length >= 2) break;
+  }
+
   let lastSameSession: SessionIntelligence["lastSameSession"] = null;
 
-  if (sameSessionWorkouts.length) {
-    const latest = sameSessionWorkouts[0];
-    const prior = sameSessionWorkouts[1] ?? null;
-
-    const latestPerformance = await loadWorkoutPerformanceSnapshot(String(latest.id));
-    const priorPerformance = prior
-      ? await loadWorkoutPerformanceSnapshot(String(prior.id))
-      : null;
+  if (meaningfulSameSession.length) {
+    const latest = meaningfulSameSession[0];
+    const prior = meaningfulSameSession[1] ?? null;
 
     lastSameSession = {
-      completedAt: String(latest.completed_at),
-      daysAgo: daysSinceLocal(String(latest.completed_at)),
-      durationMinutes: safeWorkoutDurationMinutes(latest),
-      completedSets: latestPerformance.completedSets,
-      plannedSets: latestPerformance.plannedSets,
-      volume: latestPerformance.volume,
+      completedAt: String(latest.row.completed_at),
+      daysAgo: daysSinceLocal(String(latest.row.completed_at)),
+      durationMinutes: safeWorkoutDurationMinutes(latest.row),
+      completedSets: latest.performance.completedSets,
+      plannedSets: latest.performance.plannedSets,
+      volume: latest.performance.volume,
       volumeDelta:
-        priorPerformance && priorPerformance.volume > 0
-          ? latestPerformance.volume - priorPerformance.volume
+        prior && prior.performance.volume > 0
+          ? latest.performance.volume - prior.performance.volume
           : null,
     };
   }
 
   const weekStart = new Date(localStartOfWeekIso()).getTime();
-  const weekWorkouts = completedWorkouts.filter((row) => {
+  const weekCandidates = completedWorkouts.filter((row) => {
     const completed = new Date(String(row?.completed_at ?? 0)).getTime();
     return Number.isFinite(completed) && completed >= weekStart;
   });
 
-  const weekMinutes = weekWorkouts.reduce(
+  const meaningfulWeekWorkouts: any[] = [];
+  for (const row of weekCandidates) {
+    const performance = await getPerformance(row);
+    if (isMeaningfulCompletedWorkout(row, performance)) {
+      meaningfulWeekWorkouts.push(row);
+    }
+  }
+
+  const weekMinutes = meaningfulWeekWorkouts.reduce(
     (sum, row) => sum + (safeWorkoutDurationMinutes(row) ?? 0),
     0
   );
@@ -877,8 +921,7 @@ async function loadSessionIntelligence(params: {
     weightTrend30,
     lastSameSession,
     week: {
-      completedWorkouts: weekWorkouts.length,
-      targetWorkouts: sessions.length || null,
+      completedWorkouts: meaningfulWeekWorkouts.length,
       trainingMinutes: weekMinutes,
     },
   };
@@ -4271,10 +4314,11 @@ export function WorkoutPlayerPage({ params }: any) {
   const nextIncompleteIndex = items.findIndex(
     (row, index) => index > activeIdx && !row.completed_at
   );
+  const sessionShortLabel = sessionLabel.split("•")[0]?.trim() || sessionLabel;
   const lastSession = sessionIntelligence.lastSameSession;
   const lastSessionAgo =
     lastSession == null
-      ? "NO PRIOR SESSION"
+      ? "NO COMPLETED BENCHMARK"
       : lastSession.daysAgo === 0
         ? "TODAY"
         : lastSession.daysAgo === 1
@@ -4284,23 +4328,28 @@ export function WorkoutPlayerPage({ params }: any) {
   const weightTrendText =
     weightTrend == null
       ? "30-DAY TREND BUILDING"
-      : `${weightTrend > 0 ? "+" : ""}${weightTrend.toFixed(1)} LB • 30-DAY TREND`;
+      : Math.abs(weightTrend) < 0.05
+        ? "STABLE OVER 30 DAYS"
+        : `${weightTrend > 0 ? "+" : ""}${weightTrend.toFixed(1)} LB OVER 30 DAYS`;
   const volumeDelta = lastSession?.volumeDelta ?? null;
   const volumeDeltaText =
     volumeDelta == null
-      ? "PRIOR COMPARISON BUILDING"
+      ? "COMPARISON BUILDS AFTER TWO COMPLETED SESSIONS"
       : volumeDelta === 0
-        ? "MATCHED PRIOR SESSION VOLUME"
-        : `${volumeDelta > 0 ? "+" : ""}${Math.round(volumeDelta).toLocaleString()} LB VS PRIOR`;
-  const weekTarget = sessionIntelligence.week.targetWorkouts;
-  const weekCompletionText =
-    weekTarget && weekTarget > 0
-      ? `${sessionIntelligence.week.completedWorkouts} / ${weekTarget}`
-      : String(sessionIntelligence.week.completedWorkouts);
+        ? `MATCHED PREVIOUS ${sessionShortLabel.toUpperCase()} VOLUME`
+        : `${volumeDelta > 0 ? "+" : ""}${Math.round(volumeDelta).toLocaleString()} LB VS PREVIOUS ${sessionShortLabel.toUpperCase()}`;
+  const weekCompletionText = String(sessionIntelligence.week.completedWorkouts);
   const weekTrainingTime =
     sessionIntelligence.week.trainingMinutes > 0
       ? formatMinutesCompact(sessionIntelligence.week.trainingMinutes)
       : "0 MIN";
+  const progressRatio = items.length ? Math.min(1, doneCount / items.length) : 0;
+  const progressPercent = Math.round(progressRatio * 100);
+  const currentProgressStart = items.length
+    ? Math.min(100, (doneCount / items.length) * 100)
+    : 0;
+  const currentProgressWidth =
+    items.length && doneCount < items.length ? 100 / items.length : 0;
 
   const prev = () => setActiveIdx((i) => Math.max(i - 1, 0));
   const next = () => setActiveIdx((i) => Math.min(i + 1, Math.max(0, items.length - 1)));
@@ -4405,21 +4454,21 @@ export function WorkoutPlayerPage({ params }: any) {
               <div className="tr-sessionIntelMetric is-protein">
                 <div className="tr-kicker">PROTEIN TARGET</div>
                 <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
-                <span>DAILY TARGET</span>
+                <span>DAILY MUSCLE-GAIN TARGET</span>
               </div>
 
               <div className="tr-sessionIntelMetric is-last">
-                <div className="tr-kicker">LAST {sessionLabel.toUpperCase()}</div>
+                <div className="tr-kicker">LAST {sessionShortLabel.toUpperCase()}</div>
                 <strong>{lastSessionAgo}</strong>
-                <span>{lastSession ? compactDate(lastSession.completedAt) : "FIRST SESSION BASELINE"}</span>
+                <span>{lastSession ? compactDate(lastSession.completedAt) : "COMPLETE ONE TO BUILD HISTORY"}</span>
               </div>
             </div>
 
             <div className="tr-sessionIntelPerformance">
               <div className="tr-sessionIntelPerformanceHead">
                 <div>
-                  <div className="tr-kicker">LAST {sessionLabel.toUpperCase()} PERFORMANCE</div>
-                  <strong>{lastSession ? "YOUR PREVIOUS BENCHMARK" : "BUILDING YOUR BASELINE"}</strong>
+                  <div className="tr-kicker">PREVIOUS {sessionShortLabel.toUpperCase()}</div>
+                  <strong>{lastSession ? "PERFORMANCE BENCHMARK" : "NO COMPLETED BENCHMARK YET"}</strong>
                 </div>
                 {lastSession ? (
                   <span className="tr-sessionIntelDate">{compactDate(lastSession.completedAt)}</span>
@@ -4465,25 +4514,13 @@ export function WorkoutPlayerPage({ params }: any) {
                 <span>WORKOUTS COMPLETED</span>
               </div>
 
-              <div className="tr-sessionIntelWeekRail" aria-hidden="true">
-                {Array.from({
-                  length: Math.max(
-                    1,
-                    weekTarget ?? Math.max(1, sessionIntelligence.week.completedWorkouts)
-                  ),
-                }).map((_, index) => (
-                  <span
-                    key={index}
-                    className={
-                      index < sessionIntelligence.week.completedWorkouts ? "is-complete" : ""
-                    }
-                  />
-                ))}
+              <div className="tr-sessionIntelWeekDivider" aria-hidden="true">
+                <span />
               </div>
 
               <div className="tr-sessionIntelWeekTime">
                 <strong>{weekTrainingTime}</strong>
-                <span>TRAINED</span>
+                <span>TRAINED THIS WEEK</span>
               </div>
             </div>
           </div>
@@ -4514,8 +4551,8 @@ export function WorkoutPlayerPage({ params }: any) {
             >
               <span className="tr-sessionNavArrow" aria-hidden="true">←</span>
               <span className="tr-sessionNavCopy">
-                <small>{atFirst ? "START OF WORKOUT" : "PREVIOUS"}</small>
-                <strong>{atFirst ? "NO PREVIOUS EXERCISE" : previousExerciseName}</strong>
+                {!atFirst ? <small>PREVIOUS</small> : null}
+                <strong>{atFirst ? "START OF WORKOUT" : previousExerciseName}</strong>
               </span>
             </button>
 
@@ -4549,8 +4586,8 @@ export function WorkoutPlayerPage({ params }: any) {
               aria-label={atLast ? "End of workout" : `Next exercise: ${nextExerciseName}`}
             >
               <span className="tr-sessionNavCopy">
-                <small>{atLast ? "END OF WORKOUT" : "NEXT"}</small>
-                <strong>{atLast ? "NO NEXT EXERCISE" : nextExerciseName}</strong>
+                {!atLast ? <small>NEXT</small> : null}
+                <strong>{atLast ? "END OF WORKOUT" : nextExerciseName}</strong>
               </span>
               <span className="tr-sessionNavArrow" aria-hidden="true">→</span>
             </button>
@@ -4563,45 +4600,58 @@ export function WorkoutPlayerPage({ params }: any) {
                 <strong>WORKOUT ROADMAP</strong>
               </div>
 
-              <div className="tr-exerciseProgressCount" aria-label={`${doneCount} of ${items.length} completed`}>
-                <strong>{doneCount}/{items.length}</strong>
-                <span>COMPLETED</span>
+              <div
+                className="tr-exerciseProgressCount"
+                style={{ "--tr-progress": progressRatio } as any}
+                aria-label={`${doneCount} of ${items.length} completed`}
+              >
+                <div className="tr-exerciseProgressCountValue">
+                  <strong className="tr-exerciseProgressDone">{doneCount}</strong>
+                  <span className="tr-exerciseProgressTotal">/{items.length}</span>
+                </div>
+                <span className="tr-exerciseProgressCountLabel">COMPLETED</span>
               </div>
             </div>
 
             <div
-              className="tr-exerciseProgressSegments"
-              style={{ gridTemplateColumns: `repeat(${Math.max(1, items.length)}, minmax(0, 1fr))` }}
+              className="tr-exerciseProgressRail"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={items.length || 1}
               aria-valuenow={doneCount}
               aria-label={`${doneCount} of ${items.length} exercises completed`}
             >
-              {items.map((row, index) => {
-                const isSelected = index === activeIdx;
-                const segmentState = row.completed_at
-                  ? "complete"
-                  : isSelected
-                    ? "current"
-                    : index === nextIncompleteIndex
-                      ? "next"
-                      : "remaining";
-
-                return (
-                  <button
+              <span
+                className="tr-exerciseProgressRailFill"
+                style={{ width: `${progressPercent}%` }}
+              />
+              {currentProgressWidth > 0 ? (
+                <span
+                  className="tr-exerciseProgressRailCurrent"
+                  style={{
+                    left: `${currentProgressStart}%`,
+                    width: `${currentProgressWidth}%`,
+                  }}
+                />
+              ) : null}
+              <span
+                className="tr-exerciseProgressRailCheckpoints"
+                aria-hidden="true"
+              >
+                {items.slice(0, -1).map((row, index) => (
+                  <i
                     key={row.id}
-                    type="button"
-                    className={`tr-exerciseProgressSegment is-${segmentState}`}
-                    onClick={() => setActiveIdx(index)}
-                    aria-label={`Exercise ${index + 1}: ${
-                      row.exercise?.name ?? row.exercise?.title ?? "Exercise"
-                    }`}
-                  >
-                    <span>{row.completed_at ? "✓" : index + 1}</span>
-                  </button>
-                );
-              })}
+                    style={{ left: `${((index + 1) / items.length) * 100}%` }}
+                  />
+                ))}
+              </span>
+              {doneCount > 0 && doneCount < items.length ? (
+                <span
+                  className="tr-exerciseProgressRailEdge"
+                  style={{ left: `${progressPercent}%` }}
+                  aria-hidden="true"
+                />
+              ) : null}
             </div>
 
             <div className="tr-exerciseProgressGrid">
@@ -6170,6 +6220,525 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-sessionIntelWeekTime strong{ font-size:16px; }
           .tr-sessionNavCopy strong{ font-size:8.8px; }
           .tr-exerciseProgressCount strong{ font-size:29px; }
+        }
+
+        /* ============================================================
+           V13.6.1 — FLAGSHIP ROADMAP + SESSION DATA CORRECTIONS
+           ============================================================ */
+
+        /* Session Check-In: clearer hierarchy, no fake weekly target. */
+        .tr-sessionIntelMetric.is-protein > span{
+          color:rgba(196,216,228,.70);
+        }
+
+        .tr-sessionIntelPerformance{
+          padding:15px 18px 14px;
+        }
+
+        .tr-sessionIntelPerformanceHead strong{
+          font-size:11px;
+          color:rgba(242,248,252,.86);
+        }
+
+        .tr-sessionIntelPerformanceGrid strong{
+          letter-spacing:-.035em;
+        }
+
+        .tr-sessionIntelDelta{
+          min-height:16px;
+          display:flex;
+          align-items:center;
+        }
+
+        .tr-sessionIntelWeek{
+          grid-template-columns:minmax(128px,auto) minmax(80px,1fr) minmax(128px,auto);
+          gap:18px;
+        }
+
+        .tr-sessionIntelWeekCopy strong,
+        .tr-sessionIntelWeekTime strong{
+          font-size:26px;
+          letter-spacing:-.03em;
+        }
+
+        .tr-sessionIntelWeekDivider{
+          min-width:70px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+        }
+
+        .tr-sessionIntelWeekDivider span{
+          width:100%;
+          height:1px;
+          background:linear-gradient(
+            90deg,
+            transparent,
+            rgba(84,211,255,.18) 22%,
+            rgba(255,255,255,.13) 50%,
+            rgba(84,211,255,.18) 78%,
+            transparent
+          );
+          box-shadow:0 0 16px rgba(56,196,255,.06);
+        }
+
+        /* Previous / Next: premium dark surfaces and stronger typography. */
+        .tr-sessionNavButton{
+          border-color:rgba(116,174,202,.15);
+          background:
+            radial-gradient(220px 120px at 50% -35%, rgba(51,184,235,.07), transparent 72%),
+            linear-gradient(180deg, rgba(16,25,34,.98), rgba(5,9,14,.995));
+        }
+
+        .tr-sessionNavButton.is-next{
+          border-color:rgba(226,193,134,.26);
+          background:
+            radial-gradient(220px 120px at 76% -35%, rgba(225,190,126,.085), transparent 72%),
+            linear-gradient(180deg, rgba(17,22,27,.99), rgba(6,9,13,.995));
+        }
+
+        .tr-sessionNavArrow{
+          border-color:rgba(89,202,244,.25);
+          background:linear-gradient(180deg,rgba(25,180,232,.09),rgba(0,0,0,.08));
+        }
+
+        .tr-sessionNavButton.is-next .tr-sessionNavArrow{
+          border-color:rgba(232,201,148,.34);
+          background:linear-gradient(180deg,rgba(224,188,124,.10),rgba(0,0,0,.08));
+          color:#e9cb98 !important;
+        }
+
+        .tr-sessionNavCopy small{
+          font-size:8.5px;
+          color:rgba(156,205,228,.66);
+        }
+
+        .tr-sessionNavButton.is-next .tr-sessionNavCopy small{
+          color:rgba(232,202,151,.78);
+        }
+
+        .tr-sessionNavCopy strong{
+          font-size:13.5px;
+          line-height:1.18;
+          letter-spacing:-.01em;
+        }
+
+        .tr-sessionNavButton:disabled{
+          opacity:.70;
+          border-color:rgba(255,255,255,.07);
+          background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(0,0,0,.13));
+        }
+
+        .tr-sessionNavButton:disabled .tr-sessionNavArrow{
+          opacity:.38;
+        }
+
+        /* Live completion counter. The completed number moves cyan -> green
+           as the workout fills, while /total stays crisp and secondary. */
+        .tr-exerciseProgressCount{
+          min-width:104px;
+          display:grid;
+          justify-items:end;
+          align-content:center;
+          gap:5px;
+        }
+
+        .tr-exerciseProgressCountValue{
+          display:flex;
+          align-items:flex-end;
+          line-height:.8;
+          white-space:nowrap;
+          filter:drop-shadow(0 4px 8px rgba(0,0,0,.46));
+        }
+
+        .tr-exerciseProgressDone{
+          color:hsl(calc(191 - (var(--tr-progress) * 54)) 88% 62%) !important;
+          font-size:46px !important;
+          line-height:.78 !important;
+          font-weight:1100 !important;
+          letter-spacing:-.075em !important;
+          text-shadow:
+            0 2px 0 rgba(0,0,0,.88),
+            0 0 16px hsl(calc(191 - (var(--tr-progress) * 54)) 88% 52% / .34),
+            0 0 34px hsl(calc(191 - (var(--tr-progress) * 54)) 88% 52% / .15) !important;
+          transition:color .35s ease,text-shadow .35s ease,transform .25s ease;
+        }
+
+        .tr-exerciseProgressTotal{
+          margin-left:5px;
+          padding-bottom:2px;
+          color:rgba(244,249,252,.94) !important;
+          font-size:26px !important;
+          line-height:.85 !important;
+          font-weight:1000 !important;
+          letter-spacing:-.045em !important;
+        }
+
+        .tr-exerciseProgressCountLabel{
+          color:rgba(218,228,235,.66) !important;
+          font-size:7.5px !important;
+          font-weight:1000 !important;
+          letter-spacing:.19em !important;
+        }
+
+        /* One seamless progress strip with internal checkpoints, no gaps. */
+        .tr-exerciseProgressRail{
+          position:relative;
+          height:14px;
+          overflow:hidden;
+          border:1px solid rgba(142,196,219,.13);
+          border-radius:999px;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.055),rgba(0,0,0,.18)),
+            rgba(5,10,15,.98);
+          box-shadow:
+            inset 0 2px 5px rgba(0,0,0,.78),
+            inset 0 0 0 1px rgba(255,255,255,.018),
+            0 8px 22px rgba(0,0,0,.18);
+          isolation:isolate;
+        }
+
+        .tr-exerciseProgressRailFill{
+          position:absolute;
+          z-index:2;
+          inset:0 auto 0 0;
+          border-radius:999px;
+          background:
+            linear-gradient(90deg,#16a8db 0%,#38d4de 55%,#66e49a 100%);
+          box-shadow:
+            0 0 17px rgba(41,202,229,.28),
+            inset 0 1px 0 rgba(255,255,255,.30);
+          transition:width .38s cubic-bezier(.22,.75,.2,1);
+        }
+
+        .tr-exerciseProgressRailCurrent{
+          position:absolute;
+          z-index:1;
+          top:0;
+          bottom:0;
+          background:
+            linear-gradient(
+              90deg,
+              rgba(25,179,231,.17),
+              rgba(58,210,255,.38),
+              rgba(25,179,231,.12)
+            );
+          box-shadow:
+            inset 1px 0 0 rgba(88,219,255,.24),
+            inset -1px 0 0 rgba(88,219,255,.18),
+            0 0 18px rgba(38,193,246,.12);
+          animation:tr-roadmap-current-breathe 2.8s ease-in-out infinite;
+        }
+
+        .tr-exerciseProgressRailCheckpoints{
+          position:absolute;
+          z-index:3;
+          inset:0;
+          pointer-events:none;
+        }
+
+        .tr-exerciseProgressRailCheckpoints i{
+          position:absolute;
+          top:3px;
+          bottom:3px;
+          width:1px;
+          transform:translateX(-.5px);
+          background:rgba(220,238,246,.18);
+          box-shadow:0 0 4px rgba(0,0,0,.45);
+        }
+
+        .tr-exerciseProgressRailEdge{
+          position:absolute;
+          z-index:4;
+          top:50%;
+          width:8px;
+          height:8px;
+          transform:translate(-50%,-50%);
+          border-radius:50%;
+          background:#7ce9ec;
+          box-shadow:
+            0 0 0 3px rgba(67,219,225,.13),
+            0 0 13px rgba(82,225,229,.72);
+          transition:left .38s cubic-bezier(.22,.75,.2,1);
+        }
+
+        @keyframes tr-roadmap-current-breathe{
+          0%,100%{ opacity:.52; }
+          50%{ opacity:.95; }
+        }
+
+        /* Flagship roadmap cards. */
+        .tr-exerciseProgressGrid{
+          gap:11px;
+        }
+
+        .tr-exerciseProgressCard{
+          position:relative;
+          isolation:isolate;
+          overflow:hidden;
+          min-height:98px;
+          border:1px solid rgba(130,169,190,.13);
+          border-radius:18px;
+          background:
+            radial-gradient(260px 110px at 12% -35%,rgba(84,157,194,.055),transparent 72%),
+            linear-gradient(180deg,rgba(17,24,31,.985),rgba(5,9,14,.995));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.045),
+            0 13px 28px rgba(0,0,0,.17);
+          transition:
+            transform .18s ease,
+            border-color .18s ease,
+            box-shadow .18s ease,
+            background .18s ease;
+        }
+
+        .tr-exerciseProgressCard::before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          left:11px;
+          right:11px;
+          top:0;
+          height:2px;
+          border-radius:0 0 99px 99px;
+          background:rgba(130,180,204,.13);
+          opacity:.75;
+        }
+
+        .tr-exerciseProgressCard::after{
+          content:"";
+          position:absolute;
+          z-index:-2;
+          inset:0;
+          opacity:0;
+          transition:opacity .2s ease;
+        }
+
+        .tr-exerciseProgressCard:hover,
+        .tr-exerciseProgressCard:focus-visible{
+          transform:translateY(-2px);
+          border-color:rgba(118,199,232,.28);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.06),
+            0 18px 38px rgba(0,0,0,.24);
+        }
+
+        .tr-exerciseProgressCard.is-current,
+        .tr-exerciseProgressCard.is-selected.is-current{
+          border-color:rgba(61,208,255,.64);
+          background:
+            radial-gradient(340px 150px at 8% -26%,rgba(14,190,249,.22),transparent 68%),
+            linear-gradient(180deg,rgba(9,30,43,.995),rgba(3,10,16,.998));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.09),
+            inset 0 0 34px rgba(0,177,239,.045),
+            0 19px 42px rgba(0,0,0,.27),
+            0 0 30px rgba(0,181,242,.13);
+        }
+
+        .tr-exerciseProgressCard.is-current::before{
+          background:linear-gradient(90deg,transparent,#42d5ff 18%,#8beaff 50%,#42d5ff 82%,transparent);
+          opacity:1;
+          box-shadow:0 0 12px rgba(61,210,255,.35);
+        }
+
+        .tr-exerciseProgressCard.is-current::after{
+          opacity:1;
+          background:linear-gradient(110deg,transparent 12%,rgba(64,215,255,.035) 48%,transparent 70%);
+          animation:tr-card-current-sheen 5.2s ease-in-out infinite;
+        }
+
+        @keyframes tr-card-current-sheen{
+          0%,45%{ transform:translateX(-35%); opacity:0; }
+          58%{ opacity:1; }
+          78%,100%{ transform:translateX(35%); opacity:0; }
+        }
+
+        /* UP NEXT: premium champagne accent on a black/glass surface.
+           No dark orange card fill. */
+        .tr-exerciseProgressCard.is-next{
+          border-color:rgba(228,197,143,.34);
+          background:
+            radial-gradient(300px 130px at 84% -35%,rgba(225,192,132,.105),transparent 70%),
+            linear-gradient(180deg,rgba(18,22,26,.995),rgba(6,9,13,.998));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.055),
+            0 16px 34px rgba(0,0,0,.21);
+        }
+
+        .tr-exerciseProgressCard.is-next::before{
+          background:linear-gradient(90deg,transparent,#d9b879 20%,#f0d39c 50%,#d9b879 80%,transparent);
+          opacity:.9;
+          box-shadow:0 0 9px rgba(227,193,133,.14);
+        }
+
+        .tr-exerciseProgressCard.is-complete{
+          border-color:rgba(92,222,156,.28);
+          background:
+            radial-gradient(280px 120px at 10% -35%,rgba(76,215,153,.10),transparent 70%),
+            linear-gradient(180deg,rgba(12,24,24,.99),rgba(5,10,13,.998));
+        }
+
+        .tr-exerciseProgressCard.is-complete::before{
+          background:linear-gradient(90deg,transparent,#52d59c 20%,#83ebbc 50%,#52d59c 80%,transparent);
+          opacity:.72;
+        }
+
+        .tr-exerciseProgressCard.is-remaining{
+          border-color:rgba(121,159,180,.12);
+        }
+
+        .tr-exerciseProgressNumber{
+          width:46px;
+          height:46px;
+          border-radius:15px;
+          border-color:rgba(120,185,216,.18);
+          color:rgba(220,236,244,.88);
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.12)),
+            rgba(9,15,21,.92);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.05),
+            0 7px 18px rgba(0,0,0,.18);
+        }
+
+        .tr-exerciseProgressCard.is-current .tr-exerciseProgressNumber{
+          border-color:rgba(61,211,255,.52);
+          color:#c8f5ff;
+          background:linear-gradient(180deg,rgba(20,189,241,.18),rgba(5,54,72,.25));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.10),
+            0 0 20px rgba(21,190,244,.12);
+        }
+
+        .tr-exerciseProgressCard.is-next .tr-exerciseProgressNumber{
+          border-color:rgba(229,198,145,.42);
+          color:#f1d49f;
+          background:linear-gradient(180deg,rgba(225,190,128,.105),rgba(46,37,24,.16));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.07);
+        }
+
+        .tr-exerciseProgressCard.is-complete .tr-exerciseProgressNumber{
+          border-color:rgba(94,224,160,.38);
+          color:#8ceab9;
+          background:linear-gradient(180deg,rgba(69,211,145,.11),rgba(11,48,35,.15));
+        }
+
+        .tr-exerciseProgressText{
+          gap:7px;
+        }
+
+        .tr-exerciseProgressText strong{
+          color:rgba(250,252,254,.96);
+          font-size:14.5px;
+          letter-spacing:-.012em;
+        }
+
+        .tr-exerciseProgressText small{
+          font-size:7.5px;
+          letter-spacing:.17em;
+        }
+
+        .tr-exerciseProgressCard.is-current small{
+          color:#80e3ff;
+        }
+
+        .tr-exerciseProgressCard.is-next small{
+          color:#e7c68c;
+        }
+
+        .tr-exerciseProgressCard.is-complete small{
+          color:#7ae4ad;
+        }
+
+        .tr-exerciseProgressCard.is-remaining small{
+          color:rgba(161,187,200,.43);
+        }
+
+        @media (max-width:720px){
+          .tr-sessionIntelWeek{
+            grid-template-columns:1fr auto 1fr;
+            gap:10px;
+          }
+
+          .tr-sessionIntelWeekDivider{
+            width:1px;
+            min-width:1px;
+            height:36px;
+          }
+
+          .tr-sessionIntelWeekDivider span{
+            width:1px;
+            height:100%;
+            background:linear-gradient(180deg,transparent,rgba(89,210,255,.22),transparent);
+          }
+
+          .tr-sessionIntelWeekCopy strong,
+          .tr-sessionIntelWeekTime strong{
+            font-size:22px;
+          }
+
+          .tr-sessionNavCopy strong{
+            font-size:11px;
+          }
+
+          .tr-sessionNavCopy small{
+            font-size:7px;
+          }
+
+          .tr-exerciseProgressCount{
+            min-width:92px;
+          }
+
+          .tr-exerciseProgressDone{
+            font-size:42px !important;
+          }
+
+          .tr-exerciseProgressTotal{
+            font-size:23px !important;
+          }
+
+          .tr-exerciseProgressRail{
+            height:13px;
+          }
+
+          .tr-exerciseProgressCard{
+            min-height:82px;
+            border-radius:16px;
+          }
+
+          .tr-exerciseProgressCard.is-selected{
+            min-height:96px;
+          }
+
+          .tr-exerciseProgressText strong{
+            font-size:12.5px;
+          }
+
+          .tr-exerciseProgressCard.is-selected .tr-exerciseProgressText strong{
+            font-size:15px;
+          }
+        }
+
+        @media (max-width:390px){
+          .tr-exerciseProgressDone{
+            font-size:38px !important;
+          }
+
+          .tr-exerciseProgressTotal{
+            font-size:21px !important;
+          }
+
+          .tr-sessionNavCopy strong{
+            font-size:10px;
+          }
+        }
+
+        @media (prefers-reduced-motion:reduce){
+          .tr-exerciseProgressRailCurrent,
+          .tr-exerciseProgressCard.is-current::after{
+            animation:none !important;
+          }
         }
         .tr-addedBadge{
           height: 34px;
