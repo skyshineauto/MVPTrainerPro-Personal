@@ -3444,6 +3444,53 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-audioEqPanel select:disabled,.tr-audioEqPanel input:disabled,.tr-audioEqPanel button:disabled{cursor:not-allowed!important;opacity:.50!important}
         @media(max-width:650px){.tr-outputProfilePanel{grid-template-columns:1fr!important;gap:10px!important;padding:12px!important}.tr-outputProfileTelemetry{grid-column:1!important;gap:5px!important}.tr-outputProfileTelemetry>span{font-size:6px!important;padding:0 6px!important}.tr-outputProfileIntro strong{font-size:14px!important}.tr-outputProfileIntro p{font-size:8.5px!important}.tr-outputProfileSelect select{height:40px!important;font-size:11px!important}}
 
+        /* V13.5 MOBILE ARTWORK SAFETY
+           Keep the complete album cover visible. The hero can grow around the
+           square cover, but the cover itself is never stretched or cropped. */
+        @media(max-width:650px){
+          .tr-playerHero{
+            align-items:center!important;
+          }
+          .tr-playerHero .tr-audioArtwork{
+            width:calc(100% + 22px)!important;
+            height:auto!important;
+            min-height:0!important;
+            max-height:none!important;
+            aspect-ratio:1 / 1!important;
+            align-self:center!important;
+            margin-right:-22px!important;
+            overflow:hidden!important;
+            background:#05080b!important;
+          }
+          .tr-playerHero .tr-audioArtworkImage{
+            width:100%!important;
+            height:100%!important;
+            object-fit:contain!important;
+            object-position:center center!important;
+            background:#05080b!important;
+          }
+        }
+        @media(max-width:390px){
+          .tr-playerHero .tr-audioArtwork{
+            width:calc(100% + 18px)!important;
+            height:auto!important;
+            min-height:0!important;
+            max-height:none!important;
+            aspect-ratio:1 / 1!important;
+            margin-right:-18px!important;
+          }
+        }
+        @media(max-width:350px){
+          .tr-playerHero .tr-audioArtwork{
+            width:calc(100% + 14px)!important;
+            height:auto!important;
+            min-height:0!important;
+            max-height:none!important;
+            aspect-ratio:1 / 1!important;
+            margin-right:-14px!important;
+          }
+        }
+
 
         /* V12.4 TRUE-FIDELITY DSP + RTA READABILITY PASS */
         .tr-rtaFidelity{
