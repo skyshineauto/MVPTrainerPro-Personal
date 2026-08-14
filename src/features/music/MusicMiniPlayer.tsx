@@ -385,9 +385,9 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
 
-const HERO_SCENE_COUNT = 6;
+const HERO_SCENE_COUNT = 5;
 const HERO_SCENE_MS = 9000;
-const HERO_CROSSFADE_MS = 2400;
+const HERO_CROSSFADE_MS = 3200;
 const HERO_ENGINE_EPOCH_MS = Date.now();
 const HERO_NEUTRAL_PALETTE: HeroPalette = [
   { r: 196, g: 216, b: 220 },
@@ -442,10 +442,30 @@ function heroColorDistance(left: HeroRgb, right: HeroRgb) {
 }
 
 function heroMakeVisible(color: HeroRgb) {
-  const light = heroLightness(color);
-  if (light < 0.15) return heroMix(color, { r: 255, g: 255, b: 255 }, 0.34);
-  if (light > 0.91) return heroMix(color, { r: 0, g: 0, b: 0 }, 0.12);
-  return color;
+  const gray = (color.r + color.g + color.b) / 3;
+  const saturationBoost = 1.18;
+  let adjusted: HeroRgb = {
+    r: heroClamp(gray + (color.r - gray) * saturationBoost, 0, 255),
+    g: heroClamp(gray + (color.g - gray) * saturationBoost, 0, 255),
+    b: heroClamp(gray + (color.b - gray) * saturationBoost, 0, 255),
+  };
+  const light = heroLightness(adjusted);
+  if (light < 0.14) {
+    const scale = Math.min(2.1, 0.22 / Math.max(0.035, light));
+    adjusted = {
+      r: heroClamp(adjusted.r * scale, 0, 255),
+      g: heroClamp(adjusted.g * scale, 0, 255),
+      b: heroClamp(adjusted.b * scale, 0, 255),
+    };
+  } else if (light > 0.88) {
+    const scale = 0.82 / Math.max(0.001, light);
+    adjusted = {
+      r: heroClamp(adjusted.r * scale, 0, 255),
+      g: heroClamp(adjusted.g * scale, 0, 255),
+      b: heroClamp(adjusted.b * scale, 0, 255),
+    };
+  }
+  return adjusted;
 }
 
 function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
@@ -480,14 +500,19 @@ function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
 
   if (!ranked.length) return null;
 
-  const usable = ranked.filter((item) => item.light > 0.08 && item.light < 0.94);
+  const usable = ranked.filter((item) => item.light > 0.07 && item.light < 0.95);
   const source = usable.length ? usable : ranked;
-  const dominant = source[0];
+  const colorful = source.filter((item) => item.saturation > 0.16);
+  const primaryPool = colorful.length >= 2 ? colorful : source;
+  const dominant = [...primaryPool].sort((a, b) => {
+    const score = (item: Bucket) => Math.sqrt(item.hits) * (0.72 + item.saturation * 2.35) * (1.08 - Math.abs(item.light - 0.48) * 0.42);
+    return score(b) - score(a);
+  })[0];
 
   const diversityScore = (item: Bucket, anchors: HeroRgb[]) => {
     const distance = Math.min(...anchors.map((anchor) => heroColorDistance(anchor, item.color)));
-    const population = Math.log2(item.hits + 1);
-    return distance * (0.72 + item.saturation * 0.72) + population * 13;
+    const population = Math.sqrt(item.hits);
+    return distance * (0.48 + item.saturation * 0.88) + population * (7.0 + item.saturation * 9.0);
   };
 
   const chosen: HeroRgb[] = [heroMakeVisible(dominant.color)];
@@ -541,276 +566,191 @@ const HERO_FRAGMENT_SHADER = `
   uniform vec3 u_c3;
   uniform vec3 u_c4;
 
-  #define PI 3.14159265359
+  float sat(float v){ return clamp(v,0.0,1.0); }
+  vec2 rot(vec2 p,float a){ float c=cos(a),s=sin(a); return mat2(c,-s,s,c)*p; }
 
-  float sat(float value) { return clamp(value, 0.0, 1.0); }
-  vec2 rot(vec2 p, float angle) {
-    float c = cos(angle);
-    float s = sin(angle);
-    return mat2(c, -s, s, c) * p;
+  float hash21(vec2 p){
+    p=fract(p*vec2(123.34,456.21));
+    p+=dot(p,p+45.32);
+    return fract(p.x*p.y);
   }
+  vec2 hash22(vec2 p){ float n=hash21(p); return vec2(n,hash21(p+n+19.19)); }
 
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
+  float noise(vec2 p){
+    vec2 i=floor(p), f=fract(p);
+    f=f*f*(3.0-2.0*f);
+    float a=hash21(i),b=hash21(i+vec2(1.0,0.0));
+    float c=hash21(i+vec2(0.0,1.0)),d=hash21(i+vec2(1.0,1.0));
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
   }
-
-  vec2 hash22(vec2 p) {
-    float n = hash21(p);
-    return vec2(n, hash21(p + n + 19.19));
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash21(i);
-    float b = hash21(i + vec2(1.0, 0.0));
-    float c = hash21(i + vec2(0.0, 1.0));
-    float d = hash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-  }
-
-  float fbm(vec2 p) {
-    float value = 0.0;
-    float amplitude = 0.52;
-    mat2 matrix = mat2(0.80, -0.60, 0.60, 0.80);
-    for (int i = 0; i < 5; i++) {
-      value += amplitude * noise(p);
-      p = matrix * p * 2.03 + vec2(17.1, 9.2);
-      amplitude *= 0.50;
+  float fbm(vec2 p){
+    float v=0.0,a=0.54;
+    mat2 m=mat2(0.80,-0.60,0.60,0.80);
+    for(int i=0;i<4;i++){
+      v+=a*noise(p);
+      p=m*p*2.02+vec2(13.7,8.1);
+      a*=0.49;
     }
-    return value;
+    return v;
   }
 
-  float ridge(vec2 p) {
-    float n = fbm(p);
-    return 1.0 - abs(n * 2.0 - 1.0);
-  }
-
-  vec3 palette(float amount) {
-    float x = fract(amount) * 3.0;
-    if (x < 1.0) return mix(u_c0, u_c1, smoothstep(0.0, 1.0, x));
-    if (x < 2.0) return mix(u_c1, u_c2, smoothstep(0.0, 1.0, x - 1.0));
-    return mix(u_c2, u_c3, smoothstep(0.0, 1.0, x - 2.0));
-  }
-
-  vec3 baseDark() {
-    return mix(vec3(0.0035, 0.006, 0.008), u_c4, 0.70);
-  }
-
-  vec2 centeredUv(vec2 uv) {
-    vec2 p = uv - 0.5;
-    p.x *= u_resolution.x / max(1.0, u_resolution.y);
+  vec2 cuv(vec2 uv){
+    vec2 p=uv-0.5;
+    p.x*=u_resolution.x/max(1.0,u_resolution.y);
     return p;
   }
 
-  vec3 sceneFluid(vec2 uv, float t) {
-    vec2 p = centeredUv(uv) * 1.78;
-    float a = 0.055 + u_audio.x * 0.075;
-    vec2 q = vec2(
-      fbm(p + vec2(t * 0.18, -t * 0.13)),
-      fbm(p + vec2(5.2 - t * 0.12, 1.3 + t * 0.16))
-    );
-    vec2 r = vec2(
-      fbm(p + q * 2.10 + vec2(1.7, 9.2) + t * 0.12),
-      fbm(p + q * 2.25 + vec2(8.3, 2.8) - t * 0.14)
-    );
-    float f = fbm(p + r * (2.15 + a));
-    float glow = smoothstep(0.30, 0.86, f);
-    float core = smoothstep(0.55, 0.92, f + 0.11 * sin((p.x + p.y) * 1.7 + t * 0.42));
-    vec3 color = mix(baseDark(), palette(f + q.x * 0.18 + u_character * 0.17), 0.34 + glow * 0.58);
-    color += palette(f + 0.29) * core * (0.12 + u_audio.w * 0.045);
-    return color;
+  vec3 album(float x){
+    x=fract(x)*4.0;
+    if(x<1.0) return mix(u_c0,u_c1,smoothstep(0.0,1.0,x));
+    if(x<2.0) return mix(u_c1,u_c2,smoothstep(0.0,1.0,x-1.0));
+    if(x<3.0) return mix(u_c2,u_c0,smoothstep(0.0,1.0,x-2.0));
+    return mix(u_c0,u_c3,smoothstep(0.0,1.0,x-3.0));
+  }
+  vec3 darkBase(){ return mix(vec3(0.0025,0.005,0.007),u_c4,0.54); }
+
+  vec2 flowWarp(vec2 p,float t,float strength){
+    vec2 q=vec2(
+      fbm(p*0.72+vec2(t*0.12,-t*0.09)),
+      fbm(p*0.76+vec2(4.7-t*0.10,1.9+t*0.11))
+    )-0.5;
+    vec2 r=vec2(
+      fbm(p*0.88+q*1.55+vec2(7.1,2.3)+t*0.08),
+      fbm(p*0.84+q*1.62+vec2(2.1,8.4)-t*0.085)
+    )-0.5;
+    return p+(q*0.72+r*0.48)*strength;
   }
 
-  vec3 sceneGlass(vec2 uv, float t) {
-    vec2 p = centeredUv(uv) * 1.58;
-    float h = fbm(p * 1.35 + vec2(t * 0.14, -t * 0.11));
-    float e = 0.014;
-    float hx = fbm((p + vec2(e, 0.0)) * 1.35 + vec2(t * 0.14, -t * 0.11));
-    float hy = fbm((p + vec2(0.0, e)) * 1.35 + vec2(t * 0.14, -t * 0.11));
-    vec2 normal = vec2(h - hx, h - hy) / e;
-    normal = clamp(normal, vec2(-1.1), vec2(1.1));
-    vec2 refracted = p + normal * (0.12 + u_audio.y * 0.025);
-    float field = fbm(refracted * 1.72 - vec2(t * 0.10, t * 0.13));
-    float depth = fbm(refracted * 0.72 + vec2(-t * 0.07, t * 0.09));
-    vec3 lightDir = normalize(vec3(-0.42, 0.36, 1.0));
-    vec3 surfaceNormal = normalize(vec3(normal * 0.72, 1.0));
-    float spec = pow(max(0.0, dot(surfaceNormal, lightDir)), 16.0);
-    float fresnel = pow(1.0 - max(0.0, surfaceNormal.z), 2.0);
-    vec3 color = mix(baseDark(), palette(field + depth * 0.25 + u_character * 0.11), 0.26 + field * 0.47);
-    color += u_c3 * spec * (0.20 + u_audio.z * 0.06);
-    color += palette(depth + 0.44) * fresnel * 0.18;
-    return color;
-  }
-
-  vec3 sceneSilk(vec2 uv, float t) {
-    vec2 p = centeredUv(uv) * 1.28;
-    p = rot(p, -0.10 + sin(t * 0.11) * 0.10);
-    float warp = fbm(p * 1.08 + vec2(t * 0.13, -t * 0.09)) - 0.5;
-    float foldA = p.y + sin(p.x * 1.55 + t * 0.54 + warp * 2.2) * (0.22 + u_audio.y * 0.035);
-    float foldB = p.y - 0.25 + sin(p.x * 1.17 - t * 0.43 - warp * 1.8 + 2.2) * 0.28;
-    float foldC = p.y + 0.31 + sin(p.x * 1.38 + t * 0.37 + warp * 2.6 + 4.4) * 0.24;
-    float sheetA = exp(-abs(foldA) * 5.0);
-    float sheetB = exp(-abs(foldB) * 5.7);
-    float sheetC = exp(-abs(foldC) * 6.1);
-    float body = sat(sheetA * 0.78 + sheetB * 0.64 + sheetC * 0.58);
-    float translucency = fbm(p * 1.9 + vec2(-t * 0.08, t * 0.12));
-    vec3 color = baseDark();
-    color += palette(0.12 + translucency * 0.24) * sheetA * 0.26;
-    color += palette(0.47 + translucency * 0.21) * sheetB * 0.23;
-    color += palette(0.78 + translucency * 0.19) * sheetC * 0.21;
-    color += u_c3 * pow(body, 2.4) * (0.055 + u_audio.z * 0.018);
-    return color;
-  }
-
-  vec3 scenePlasma(vec2 uv, float t) {
-    vec2 p = centeredUv(uv) * 1.72;
-    vec2 warp = vec2(
-      fbm(p * 0.92 + vec2(t * 0.18, 2.6)),
-      fbm(p * 0.88 + vec2(-3.1, -t * 0.15))
-    ) - 0.5;
-    p += warp * (0.85 + u_audio.y * 0.10);
-    float v = sin(p.x * 2.05 + t * 0.67);
-    v += sin((p.y * 1.74 - t * 0.53) + sin(p.x * 0.78 + t * 0.31));
-    v += sin((p.x + p.y) * 1.24 + t * 0.44 + warp.x * 3.0);
-    v = v / 3.0 * 0.5 + 0.5;
-    float mist = fbm(p * 1.15 - vec2(t * 0.11, t * 0.07));
-    float energy = smoothstep(0.18, 0.92, v * 0.72 + mist * 0.42);
-    vec3 color = mix(baseDark(), palette(v + mist * 0.28 + u_character * 0.13), 0.24 + energy * 0.62);
-    color += palette(v + 0.34) * pow(energy, 2.2) * (0.09 + u_audio.w * 0.035);
-    return color;
-  }
-
-  vec3 scenePhotons(vec2 uv, float t) {
-    vec2 p = uv;
-    vec3 color = baseDark();
-    float haze = fbm(centeredUv(uv) * 1.15 + vec2(t * 0.06, -t * 0.05));
-    color += palette(haze * 0.38 + 0.1) * haze * 0.045;
-
-    for (int layer = 0; layer < 3; layer++) {
-      float lf = float(layer);
-      float scale = 8.0 + lf * 5.0;
-      vec2 flow = vec2(
-        sin(t * (0.20 + lf * 0.03) + uv.y * 3.0),
-        cos(t * (0.17 + lf * 0.025) + uv.x * 2.6)
-      ) * (0.08 + lf * 0.015);
-      vec2 grid = (p + flow) * scale;
-      vec2 id = floor(grid);
-      vec2 gv = fract(grid) - 0.5;
-      vec2 rnd = hash22(id + lf * 31.7);
-      vec2 point = (rnd - 0.5) * 0.72;
-      point += vec2(sin(t * 0.43 + rnd.x * 6.28), cos(t * 0.39 + rnd.y * 6.28)) * 0.055;
-      float d = length(gv - point);
-      float sparkle = smoothstep(0.10, 0.0, d) * (0.30 + 0.70 * pow(rnd.x, 2.0));
-      float halo = smoothstep(0.25, 0.0, d) * 0.16;
-      float trail = smoothstep(0.055, 0.0, abs((gv.y - point.y) + (gv.x - point.x) * (0.32 + rnd.y * 0.7))) * smoothstep(0.30, 0.0, abs(gv.x - point.x)) * 0.10;
-      vec3 photon = palette(rnd.y + lf * 0.21 + u_character * 0.12);
-      color += photon * (sparkle * (0.19 + u_audio.z * 0.035) + halo * 0.09 + trail * 0.05);
+  // Volumetric light field. Broad depth layers, no identifiable blobs or rings.
+  vec3 sceneVolume(vec2 uv,float t){
+    vec2 p=cuv(uv)*1.05;
+    vec3 col=darkBase();
+    float total=0.0;
+    for(int i=0;i<9;i++){
+      float z=float(i)/8.0;
+      vec2 q=p*(0.78+z*0.82);
+      q=rot(q,0.10*sin(t*0.16+z*3.2));
+      q+=vec2(sin(t*0.20+z*5.1)*0.18,cos(t*0.17+z*4.3)*0.14);
+      q=flowWarp(q,t+z*1.7,0.36+z*0.16);
+      float n=fbm(q*1.32+vec2(z*5.3,-z*3.8));
+      float d=smoothstep(0.44,0.77,n)*(1.0-z*0.38);
+      float w=(0.038+z*0.010)*(1.0+u_audio.x*0.035);
+      col+=album(n*0.54+z*0.19+u_character*0.13)*d*w;
+      total+=d*w;
     }
-    return color;
+    float bloom=smoothstep(0.18,0.52,total);
+    col+=album(total*1.7+0.16)*bloom*(0.035+u_audio.w*0.012);
+    return col;
   }
 
-  vec3 sceneSpace(vec2 uv, float t) {
-    vec2 p = centeredUv(uv);
-    vec3 color = baseDark();
-    float nebulaA = fbm(p * 1.22 + vec2(t * 0.045, -t * 0.038));
-    float nebulaB = fbm(rot(p, 0.62) * 1.65 - vec2(t * 0.035, t * 0.043));
-    float cloud = smoothstep(0.28, 0.88, nebulaA * 0.62 + nebulaB * 0.48);
-    color += palette(nebulaA * 0.42 + 0.18) * cloud * 0.11;
-
-    for (int layer = 0; layer < 4; layer++) {
-      float lf = float(layer);
-      float scale = 12.0 + lf * 10.0;
-      vec2 drift = vec2(t * (0.010 + lf * 0.002), -t * (0.007 + lf * 0.0015));
-      vec2 grid = (uv + drift) * scale;
-      vec2 id = floor(grid);
-      vec2 gv = fract(grid) - 0.5;
-      vec2 rnd = hash22(id + lf * 93.1);
-      vec2 pos = (rnd - 0.5) * 0.82;
-      float d = length(gv - pos);
-      float star = smoothstep(0.055 + lf * 0.006, 0.0, d) * step(0.78 - lf * 0.035, rnd.x);
-      float twinkle = 0.72 + 0.28 * sin(t * (0.55 + rnd.y * 0.35) + rnd.x * 18.0);
-      vec3 starColor = mix(u_c3, palette(rnd.y + 0.2), 0.42);
-      color += starColor * star * twinkle * (0.24 + lf * 0.05 + u_audio.z * 0.025);
-    }
-    return color;
+  // Liquid glass: continuous refractive heightfield with restrained specular light.
+  vec3 sceneGlass(vec2 uv,float t){
+    vec2 p=cuv(uv)*1.28;
+    p=flowWarp(p,t,0.46);
+    float e=0.012;
+    float h=fbm(p*1.22+vec2(t*0.10,-t*0.075));
+    float hx=fbm((p+vec2(e,0.0))*1.22+vec2(t*0.10,-t*0.075));
+    float hy=fbm((p+vec2(0.0,e))*1.22+vec2(t*0.10,-t*0.075));
+    vec2 g=clamp(vec2(h-hx,h-hy)/e,vec2(-1.1),vec2(1.1));
+    vec2 refr=p+g*(0.075+u_audio.y*0.010);
+    float under=fbm(refr*1.42-vec2(t*0.08,t*0.095));
+    float depth=fbm(refr*0.62+vec2(-t*0.045,t*0.055));
+    vec3 nrm=normalize(vec3(g*0.62,1.0));
+    vec3 light=normalize(vec3(-0.38,0.30,1.0));
+    float spec=pow(max(0.0,dot(nrm,light)),22.0);
+    float rim=pow(1.0-max(0.0,nrm.z),2.4);
+    vec3 col=mix(darkBase(),album(under*0.62+depth*0.21+0.08),0.30+under*0.40);
+    col+=u_c3*spec*(0.085+u_audio.z*0.012);
+    col+=album(depth+0.38)*rim*0.075;
+    return col;
   }
 
-  vec3 sceneNeural(vec2 uv, float t) {
-    vec2 p = centeredUv(uv) * 1.72;
-    vec2 w = vec2(
-      fbm(p * 0.80 + vec2(t * 0.12, -t * 0.08)),
-      fbm(p * 0.84 + vec2(-t * 0.09, t * 0.10) + 4.1)
-    ) - 0.5;
-    vec2 q = p + w * 1.28;
-    float r1 = ridge(q * 1.54 + vec2(t * 0.12, 0.0));
-    float r2 = ridge(rot(q, 1.07) * 1.72 - vec2(0.0, t * 0.10));
-    float filament = pow(sat(r1 * r2 * 1.62), 5.2);
-    float ghost = pow(sat(r1 * 1.08), 8.0) * 0.35 + pow(sat(r2 * 1.08), 8.0) * 0.30;
-    vec3 color = mix(baseDark(), palette(fbm(q * 0.72) + u_character * 0.2), 0.12 + ghost * 0.30);
-    color += palette(r1 * 0.42 + r2 * 0.36 + 0.2) * filament * (0.28 + u_audio.y * 0.045);
-    color += u_c3 * pow(filament, 2.0) * (0.08 + u_audio.z * 0.018);
-    return color;
+  // Luminous fabric: a broad shaded surface, not traveling ribbon lines.
+  vec3 sceneSilk(vec2 uv,float t){
+    vec2 p=cuv(uv)*1.03;
+    p=rot(p,0.08*sin(t*0.12));
+    p=flowWarp(p,t,0.27);
+    float phase=p.x*1.18+p.y*0.48;
+    float h=0.34*sin(phase*1.24+t*0.34)+0.22*sin(p.x*0.78-p.y*1.12-t*0.27+2.3);
+    h+=0.16*(fbm(p*1.05+vec2(t*0.065,-t*0.055))-0.5);
+    float ex=0.018;
+    vec2 px=p+vec2(ex,0.0), py=p+vec2(0.0,ex);
+    float hx=0.34*sin((px.x*1.18+px.y*0.48)*1.24+t*0.34)+0.22*sin(px.x*0.78-px.y*1.12-t*0.27+2.3);
+    float hy=0.34*sin((py.x*1.18+py.y*0.48)*1.24+t*0.34)+0.22*sin(py.x*0.78-py.y*1.12-t*0.27+2.3);
+    vec3 nrm=normalize(vec3((h-hx)/ex*0.22,(h-hy)/ex*0.22,1.0));
+    vec3 ld=normalize(vec3(-0.45,0.40,1.0));
+    float diff=0.48+0.52*max(0.0,dot(nrm,ld));
+    float sheen=pow(max(0.0,dot(nrm,normalize(vec3(0.30,-0.15,1.0)))),18.0);
+    float tint=fbm(p*0.74+vec2(-t*0.045,t*0.052));
+    vec3 surface=album(tint*0.58+h*0.13+u_character*0.08);
+    vec3 col=mix(darkBase(),surface,diff*0.48);
+    col+=u_c3*sheen*(0.055+u_audio.z*0.008);
+    return col;
   }
 
-  vec3 sceneDrift(vec2 uv, float t) {
-    vec2 p = centeredUv(uv);
-    vec3 color = baseDark();
-    float total = 0.0;
-    for (int i = 0; i < 11; i++) {
-      float z = float(i) / 10.0;
-      float depthScale = 0.72 + z * 1.38;
-      vec2 q = p * depthScale;
-      q = rot(q, 0.18 * sin(t * 0.10 + z * 2.2));
-      q += vec2(
-        sin(t * 0.19 + z * 4.8) * 0.23,
-        cos(t * 0.16 + z * 3.7) * 0.18
+  // Photon atmosphere: layered depth particles suspended inside colored haze.
+  vec3 scenePhotons(vec2 uv,float t){
+    vec2 p=cuv(uv);
+    float haze=fbm(flowWarp(p*0.92,t,0.22)+vec2(t*0.045,-t*0.035));
+    vec3 col=mix(darkBase(),album(haze*0.42+0.10),smoothstep(0.30,0.82,haze)*0.19);
+    for(int layer=0;layer<4;layer++){
+      float lf=float(layer);
+      float scale=8.0+lf*6.5;
+      vec2 drift=vec2(
+        sin(t*(0.13+lf*0.012)+uv.y*2.7)*0.045+t*(0.005+lf*0.001),
+        cos(t*(0.11+lf*0.010)+uv.x*2.2)*0.040-t*(0.003+lf*0.0008)
       );
-      float density = fbm(q * (1.18 + z * 0.52) + vec2(z * 4.3, -z * 2.7));
-      density = smoothstep(0.42, 0.80, density);
-      float fade = (1.0 - z * 0.48) * 0.072;
-      vec3 fogColor = palette(density * 0.44 + z * 0.22 + u_character * 0.12);
-      color += fogColor * density * fade * (1.0 + u_audio.x * 0.08);
-      total += density * fade;
+      vec2 grid=(uv+drift)*scale;
+      vec2 id=floor(grid), gv=fract(grid)-0.5;
+      vec2 rnd=hash22(id+lf*71.3);
+      vec2 pos=(rnd-0.5)*0.80;
+      float d=length(gv-pos);
+      float point=smoothstep(0.055+lf*0.004,0.0,d)*step(0.56-lf*0.045,rnd.x);
+      float halo=smoothstep(0.18,0.0,d)*0.10*point;
+      float twinkle=0.82+0.18*sin(t*(0.32+rnd.y*0.18)+rnd.x*14.0);
+      vec3 pc=album(rnd.y+lf*0.17+u_character*0.09);
+      col+=pc*(point*twinkle*(0.11+lf*0.018+u_audio.z*0.008)+halo*0.05);
     }
-    float shaft = smoothstep(0.72, 0.12, abs(p.x + sin(p.y * 1.8 + t * 0.23) * 0.16)) * fbm(p * 0.8 - vec2(t * 0.05, 0.0));
-    color += u_c3 * shaft * 0.035;
-    color = mix(color, palette(total * 0.8 + 0.1), sat(total * 0.10));
-    return color;
+    return col;
   }
 
-  vec3 renderScene(float scene, vec2 uv, float t) {
-    if (scene < 0.5) return sceneFluid(uv, t);
-    if (scene < 1.5) return sceneGlass(uv, t);
-    if (scene < 2.5) return sceneSilk(uv, t);
-    if (scene < 3.5) return scenePlasma(uv, t);
-    if (scene < 4.5) return scenePhotons(uv, t);
-    return sceneDrift(uv, t);
+  // Plasma current: smooth domain-warped energy with broad caustics, never marble-gray.
+  vec3 scenePlasma(vec2 uv,float t){
+    vec2 p=cuv(uv)*1.20;
+    p=flowWarp(p,t,0.58);
+    float a=fbm(p*1.10+vec2(t*0.105,-t*0.082));
+    float b=fbm(rot(p,0.72)*1.36+vec2(-t*0.075,t*0.090)+3.7);
+    float c=fbm(p*0.62+vec2(t*0.048,t*0.042)+8.2);
+    float field=sat(a*0.56+b*0.34+c*0.22);
+    float caustic=pow(smoothstep(0.48,0.82,abs(a-b)*1.45),1.35);
+    vec3 col=mix(darkBase(),album(field*0.64+c*0.18+u_character*0.11),0.28+field*0.45);
+    col+=album(field+0.31)*caustic*(0.065+u_audio.w*0.012);
+    return col;
   }
 
-  void main() {
-    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-    vec3 a = renderScene(u_sceneA, uv, u_time);
-    vec3 b = renderScene(u_sceneB, uv, u_time);
-    vec3 color = mix(a, b, u_blend);
+  vec3 renderScene(float scene,vec2 uv,float t){
+    if(scene<0.5) return sceneVolume(uv,t);
+    if(scene<1.5) return sceneGlass(uv,t);
+    if(scene<2.5) return sceneSilk(uv,t);
+    if(scene<3.5) return scenePhotons(uv,t);
+    return scenePlasma(uv,t);
+  }
 
-    // The artwork owns the color identity. Scenes only decide structure and motion.
-    float sceneLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    vec3 albumTone = palette(sceneLum * 1.17 + uv.x * 0.11 + uv.y * 0.07 + u_character * 0.19);
-    float albumWeight = 0.30 + smoothstep(0.08, 0.72, sceneLum) * 0.12;
-    color = mix(color, albumTone * (0.48 + sceneLum * 0.88), albumWeight);
-    color += palette(sceneLum * 0.72 + 0.18) * 0.035;
+  void main(){
+    vec2 uv=gl_FragCoord.xy/u_resolution.xy;
+    vec3 color=renderScene(u_sceneA,uv,u_time);
+    if(u_blend>0.001){
+      vec3 incoming=renderScene(u_sceneB,uv,u_time);
+      color=mix(color,incoming,u_blend);
+    }
 
-    float vignette = smoothstep(0.98, 0.18, length((uv - 0.5) * vec2(0.92, 1.04)));
-    color = mix(baseDark(), color, 0.76 + vignette * 0.24);
-    color *= 0.95 + vignette * 0.09;
-    color = 1.0 - exp(-color * 1.10);
-    color = pow(max(color, vec3(0.0)), vec3(0.95));
-
-    gl_FragColor = vec4(color, 0.82);
+    float vig=smoothstep(1.05,0.20,length((uv-0.5)*vec2(0.88,1.02)));
+    color=mix(darkBase(),color,0.78+vig*0.22);
+    // A small dominant-artwork tint locks every mode to the current cover without flattening depth.
+    color=mix(color,color*(0.84+u_c0*0.38),0.20);
+    color=1.0-exp(-color*1.08);
+    color=pow(max(color,vec3(0.0)),vec3(0.96));
+    gl_FragColor=vec4(color,0.68);
   }
 `;
 
@@ -952,15 +892,17 @@ function MusicHeroSceneEngine({
     let height = 1;
     let dpr = 1;
     let lastNow = performance.now();
+    let lastAudioSample = 0;
     let liveCharacter = targetCharacterRef.current;
     const audioSmooth = { low: 0, mid: 0, high: 0, energy: 0 };
+    const audioTarget = { low: 0, mid: 0, high: 0, energy: 0 };
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       width = Math.max(1, Math.floor(rect.width));
       height = Math.max(1, Math.floor(rect.height));
       const device = window.devicePixelRatio || 1;
-      dpr = Math.min(device, width < 620 ? 1.0 : 1.25);
+      dpr = Math.min(device, 1.0);
       const pixelWidth = Math.max(1, Math.floor(width * dpr));
       const pixelHeight = Math.max(1, Math.floor(height * dpr));
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -994,33 +936,34 @@ function MusicHeroSceneEngine({
       const dtSeconds = heroClamp((now - lastNow) / 1000, 0, 0.08);
       lastNow = now;
 
-      const raw = playingRef.current ? getMusicRtaLevels() : Array(10).fill(0);
-      const average = (from: number, to: number) => {
-        let sum = 0;
-        let count = 0;
-        for (let index = from; index <= to; index += 1) {
-          sum += heroClamp(Number(raw[index]) || 0);
-          count += 1;
-        }
-        return count ? sum / count : 0;
-      };
+      // Sample the analyzer at 20 Hz. Rendering remains display-rate and independent of beat transients.
+      if (now - lastAudioSample >= 50) {
+        lastAudioSample = now;
+        const raw = playingRef.current ? getMusicRtaLevels() : Array(10).fill(0);
+        const average = (from: number, to: number) => {
+          let sum = 0;
+          let count = 0;
+          for (let index = from; index <= to; index += 1) {
+            sum += heroClamp(Number(raw[index]) || 0);
+            count += 1;
+          }
+          return count ? sum / count : 0;
+        };
+        const lowRaw = average(0, 2);
+        const midRaw = average(3, 6);
+        const highRaw = average(7, 9);
+        const energyRaw = lowRaw * 0.38 + midRaw * 0.42 + highRaw * 0.20;
+        audioTarget.low = playingRef.current ? heroClamp(lowRaw * 0.72, 0, 0.46) : 0;
+        audioTarget.mid = playingRef.current ? heroClamp(midRaw * 0.68, 0, 0.44) : 0;
+        audioTarget.high = playingRef.current ? heroClamp(highRaw * 0.62, 0, 0.40) : 0;
+        audioTarget.energy = playingRef.current ? heroClamp(energyRaw * 0.66, 0, 0.42) : 0;
+      }
 
-      const lowRaw = average(0, 2);
-      const midRaw = average(3, 6);
-      const highRaw = average(7, 9);
-      const energyRaw = lowRaw * 0.38 + midRaw * 0.42 + highRaw * 0.20;
-
-      const lowTarget = playingRef.current ? heroClamp(lowRaw * 1.12, 0, 0.72) : 0;
-      const midTarget = playingRef.current ? heroClamp(midRaw * 1.08, 0, 0.70) : 0;
-      const highTarget = playingRef.current ? heroClamp(highRaw * 1.04, 0, 0.66) : 0;
-      const energyTarget = playingRef.current ? heroClamp(energyRaw * 1.06, 0, 0.68) : 0;
-
-      // Long time constants are deliberate. The scene owns the motion; music only applies a gentle,
-      // heavily-smoothed pressure so kick drums and guitar transients can never jerk the geometry.
-      audioSmooth.low = expApproach(audioSmooth.low, lowTarget, dtSeconds, 0.82);
-      audioSmooth.mid = expApproach(audioSmooth.mid, midTarget, dtSeconds, 0.96);
-      audioSmooth.high = expApproach(audioSmooth.high, highTarget, dtSeconds, 0.68);
-      audioSmooth.energy = expApproach(audioSmooth.energy, energyTarget, dtSeconds, 1.08);
+      // The scene owns 90%+ of the motion. Music is a slow pressure layer, never a positional driver.
+      audioSmooth.low = expApproach(audioSmooth.low, audioTarget.low, dtSeconds, 1.55);
+      audioSmooth.mid = expApproach(audioSmooth.mid, audioTarget.mid, dtSeconds, 1.80);
+      audioSmooth.high = expApproach(audioSmooth.high, audioTarget.high, dtSeconds, 1.28);
+      audioSmooth.energy = expApproach(audioSmooth.energy, audioTarget.energy, dtSeconds, 2.05);
 
       const livePalette = livePaletteRef.current;
       const targetPalette = targetPaletteRef.current;
@@ -2599,6 +2542,188 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-heroPrefButton{height:29px;min-height:29px;padding:0 3px;font-size:6.6px;gap:3px}
           .tr-heroPrefButton svg{width:12px;height:12px;flex-basis:12px}
         }
+
+
+        /* AUG 14 V8 ULTRA: authoritative seamless media stage, album-owned color, fluid GPU motion */
+        .tr-audioDeck--pro7{
+          position:relative!important;
+          padding:0!important;
+          overflow:hidden!important;
+          border:1px solid rgba(86,174,205,.18)!important;
+          border-radius:17px!important;
+          background:linear-gradient(180deg,#050b0f 0%,#020609 46%,#010405 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.028),0 18px 55px rgba(0,0,0,.30)!important;
+        }
+        .tr-playerHero{
+          position:relative!important;
+          isolation:isolate!important;
+          width:100%!important;
+          min-width:0!important;
+          margin:0!important;
+          padding:0!important;
+          display:grid!important;
+          grid-template-columns:clamp(240px,28%,290px) minmax(0,1fr)!important;
+          align-items:stretch!important;
+          gap:0!important;
+          overflow:hidden!important;
+          border:0!important;
+          border-radius:0!important;
+          background:transparent!important;
+          box-shadow:none!important;
+          text-align:left!important;
+        }
+        .tr-playerHero::before,.tr-playerHero::after{display:none!important;content:none!important;background:none!important;box-shadow:none!important}
+        .tr-playerVisualEngine{
+          position:absolute!important;z-index:0!important;inset:0!important;
+          overflow:hidden!important;pointer-events:none!important;
+          background:linear-gradient(180deg,#04090c 0%,#020609 100%)!important;
+        }
+        .tr-playerVisualArtwork{
+          position:absolute!important;z-index:0!important;
+          left:-14%!important;top:-40%!important;width:136%!important;height:184%!important;
+          object-fit:cover!important;object-position:center!important;
+          opacity:.50!important;
+          filter:blur(82px) saturate(1.74) contrast(1.035) brightness(.72)!important;
+          transform:scale(1.18)!important;transform-origin:center!important;
+          animation:none!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.52!important}
+        .tr-playerVisualEngine canvas{
+          position:absolute!important;z-index:1!important;inset:0!important;
+          width:100%!important;height:100%!important;display:block!important;
+          opacity:.90!important;mix-blend-mode:normal!important;
+          filter:saturate(1.10) contrast(1.015)!important;
+          transform:translateZ(0)!important;will-change:contents!important;
+        }
+        .tr-playerVisualGlass{
+          position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
+          background:
+            radial-gradient(78% 125% at 84% 46%,transparent 30%,rgba(0,0,0,.10) 100%),
+            linear-gradient(90deg,rgba(0,0,0,.015) 0%,transparent 46%,rgba(0,0,0,.035) 100%)!important;
+          box-shadow:none!important;
+        }
+        .tr-playerHero .tr-audioArtwork{
+          position:relative!important;z-index:6!important;
+          width:calc(100% + 68px)!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;
+          aspect-ratio:1/1!important;margin:0 -68px 0 0!important;padding:0!important;
+          border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:hidden!important;
+        }
+        .tr-playerHero .tr-audioArtwork::after{display:none!important;content:none!important}
+        .tr-playerHero .tr-audioArtworkImage{
+          display:block!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:center!important;
+          -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 76%,rgba(0,0,0,.98) 82%,rgba(0,0,0,.82) 89%,rgba(0,0,0,.48) 95%,transparent 100%)!important;
+          mask-image:linear-gradient(90deg,#000 0%,#000 76%,rgba(0,0,0,.98) 82%,rgba(0,0,0,.82) 89%,rgba(0,0,0,.48) 95%,transparent 100%)!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          position:relative!important;z-index:7!important;
+          width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;min-height:0!important;
+          margin:0!important;padding:clamp(28px,3.2vw,42px) clamp(26px,3.8vw,54px) clamp(26px,3vw,38px) clamp(54px,6vw,78px)!important;
+          display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;
+          text-align:left!important;overflow:hidden!important;border:0!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          content:""!important;display:block!important;position:absolute!important;z-index:-1!important;
+          inset:6% -4% 6% -14%!important;pointer-events:none!important;
+          background:radial-gradient(62% 86% at 20% 50%,rgba(0,0,0,.33),rgba(0,0,0,.12) 50%,transparent 80%)!important;
+          filter:blur(22px)!important;
+        }
+        .tr-audioIdentityMain{width:100%!important;min-width:0!important;position:relative!important;z-index:2!important}
+        .tr-playerHero .tr-audioIdentityMain strong{
+          display:block!important;width:100%!important;margin:0!important;padding:0!important;
+          color:#fff!important;font-size:clamp(30px,3.8vw,50px)!important;line-height:1.02!important;font-weight:1000!important;letter-spacing:-.043em!important;
+          white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;
+          text-shadow:0 3px 22px rgba(0,0,0,.90),0 1px 4px rgba(0,0,0,.88)!important;
+        }
+        .tr-playerHero .tr-audioIdentityMain small{
+          display:block!important;width:100%!important;margin-top:9px!important;padding:0!important;
+          color:#d0e0e6!important;font-size:clamp(14px,1.45vw,19px)!important;line-height:1.18!important;font-weight:850!important;
+          text-shadow:0 2px 12px rgba(0,0,0,.88)!important;
+        }
+        .tr-heroPreferenceStage{
+          position:relative!important;z-index:3!important;width:auto!important;max-width:100%!important;margin-top:22px!important;
+          display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:8px!important;flex-wrap:nowrap!important;
+        }
+        .tr-heroPrefButton{
+          position:relative!important;isolation:isolate!important;overflow:hidden!important;
+          width:auto!important;min-width:0!important;height:36px!important;min-height:36px!important;padding:0 14px!important;
+          display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;
+          border:1px solid rgba(192,220,230,.18)!important;border-radius:11px!important;
+          background:linear-gradient(180deg,rgba(26,39,47,.54),rgba(5,11,16,.62))!important;
+          color:#edf7fa!important;font-size:8.5px!important;font-weight:1000!important;letter-spacing:.035em!important;white-space:nowrap!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.065),inset 0 -1px 0 rgba(0,0,0,.42),0 7px 18px rgba(0,0,0,.18)!important;
+          backdrop-filter:blur(16px) saturate(1.12)!important;-webkit-backdrop-filter:blur(16px) saturate(1.12)!important;
+          cursor:pointer!important;transition:transform .16s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease!important;
+        }
+        .tr-heroPrefButton:nth-child(1){min-width:92px!important}.tr-heroPrefButton:nth-child(2){min-width:112px!important}.tr-heroPrefButton:nth-child(3){min-width:126px!important}
+        .tr-heroPrefButton::before{
+          content:""!important;position:absolute!important;z-index:-1!important;left:10%!important;right:10%!important;top:0!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(218,245,255,.25),transparent)!important;
+        }
+        .tr-heroPrefButton:hover:not(:disabled){
+          transform:translateY(-1px)!important;border-color:rgba(112,219,246,.40)!important;
+          background:linear-gradient(180deg,rgba(25,55,67,.66),rgba(5,20,27,.70))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 8px 20px rgba(0,0,0,.20),0 0 16px rgba(67,204,241,.07)!important;
+        }
+        .tr-heroPrefButton:active:not(:disabled){transform:translateY(0) scale(.985)!important}
+        .tr-heroPrefButton:disabled{opacity:.40!important;cursor:default!important}
+        .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex:0 0 15px!important;fill:currentColor!important}
+        .tr-heroPrefButton span{display:block!important;overflow:visible!important;text-overflow:clip!important}
+        .tr-heroPrefButton.tr-prefLike.is-liked{color:#effff8!important;border-color:rgba(76,230,159,.54)!important;background:linear-gradient(180deg,rgba(18,118,78,.78),rgba(6,67,43,.82))!important;box-shadow:inset 0 1px rgba(255,255,255,.11),0 0 18px rgba(53,218,143,.12)!important}
+        .tr-heroPrefButton.tr-prefLess.is-disliked{color:#fff5f5!important;border-color:rgba(255,103,111,.54)!important;background:linear-gradient(180deg,rgba(143,42,49,.78),rgba(82,16,22,.84))!important;box-shadow:inset 0 1px rgba(255,255,255,.10),0 0 18px rgba(234,65,77,.10)!important}
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{color:#f5fdff!important;border-color:rgba(100,219,253,.56)!important;background:linear-gradient(180deg,rgba(17,105,137,.80),rgba(5,57,77,.85))!important;box-shadow:inset 0 1px rgba(255,255,255,.12),0 0 18px rgba(62,200,239,.11)!important}
+        .tr-playerPreferenceStage{display:none!important}
+        .tr-audioDeck--pro7 .tr-audioTimeline{
+          position:relative!important;z-index:8!important;width:calc(100% - 24px)!important;max-width:none!important;
+          margin:0 auto 6px!important;padding-top:10px!important;min-height:34px!important;
+          background:transparent!important;border:0!important;box-shadow:none!important;
+        }
+
+        @media(min-width:1100px){
+          .tr-playerHero{grid-template-columns:290px minmax(0,1fr)!important}
+          .tr-playerHero .tr-audioIdentity{padding:36px 56px 34px 76px!important}
+          .tr-heroPreferenceStage{margin-top:24px!important;gap:9px!important}
+          .tr-heroPrefButton{height:38px!important;min-height:38px!important;font-size:9px!important}
+        }
+        @media(min-width:651px) and (max-width:900px){
+          .tr-playerHero{grid-template-columns:235px minmax(0,1fr)!important}
+          .tr-playerHero .tr-audioArtwork{width:calc(100% + 54px)!important;margin-right:-54px!important}
+          .tr-playerHero .tr-audioIdentity{padding:24px 26px 22px 58px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(27px,4.2vw,38px)!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:14px!important;margin-top:7px!important}
+          .tr-heroPreferenceStage{margin-top:18px!important;gap:6px!important}
+          .tr-heroPrefButton{height:34px!important;min-height:34px!important;padding:0 10px!important;font-size:7.8px!important;gap:5px!important}
+          .tr-heroPrefButton:nth-child(1){min-width:78px!important}.tr-heroPrefButton:nth-child(2){min-width:96px!important}.tr-heroPrefButton:nth-child(3){min-width:110px!important}
+        }
+        @media(max-width:650px){
+          .tr-audioDeck--pro7{border-radius:14px!important}
+          .tr-playerHero{grid-template-columns:128px minmax(0,1fr)!important;min-height:128px!important}
+          .tr-playerHero .tr-audioArtwork{width:calc(128px + 34px)!important;height:128px!important;min-width:0!important;min-height:128px!important;max-width:none!important;max-height:128px!important;margin-right:-34px!important;aspect-ratio:auto!important}
+          .tr-playerHero .tr-audioArtworkImage{
+            -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 75%,rgba(0,0,0,.96) 83%,rgba(0,0,0,.70) 92%,transparent 100%)!important;
+            mask-image:linear-gradient(90deg,#000 0%,#000 75%,rgba(0,0,0,.96) 83%,rgba(0,0,0,.70) 92%,transparent 100%)!important;
+          }
+          .tr-playerHero .tr-audioIdentity{height:128px!important;min-height:128px!important;padding:10px 8px 9px 36px!important;justify-content:center!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(18px,5.3vw,23px)!important;line-height:1.03!important;letter-spacing:-.03em!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:11px!important;margin-top:5px!important;line-height:1.12!important}
+          .tr-heroPreferenceStage{width:100%!important;margin-top:10px!important;gap:4px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+          .tr-heroPrefButton{width:100%!important;min-width:0!important;height:31px!important;min-height:31px!important;padding:0 4px!important;border-radius:8px!important;gap:3px!important;font-size:7px!important;letter-spacing:0!important}
+          .tr-heroPrefButton:nth-child(n){min-width:0!important}
+          .tr-heroPrefButton svg{width:12px!important;height:12px!important;flex-basis:12px!important}
+          .tr-playerVisualArtwork{left:-20%!important;top:-46%!important;width:150%!important;height:194%!important;opacity:.48!important;filter:blur(54px) saturate(1.70) brightness(.72)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.50!important}
+          .tr-audioDeck--pro7 .tr-audioTimeline{width:calc(100% - 14px)!important;padding-top:8px!important}
+        }
+        @media(max-width:390px){
+          .tr-playerHero{grid-template-columns:118px minmax(0,1fr)!important;min-height:118px!important}
+          .tr-playerHero .tr-audioArtwork{width:calc(118px + 30px)!important;height:118px!important;min-height:118px!important;max-height:118px!important;margin-right:-30px!important}
+          .tr-playerHero .tr-audioIdentity{height:118px!important;min-height:118px!important;padding:8px 6px 7px 31px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:17.5px!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:10.2px!important;margin-top:4px!important}
+          .tr-heroPreferenceStage{margin-top:8px!important;gap:3px!important}
+          .tr-heroPrefButton{height:28px!important;min-height:28px!important;padding:0 2px!important;font-size:6.3px!important;gap:2px!important}
+          .tr-heroPrefButton svg{width:11px!important;height:11px!important;flex-basis:11px!important}
+        }
+        @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
 
 
 
