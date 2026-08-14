@@ -384,11 +384,14 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
 type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
+type HeroColorPool = HeroRgb[];
 
 const HERO_SCENE_COUNT = 5;
-const HERO_SCENE_MS = 8500;
-const HERO_CROSSFADE_MS = 2800;
-const HERO_ENGINE_EPOCH_MS = Date.now();
+const HERO_SCENE_MIN_MS = 8000;
+const HERO_SCENE_MAX_MS = 10000;
+const HERO_MORPH_MS = 1150;
+const HERO_PALETTE_MIN_MS = 4200;
+const HERO_PALETTE_MAX_MS = 6500;
 const HERO_NEUTRAL_PALETTE: HeroPalette = [
   { r: 196, g: 216, b: 220 },
   { r: 137, g: 164, b: 171 },
@@ -541,6 +544,94 @@ function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
   const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.18);
   const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.48), { r: 0, g: 0, b: 0 }, 0.82);
   return [chosen[0], chosen[1], chosen[2], highlight, shadow];
+}
+
+
+function extractHeroColorPool(data: Uint8ClampedArray): HeroColorPool {
+  type PoolBucket = { color: HeroRgb; hits: number; saturation: number; light: number };
+  const bins = new Map<string, { r: number; g: number; b: number; hits: number }>();
+  const quantum = 20;
+
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] < 180) continue;
+    const color = { r: data[index], g: data[index + 1], b: data[index + 2] };
+    const light = heroLightness(color);
+    if (light < 0.025 || light > 0.985) continue;
+    const qr = Math.round(color.r / quantum) * quantum;
+    const qg = Math.round(color.g / quantum) * quantum;
+    const qb = Math.round(color.b / quantum) * quantum;
+    const key = `${qr}:${qg}:${qb}`;
+    const bucket = bins.get(key) ?? { r: 0, g: 0, b: 0, hits: 0 };
+    bucket.r += color.r;
+    bucket.g += color.g;
+    bucket.b += color.b;
+    bucket.hits += 1;
+    bins.set(key, bucket);
+  }
+
+  const ranked: PoolBucket[] = Array.from(bins.values())
+    .filter((bucket) => bucket.hits >= 2)
+    .map((bucket) => {
+      const color = { r: bucket.r / bucket.hits, g: bucket.g / bucket.hits, b: bucket.b / bucket.hits };
+      return { color, hits: bucket.hits, saturation: heroSaturation(color), light: heroLightness(color) };
+    })
+    .filter((item) => item.light > 0.055 && item.light < 0.96)
+    .sort((a, b) => {
+      const score = (item: PoolBucket) => Math.sqrt(item.hits) * (0.92 + item.saturation * 1.85) * (1.08 - Math.abs(item.light - 0.5) * 0.34);
+      return score(b) - score(a);
+    });
+
+  if (!ranked.length) return HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color }));
+
+  const pool: HeroRgb[] = [];
+  for (const item of ranked.slice(0, 100)) {
+    const visible = heroMakeVisible(item.color);
+    const minDistance = pool.length < 4 ? 34 : 27;
+    if (pool.every((existing) => heroColorDistance(existing, visible) > minDistance)) pool.push(visible);
+    if (pool.length >= 9) break;
+  }
+
+  // Preserve useful light and dark neutrals from the actual artwork as fidelity accents.
+  const lightNeutral = ranked
+    .filter((item) => item.light > 0.62 && item.saturation < 0.34)
+    .sort((a, b) => (b.hits * b.light) - (a.hits * a.light))[0];
+  const darkNeutral = ranked
+    .filter((item) => item.light < 0.32)
+    .sort((a, b) => b.hits - a.hits)[0];
+  for (const item of [lightNeutral, darkNeutral]) {
+    if (!item) continue;
+    const visible = heroMakeVisible(item.color);
+    if (pool.every((existing) => heroColorDistance(existing, visible) > 24)) pool.push(visible);
+  }
+
+  while (pool.length < 5) pool.push({ ...HERO_NEUTRAL_PALETTE[pool.length % 4] });
+  return pool.slice(0, 10);
+}
+
+function heroPaletteFromPool(pool: HeroColorPool, phase: number, seed: number): HeroPalette {
+  const source = pool.length ? pool : HERO_NEUTRAL_PALETTE.slice(0, 4);
+  const count = source.length;
+  const cycleStep = count % 2 === 0 ? (count % 3 === 0 ? 5 : 3) : 2;
+  const start = (seed + phase * cycleStep) % count;
+  const stride = count > 7 ? 3 : count > 4 ? 2 : 1;
+  const pick = (offset: number) => ({ ...source[(start + offset * stride) % count] });
+  const c0 = pick(0);
+  let c1 = pick(1);
+  let c2 = pick(2);
+
+  if (heroColorDistance(c0, c1) < 28 && count > 3) c1 = pick(3);
+  if (heroColorDistance(c0, c2) < 28 && count > 4) c2 = pick(4);
+
+  const highlightBase = [...source].sort((a, b) => heroLightness(b) - heroLightness(a))[phase % Math.min(3, count)] ?? c1;
+  const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.12);
+  const darkest = [...source].sort((a, b) => heroLightness(a) - heroLightness(b))[phase % Math.min(2, count)] ?? c0;
+  const shadow = heroMix(darkest, { r: 0, g: 0, b: 0 }, 0.72);
+  return [c0, c1, c2, highlight, shadow];
+}
+
+function heroTimedDuration(seed: number, step: number, minMs: number, maxMs: number) {
+  const span = Math.max(1, maxMs - minMs);
+  return minMs + (heroHash(`${seed}:${step}`) % (span + 1));
 }
 
 const HERO_VERTEX_SHADER = `
@@ -738,38 +829,55 @@ const HERO_FRAGMENT_SHADER = `
 
   void main(){
     vec2 uv=gl_FragCoord.xy/u_resolution.xy;
-    // The scene world owns its motion. Audio never changes the clock, so strong songs cannot make it jump.
-    float visualTime=u_time*1.34;
+    // One uninterrupted visual clock. Audio never changes time, velocity, direction, or scene position.
+    float visualTime=u_time*1.46;
     vec3 color=renderScene(u_sceneA,uv,visualTime);
+
+    // Short material morph instead of a long double-exposure crossfade.
     if(u_blend>0.001){
       vec3 incoming=renderScene(u_sceneB,uv,visualTime);
-      color=mix(color,incoming,u_blend);
+      vec2 mp=flowWarp(cuv(uv)*0.68,visualTime*0.42,0.26);
+      float field=fbm(mp+vec2(visualTime*0.018,-visualTime*0.014)+u_character*6.7);
+      float reveal=1.0-smoothstep(u_blend-0.16,u_blend+0.16,field);
+      float lumA=dot(color,vec3(0.2126,0.7152,0.0722));
+      float lumB=dot(incoming,vec3(0.2126,0.7152,0.0722));
+      incoming*=clamp((lumA+0.10)/(lumB+0.10),0.82,1.18);
+      color=mix(color,incoming,reveal);
     }
 
-    // Keep several real artwork colors present at once instead of collapsing each cover into one tint.
-    vec2 ap=cuv(uv)*0.46;
-    float paletteFlow=fbm(ap+vec2(visualTime*0.026,-visualTime*0.021));
-    vec3 albumWash=mix(u_c0,u_c1,smoothstep(0.08,0.92,uv.y+0.12*sin(uv.x*3.2+visualTime*0.10)));
-    albumWash=mix(albumWash,u_c2,smoothstep(0.42,0.88,paletteFlow));
-    color+=albumWash*(0.078+0.050*paletteFlow);
+    // Multiple album colors coexist and drift independently so the cover never collapses to one tint.
+    vec2 ap=cuv(uv)*0.62;
+    float p0=fbm(ap+vec2(visualTime*0.030,-visualTime*0.022));
+    float p1=fbm(rot(ap,0.78)*1.12+vec2(-visualTime*0.021,visualTime*0.027)+4.8);
+    vec3 albumWash=mix(u_c0,u_c1,smoothstep(0.16,0.84,p0));
+    albumWash=mix(albumWash,u_c2,smoothstep(0.30,0.78,p1)*0.72);
+    color+=albumWash*(0.070+0.042*p0);
 
-    // Premium caustic detail: always fluid, always album-colored, never beat-driven.
-    vec2 detailUv=cuv(uv)*0.92;
-    float caA=fbm(flowWarp(detailUv,visualTime*0.72,0.28)+vec2(visualTime*0.028,-visualTime*0.021));
-    float caB=fbm(rot(detailUv,0.74)*1.18+vec2(-visualTime*0.022,visualTime*0.026)+5.4);
-    float caustic=pow(smoothstep(0.12,0.56,abs(caA-caB)),1.65);
-    float veil=smoothstep(0.34,0.84,fbm(detailUv*0.58+vec2(visualTime*0.018,visualTime*0.014)+9.0));
-    color+=album(caA*0.72+caB*0.28+0.17)*caustic*0.115;
-    color+=album(caB+0.53)*veil*0.045;
+    // Fine refractive fidelity layer. Smaller scale than V10 to avoid giant blurry patches.
+    vec2 detailUv=cuv(uv)*1.64;
+    float caA=fbm(flowWarp(detailUv,visualTime*0.58,0.18)+vec2(visualTime*0.034,-visualTime*0.025));
+    float caB=fbm(rot(detailUv,0.91)*1.34+vec2(-visualTime*0.027,visualTime*0.031)+5.4);
+    float caustic=pow(smoothstep(0.20,0.54,abs(caA-caB)),2.25);
+    float micro=pow(smoothstep(0.47,0.76,fbm(detailUv*1.70+vec2(-visualTime*0.030,visualTime*0.024)+11.0)),2.1);
+    color+=album(caA*0.61+caB*0.39+0.17)*caustic*0.072;
+    color+=mix(u_c3,album(caB+0.53),0.42)*micro*0.032;
+
+    // Tiny depth shimmer, deliberately independent of beat transients.
+    vec2 g=uv*vec2(36.0,20.0)+vec2(visualTime*0.028,-visualTime*0.019);
+    vec2 id=floor(g),gv=fract(g)-0.5;
+    vec2 rnd=hash22(id);
+    float sparkle=smoothstep(0.032,0.0,length(gv-(rnd-0.5)*0.72))*step(0.84,rnd.x);
+    color+=album(rnd.y+0.21)*sparkle*0.055;
 
     float vig=smoothstep(1.05,0.20,length((uv-0.5)*vec2(0.88,1.02)));
-    color=mix(darkBase(),color,0.92+vig*0.08);
-    color=mix(color,color*(0.84+u_c0*0.38),0.16);
+    color=mix(darkBase(),color,0.94+vig*0.06);
     float luminance=dot(color,vec3(0.2126,0.7152,0.0722));
-    color=mix(vec3(luminance),color,1.34);
-    color=1.0-exp(-color*1.62);
-    color=pow(max(color,vec3(0.0)),vec3(0.94));
-    gl_FragColor=vec4(color,0.97);
+    color=mix(vec3(luminance),color,1.42);
+    color=1.0-exp(-color*1.72);
+    color=pow(max(color,vec3(0.0)),vec3(0.93));
+    float dither=(hash21(gl_FragCoord.xy+visualTime*13.7)-0.5)/255.0;
+    color+=vec3(dither);
+    gl_FragColor=vec4(color,0.98);
   }
 `;
 
@@ -785,6 +893,8 @@ function MusicHeroSceneEngine({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playingRef = useRef(playing);
   const targetCharacterRef = useRef((heroHash(trackKey || "mvp-music") % 10000) / 10000);
+  const trackKeyRef = useRef(trackKey || "mvp-music");
+  const palettePoolRef = useRef<HeroColorPool>(HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color })));
   const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
   const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
 
@@ -793,11 +903,13 @@ function MusicHeroSceneEngine({
   }, [playing]);
 
   useEffect(() => {
-    targetCharacterRef.current = (heroHash(trackKey || "mvp-music") % 10000) / 10000;
+    trackKeyRef.current = trackKey || "mvp-music";
+    targetCharacterRef.current = (heroHash(trackKeyRef.current) % 10000) / 10000;
   }, [trackKey]);
 
   useEffect(() => {
     if (!artworkUrl || typeof document === "undefined") {
+      palettePoolRef.current = HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color }));
       targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
       return;
     }
@@ -817,8 +929,14 @@ function MusicHeroSceneEngine({
         const context = sample.getContext("2d", { willReadFrequently: true });
         if (!context) return;
         context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, size, size);
-        const palette = extractHeroPalette(context.getImageData(0, 0, size, size).data);
-        if (!cancelled && palette) targetPaletteRef.current = palette;
+        const imageData = context.getImageData(0, 0, size, size).data;
+        const pool = extractHeroColorPool(imageData);
+        const fallbackPalette = extractHeroPalette(imageData);
+        if (!cancelled) {
+          palettePoolRef.current = pool;
+          const seed = heroHash(trackKeyRef.current);
+          targetPaletteRef.current = pool.length >= 3 ? heroPaletteFromPool(pool, 0, seed) : (fallbackPalette ?? HERO_NEUTRAL_PALETTE);
+        }
       } catch {
         targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
       }
@@ -913,6 +1031,14 @@ function MusicHeroSceneEngine({
     let lastNow = performance.now();
     let lastAudioSample = 0;
     let liveCharacter = targetCharacterRef.current;
+    let sceneIndex = heroHash("v11-scene-seed") % HERO_SCENE_COUNT;
+    let sceneSerial = 0;
+    let sceneStartedAt = performance.now();
+    let sceneDuration = heroTimedDuration(heroHash("v11-scene-duration"), sceneSerial, HERO_SCENE_MIN_MS, HERO_SCENE_MAX_MS);
+    let palettePhase = 0;
+    let paletteChangedAt = performance.now();
+    let paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
+    let lastPaletteTrackKey = trackKeyRef.current;
     const audioSmooth = { low: 0, mid: 0, high: 0, energy: 0 };
     const audioTarget = { low: 0, mid: 0, high: 0, energy: 0 };
 
@@ -984,21 +1110,43 @@ function MusicHeroSceneEngine({
       audioSmooth.high = expApproach(audioSmooth.high, audioTarget.high, dtSeconds, 1.28);
       audioSmooth.energy = expApproach(audioSmooth.energy, audioTarget.energy, dtSeconds, 2.05);
 
+      if (lastPaletteTrackKey !== trackKeyRef.current) {
+        lastPaletteTrackKey = trackKeyRef.current;
+        palettePhase = 0;
+        paletteChangedAt = now;
+        paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
+        targetPaletteRef.current = heroPaletteFromPool(palettePoolRef.current, palettePhase, heroHash(trackKeyRef.current));
+      }
+
+      // During playback, smoothly rotate emphasis across the full artwork color pool every 4.2–6.5 s.
+      if (playingRef.current && now - paletteChangedAt >= paletteDuration) {
+        palettePhase += 1;
+        paletteChangedAt = now;
+        paletteDuration = heroTimedDuration(heroHash(trackKeyRef.current), palettePhase, HERO_PALETTE_MIN_MS, HERO_PALETTE_MAX_MS);
+        targetPaletteRef.current = heroPaletteFromPool(palettePoolRef.current, palettePhase, heroHash(trackKeyRef.current));
+      } else if (!playingRef.current) {
+        paletteChangedAt = now;
+      }
+
       const livePalette = livePaletteRef.current;
       const targetPalette = targetPaletteRef.current;
-      const paletteAmount = 1 - Math.exp(-dtSeconds / 1.65);
+      const paletteAmount = 1 - Math.exp(-dtSeconds / 1.35);
       for (let index = 0; index < livePalette.length; index += 1) {
         livePalette[index] = heroMix(livePalette[index], targetPalette[index], paletteAmount);
       }
       liveCharacter = expApproach(liveCharacter, targetCharacterRef.current, dtSeconds, 2.2);
 
-      const globalMs = Date.now() - HERO_ENGINE_EPOCH_MS;
-      const sceneStep = Math.floor(globalMs / HERO_SCENE_MS);
-      const sceneElapsed = globalMs - sceneStep * HERO_SCENE_MS;
-      const sceneA = sceneStep % HERO_SCENE_COUNT;
-      const sceneB = (sceneA + 1) % HERO_SCENE_COUNT;
-      const fadeStart = HERO_SCENE_MS - HERO_CROSSFADE_MS;
-      const rawBlend = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
+      while (now - sceneStartedAt >= sceneDuration) {
+        sceneStartedAt += sceneDuration;
+        sceneIndex = (sceneIndex + 1) % HERO_SCENE_COUNT;
+        sceneSerial += 1;
+        sceneDuration = heroTimedDuration(heroHash("v11-scene-duration"), sceneSerial, HERO_SCENE_MIN_MS, HERO_SCENE_MAX_MS);
+      }
+      const sceneElapsed = now - sceneStartedAt;
+      const sceneA = sceneIndex;
+      const sceneB = (sceneIndex + 1) % HERO_SCENE_COUNT;
+      const morphStart = Math.max(0, sceneDuration - HERO_MORPH_MS);
+      const rawBlend = sceneElapsed > morphStart ? heroClamp((sceneElapsed - morphStart) / HERO_MORPH_MS) : 0;
       const blend = rawBlend * rawBlend * (3 - 2 * rawBlend);
 
       gl.useProgram(program);
@@ -1050,7 +1198,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
   const restoredProfileRef = useRef<string>("");
-
+  const heroIdentityRef = useRef<HTMLDivElement | null>(null);
+  const heroTitleRef = useRef<HTMLElement | null>(null);
+  const heroArtistRef = useRef<HTMLElement | null>(null);
+  const heroActionsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const title = document.querySelector<HTMLElement>(".tr-topTitle");
@@ -1277,6 +1428,58 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setSavePresetOpen(false);
   }
 
+
+  const track = player.currentTrack;
+
+  useEffect(() => {
+    const identity = heroIdentityRef.current;
+    const title = heroTitleRef.current;
+    const artist = heroArtistRef.current;
+    const actions = heroActionsRef.current;
+    if (!identity || !title || !artist || !actions) return;
+
+    let raf = 0;
+    const fitHeroTitle = () => {
+      window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(() => {
+        const mobile = window.matchMedia("(max-width: 650px)").matches;
+        const narrow = window.matchMedia("(max-width: 390px)").matches;
+        const maxSize = mobile ? (narrow ? 25 : 30) : window.innerWidth >= 1100 ? 62 : 46;
+        const minSize = mobile ? (narrow ? 17 : 18) : 27;
+        const computed = window.getComputedStyle(identity);
+        const paddingY = (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
+        const artistHeight = artist.getBoundingClientRect().height;
+        const actionsHeight = actions.getBoundingClientRect().height;
+        const safetyGap = mobile ? 26 : 42;
+        const targetHeroHeight = mobile ? (narrow ? 218 : 216) : Math.max(220, identity.parentElement?.clientHeight || identity.clientHeight);
+        const availableTitleHeight = Math.max(42, targetHeroHeight - paddingY - artistHeight - actionsHeight - safetyGap);
+
+        let chosen = maxSize;
+        for (let size = maxSize; size >= minSize; size -= 1) {
+          identity.style.setProperty("--tr-hero-title-size", `${size}px`);
+          const fitsHeight = title.scrollHeight <= availableTitleHeight + 2;
+          const fitsWidth = title.scrollWidth <= title.clientWidth + 2;
+          if (fitsHeight && fitsWidth) {
+            chosen = size;
+            break;
+          }
+          chosen = size;
+        }
+        identity.style.setProperty("--tr-hero-title-size", `${chosen}px`);
+      });
+    };
+
+    fitHeroTitle();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fitHeroTitle) : null;
+    observer?.observe(identity);
+    window.addEventListener("resize", fitHeroTitle);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      observer?.disconnect();
+      window.removeEventListener("resize", fitHeroTitle);
+    };
+  }, [track?.title, track?.artist]);
+
   function openSavePresetDialog(preferredSlot?: MusicCustomPresetSlot) {
     const firstEmpty = DSP_SLOTS.find((slot) => !dspProfiles[slot]);
     const slot = preferredSlot ?? firstEmpty ?? activeCustomSlot ?? "custom_1";
@@ -1285,7 +1488,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setSavePresetOpen(true);
   }
 
-  const track = player.currentTrack;
   const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
   const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
   const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
@@ -1311,12 +1513,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
-        <div className="tr-audioIdentity">
+        <div ref={heroIdentityRef} className="tr-audioIdentity">
           <button type="button" className="tr-audioIdentityMain" onClick={() => navigate("/music")} aria-label="Open current song in music library">
-            <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
-            <small>{track?.artist || "Unknown Artist"}</small>
+            <strong ref={heroTitleRef}>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
+            <small ref={heroArtistRef}>{track?.artist || "Unknown Artist"}</small>
           </button>
-          <div className="tr-heroPreferenceStage" aria-label="Track preference controls">
+          <div ref={heroActionsRef} className="tr-heroPreferenceStage" aria-label="Track preference controls">
             <button type="button" className={`tr-heroPrefButton tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
               if (!track) return;
               void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
@@ -2942,7 +3144,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           filter:blur(28px)!important;
         }
         .tr-playerHero .tr-audioIdentityMain strong{
-          font-size:clamp(42px,4.9vw,62px)!important;
+          font-size:var(--tr-hero-title-size,clamp(42px,4.9vw,62px))!important;
           line-height:.98!important;
           letter-spacing:-.048em!important;
         }
@@ -3030,7 +3232,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
         @media(min-width:1100px){
           .tr-playerHero .tr-audioIdentity{padding:34px 48px 34px 64px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:62px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,62px)!important}
           .tr-playerHero .tr-audioIdentityMain small{font-size:22px!important}
           .tr-heroPreferenceStage{margin-top:28px!important;gap:12px!important}
           .tr-heroPrefButton{height:48px!important;min-height:48px!important;font-size:11px!important}
@@ -3038,7 +3240,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
         @media(min-width:651px) and (max-width:900px){
           .tr-playerHero .tr-audioIdentity{padding:22px 20px 22px 48px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(34px,5.2vw,46px)!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,clamp(34px,5.2vw,46px))!important}
           .tr-playerHero .tr-audioIdentityMain small{font-size:16.5px!important}
           .tr-heroPreferenceStage{margin-top:20px!important;gap:7px!important}
           .tr-heroPrefButton{height:40px!important;min-height:40px!important;padding:0 12px!important;font-size:8.8px!important;gap:6px!important}
@@ -3049,65 +3251,83 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
         @media(max-width:650px){
-          /* Mobile gets a taller hero so title + full labels never have to squeeze. */
-          .tr-playerHero{grid-template-columns:44% minmax(0,1fr)!important;min-height:184px!important}
+          /* V11 mobile: more room for metadata, flexible height, and full action labels at every supported width. */
+          .tr-playerHero{grid-template-columns:40% minmax(0,1fr)!important;min-height:216px!important;align-items:stretch!important}
           .tr-playerHero .tr-audioArtwork{
-            width:calc(100% + 34px)!important;height:184px!important;min-height:184px!important;max-height:184px!important;
-            margin-right:-34px!important;aspect-ratio:auto!important;
+            width:calc(100% + 22px)!important;height:100%!important;min-height:216px!important;max-height:none!important;
+            margin-right:-22px!important;aspect-ratio:auto!important;align-self:stretch!important;
           }
           .tr-playerHero .tr-audioArtworkImage{object-fit:cover!important;object-position:center!important}
           .tr-playerHero .tr-audioIdentity{
-            height:184px!important;min-height:184px!important;
-            padding:12px 8px 10px 30px!important;
-            align-items:center!important;justify-content:center!important;text-align:center!important;
+            height:auto!important;min-height:216px!important;
+            padding:14px 10px 13px 22px!important;
+            align-items:center!important;justify-content:center!important;text-align:center!important;overflow:visible!important;
           }
           .tr-playerHero .tr-audioIdentity:before{
-            inset:5% 0 5% -12%!important;
-            background:radial-gradient(72% 82% at 52% 47%,rgba(0,0,0,.27),rgba(0,0,0,.08) 58%,transparent 84%)!important;
+            inset:4% 0 4% -8%!important;
+            background:radial-gradient(76% 86% at 52% 48%,rgba(0,0,0,.25),rgba(0,0,0,.075) 60%,transparent 86%)!important;
+          }
+          .tr-playerHero .tr-audioIdentityMain{
+            width:100%!important;min-width:0!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;
           }
           .tr-playerHero .tr-audioIdentityMain strong{
-            font-size:clamp(27px,7.5vw,32px)!important;
-            line-height:.98!important;letter-spacing:-.038em!important;
+            width:100%!important;max-width:100%!important;
+            font-size:var(--tr-hero-title-size,clamp(21px,6.2vw,28px))!important;
+            line-height:1.04!important;letter-spacing:-.034em!important;
+            white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
+            overflow-wrap:anywhere!important;word-break:normal!important;
           }
           .tr-playerHero .tr-audioIdentityMain small{
-            margin-top:7px!important;font-size:15px!important;line-height:1.10!important;
+            width:100%!important;margin-top:6px!important;font-size:14px!important;line-height:1.12!important;
+            white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
           }
           .tr-heroPreferenceStage{
-            width:100%!important;max-width:250px!important;margin-top:15px!important;
-            display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1.22fr)!important;
+            width:100%!important;max-width:270px!important;margin-top:13px!important;
+            display:grid!important;grid-template-columns:minmax(max-content,1fr) minmax(max-content,1.18fr)!important;
             gap:7px!important;align-items:center!important;justify-content:center!important;
           }
           .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
-            width:100%!important;min-width:0!important;max-width:none!important;
-            height:42px!important;min-height:42px!important;
-            padding:0 9px!important;gap:6px!important;border-radius:11px!important;
-            font-size:11px!important;letter-spacing:0!important;line-height:1!important;
+            width:100%!important;min-width:max-content!important;max-width:none!important;
+            height:41px!important;min-height:41px!important;
+            padding:0 10px!important;gap:6px!important;border-radius:11px!important;
+            font-size:10.6px!important;letter-spacing:0!important;line-height:1!important;
             white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;
           }
           .tr-heroPrefButton:nth-child(3){
             grid-column:1/-1!important;
-            width:76%!important;min-width:128px!important;justify-self:center!important;
+            width:max-content!important;min-width:142px!important;justify-self:center!important;
           }
           .tr-heroPrefButton>span{
             display:block!important;min-width:max-content!important;max-width:none!important;
             overflow:visible!important;white-space:nowrap!important;text-overflow:clip!important;
           }
           .tr-heroPrefButton svg{width:16px!important;height:16px!important;flex:0 0 16px!important}
-          .tr-playerVisualArtwork{opacity:.20!important;filter:blur(58px) saturate(2.00) brightness(.74)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.22!important}
-          .tr-playerVisualEngine canvas{filter:saturate(1.42) contrast(1.13) brightness(1.22)!important}
+          .tr-playerVisualArtwork{opacity:.18!important;filter:blur(54px) saturate(2.08) brightness(.76)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.20!important}
+          .tr-playerVisualEngine canvas{filter:saturate(1.46) contrast(1.15) brightness(1.25)!important}
         }
 
         @media(max-width:390px){
-          .tr-playerHero{grid-template-columns:43% minmax(0,1fr)!important;min-height:178px!important}
-          .tr-playerHero .tr-audioArtwork{height:178px!important;min-height:178px!important;max-height:178px!important}
-          .tr-playerHero .tr-audioIdentity{height:178px!important;min-height:178px!important;padding:10px 6px 9px 26px!important}
-          .tr-playerHero .tr-audioIdentityMain strong{font-size:26px!important}
-          .tr-playerHero .tr-audioIdentityMain small{font-size:14px!important;margin-top:6px!important}
-          .tr-heroPreferenceStage{max-width:226px!important;gap:6px!important;margin-top:13px!important}
-          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:40px!important;min-height:40px!important;padding:0 7px!important;font-size:10.5px!important;gap:5px!important}
-          .tr-heroPrefButton:nth-child(3){min-width:124px!important;width:80%!important}
+          .tr-playerHero{grid-template-columns:38% minmax(0,1fr)!important;min-height:218px!important}
+          .tr-playerHero .tr-audioArtwork{min-height:218px!important}
+          .tr-playerHero .tr-audioIdentity{min-height:218px!important;padding:12px 7px 11px 18px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,clamp(18px,5.8vw,24px))!important;line-height:1.05!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:13px!important;margin-top:5px!important;line-height:1.12!important}
+          .tr-heroPreferenceStage{max-width:244px!important;gap:6px!important;margin-top:11px!important;grid-template-columns:minmax(max-content,1fr) minmax(max-content,1.16fr)!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:39px!important;min-height:39px!important;padding:0 8px!important;font-size:10px!important;gap:5px!important}
+          .tr-heroPrefButton:nth-child(3){min-width:136px!important;width:max-content!important}
           .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
+        }
+
+        @media(max-width:350px){
+          .tr-playerHero{grid-template-columns:36% minmax(0,1fr)!important;min-height:246px!important}
+          .tr-playerHero .tr-audioArtwork{min-height:246px!important}
+          .tr-playerHero .tr-audioIdentity{min-height:246px!important;padding:11px 6px 11px 16px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:var(--tr-hero-title-size,20px)!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:12.5px!important}
+          .tr-heroPreferenceStage{width:100%!important;max-width:154px!important;grid-template-columns:1fr!important;gap:5px!important;margin-top:10px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){grid-column:1!important;width:100%!important;min-width:0!important;height:37px!important;min-height:37px!important;padding:0 9px!important;font-size:10px!important}
+          .tr-heroPrefButton:nth-child(3){width:100%!important;min-width:0!important}
         }
 
 
