@@ -738,19 +738,29 @@ const HERO_FRAGMENT_SHADER = `
 
   void main(){
     vec2 uv=gl_FragCoord.xy/u_resolution.xy;
-    vec3 color=renderScene(u_sceneA,uv,u_time);
+    // The scene world owns its motion. Audio never changes the clock, so strong songs cannot make it jump.
+    float visualTime=u_time*1.20;
+    vec3 color=renderScene(u_sceneA,uv,visualTime);
     if(u_blend>0.001){
-      vec3 incoming=renderScene(u_sceneB,uv,u_time);
+      vec3 incoming=renderScene(u_sceneB,uv,visualTime);
       color=mix(color,incoming,u_blend);
     }
 
+    // Keep several real artwork colors present at once instead of collapsing each cover into one tint.
+    vec2 ap=cuv(uv)*0.46;
+    float paletteFlow=fbm(ap+vec2(visualTime*0.026,-visualTime*0.021));
+    vec3 albumWash=mix(u_c0,u_c1,smoothstep(0.08,0.92,uv.y+0.12*sin(uv.x*3.2+visualTime*0.10)));
+    albumWash=mix(albumWash,u_c2,smoothstep(0.42,0.88,paletteFlow));
+    color+=albumWash*(0.040+0.026*paletteFlow);
+
     float vig=smoothstep(1.05,0.20,length((uv-0.5)*vec2(0.88,1.02)));
-    color=mix(darkBase(),color,0.78+vig*0.22);
-    // A small dominant-artwork tint locks every mode to the current cover without flattening depth.
-    color=mix(color,color*(0.84+u_c0*0.38),0.20);
-    color=1.0-exp(-color*1.08);
-    color=pow(max(color,vec3(0.0)),vec3(0.96));
-    gl_FragColor=vec4(color,0.68);
+    color=mix(darkBase(),color,0.84+vig*0.16);
+    color=mix(color,color*(0.84+u_c0*0.38),0.16);
+    float luminance=dot(color,vec3(0.2126,0.7152,0.0722));
+    color=mix(vec3(luminance),color,1.18);
+    color=1.0-exp(-color*1.36);
+    color=pow(max(color,vec3(0.0)),vec3(0.94));
+    gl_FragColor=vec4(color,0.90);
   }
 `;
 
@@ -2725,6 +2735,180 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
         @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
 
+
+        /* AUG 14 V9 HERO POLISH: stronger album-owned visuals + centered premium media controls */
+        .tr-playerVisualArtwork{
+          opacity:.36!important;
+          filter:blur(78px) saturate(1.92) contrast(1.05) brightness(.76)!important;
+        }
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.38!important}
+        .tr-playerVisualEngine canvas{
+          opacity:.99!important;
+          filter:saturate(1.24) contrast(1.065) brightness(1.08)!important;
+        }
+        .tr-playerVisualGlass{
+          background:
+            radial-gradient(82% 130% at 84% 46%,transparent 34%,rgba(0,0,0,.055) 100%),
+            linear-gradient(90deg,rgba(0,0,0,.008) 0%,transparent 50%,rgba(0,0,0,.018) 100%)!important;
+        }
+        .tr-playerHero .tr-audioIdentity{
+          padding:clamp(28px,3.1vw,42px) clamp(28px,3.4vw,50px) clamp(28px,3vw,40px) clamp(46px,5vw,64px)!important;
+          align-items:center!important;
+          justify-content:center!important;
+          text-align:center!important;
+        }
+        .tr-playerHero .tr-audioIdentity:before{
+          inset:4% 2% 4% -10%!important;
+          background:radial-gradient(66% 86% at 48% 50%,rgba(0,0,0,.20),rgba(0,0,0,.075) 52%,transparent 82%)!important;
+          filter:blur(25px)!important;
+        }
+        .tr-audioIdentityMain{
+          width:100%!important;
+          display:flex!important;
+          flex-direction:column!important;
+          align-items:center!important;
+          justify-content:center!important;
+          text-align:center!important;
+          border:0!important;
+          background:transparent!important;
+          padding:0!important;
+          color:inherit!important;
+          cursor:pointer!important;
+        }
+        .tr-playerHero .tr-audioIdentityMain strong{
+          width:100%!important;
+          max-width:760px!important;
+          margin-inline:auto!important;
+          text-align:center!important;
+          font-size:clamp(38px,4.6vw,58px)!important;
+          line-height:1.00!important;
+          letter-spacing:-.046em!important;
+          text-wrap:balance!important;
+          text-shadow:0 4px 24px rgba(0,0,0,.84),0 1px 5px rgba(0,0,0,.88)!important;
+        }
+        .tr-playerHero .tr-audioIdentityMain small{
+          width:100%!important;
+          margin-top:11px!important;
+          text-align:center!important;
+          color:#d9e8ed!important;
+          font-size:clamp(17px,1.7vw,22px)!important;
+          line-height:1.14!important;
+          font-weight:900!important;
+          text-shadow:0 2px 14px rgba(0,0,0,.82)!important;
+        }
+        .tr-heroPreferenceStage{
+          width:auto!important;
+          max-width:100%!important;
+          margin-top:26px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:11px!important;
+          flex-wrap:nowrap!important;
+        }
+        .tr-heroPrefButton{
+          height:44px!important;
+          min-height:44px!important;
+          padding:0 18px!important;
+          gap:8px!important;
+          border:1px solid rgba(206,235,244,.23)!important;
+          border-radius:14px!important;
+          background:
+            linear-gradient(180deg,rgba(47,62,71,.72) 0%,rgba(18,29,36,.61) 47%,rgba(5,12,17,.76) 100%)!important;
+          color:#f3fbfd!important;
+          font-size:10px!important;
+          font-weight:1000!important;
+          letter-spacing:.025em!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.13),
+            inset 0 -1px 0 rgba(0,0,0,.60),
+            0 10px 24px rgba(0,0,0,.25),
+            0 0 0 1px rgba(255,255,255,.012)!important;
+          backdrop-filter:blur(22px) saturate(1.24)!important;
+          -webkit-backdrop-filter:blur(22px) saturate(1.24)!important;
+        }
+        .tr-heroPrefButton:nth-child(1){min-width:108px!important}
+        .tr-heroPrefButton:nth-child(2){min-width:132px!important}
+        .tr-heroPrefButton:nth-child(3){min-width:148px!important}
+        .tr-heroPrefButton::before{
+          left:12%!important;right:12%!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(232,250,255,.48),transparent)!important;
+        }
+        .tr-heroPrefButton::after{
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          left:18%!important;right:18%!important;bottom:-28%!important;height:58%!important;
+          border-radius:50%!important;
+          background:radial-gradient(ellipse,rgba(92,210,244,.095),transparent 70%)!important;
+          filter:blur(7px)!important;
+          pointer-events:none!important;
+        }
+        .tr-heroPrefButton svg{width:17px!important;height:17px!important;flex:0 0 17px!important}
+        .tr-heroPrefButton:hover:not(:disabled){
+          transform:translateY(-1px)!important;
+          border-color:rgba(126,224,249,.50)!important;
+          background:linear-gradient(180deg,rgba(43,76,89,.78),rgba(11,36,46,.70) 54%,rgba(4,17,23,.80))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 11px 26px rgba(0,0,0,.27),0 0 20px rgba(67,204,241,.09)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked{
+          color:#f2fff8!important;
+          border-color:rgba(77,227,158,.60)!important;
+          background:linear-gradient(180deg,rgba(19,126,82,.86),rgba(7,74,47,.88))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 10px 22px rgba(0,0,0,.22),0 0 20px rgba(48,218,139,.15)!important;
+        }
+        .tr-heroPrefButton.tr-prefLess.is-disliked{
+          color:#fff7f7!important;
+          border-color:rgba(226,91,103,.60)!important;
+          background:linear-gradient(180deg,rgba(126,34,44,.88),rgba(67,13,22,.90))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 10px 22px rgba(0,0,0,.22),0 0 18px rgba(205,57,72,.13)!important;
+        }
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          color:#f4fdff!important;
+          border-color:rgba(103,219,249,.64)!important;
+          background:linear-gradient(180deg,rgba(17,112,145,.88),rgba(5,64,84,.90))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 10px 22px rgba(0,0,0,.22),0 0 20px rgba(64,199,235,.14)!important;
+        }
+
+        @media(min-width:1100px){
+          .tr-playerHero .tr-audioIdentity{padding:34px 50px 34px 62px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:58px!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:21px!important}
+          .tr-heroPreferenceStage{margin-top:28px!important;gap:12px!important}
+          .tr-heroPrefButton{height:46px!important;min-height:46px!important;font-size:10.5px!important}
+        }
+        @media(min-width:651px) and (max-width:900px){
+          .tr-playerHero .tr-audioIdentity{padding:22px 20px 22px 48px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(34px,5vw,44px)!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:16px!important;margin-top:8px!important}
+          .tr-heroPreferenceStage{margin-top:21px!important;gap:7px!important}
+          .tr-heroPrefButton{height:39px!important;min-height:39px!important;padding:0 12px!important;font-size:8.6px!important;gap:6px!important}
+          .tr-heroPrefButton:nth-child(1){min-width:88px!important}.tr-heroPrefButton:nth-child(2){min-width:106px!important}.tr-heroPrefButton:nth-child(3){min-width:120px!important}
+          .tr-heroPrefButton svg{width:15px!important;height:15px!important;flex-basis:15px!important}
+        }
+        @media(max-width:650px){
+          .tr-playerHero{grid-template-columns:148px minmax(0,1fr)!important;min-height:148px!important}
+          .tr-playerHero .tr-audioArtwork{width:calc(148px + 38px)!important;height:148px!important;min-height:148px!important;max-height:148px!important;margin-right:-38px!important}
+          .tr-playerHero .tr-audioIdentity{height:148px!important;min-height:148px!important;padding:10px 8px 9px 25px!important;align-items:center!important;text-align:center!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(22px,6.5vw,29px)!important;line-height:1.00!important;letter-spacing:-.034em!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:13.5px!important;margin-top:6px!important;line-height:1.10!important}
+          .tr-heroPreferenceStage{width:100%!important;margin-top:14px!important;gap:5px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){width:100%!important;min-width:0!important;height:35px!important;min-height:35px!important;padding:0 5px!important;border-radius:10px!important;gap:4px!important;font-size:7.6px!important;letter-spacing:0!important}
+          .tr-heroPrefButton svg{width:13.5px!important;height:13.5px!important;flex:0 0 13.5px!important}
+          .tr-playerVisualArtwork{opacity:.35!important;filter:blur(52px) saturate(1.88) brightness(.76)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.37!important}
+          .tr-playerVisualEngine canvas{filter:saturate(1.22) contrast(1.06) brightness(1.08)!important}
+        }
+        @media(max-width:390px){
+          .tr-playerHero{grid-template-columns:136px minmax(0,1fr)!important;min-height:136px!important}
+          .tr-playerHero .tr-audioArtwork{width:calc(136px + 34px)!important;height:136px!important;min-height:136px!important;max-height:136px!important;margin-right:-34px!important}
+          .tr-playerHero .tr-audioIdentity{height:136px!important;min-height:136px!important;padding:8px 5px 7px 22px!important}
+          .tr-playerHero .tr-audioIdentityMain strong{font-size:22px!important;line-height:1.0!important}
+          .tr-playerHero .tr-audioIdentityMain small{font-size:12.5px!important;margin-top:5px!important}
+          .tr-heroPreferenceStage{margin-top:11px!important;gap:4px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:33px!important;min-height:33px!important;padding:0 3px!important;font-size:7.4px!important;gap:3px!important}
+          .tr-heroPrefButton svg{width:12.5px!important;height:12.5px!important;flex-basis:12.5px!important}
+        }
 
 
       `}</style>
