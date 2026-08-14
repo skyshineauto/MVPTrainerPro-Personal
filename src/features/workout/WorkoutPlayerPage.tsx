@@ -507,6 +507,23 @@ function roundProtein(g: number) {
   return Math.round(g / 5) * 5;
 }
 
+async function loadLatestCompletedBodyWeight(userId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("workouts")
+    .select("bodyweight_lb,completed_at")
+    .eq("user_id", userId)
+    .not("completed_at", "is", null)
+    .not("bodyweight_lb", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const value = Number((data as any)?.bodyweight_lb ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 async function loadWorkoutExercisesWithExercises(workoutId: string): Promise<WorkoutExerciseRow[]> {
   const { data: wes, error: weErr } = await supabase
     .from("workout_exercises")
@@ -2734,11 +2751,19 @@ export function WorkoutPlayerPage({ params }: any) {
       if (!wId) throw new Error("Failed to obtain workout id.");
       setWorkoutId(wId);
 
-      const suggested =
-        (wData as any)?.bodyweight_lb != null
-          ? String((wData as any).bodyweight_lb)
-          : "";
-      setGateWeight(suggested);
+      const latestCompletedWeight = await loadLatestCompletedBodyWeight(u.user.id);
+      const rpcSuggestedWeight =
+        (wData as any)?.bodyweight_lb != null && Number((wData as any).bodyweight_lb) > 0
+          ? Number((wData as any).bodyweight_lb)
+          : null;
+
+      // The launch check-in should match the HUD's "Last completed" body weight.
+      // Ignore stale bodyweight data left on an unstarted workout whenever a
+      // newer completed-workout value exists.
+      const launchSuggestedWeight = latestCompletedWeight ?? rpcSuggestedWeight;
+      setGateWeight(
+        launchSuggestedWeight != null ? formatLoggedWeight(launchSuggestedWeight) : ""
+      );
 
       const { data: wRow, error: wErr } = await supabase
         .from("workouts")
