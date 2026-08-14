@@ -384,25 +384,18 @@ function MusicActivityRta({ playing }: { playing: boolean }) {
 
 type HeroRgb = { r: number; g: number; b: number };
 type HeroPalette = [HeroRgb, HeroRgb, HeroRgb, HeroRgb, HeroRgb];
-type HeroSceneName = "fluid" | "waves" | "stars" | "plasma" | "bloom" | "haze" | "tunnel" | "flow";
+type HeroSceneName = "fluid" | "silk" | "glass" | "neural" | "photons" | "plasma" | "space" | "drift";
 type HeroAudioShape = { low: number; mid: number; high: number; energy: number; depth: number; pulse: number; speed: number };
 
-const HERO_SCENES: HeroSceneName[] = ["fluid", "stars", "plasma", "waves", "bloom", "haze", "tunnel", "flow"];
+const HERO_SCENES: HeroSceneName[] = ["fluid", "silk", "glass", "neural", "photons", "plasma", "space", "drift"];
 const HERO_SCENE_MS = 9000;
-const HERO_CROSSFADE_MS = 1250;
-const HERO_ENGINE_VERSION = "AUG14-V4";
-
-function heroSceneDisplayName(scene: HeroSceneName) {
-  if (scene === "flow") return "PARTICLES";
-  if (scene === "haze") return "SMOKE";
-  return scene.toUpperCase();
-}
+const HERO_CROSSFADE_MS = 2200;
 const HERO_NEUTRAL_PALETTE: HeroPalette = [
-  { r: 225, g: 235, b: 239 },
-  { r: 170, g: 184, b: 190 },
-  { r: 118, g: 132, b: 140 },
-  { r: 245, g: 248, b: 250 },
-  { r: 64, g: 74, b: 80 },
+  { r: 196, g: 216, b: 220 },
+  { r: 137, g: 164, b: 171 },
+  { r: 194, g: 151, b: 114 },
+  { r: 241, g: 235, b: 220 },
+  { r: 24, g: 31, b: 35 },
 ];
 
 function heroClamp(value: number, min = 0, max = 1) {
@@ -439,9 +432,7 @@ function heroRgba(color: HeroRgb, alpha: number) {
 }
 
 function heroLightness(color: HeroRgb) {
-  const max = Math.max(color.r, color.g, color.b) / 255;
-  const min = Math.min(color.r, color.g, color.b) / 255;
-  return (max + min) / 2;
+  return (Math.max(color.r, color.g, color.b) + Math.min(color.r, color.g, color.b)) / 510;
 }
 
 function heroSaturation(color: HeroRgb) {
@@ -452,7 +443,7 @@ function heroSaturation(color: HeroRgb) {
   const min = Math.min(r, g, b);
   const light = (max + min) / 2;
   const chroma = max - min;
-  return chroma === 0 ? 0 : heroClamp(chroma / (1 - Math.abs(2 * light - 1)));
+  return chroma === 0 ? 0 : heroClamp(chroma / Math.max(0.001, 1 - Math.abs(2 * light - 1)));
 }
 
 function heroColorDistance(left: HeroRgb, right: HeroRgb) {
@@ -464,66 +455,79 @@ function heroColorDistance(left: HeroRgb, right: HeroRgb) {
 
 function heroMakeVisible(color: HeroRgb) {
   const light = heroLightness(color);
-  if (light < 0.18) return heroMix(color, { r: 255, g: 255, b: 255 }, 0.28);
-  if (light > 0.86) return heroMix(color, { r: 0, g: 0, b: 0 }, 0.14);
+  if (light < 0.15) return heroMix(color, { r: 255, g: 255, b: 255 }, 0.34);
+  if (light > 0.91) return heroMix(color, { r: 0, g: 0, b: 0 }, 0.12);
   return color;
 }
 
 function extractHeroPalette(data: Uint8ClampedArray): HeroPalette | null {
-  type Bucket = { r: number; g: number; b: number; weight: number; hits: number };
-  const buckets = new Map<string, Bucket>();
+  type Bucket = { color: HeroRgb; hits: number; saturation: number; light: number };
+  const bins = new Map<string, { r: number; g: number; b: number; hits: number }>();
+  const quantum = 24;
 
-  for (let index = 0; index < data.length; index += 12) {
-    const alpha = data[index + 3] / 255;
-    if (alpha < 0.65) continue;
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] < 180) continue;
     const color = { r: data[index], g: data[index + 1], b: data[index + 2] };
     const light = heroLightness(color);
-    if (light < 0.035 || light > 0.97) continue;
-    const saturation = heroSaturation(color);
-    const q = 28;
-    const qr = Math.round(color.r / q) * q;
-    const qg = Math.round(color.g / q) * q;
-    const qb = Math.round(color.b / q) * q;
+    if (light < 0.025 || light > 0.985) continue;
+    const qr = Math.round(color.r / quantum) * quantum;
+    const qg = Math.round(color.g / quantum) * quantum;
+    const qb = Math.round(color.b / quantum) * quantum;
     const key = `${qr}:${qg}:${qb}`;
-    const centerBias = 1 - Math.min(1, Math.abs(light - 0.48) * 1.35);
-    const weight = alpha * (0.72 + saturation * 1.35) * (0.68 + centerBias * 0.32);
-    const bucket = buckets.get(key) ?? { r: 0, g: 0, b: 0, weight: 0, hits: 0 };
-    bucket.r += color.r * weight;
-    bucket.g += color.g * weight;
-    bucket.b += color.b * weight;
-    bucket.weight += weight;
+    const bucket = bins.get(key) ?? { r: 0, g: 0, b: 0, hits: 0 };
+    bucket.r += color.r;
+    bucket.g += color.g;
+    bucket.b += color.b;
     bucket.hits += 1;
-    buckets.set(key, bucket);
+    bins.set(key, bucket);
   }
 
-  const ranked = Array.from(buckets.values())
-    .filter((bucket) => bucket.weight > 0)
-    .map((bucket) => ({
-      color: {
-        r: bucket.r / bucket.weight,
-        g: bucket.g / bucket.weight,
-        b: bucket.b / bucket.weight,
-      },
-      score: bucket.weight * Math.sqrt(bucket.hits),
-    }))
-    .sort((left, right) => right.score - left.score);
+  const ranked: Bucket[] = Array.from(bins.values())
+    .filter((bucket) => bucket.hits >= 2)
+    .map((bucket) => {
+      const color = { r: bucket.r / bucket.hits, g: bucket.g / bucket.hits, b: bucket.b / bucket.hits };
+      return { color, hits: bucket.hits, saturation: heroSaturation(color), light: heroLightness(color) };
+    })
+    .sort((a, b) => b.hits - a.hits);
 
   if (!ranked.length) return null;
-  const chosen: HeroRgb[] = [];
-  for (const candidate of ranked) {
-    if (!chosen.length || chosen.every((existing) => heroColorDistance(existing, candidate.color) > 54)) {
-      chosen.push(heroMakeVisible(candidate.color));
-      if (chosen.length === 4) break;
+
+  const usable = ranked.filter((item) => item.light > 0.08 && item.light < 0.94);
+  const source = usable.length ? usable : ranked;
+  const dominant = source[0];
+
+  const diversityScore = (item: Bucket, anchors: HeroRgb[]) => {
+    const distance = Math.min(...anchors.map((anchor) => heroColorDistance(anchor, item.color)));
+    const population = Math.log2(item.hits + 1);
+    return distance * (0.72 + item.saturation * 0.72) + population * 13;
+  };
+
+  const chosen: HeroRgb[] = [heroMakeVisible(dominant.color)];
+  while (chosen.length < 3) {
+    let best: Bucket | null = null;
+    let bestScore = -Infinity;
+    for (const item of source.slice(0, Math.min(80, source.length))) {
+      const score = diversityScore(item, chosen);
+      if (score > bestScore && chosen.every((color) => heroColorDistance(color, item.color) > 38)) {
+        best = item;
+        bestScore = score;
+      }
     }
-  }
-  while (chosen.length < 4) {
-    const fallback = ranked[Math.min(chosen.length, ranked.length - 1)]?.color ?? HERO_NEUTRAL_PALETTE[chosen.length];
-    chosen.push(heroMakeVisible(fallback));
+    chosen.push(heroMakeVisible((best ?? source[Math.min(chosen.length, source.length - 1)]).color));
   }
 
-  const brightest = [...chosen].sort((a, b) => heroLightness(b) - heroLightness(a))[0];
-  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.42), { r: 0, g: 0, b: 0 }, 0.76);
-  return [chosen[0], chosen[1], chosen[2], heroMix(brightest, { r: 255, g: 255, b: 255 }, 0.20), shadow];
+  const accentCandidate = [...source]
+    .sort((a, b) => (b.saturation * 1.6 + Math.sqrt(b.hits) * 0.10) - (a.saturation * 1.6 + Math.sqrt(a.hits) * 0.10))
+    .find((item) => chosen.every((color) => heroColorDistance(color, item.color) > 34));
+  if (accentCandidate) chosen[2] = heroMakeVisible(accentCandidate.color);
+
+  const highlightCandidate = [...source]
+    .filter((item) => item.light > 0.48)
+    .sort((a, b) => (b.light * 1.5 + b.saturation * 0.35 + Math.sqrt(b.hits) * 0.03) - (a.light * 1.5 + a.saturation * 0.35 + Math.sqrt(a.hits) * 0.03))[0];
+  const highlightBase = highlightCandidate?.color ?? chosen.reduce((best, color) => heroLightness(color) > heroLightness(best) ? color : best, chosen[0]);
+  const highlight = heroMix(heroMakeVisible(highlightBase), { r: 255, g: 255, b: 255 }, 0.18);
+  const shadow = heroMix(heroMix(chosen[0], chosen[1], 0.48), { r: 0, g: 0, b: 0 }, 0.80);
+  return [chosen[0], chosen[1], chosen[2], highlight, shadow];
 }
 
 function MusicHeroSceneEngine({
@@ -540,7 +544,6 @@ function MusicHeroSceneEngine({
   const seedRef = useRef(heroHash(trackKey || "mvp-music"));
   const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
   const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
-  const [debugScene, setDebugScene] = useState<HeroSceneName>(() => HERO_SCENES[Math.floor(Date.now() / HERO_SCENE_MS) % HERO_SCENES.length]);
 
   useEffect(() => {
     playingRef.current = playing;
@@ -549,16 +552,6 @@ function MusicHeroSceneEngine({
   useEffect(() => {
     seedRef.current = heroHash(trackKey || "mvp-music");
   }, [trackKey]);
-
-  useEffect(() => {
-    const syncScene = () => {
-      const sceneStep = Math.floor(Date.now() / HERO_SCENE_MS);
-      setDebugScene(HERO_SCENES[sceneStep % HERO_SCENES.length]);
-    };
-    syncScene();
-    const timer = window.setInterval(syncScene, 250);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (!artworkUrl || typeof document === "undefined") {
@@ -575,22 +568,16 @@ function MusicHeroSceneEngine({
       if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
       try {
         const sample = document.createElement("canvas");
-        const size = 64;
+        const size = 72;
         sample.width = size;
         sample.height = size;
         const context = sample.getContext("2d", { willReadFrequently: true });
         if (!context) return;
-        const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
-        const sourceWidth = size / scale;
-        const sourceHeight = size / scale;
-        const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
-        const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
-        context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, size, size);
+        context.clearRect(0, 0, size, size);
+        context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight, 0, 0, size, size);
         const palette = extractHeroPalette(context.getImageData(0, 0, size, size).data);
         if (!cancelled && palette) targetPaletteRef.current = palette;
       } catch {
-        // The blurred artwork remains underneath the transparent canvas, so a CORS-blocked
-        // palette read still preserves the album's real colors instead of inventing a theme.
         targetPaletteRef.current = HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette;
       }
     };
@@ -606,11 +593,11 @@ function MusicHeroSceneEngine({
     if (!canvas) return;
 
     let frame = 0;
-    let lastNow = performance.now();
     let width = 1;
     let height = 1;
     let dpr = 1;
-    const smoothed = { low: 0.11, mid: 0.10, high: 0.08, energy: 0.16, depth: 0.16, pulse: 0.10 };
+    let lastNow = performance.now();
+    const smoothed = { low: 0.10, mid: 0.10, high: 0.08, energy: 0.18, depth: 0.18, pulse: 0.10 };
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -641,54 +628,113 @@ function MusicHeroSceneEngine({
       ctx.lineTo(last.x, last.y);
     };
 
+    const organicLoop = (
+      ctx: CanvasRenderingContext2D,
+      cx: number,
+      cy: number,
+      rx: number,
+      ry: number,
+      rotation: number,
+      t: number,
+      seed: number,
+      wobble: number,
+    ) => {
+      const points: Array<{ x: number; y: number }> = [];
+      const count = 14;
+      const cosR = Math.cos(rotation);
+      const sinR = Math.sin(rotation);
+      for (let index = 0; index < count; index += 1) {
+        const angle = (index / count) * Math.PI * 2;
+        const noise = 1 + Math.sin(angle * 3 + t * 0.52 + heroNoise(index + 1, seed) * 6.2) * wobble + Math.cos(angle * 5 - t * 0.34) * wobble * 0.45;
+        const lx = Math.cos(angle) * rx * noise;
+        const ly = Math.sin(angle) * ry * (1 + Math.sin(angle * 2 - t * 0.29) * wobble * 0.55);
+        points.push({ x: cx + lx * cosR - ly * sinR, y: cy + lx * sinR + ly * cosR });
+      }
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let index = 0; index < points.length; index += 1) {
+        const current = points[index];
+        const next = points[(index + 1) % points.length];
+        const after = points[(index + 2) % points.length];
+        ctx.quadraticCurveTo(next.x, next.y, (next.x + after.x) / 2, (next.y + after.y) / 2);
+      }
+      ctx.closePath();
+    };
+
+    const drawAmbient = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette) => {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      for (let index = 0; index < 4; index += 1) {
+        const phase = t * (0.14 + index * 0.018) + index * 1.9;
+        const x = width * (0.23 + index * 0.19) + Math.sin(phase) * width * (0.07 + audio.depth * 0.025);
+        const y = height * (0.28 + (index % 2) * 0.42) + Math.cos(phase * 0.83) * height * 0.12;
+        const radius = Math.max(width, height) * (0.20 + index * 0.025);
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.050 + audio.energy * 0.020));
+        gradient.addColorStop(0.52, heroRgba(palette[(index + 1) % 4], 0.018));
+        gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+      }
+      ctx.restore();
+    };
+
     const drawFluid = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.globalCompositeOperation = "screen";
-      for (let index = 0; index < 7; index += 1) {
+      const count = width < 520 ? 6 : 9;
+      for (let index = 0; index < count; index += 1) {
         const p = heroNoise(index * 7 + 1, seed);
         const q = heroNoise(index * 7 + 2, seed);
         const r = heroNoise(index * 7 + 3, seed);
-        const x = width * (0.12 + p * 0.78) + Math.sin(t * (0.18 + q * 0.07) + r * 6.28) * width * (0.04 + audio.depth * 0.055);
-        const y = height * (0.16 + q * 0.68) + Math.cos(t * (0.15 + r * 0.06) + p * 6.28) * height * (0.07 + audio.depth * 0.05);
-        const radius = Math.max(width, height) * (0.18 + r * 0.18 + audio.low * 0.055);
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.18 + audio.energy * 0.08));
-        gradient.addColorStop(0.42, heroRgba(palette[(index + 1) % 4], 0.07 + audio.mid * 0.04));
+        const phase = t * (0.38 + q * 0.10) + p * Math.PI * 2;
+        const x = width * (0.12 + p * 0.78) + Math.sin(phase) * width * (0.07 + audio.depth * 0.038);
+        const y = height * (0.15 + q * 0.70) + Math.cos(phase * 0.73 + r * 3.4) * height * (0.10 + audio.low * 0.026);
+        const radius = Math.max(width, height) * (0.14 + r * 0.14 + audio.depth * 0.032);
+        const gradient = ctx.createRadialGradient(x, y, radius * 0.03, x, y, radius);
+        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.22 + audio.energy * 0.055));
+        gradient.addColorStop(0.34, heroRgba(palette[(index + 1) % 4], 0.095 + audio.mid * 0.018));
+        gradient.addColorStop(0.74, heroRgba(palette[(index + 2) % 4], 0.025));
         gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.ellipse(x, y, radius * (1.0 + Math.sin(t * 0.21 + index) * 0.18), radius * (0.58 + q * 0.34), t * 0.07 + index, 0, Math.PI * 2);
+        organicLoop(ctx, x, y, radius * (1.05 + audio.low * 0.08), radius * (0.62 + q * 0.28), phase * 0.18, t + index, seed + index * 31, 0.10 + audio.mid * 0.035);
         ctx.fill();
       }
       ctx.restore();
     };
 
-    const drawWaves = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+    const drawSilk = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.globalCompositeOperation = "screen";
       const layers = width < 520 ? 3 : 5;
-      const pointCount = 13;
+      const pointCount = 18;
+      const maxDim = Math.max(width, height);
       for (let layer = 0; layer < layers; layer += 1) {
+        const layerSeed = seed + layer * 97;
+        const baseAngle = -0.65 + layer * 0.31 + Math.sin(t * 0.18 + layer * 1.4) * 0.36;
+        const cx = width * (0.55 + Math.sin(t * 0.21 + layer * 1.1) * 0.10);
+        const cy = height * (0.50 + Math.cos(t * 0.17 + layer * 0.8) * 0.18);
+        const length = maxDim * (0.80 + heroNoise(layer + 1, layerSeed) * 0.24);
+        const amplitude = height * (0.08 + layer * 0.012 + audio.mid * 0.055);
+        const thickness = height * (0.020 + heroNoise(layer + 3, layerSeed) * 0.024 + audio.depth * 0.012);
         const upper: Array<{ x: number; y: number }> = [];
         const lower: Array<{ x: number; y: number }> = [];
-        const layerSeed = seed + layer * 37;
-        const baseY = height * (0.25 + layer * (0.52 / Math.max(1, layers - 1)));
-        const thickness = height * (0.035 + heroNoise(layer + 2, layerSeed) * 0.045 + audio.depth * 0.022);
+        const cosA = Math.cos(baseAngle);
+        const sinA = Math.sin(baseAngle);
+
         for (let point = 0; point < pointCount; point += 1) {
-          const u = point / (pointCount - 1);
-          const p = heroNoise(point * 5 + 1, layerSeed);
-          const q = heroNoise(point * 5 + 2, layerSeed);
-          const xDrift = Math.sin(t * (0.24 + q * 0.08) + point * 0.73 + layer * 1.17) * width * (0.012 + audio.mid * 0.014);
-          const fold = Math.sin(t * 0.31 + point * 0.55 + layer * 0.9) * height * (0.045 + audio.mid * 0.045);
-          const curl = Math.cos(t * 0.19 + point * 0.96 + p * 5.5) * height * (0.028 + audio.low * 0.035);
-          const swell = Math.sin(t * 0.11 + layer * 1.7) * height * 0.035;
-          const x = u * width + xDrift + Math.sin(t * 0.14 + point * 0.31 + layer) * width * 0.012;
-          const y = baseY + fold + curl + swell + Math.sin(u * Math.PI * 2 + layer) * height * 0.025;
-          const localThickness = thickness * (0.72 + q * 0.55) * (0.92 + Math.sin(t * 0.25 + point * 0.44) * 0.14);
-          upper.push({ x, y: y - localThickness });
-          lower.push({ x, y: y + localThickness });
+          const u = point / (pointCount - 1) - 0.5;
+          const bend = Math.sin(u * Math.PI * 2.6 + t * 0.48 + layer * 0.9) * amplitude
+            + Math.sin(u * Math.PI * 5.2 - t * 0.31 + heroNoise(point + 5, layerSeed) * 2.2) * amplitude * 0.30;
+          const along = u * length + Math.sin(t * 0.23 + point * 0.37 + layer) * width * 0.010;
+          const localX = cx + along * cosA - bend * sinA;
+          const localY = cy + along * sinA + bend * cosA;
+          const normalAngle = baseAngle + Math.PI / 2 + Math.sin(u * 5 + t * 0.36) * 0.18;
+          const localThickness = thickness * (0.70 + (1 - Math.abs(u) * 1.3) * 0.42 + Math.sin(t * 0.44 + point * 0.6) * 0.10);
+          upper.push({ x: localX + Math.cos(normalAngle) * localThickness, y: localY + Math.sin(normalAngle) * localThickness });
+          lower.push({ x: localX - Math.cos(normalAngle) * localThickness, y: localY - Math.sin(normalAngle) * localThickness });
         }
 
         ctx.beginPath();
@@ -702,54 +748,128 @@ function MusicHeroSceneEngine({
           }
         }
         ctx.closePath();
-        const gradient = ctx.createLinearGradient(0, baseY - height * 0.12, width, baseY + height * 0.12);
-        gradient.addColorStop(0, heroRgba(palette[layer % 4], 0.025));
-        gradient.addColorStop(0.32, heroRgba(palette[(layer + 1) % 4], 0.12 + audio.energy * 0.035));
-        gradient.addColorStop(0.72, heroRgba(palette[(layer + 2) % 4], 0.16 + audio.energy * 0.045));
-        gradient.addColorStop(1, heroRgba(palette[layer % 4], 0.018));
+        const gradient = ctx.createLinearGradient(cx - cosA * length * 0.42, cy - sinA * length * 0.42, cx + cosA * length * 0.42, cy + sinA * length * 0.42);
+        gradient.addColorStop(0, heroRgba(palette[layer % 4], 0.015));
+        gradient.addColorStop(0.30, heroRgba(palette[(layer + 1) % 4], 0.11 + audio.energy * 0.025));
+        gradient.addColorStop(0.58, heroRgba(palette[(layer + 3) % 4], 0.17 + audio.energy * 0.030));
+        gradient.addColorStop(1, heroRgba(palette[(layer + 2) % 4], 0.012));
         ctx.fillStyle = gradient;
         ctx.fill();
 
+        const center = upper.map((point, index) => ({ x: (point.x + lower[index].x) / 2, y: (point.y + lower[index].y) / 2 }));
         ctx.beginPath();
-        const center = upper.map((point, index) => ({ x: point.x, y: (point.y + lower[index].y) / 2 }));
         smoothPath(ctx, center);
-        ctx.strokeStyle = heroRgba(palette[(layer + 3) % 4], 0.08 + audio.high * 0.035);
-        ctx.lineWidth = 0.8 + layer * 0.22;
+        ctx.strokeStyle = heroRgba(palette[(layer + 3) % 4], 0.10 + audio.high * 0.028);
+        ctx.lineWidth = 0.8 + layer * 0.14;
         ctx.stroke();
       }
       ctx.restore();
     };
 
-    const drawStars = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+    const drawGlass = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 72 : 132;
-      const cx = width * (0.54 + Math.sin(t * 0.08) * 0.055);
-      const cy = height * (0.50 + Math.cos(t * 0.07) * 0.07);
+      const count = width < 520 ? 3 : 4;
       for (let index = 0; index < count; index += 1) {
-        const a = heroNoise(index * 4 + 1, seed) * Math.PI * 2;
-        const baseDepth = heroNoise(index * 4 + 2, seed);
-        const radiusSeed = heroNoise(index * 4 + 3, seed);
-        const depth = (baseDepth + t * (0.035 + radiusSeed * 0.02)) % 1;
-        const eased = depth * depth;
-        const radius = eased * Math.max(width, height) * (0.22 + radiusSeed * 0.48);
-        const angle = a + t * (0.018 + radiusSeed * 0.018) * (index % 2 ? 1 : -1);
-        const x = cx + Math.cos(angle) * radius;
-        const y = cy + Math.sin(angle) * radius * (0.48 + radiusSeed * 0.20);
-        const size = 0.5 + eased * (1.2 + audio.high * 0.7);
+        const p = heroNoise(index * 9 + 1, seed);
+        const q = heroNoise(index * 9 + 2, seed);
+        const phase = t * (0.30 + q * 0.08) + p * 6.28;
+        const cx = width * (0.18 + p * 0.66) + Math.sin(phase) * width * 0.10;
+        const cy = height * (0.20 + q * 0.62) + Math.cos(phase * 0.79) * height * 0.11;
+        const rx = Math.max(width, height) * (0.18 + heroNoise(index * 9 + 3, seed) * 0.11);
+        const ry = rx * (0.40 + heroNoise(index * 9 + 4, seed) * 0.24);
+        const rotation = phase * 0.20 + index * 0.7;
+        const fill = ctx.createRadialGradient(cx - rx * 0.18, cy - ry * 0.15, 0, cx, cy, rx);
+        fill.addColorStop(0, heroRgba(palette[3], 0.10 + audio.high * 0.018));
+        fill.addColorStop(0.22, heroRgba(palette[index % 4], 0.075 + audio.energy * 0.018));
+        fill.addColorStop(0.72, heroRgba(palette[(index + 1) % 4], 0.025));
+        fill.addColorStop(1, heroRgba(palette[index % 4], 0));
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        organicLoop(ctx, cx, cy, rx, ry, rotation, t + index * 0.7, seed + index * 43, 0.075 + audio.mid * 0.025);
+        ctx.fill();
+        ctx.strokeStyle = heroRgba(palette[3], 0.12 + audio.high * 0.020);
+        ctx.lineWidth = 0.8 + index * 0.20;
+        ctx.stroke();
+
+        ctx.beginPath();
+        organicLoop(ctx, cx - rx * 0.04, cy - ry * 0.05, rx * 0.88, ry * 0.84, rotation + 0.03, t + index * 0.7 + 0.3, seed + index * 43 + 5, 0.050);
+        ctx.strokeStyle = heroRgba(palette[(index + 2) % 4], 0.040);
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const drawNeural = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const count = width < 520 ? 58 : 104;
+      for (let index = 0; index < count; index += 1) {
+        const p = heroNoise(index * 6 + 1, seed);
+        const q = heroNoise(index * 6 + 2, seed);
+        const r = heroNoise(index * 6 + 3, seed);
+        const s = heroNoise(index * 6 + 4, seed);
+        const baseX = width * p;
+        const baseY = height * q;
+        const phase = t * (0.42 + r * 0.16) + s * Math.PI * 2;
+        const fieldX = Math.sin(baseY * 0.026 + phase) + Math.cos(baseX * 0.014 - phase * 0.67);
+        const fieldY = Math.cos(baseX * 0.021 - phase * 0.82) - Math.sin(baseY * 0.018 + phase * 0.56);
+        const x = (baseX + fieldX * width * (0.06 + audio.mid * 0.018) + width * 1.5) % width;
+        const y = (baseY + fieldY * height * (0.12 + audio.depth * 0.028) + height * 1.5) % height;
+        const angle = Math.atan2(fieldY, fieldX);
+        const len = 5 + r * 13 + audio.high * 3;
         const color = palette[index % 4];
-        ctx.fillStyle = heroRgba(color, 0.12 + eased * 0.42);
+        ctx.strokeStyle = heroRgba(color, 0.075 + r * 0.16 + audio.high * 0.015);
+        ctx.lineWidth = 0.45 + s * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(x - Math.cos(angle) * len, y - Math.sin(angle) * len);
+        ctx.quadraticCurveTo(x - Math.cos(angle + 0.35) * len * 0.45, y - Math.sin(angle + 0.35) * len * 0.45, x, y);
+        ctx.stroke();
+        if (index % 7 === 0) {
+          ctx.fillStyle = heroRgba(palette[3], 0.20 + audio.high * 0.025);
+          ctx.beginPath();
+          ctx.arc(x, y, 0.65 + s * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    };
+
+    const drawPhotons = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const count = width < 520 ? 90 : 158;
+      const cx = width * (0.57 + Math.sin(t * 0.15) * 0.05);
+      const cy = height * (0.49 + Math.cos(t * 0.13) * 0.07);
+      for (let index = 0; index < count; index += 1) {
+        const px = heroNoise(index * 5 + 1, seed) * 2 - 1;
+        const py = heroNoise(index * 5 + 2, seed) * 2 - 1;
+        const zSeed = heroNoise(index * 5 + 3, seed);
+        const sizeSeed = heroNoise(index * 5 + 4, seed);
+        const z = (zSeed + t * (0.13 + sizeSeed * 0.045)) % 1;
+        const perspective = 0.18 + z * z * 1.12;
+        const x = cx + px * width * 0.62 * perspective + Math.sin(t * 0.28 + index) * 2.2;
+        const y = cy + py * height * 0.88 * perspective + Math.cos(t * 0.23 + index * 0.7) * 1.7;
+        if (x < -20 || x > width + 20 || y < -20 || y > height + 20) continue;
+        const size = 0.45 + z * (1.45 + sizeSeed * 1.25) + audio.high * 0.30;
+        const color = palette[index % 4];
+        const brightness = 0.10 + z * 0.48;
+        ctx.fillStyle = heroRgba(color, brightness);
         ctx.beginPath();
         ctx.arc(x, y, size, 0, Math.PI * 2);
         ctx.fill();
-        if (depth > 0.76 && playingRef.current) {
-          const trail = 3 + eased * 7;
-          ctx.strokeStyle = heroRgba(color, 0.05 + audio.high * 0.05);
-          ctx.lineWidth = Math.max(0.5, size * 0.48);
+        if (z > 0.72) {
+          const dx = (x - cx) * (0.018 + audio.depth * 0.006);
+          const dy = (y - cy) * (0.018 + audio.depth * 0.006);
+          ctx.strokeStyle = heroRgba(color, 0.07 + z * 0.12);
+          ctx.lineWidth = Math.max(0.55, size * 0.46);
           ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x - Math.cos(angle) * trail, y - Math.sin(angle) * trail * 0.55);
+          ctx.moveTo(x - dx * 3.2, y - dy * 3.2);
+          ctx.lineTo(x, y);
           ctx.stroke();
         }
       }
@@ -760,133 +880,136 @@ function MusicHeroSceneEngine({
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.globalCompositeOperation = "screen";
-      for (let index = 0; index < 9; index += 1) {
-        const p = heroNoise(index * 5 + 1, seed);
-        const q = heroNoise(index * 5 + 2, seed);
-        const x = width * (0.08 + p * 0.84) + Math.sin(t * (0.14 + q * 0.08) + index) * width * 0.06;
-        const y = height * (0.12 + q * 0.76) + Math.cos(t * (0.17 + p * 0.05) + index * 0.6) * height * 0.10;
-        const radius = Math.max(width, height) * (0.10 + heroNoise(index * 5 + 3, seed) * 0.12 + audio.depth * 0.035);
-        const gradient = ctx.createRadialGradient(x, y, radius * 0.03, x, y, radius);
-        gradient.addColorStop(0, heroRgba(palette[index % 4], 0.21 + audio.energy * 0.06));
-        gradient.addColorStop(0.46, heroRgba(palette[(index + 2) % 4], 0.08));
+      const count = width < 520 ? 7 : 11;
+      for (let index = 0; index < count; index += 1) {
+        const p = heroNoise(index * 8 + 1, seed);
+        const q = heroNoise(index * 8 + 2, seed);
+        const r = heroNoise(index * 8 + 3, seed);
+        const phase = t * (0.35 + r * 0.12) + index * 0.79;
+        const x = width * (0.08 + p * 0.84) + Math.sin(phase + q * 5) * width * 0.085;
+        const y = height * (0.10 + q * 0.78) + Math.cos(phase * 0.78 + p * 4) * height * 0.13;
+        const radius = Math.max(width, height) * (0.095 + r * 0.12 + audio.depth * 0.025);
+        const gradient = ctx.createRadialGradient(x, y, radius * 0.04, x, y, radius);
+        gradient.addColorStop(0, heroRgba(palette[(index + 3) % 4], 0.21 + audio.energy * 0.040));
+        gradient.addColorStop(0.32, heroRgba(palette[index % 4], 0.13 + audio.mid * 0.020));
+        gradient.addColorStop(0.68, heroRgba(palette[(index + 1) % 4], 0.040));
         gradient.addColorStop(1, heroRgba(palette[index % 4], 0));
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.ellipse(x, y, radius * (1.15 + Math.sin(t * 0.22 + index) * 0.22), radius * (0.72 + Math.cos(t * 0.18 + index) * 0.18), t * 0.11 + index, 0, Math.PI * 2);
+        organicLoop(ctx, x, y, radius * 1.18, radius * (0.58 + q * 0.26), phase * 0.16, t * 1.2 + index, seed + index * 17, 0.13 + audio.mid * 0.035);
         ctx.fill();
       }
       ctx.restore();
     };
 
-    const drawBloom = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number) => {
+    const drawSpace = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.globalCompositeOperation = "screen";
-      const cx = width * (0.58 + Math.sin(t * 0.09) * 0.05);
-      const cy = height * (0.50 + Math.cos(t * 0.08) * 0.06);
-      const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.42);
-      halo.addColorStop(0, heroRgba(palette[0], 0.12 + audio.low * 0.05));
-      halo.addColorStop(0.38, heroRgba(palette[1], 0.055));
-      halo.addColorStop(1, heroRgba(palette[2], 0));
-      ctx.fillStyle = halo;
+      const hazeX = width * (0.60 + Math.sin(t * 0.12) * 0.10);
+      const hazeY = height * (0.50 + Math.cos(t * 0.10) * 0.14);
+      const haze = ctx.createRadialGradient(hazeX, hazeY, 0, hazeX, hazeY, Math.max(width, height) * 0.55);
+      haze.addColorStop(0, heroRgba(palette[1], 0.10 + audio.energy * 0.025));
+      haze.addColorStop(0.34, heroRgba(palette[2], 0.045));
+      haze.addColorStop(1, heroRgba(palette[0], 0));
+      ctx.fillStyle = haze;
       ctx.fillRect(0, 0, width, height);
-      for (let ring = 0; ring < 7; ring += 1) {
-        const progress = (ring / 7 + t * 0.035) % 1;
-        const radiusX = width * (0.05 + progress * 0.60) * (1 + audio.depth * 0.08);
-        const radiusY = height * (0.05 + progress * 0.52) * (1 + audio.low * 0.08);
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, radiusX, radiusY, Math.sin(t * 0.11 + ring) * 0.10, 0, Math.PI * 2);
-        ctx.strokeStyle = heroRgba(palette[ring % 4], (1 - progress) * (0.11 + audio.energy * 0.045));
-        ctx.lineWidth = 0.8 + (1 - progress) * 2.2;
-        ctx.stroke();
-      }
-      ctx.restore();
-    };
 
-    const drawHaze = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      for (let wisp = 0; wisp < 7; wisp += 1) {
-        const base = height * (0.14 + heroNoise(wisp + 1, seed) * 0.72);
-        const points: Array<{ x: number; y: number }> = [];
-        for (let point = 0; point < 9; point += 1) {
-          const u = point / 8;
-          const x = width * u + Math.sin(t * 0.12 + point * 0.7 + wisp) * width * 0.02;
-          const y = base + Math.sin(t * (0.15 + wisp * 0.006) + point * 0.52 + wisp * 1.3) * height * (0.055 + audio.mid * 0.045) + Math.cos(t * 0.09 + point * 0.91) * height * 0.025;
-          points.push({ x, y });
-        }
-        ctx.beginPath();
-        smoothPath(ctx, points);
-        ctx.strokeStyle = heroRgba(palette[wisp % 4], 0.045 + audio.energy * 0.025);
-        ctx.lineWidth = height * (0.07 + heroNoise(wisp + 4, seed) * 0.06);
-        ctx.lineCap = "round";
-        ctx.stroke();
-      }
-      ctx.restore();
-    };
-
-    const drawTunnel = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const cx = width * (0.57 + Math.sin(t * 0.10) * 0.06);
-      const cy = height * (0.50 + Math.cos(t * 0.085) * 0.07);
-      for (let ring = 0; ring < 12; ring += 1) {
-        const phase = (ring / 12 + t * 0.025) % 1;
-        const scale = 0.06 + phase * 0.92;
-        ctx.beginPath();
-        ctx.ellipse(cx + Math.sin(t * 0.13 + ring * 0.3) * width * 0.02, cy + Math.cos(t * 0.11 + ring * 0.4) * height * 0.025, width * scale * 0.55, height * scale * 0.46, Math.sin(t * 0.07) * 0.08, 0, Math.PI * 2);
-        ctx.strokeStyle = heroRgba(palette[ring % 4], (1 - phase) * (0.09 + audio.high * 0.025));
-        ctx.lineWidth = 0.7 + (1 - phase) * 2.4;
-        ctx.stroke();
-      }
-      const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(width, height) * 0.28);
-      core.addColorStop(0, heroRgba(palette[3], 0.10 + audio.low * 0.035));
-      core.addColorStop(1, heroRgba(palette[0], 0));
-      ctx.fillStyle = core;
-      ctx.fillRect(0, 0, width, height);
-      ctx.restore();
-    };
-
-    const drawFlow = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.globalCompositeOperation = "screen";
-      const count = width < 520 ? 74 : 128;
-      const cx = width * (0.55 + Math.sin(t * 0.08) * 0.09);
-      const cy = height * (0.50 + Math.cos(t * 0.065) * 0.10);
+      const count = width < 520 ? 105 : 180;
       for (let index = 0; index < count; index += 1) {
         const p = heroNoise(index * 5 + 1, seed);
         const q = heroNoise(index * 5 + 2, seed);
         const r = heroNoise(index * 5 + 3, seed);
-        const direction = index % 2 ? 1 : -1;
-        const angle = p * Math.PI * 2 + direction * t * (0.035 + r * 0.028) + Math.sin(t * 0.09 + q * 7) * 0.22;
-        const radius = Math.max(width, height) * (0.03 + q * 0.48) * (0.95 + Math.sin(t * 0.08 + p * 8) * 0.07);
-        const x = cx + Math.cos(angle) * radius;
-        const y = cy + Math.sin(angle) * radius * (0.42 + r * 0.28);
-        const tangent = angle + direction * Math.PI / 2;
-        const len = 3 + r * 10 + audio.high * 3;
-        ctx.strokeStyle = heroRgba(palette[index % 4], 0.07 + r * 0.18 + audio.high * 0.018);
-        ctx.lineWidth = 0.6 + r * 1.1;
+        const layer = heroNoise(index * 5 + 4, seed);
+        const drift = t * (0.018 + layer * 0.040);
+        const x = (p * width + Math.sin(drift + q * 8) * width * (0.012 + layer * 0.018) + width) % width;
+        const y = (q * height + Math.cos(drift * 0.83 + p * 7) * height * (0.025 + layer * 0.035) + height) % height;
+        const twinkle = 0.58 + Math.sin(t * (0.8 + r * 0.7) + index * 1.7) * 0.28;
+        const size = 0.35 + layer * 1.35 + (index % 41 === 0 ? 1.2 : 0);
+        ctx.fillStyle = heroRgba(index % 9 === 0 ? palette[3] : palette[index % 4], (0.08 + layer * 0.28) * twinkle + audio.high * 0.012);
         ctx.beginPath();
-        ctx.moveTo(x - Math.cos(tangent) * len, y - Math.sin(tangent) * len);
-        ctx.quadraticCurveTo(x - Math.cos(tangent) * len * 0.3 + Math.cos(angle) * 4, y - Math.sin(tangent) * len * 0.3 + Math.sin(angle) * 3, x, y);
-        ctx.stroke();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
       }
       ctx.restore();
     };
 
-    const drawScene = (ctx: CanvasRenderingContext2D, scene: HeroSceneName, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+    const drawDrift = (ctx: CanvasRenderingContext2D, t: number, audio: HeroAudioShape, palette: HeroPalette, alpha: number, seed: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.globalCompositeOperation = "screen";
+      const cx = width * (0.57 + Math.sin(t * 0.16) * 0.07);
+      const cy = height * (0.49 + Math.cos(t * 0.14) * 0.08);
+
+      for (let layer = 0; layer < 4; layer += 1) {
+        const phase = t * (0.20 + layer * 0.035) + layer * 1.7;
+        const x = width * (0.36 + layer * 0.13) + Math.sin(phase) * width * 0.16;
+        const y = height * (0.23 + (layer % 2) * 0.48) + Math.cos(phase * 0.77) * height * 0.16;
+        const radius = Math.max(width, height) * (0.24 + layer * 0.04);
+        const fog = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        fog.addColorStop(0, heroRgba(palette[layer % 4], 0.070 + audio.depth * 0.018));
+        fog.addColorStop(0.52, heroRgba(palette[(layer + 1) % 4], 0.022));
+        fog.addColorStop(1, heroRgba(palette[layer % 4], 0));
+        ctx.fillStyle = fog;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      const count = width < 520 ? 88 : 148;
+      for (let index = 0; index < count; index += 1) {
+        const px = heroNoise(index * 6 + 1, seed) * 2 - 1;
+        const py = heroNoise(index * 6 + 2, seed) * 2 - 1;
+        const zSeed = heroNoise(index * 6 + 3, seed);
+        const curve = heroNoise(index * 6 + 4, seed) * 2 - 1;
+        const sizeSeed = heroNoise(index * 6 + 5, seed);
+        const z = (zSeed + t * (0.085 + sizeSeed * 0.026)) % 1;
+        const persp = 0.12 + Math.pow(z, 1.85) * 1.26;
+        const swirl = (1 - z) * 0.34 + z * 0.06;
+        const angle = curve * 0.45 + Math.sin(t * 0.18 + index * 0.17) * swirl;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const rx = px * cosA - py * sinA;
+        const ry = px * sinA + py * cosA;
+        const x = cx + rx * width * 0.61 * persp;
+        const y = cy + ry * height * 0.91 * persp;
+        if (x < -25 || x > width + 25 || y < -25 || y > height + 25) continue;
+        const size = 0.4 + z * (1.25 + sizeSeed * 1.1);
+        const color = palette[index % 4];
+        ctx.fillStyle = heroRgba(color, 0.08 + z * 0.38);
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+        if (z > 0.68) {
+          const dx = (x - cx) * (0.012 + audio.depth * 0.010);
+          const dy = (y - cy) * (0.012 + audio.depth * 0.010);
+          ctx.strokeStyle = heroRgba(color, 0.060 + z * 0.10);
+          ctx.lineWidth = Math.max(0.45, size * 0.44);
+          ctx.beginPath();
+          ctx.moveTo(x - dx * 4.5, y - dy * 4.5);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    };
+
+    const drawScene = (
+      ctx: CanvasRenderingContext2D,
+      scene: HeroSceneName,
+      t: number,
+      audio: HeroAudioShape,
+      palette: HeroPalette,
+      alpha: number,
+      seed: number,
+    ) => {
       if (alpha <= 0.002) return;
       if (scene === "fluid") drawFluid(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "waves") drawWaves(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "stars") drawStars(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "silk") drawSilk(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "glass") drawGlass(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "neural") drawNeural(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "photons") drawPhotons(ctx, t, audio, palette, alpha, seed);
       else if (scene === "plasma") drawPlasma(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "bloom") drawBloom(ctx, t, audio, palette, alpha);
-      else if (scene === "haze") drawHaze(ctx, t, audio, palette, alpha, seed);
-      else if (scene === "tunnel") drawTunnel(ctx, t, audio, palette, alpha);
-      else drawFlow(ctx, t, audio, palette, alpha, seed);
+      else if (scene === "space") drawSpace(ctx, t, audio, palette, alpha, seed);
+      else drawDrift(ctx, t, audio, palette, alpha, seed);
     };
 
     const draw = (now: number) => {
@@ -914,18 +1037,18 @@ function MusicHeroSceneEngine({
       const lowRaw = average(0, 2);
       const midRaw = average(3, 6);
       const highRaw = average(7, 9);
-      const overall = lowRaw * 0.38 + midRaw * 0.40 + highRaw * 0.22;
+      const overall = lowRaw * 0.40 + midRaw * 0.39 + highRaw * 0.21;
 
       const targets = playingRef.current ? {
-        low: heroClamp(0.12 + lowRaw * 0.40, 0.12, 0.56),
-        mid: heroClamp(0.11 + midRaw * 0.37, 0.11, 0.52),
-        high: heroClamp(0.08 + highRaw * 0.34, 0.08, 0.46),
-        energy: heroClamp(0.23 + Math.tanh(overall * 1.85) * 0.32, 0.23, 0.58),
-        depth: heroClamp(0.18 + lowRaw * 0.25 + overall * 0.13, 0.18, 0.52),
-      } : { low: 0.105, mid: 0.095, high: 0.075, energy: 0.15, depth: 0.15 };
+        low: heroClamp(0.12 + Math.tanh(lowRaw * 1.65) * 0.34, 0.12, 0.50),
+        mid: heroClamp(0.11 + Math.tanh(midRaw * 1.55) * 0.31, 0.11, 0.47),
+        high: heroClamp(0.08 + Math.tanh(highRaw * 1.45) * 0.28, 0.08, 0.41),
+        energy: heroClamp(0.25 + Math.tanh(overall * 1.70) * 0.28, 0.25, 0.56),
+        depth: heroClamp(0.20 + Math.tanh((lowRaw * 0.72 + overall * 0.28) * 1.55) * 0.28, 0.20, 0.52),
+      } : { low: 0.10, mid: 0.09, high: 0.07, energy: 0.17, depth: 0.16 };
 
       const approach = (current: number, target: number) => {
-        const rate = target > current ? 1 - Math.pow(0.83, dt) : 1 - Math.pow(0.956, dt);
+        const rate = target > current ? 1 - Math.pow(0.80, dt) : 1 - Math.pow(0.948, dt);
         return current + (target - current) * rate;
       };
       smoothed.low = approach(smoothed.low, targets.low);
@@ -933,23 +1056,14 @@ function MusicHeroSceneEngine({
       smoothed.high = approach(smoothed.high, targets.high);
       smoothed.energy = approach(smoothed.energy, targets.energy);
       smoothed.depth = approach(smoothed.depth, targets.depth);
-      smoothed.pulse = approach(smoothed.pulse, targets.low * 0.72 + targets.mid * 0.28);
+      smoothed.pulse = approach(smoothed.pulse, targets.low * 0.68 + targets.mid * 0.32);
 
       const livePalette = livePaletteRef.current;
       const targetPalette = targetPaletteRef.current;
       for (let index = 0; index < livePalette.length; index += 1) {
-        livePalette[index] = heroMix(livePalette[index], targetPalette[index], 1 - Math.pow(0.962, dt));
+        livePalette[index] = heroMix(livePalette[index], targetPalette[index], 1 - Math.pow(0.955, dt));
       }
 
-      // Real wall-clock timing means React renders/remounts cannot trap the visualizer on scene one.
-      const absoluteNow = Date.now();
-      const sceneStep = Math.floor(absoluteNow / HERO_SCENE_MS);
-      const sceneElapsed = absoluteNow - sceneStep * HERO_SCENE_MS;
-      const currentScene = HERO_SCENES[sceneStep % HERO_SCENES.length];
-      const nextScene = HERO_SCENES[(sceneStep + 1) % HERO_SCENES.length];
-      const fadeStart = HERO_SCENE_MS - HERO_CROSSFADE_MS;
-      const fadeLinear = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
-      const fade = fadeLinear * fadeLinear * (3 - 2 * fadeLinear);
       const audio: HeroAudioShape = {
         low: smoothed.low,
         mid: smoothed.mid,
@@ -957,28 +1071,43 @@ function MusicHeroSceneEngine({
         energy: smoothed.energy,
         depth: smoothed.depth,
         pulse: smoothed.pulse,
-        speed: playingRef.current ? 0.56 + smoothed.energy * 0.14 : 0.34,
+        speed: playingRef.current ? 0.88 + smoothed.energy * 0.18 : 0.52,
       };
       const t = now * 0.001 * audio.speed;
       const seed = seedRef.current;
 
-      // Keep the canvas transparent so the blurred album art underneath is always the palette base.
-      const shade = ctx.createLinearGradient(0, 0, width, height);
-      shade.addColorStop(0, "rgba(0,0,0,.10)");
-      shade.addColorStop(0.55, "rgba(0,0,0,.035)");
-      shade.addColorStop(1, "rgba(0,0,0,.16)");
-      ctx.fillStyle = shade;
+      const background = ctx.createLinearGradient(0, 0, width, height);
+      background.addColorStop(0, "rgba(0,0,0,.12)");
+      background.addColorStop(0.50, "rgba(0,0,0,.025)");
+      background.addColorStop(1, "rgba(0,0,0,.16)");
+      ctx.fillStyle = background;
       ctx.fillRect(0, 0, width, height);
+      drawAmbient(ctx, t, audio, livePalette);
 
-      drawScene(ctx, currentScene, t, audio, livePalette, 1 - fade * 0.88, seed + sceneStep * 41);
-      if (fade > 0) drawScene(ctx, nextScene, t + 0.61, audio, livePalette, fade, seed + (sceneStep + 1) * 41);
+      const absoluteNow = Date.now();
+      const sceneStep = Math.floor(absoluteNow / HERO_SCENE_MS);
+      const sceneElapsed = absoluteNow - sceneStep * HERO_SCENE_MS;
+      const sceneIndex = sceneStep % HERO_SCENES.length;
+      const nextIndex = (sceneIndex + 1) % HERO_SCENES.length;
+      const fadeStart = HERO_SCENE_MS - HERO_CROSSFADE_MS;
+      const transitionLinear = sceneElapsed > fadeStart ? heroClamp((sceneElapsed - fadeStart) / HERO_CROSSFADE_MS) : 0;
+      const transition = 0.5 - Math.cos(transitionLinear * Math.PI) * 0.5;
+      const outgoingAlpha = transitionLinear > 0 ? Math.cos(transition * Math.PI * 0.5) : 1;
+      const incomingAlpha = transitionLinear > 0 ? Math.sin(transition * Math.PI * 0.5) : 0;
+      const currentScene = HERO_SCENES[sceneIndex];
+      const nextScene = HERO_SCENES[nextIndex];
 
-      const edge = ctx.createLinearGradient(0, 0, width, 0);
-      edge.addColorStop(0, "rgba(0,0,0,.20)");
-      edge.addColorStop(0.22, "rgba(0,0,0,.03)");
-      edge.addColorStop(0.78, "rgba(0,0,0,.02)");
-      edge.addColorStop(1, "rgba(0,0,0,.18)");
-      ctx.fillStyle = edge;
+      // Scene seeds are tied to the scene type, not the cycle count. Every environment is already
+      // moving on the global timeline before it fades in, so transitions never reset or bounce.
+      drawScene(ctx, currentScene, t, audio, livePalette, outgoingAlpha, seed + sceneIndex * 1009);
+      if (incomingAlpha > 0.002) drawScene(ctx, nextScene, t, audio, livePalette, incomingAlpha, seed + nextIndex * 1009);
+
+      const glass = ctx.createLinearGradient(0, 0, width, 0);
+      glass.addColorStop(0, "rgba(0,0,0,.20)");
+      glass.addColorStop(0.20, "rgba(0,0,0,.035)");
+      glass.addColorStop(0.72, "rgba(0,0,0,.018)");
+      glass.addColorStop(1, "rgba(0,0,0,.15)");
+      ctx.fillStyle = glass;
       ctx.fillRect(0, 0, width, height);
     };
 
@@ -990,17 +1119,11 @@ function MusicHeroSceneEngine({
   }, []);
 
   return (
-    <>
-      <div className="tr-playerVisualEngine" aria-hidden="true">
-        {artworkUrl ? <img className="tr-playerVisualArtwork" src={artworkUrl} alt="" /> : null}
-        <canvas ref={canvasRef} />
-        <span className="tr-playerVisualGlass" />
-      </div>
-      <div className="tr-playerVisualDebug" aria-hidden="true">
-        <span>{HERO_ENGINE_VERSION}</span>
-        <strong>{heroSceneDisplayName(debugScene)}</strong>
-      </div>
-    </>
+    <div className="tr-playerVisualEngine" aria-hidden="true">
+      {artworkUrl ? <img className="tr-playerVisualArtwork" src={artworkUrl} alt="" /> : null}
+      <canvas ref={canvasRef} />
+      <span className="tr-playerVisualGlass" />
+    </div>
   );
 }
 
@@ -2206,57 +2329,49 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           }
         }
 
-        /* AUG 14 AUTHORITATIVE GENERATIVE HERO V4: 8 scenes, artwork palette, visible test verification */
+        /* AUG 14 V5 FUTURESCAPE: premium 8-scene engine, album palette, seamless transitions */
         .tr-playerHero{isolation:isolate!important;background:#020609!important}
-        .tr-playerVisualDebug{
-          position:absolute!important;z-index:20!important;right:10px!important;top:9px!important;display:flex!important;align-items:center!important;gap:7px!important;
-          min-height:24px!important;padding:0 8px!important;border:1px solid rgba(255,255,255,.19)!important;border-radius:999px!important;
-          background:rgba(2,7,10,.72)!important;box-shadow:0 5px 16px rgba(0,0,0,.28)!important;backdrop-filter:blur(7px)!important;pointer-events:none!important;
-          color:#fff!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.08em!important;text-shadow:0 1px 3px rgba(0,0,0,.9)!important;
-        }
-        .tr-playerVisualDebug span{color:rgba(220,235,241,.72)!important}.tr-playerVisualDebug strong{color:#fff!important;font-size:8px!important;letter-spacing:.10em!important}
+        .tr-playerVisualDebug{display:none!important}
         .tr-playerVisualEngine{
           position:absolute!important;z-index:0!important;top:0!important;right:0!important;bottom:0!important;left:clamp(220px,30%,310px)!important;
           overflow:hidden!important;pointer-events:none!important;background:#020609!important;contain:paint!important;
         }
         .tr-playerVisualArtwork{
-          position:absolute!important;z-index:0!important;inset:-34% -26% -34% -18%!important;width:152%!important;height:170%!important;
-          object-fit:cover!important;object-position:center!important;opacity:.43!important;
-          filter:blur(48px) saturate(1.95) contrast(1.08) brightness(.58)!important;
-          transform:translate3d(0,0,0) scale(1.10)!important;transform-origin:center!important;
-          animation:trVisualArtworkDrift 15s ease-in-out infinite alternate!important;
+          position:absolute!important;z-index:0!important;inset:-30% -24% -30% -16%!important;width:148%!important;height:162%!important;
+          object-fit:cover!important;object-position:center!important;opacity:.30!important;
+          filter:blur(50px) saturate(1.48) contrast(1.06) brightness(.62)!important;
+          transform:translate3d(0,0,0) scale(1.08)!important;transform-origin:center!important;
+          animation:none!important;
         }
-        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.50!important;animation-duration:11s!important}
+        .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.34!important}
         .tr-playerVisualEngine canvas{
           position:absolute!important;z-index:1!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;
-          opacity:1!important;mix-blend-mode:screen!important;filter:saturate(1.08) contrast(1.025)!important;
+          opacity:1!important;mix-blend-mode:screen!important;filter:saturate(1.12) contrast(1.035)!important;
         }
         .tr-playerVisualGlass{
           position:absolute!important;z-index:2!important;inset:0!important;pointer-events:none!important;
-          background:linear-gradient(90deg,rgba(1,5,8,.18) 0%,rgba(1,5,8,.02) 24%,rgba(1,5,8,.015) 73%,rgba(1,4,7,.15) 100%),linear-gradient(180deg,rgba(255,255,255,.012),transparent 34%,rgba(0,0,0,.10) 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.02)!important;
+          background:
+            radial-gradient(90% 120% at 46% 50%,transparent 36%,rgba(0,0,0,.12) 100%),
+            linear-gradient(90deg,rgba(1,5,8,.20) 0%,rgba(1,5,8,.025) 22%,rgba(1,5,8,.015) 76%,rgba(1,4,7,.14) 100%),
+            linear-gradient(180deg,rgba(255,255,255,.015),transparent 34%,rgba(0,0,0,.09) 100%)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.022)!important;
         }
         .tr-playerHero .tr-audioArtwork{position:relative!important;z-index:4!important}
         .tr-playerHero .tr-audioIdentity{
           position:relative!important;z-index:4!important;
-          background:linear-gradient(90deg,rgba(2,7,10,.36) 0%,rgba(2,7,10,.14) 34%,rgba(2,7,10,.06) 68%,rgba(2,7,10,.13) 100%)!important;
-          text-shadow:0 2px 18px rgba(0,0,0,.94),0 1px 3px rgba(0,0,0,.80)!important;
+          background:linear-gradient(90deg,rgba(2,7,10,.31) 0%,rgba(2,7,10,.10) 34%,rgba(2,7,10,.035) 70%,rgba(2,7,10,.10) 100%)!important;
+          text-shadow:0 2px 18px rgba(0,0,0,.94),0 1px 3px rgba(0,0,0,.82)!important;
         }
-        .tr-playerHero .tr-audioIdentity:before{background:radial-gradient(72% 95% at 10% 50%,rgba(0,0,0,.17),transparent 72%),linear-gradient(90deg,rgba(0,0,0,.055),transparent 58%)!important}
-        @keyframes trVisualArtworkDrift{
-          0%{transform:translate3d(-2%,-2%,0) scale(1.08)}
-          50%{transform:translate3d(2%,2%,0) scale(1.15)}
-          100%{transform:translate3d(-1%,4%,0) scale(1.11)}
-        }
+        .tr-playerHero .tr-audioIdentity:before{background:radial-gradient(72% 95% at 10% 50%,rgba(0,0,0,.16),transparent 72%),linear-gradient(90deg,rgba(0,0,0,.045),transparent 58%)!important}
         @media(max-width:650px){
-          .tr-playerVisualDebug{right:6px!important;top:6px!important;min-height:20px!important;padding:0 6px!important;gap:5px!important;font-size:5.5px!important}.tr-playerVisualDebug strong{font-size:6.5px!important}
           .tr-playerVisualEngine{left:112px!important}
-          .tr-playerVisualArtwork{inset:-28% -32% -30% -16%!important;width:160%!important;height:160%!important;opacity:.39!important;filter:blur(31px) saturate(1.85) contrast(1.06) brightness(.56)!important}
-          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.46!important}
-          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(2,7,10,.34),rgba(2,7,10,.11) 62%,rgba(2,7,10,.16))!important}
+          .tr-playerVisualArtwork{inset:-24% -30% -26% -14%!important;width:156%!important;height:154%!important;opacity:.28!important;filter:blur(32px) saturate(1.42) contrast(1.04) brightness(.60)!important}
+          .tr-audioDeck--pro7.is-playing .tr-playerVisualArtwork{opacity:.32!important}
+          .tr-playerHero .tr-audioIdentity{background:linear-gradient(90deg,rgba(2,7,10,.30),rgba(2,7,10,.085) 62%,rgba(2,7,10,.13))!important}
         }
         @media(max-width:380px){.tr-playerVisualEngine{left:102px!important}}
         @media(prefers-reduced-motion:reduce){.tr-playerVisualArtwork{animation:none!important}}
+
 
       `}</style>
     </section>
