@@ -326,6 +326,30 @@ function MusicActivityRta({
         });
       }
 
+      const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+      const mixChannel = (from: number, to: number, amount: number) => Math.round(from + (to - from) * clamp01(amount));
+      const mixMeterColor = (from: [number, number, number], to: [number, number, number], amount: number, alpha = 1) =>
+        `rgba(${mixChannel(from[0], to[0], amount)},${mixChannel(from[1], to[1], amount)},${mixChannel(from[2], to[2], amount)},${alpha})`;
+      const meterColorAt = (ratio: number, alpha = 1) => {
+        const level = clamp01(ratio);
+        // Exact visual dB zones from -60 dB at the floor to 0 dB at the crown.
+        // -60..-48 deep cyan, -48..-36 cyan, -36..-24 aqua,
+        // -24..-12 yellow-green -> warm yellow, -12..-6 amber, -6..0 orange/red.
+        if (level <= 0.20) return mixMeterColor([7, 113, 160], [13, 169, 204], level / 0.20, alpha);
+        if (level <= 0.40) return mixMeterColor([13, 169, 204], [20, 210, 232], (level - 0.20) / 0.20, alpha);
+        if (level <= 0.60) return mixMeterColor([20, 210, 232], [57, 233, 205], (level - 0.40) / 0.20, alpha);
+        if (level <= 0.80) return mixMeterColor([57, 233, 205], [244, 209, 70], (level - 0.60) / 0.20, alpha);
+        if (level <= 0.90) return mixMeterColor([244, 209, 70], [255, 161, 52], (level - 0.80) / 0.10, alpha);
+        return mixMeterColor([255, 161, 52], [255, 74, 63], (level - 0.90) / 0.10, alpha);
+      };
+      const meterGlowAt = (ratio: number) => {
+        const level = clamp01(ratio);
+        if (level >= 0.90) return "rgba(255,90,67,.62)";
+        if (level >= 0.80) return "rgba(255,178,58,.58)";
+        if (level >= 0.60) return "rgba(227,214,80,.48)";
+        return "rgba(48,218,239,.42)";
+      };
+
       const gap = Math.max(compact ? 3 : 7, Math.min(compact ? 6 : 12, plotWidth * 0.010));
       const slotWidth = Math.max(9, (plotWidth - gap * 9) / 10);
 
@@ -362,34 +386,34 @@ function MusicActivityRta({
           for (let segment = 0; segment < segmentCount; segment += 1) {
             const segmentY = plotTop + plotHeight - (segment + 1) * pitch;
             if (segmentY + segmentHeight < activeY) continue;
-            const normalizedHeight = 1 - (segmentY - plotTop) / plotHeight;
-            let color = "rgba(31,205,229,.96)";
-            if (normalizedHeight > 0.88) color = "rgba(255,190,73,.98)";
-            else if (normalizedHeight > 0.76) color = "rgba(117,229,203,.98)";
-            else if (normalizedHeight > 0.54) color = "rgba(54,220,229,.98)";
-            ctx.fillStyle = color;
+            const normalizedHeight = clamp01(1 - (segmentY - plotTop) / plotHeight);
+            ctx.fillStyle = meterColorAt(normalizedHeight, 0.98);
+            ctx.shadowColor = meterGlowAt(normalizedHeight);
             ctx.fillRect(barX, segmentY, barWidth, segmentHeight);
 
-            // Fine luminous center keeps each segment dimensional rather than flat.
-            ctx.fillStyle = normalizedHeight > 0.88 ? "rgba(255,243,195,.24)" : "rgba(222,252,255,.19)";
+            // Bright optical core follows the same dB color zone instead of turning every band white.
+            ctx.fillStyle = meterColorAt(Math.min(1, normalizedHeight + 0.035), normalizedHeight >= 0.80 ? 0.42 : 0.30);
             const coreWidth = Math.max(1, barWidth * 0.28);
             ctx.fillRect(barX + (barWidth - coreWidth) / 2, segmentY, coreWidth, segmentHeight);
           }
           ctx.restore();
 
-          // Gentle level cap. Amber only represents the upper operating range, never random decoration.
-          ctx.fillStyle = level > 0.86 ? "rgba(255,214,113,.78)" : "rgba(213,250,255,.46)";
-          ctx.fillRect(barX - 0.5, Math.round(activeY), barWidth + 1, compact ? 1 : 1.4);
+          // Current-level cap uses the exact dB zone color reached by this band.
+          ctx.fillStyle = meterColorAt(level, 0.88);
+          ctx.fillRect(barX - 0.5, Math.round(activeY), barWidth + 1, compact ? 1.2 : 1.6);
         }
 
         if (playing && peaks[band] > 0.022) {
-          const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peaks[band]));
+          const peakRatio = clamp01(peaks[band]);
+          const peakY = Math.max(plotTop, plotTop + plotHeight * (1 - peakRatio));
           ctx.save();
-          const hotPeak = peaks[band] > 0.86;
-          ctx.fillStyle = hotPeak ? "#ffd66f" : "#e2fbff";
-          ctx.shadowColor = hotPeak ? "rgba(255,183,61,.62)" : "rgba(97,226,255,.50)";
-          ctx.shadowBlur = compact ? 4 : 6;
-          ctx.fillRect(barX - 1.5, Math.round(peakY), barWidth + 3, compact ? 1.6 : 2.0);
+          ctx.fillStyle = meterColorAt(peakRatio, 1);
+          ctx.shadowColor = meterGlowAt(peakRatio);
+          ctx.shadowBlur = compact ? 5 : 8;
+          ctx.fillRect(barX - 2, Math.round(peakY), barWidth + 4, compact ? 2.0 : 2.5);
+          // Hairline highlight makes the peak marker read like a calibrated hardware hold line.
+          ctx.fillStyle = "rgba(255,255,255,.36)";
+          ctx.fillRect(barX - 1, Math.round(peakY), barWidth + 2, 0.7);
           ctx.restore();
         }
       }
