@@ -652,7 +652,6 @@ function MusicHeroSceneEngine({
       }
       ctx.moveTo(points[0].x, points[0].y);
       for (let index = 0; index < points.length; index += 1) {
-        const current = points[index];
         const next = points[(index + 1) % points.length];
         const after = points[(index + 2) % points.length];
         ctx.quadraticCurveTo(next.x, next.y, (next.x + after.x) / 2, (next.y + after.y) / 2);
