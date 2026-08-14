@@ -1267,11 +1267,36 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
+  const [headerWorkoutState, setHeaderWorkoutState] = useState("");
   const restoredProfileRef = useRef<string>("");
   const heroIdentityRef = useRef<HTMLDivElement | null>(null);
   const heroTitleRef = useRef<HTMLElement | null>(null);
   const heroArtistRef = useRef<HTMLElement | null>(null);
   const heroActionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const readHeaderWorkoutState = () => {
+      const stamp = [
+        window.localStorage.getItem("mvp_active_session_id") || "",
+        window.localStorage.getItem("mvp_active_workout_id") || "",
+        window.localStorage.getItem("mvp_is_paused") || "false",
+        window.location.pathname,
+      ].join("|");
+
+      setHeaderWorkoutState((current) => (current === stamp ? current : stamp));
+    };
+
+    readHeaderWorkoutState();
+    const timer = window.setInterval(readHeaderWorkoutState, 750);
+    window.addEventListener("focus", readHeaderWorkoutState);
+    window.addEventListener("popstate", readHeaderWorkoutState);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", readHeaderWorkoutState);
+      window.removeEventListener("popstate", readHeaderWorkoutState);
+    };
+  }, []);
 
   useEffect(() => {
     const title = document.querySelector<HTMLElement>(".tr-topTitle");
@@ -1301,11 +1326,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       return button;
     };
 
-    const hasActiveWorkout = Boolean(
-      window.localStorage.getItem("mvp_active_session_id") ||
-      window.localStorage.getItem("mvp_active_workout_id")
-    );
-    if (hasActiveWorkout) makeButton("RESUME", () => navigate("/"), "is-resume");
+    const activeSessionId = window.localStorage.getItem("mvp_active_session_id");
+    const activeWorkoutId = window.localStorage.getItem("mvp_active_workout_id");
+    const hasActiveWorkout = Boolean(activeSessionId || activeWorkoutId);
+    const workoutPaused = window.localStorage.getItem("mvp_is_paused") === "true";
+    const onWorkoutPage = window.location.pathname.startsWith("/workout/");
+    const workoutTarget = activeSessionId ? `/workout/${activeSessionId}` : "/";
+
+    if (hasActiveWorkout && !onWorkoutPage) {
+      makeButton(
+        workoutPaused ? "RESUME" : "RETURN TO WORKOUT",
+        () => navigate(workoutTarget),
+        "is-resume"
+      );
+    }
+
     makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"), "is-sound");
 
     const accountWrap = document.createElement("div");
@@ -1333,7 +1368,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       originalActions.style.display = oldDisplay;
       mount?.remove();
     };
-  }, [navigate]);
+  }, [navigate, headerWorkoutState]);
 
   useEffect(() => {
     const refreshPlaylists = () => {
