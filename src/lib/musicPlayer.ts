@@ -79,29 +79,29 @@ function interpolateEqCurve(points: Array<[number, number]>) {
   });
 }
 
-function userOffsetPreset(label: string): EqDefinition {
-  return { label, preamp: 0, gains: MUSIC_EQ_FREQUENCIES.map(() => 0) };
+function preset(label: string, preamp: number, points: Array<[number, number]>): EqDefinition {
+  return { label, preamp, gains: interpolateEqCurve(points) };
 }
 
 export const MUSIC_EQ_PRESETS: Record<BuiltInMusicEqPreset, EqDefinition> = {
-  flat: userOffsetPreset("Flat"),
-  power: userOffsetPreset("Power Training"),
-  rock: userOffsetPreset("Rock"),
-  hard_rock: userOffsetPreset("Hard Rock"),
-  metal: userOffsetPreset("Metal"),
-  alternative: userOffsetPreset("Alternative"),
-  pop: userOffsetPreset("Pop"),
-  hip_hop: userOffsetPreset("Hip-Hop"),
-  edm: userOffsetPreset("EDM"),
-  bass_boost: userOffsetPreset("Bass Boost"),
-  deep_bass: userOffsetPreset("Deep Bass"),
-  punch: userOffsetPreset("Punch"),
-  vocal: userOffsetPreset("Vocal Clarity"),
-  acoustic: userOffsetPreset("Acoustic"),
-  warm: userOffsetPreset("Warm"),
-  bright: userOffsetPreset("Bright"),
-  late_night: userOffsetPreset("Late Night"),
-  headphones: userOffsetPreset("Headphones"),
+  flat: preset("Flat", 0, [[20, 0], [20000, 0]]),
+  power: preset("Power Training", -2.5, [[20, 3], [50, 5], [100, 4], [250, 1], [500, -1], [1000, 0], [2500, 2], [5000, 4], [10000, 3], [20000, 1]]),
+  rock: preset("Rock", -2.5, [[20, 2], [63, 4], [160, 3], [500, -1], [1000, 0], [2500, 2], [5000, 4.5], [10000, 4], [20000, 2]]),
+  hard_rock: preset("Hard Rock", -3, [[20, 2], [63, 4.5], [125, 3.5], [400, -1.5], [1000, 0], [2500, 3], [5000, 5], [10000, 4], [20000, 1.5]]),
+  metal: preset("Metal", -3.5, [[20, 2.5], [63, 4], [160, 2.5], [400, -2], [800, -1], [2000, 2.5], [4000, 5], [8000, 5.5], [16000, 3], [20000, 1]]),
+  alternative: preset("Alternative", -2, [[20, 1], [80, 3], [200, 2], [500, -1], [1250, 0.5], [3150, 3], [6300, 3.5], [12500, 2], [20000, 0]]),
+  pop: preset("Pop", -2, [[20, 1], [80, 2.5], [250, 0.5], [630, -0.5], [1600, 1.5], [4000, 3], [8000, 3], [16000, 1.5], [20000, 0]]),
+  hip_hop: preset("Hip-Hop", -3.5, [[20, 4], [40, 6], [80, 5], [160, 3], [400, -1], [1000, 0], [2500, 1], [6300, 2], [12500, 1], [20000, 0]]),
+  edm: preset("EDM", -4, [[20, 5], [40, 7], [80, 5], [200, 1], [500, -1], [1250, 0], [3150, 2], [6300, 4], [10000, 5], [16000, 3], [20000, 1]]),
+  bass_boost: preset("Bass Boost", -3.5, [[20, 5], [40, 6], [63, 6], [100, 5], [160, 3], [250, 1], [500, 0], [20000, 0]]),
+  deep_bass: preset("Deep Bass", -4.5, [[20, 7], [31.5, 8], [50, 7], [80, 5], [125, 3], [250, 1], [500, 0], [20000, 0]]),
+  punch: preset("Punch", -3, [[20, 1], [50, 3], [80, 5], [125, 4], [200, 2], [500, -1], [1000, 0], [3150, 2.5], [6300, 2], [20000, 0]]),
+  vocal: preset("Vocal Clarity", -1.5, [[20, -3], [100, -2], [250, -0.5], [630, 1], [1250, 2.5], [2500, 4.5], [4000, 4], [8000, 1.5], [16000, 0], [20000, -1]]),
+  acoustic: preset("Acoustic", -1.5, [[20, -2], [80, 0], [200, 1], [500, 0.5], [1000, 1], [2500, 2.5], [5000, 3], [10000, 2], [20000, 0]]),
+  warm: preset("Warm", -1.5, [[20, 1], [80, 2.5], [250, 2], [630, 1], [1600, 0], [4000, -1], [10000, -2], [20000, -2.5]]),
+  bright: preset("Bright", -2.5, [[20, -1], [100, 0], [500, 0], [1250, 1], [3150, 2.5], [6300, 4], [12500, 4], [20000, 2.5]]),
+  late_night: preset("Late Night", -4, [[20, 1], [63, 2], [160, 1], [630, 0], [2500, -1], [5000, -2], [10000, -4], [20000, -6]]),
+  headphones: preset("Headphones", -2, [[20, 1], [63, 2], [200, 0.5], [630, -0.5], [1600, 1], [4000, 2], [8000, 1.5], [16000, 0], [20000, -1]]),
 };
 
 type ProPeak = { frequency: number; gain: number; q: number };
@@ -250,6 +250,9 @@ export type MusicPlayerState = {
   autoHeadroomDb: number;
   crossfadeSeconds: number;
   normalizationEnabled: boolean;
+  multibandEnabled: boolean;
+  loudnessGainDb: number;
+  loudnessMomentaryLufs: number;
   limiterEnabled: boolean;
   duckingStrength: MusicDuckingStrength;
   headphoneMode: MusicHeadphoneMode;
@@ -281,6 +284,7 @@ const STORAGE_KEYS = {
   preampDb: "mvp_music_eq_preamp_db",
   crossfadeSeconds: "mvp_music_crossfade_seconds",
   normalizationEnabled: "mvp_music_normalization_enabled",
+  multibandEnabled: "mvp_music_multiband_enabled_v13_9",
   limiterEnabled: "mvp_music_limiter_enabled",
   duckingStrength: "mvp_music_ducking_strength",
   headphoneMode: "mvp_music_headphone_mode",
@@ -297,7 +301,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v13-8-single-stage-hifi";
+const AUDIO_ENGINE_VERSION = "v13-9-studio-dsp";
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -433,13 +437,23 @@ function readEqTopology(): MusicEqTopology {
 function migrateAudioFidelitySettings() {
   if (readStored(STORAGE_KEYS.audioEngineVersion) === AUDIO_ENGINE_VERSION) return;
   const presetName = readEqPreset();
-  const safePreset = isBuiltInPreset(presetName) ? presetName : "flat";
-  savePlayerSetting(STORAGE_KEYS.eqPreset, safePreset);
-  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(MUSIC_EQ_FREQUENCIES.map(() => 0)));
-  savePlayerSetting(STORAGE_KEYS.preampDb, "0");
-  savePlayerSetting(STORAGE_KEYS.eqTopology, "minimum_phase");
-  if (!readStored(STORAGE_KEYS.eqEnabled)) savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
-  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "false");
+  if (isBuiltInPreset(presetName)) {
+    const definition = MUSIC_EQ_PRESETS[presetName];
+    savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(definition.gains));
+    savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+  } else if (isCustomPresetSlot(presetName)) {
+    const definition = readCustomPreset(presetName);
+    if (definition) {
+      savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(definition.gains));
+      savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+    }
+  }
+  if (!readStored(STORAGE_KEYS.eqTopology)) savePlayerSetting(STORAGE_KEYS.eqTopology, "minimum_phase");
+  // V13.9 Studio migration intentionally starts the full processing chain active.
+  // Previous versions stored normalization OFF even though the feature was disabled.
+  savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
+  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "true");
+  savePlayerSetting(STORAGE_KEYS.multibandEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.limiterEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
   savePlayerSetting(STORAGE_KEYS.audioEngineVersion, AUDIO_ENGINE_VERSION);
@@ -471,7 +485,10 @@ let state: MusicPlayerState = {
   effectivePreampDb: 0,
   autoHeadroomDb: 0,
   crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8),
-  normalizationEnabled: false,
+  normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, true),
+  multibandEnabled: readBoolean(STORAGE_KEYS.multibandEnabled, true),
+  loudnessGainDb: 0,
+  loudnessMomentaryLufs: -70,
   limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true),
   duckingStrength: readDuckingStrength(),
   headphoneMode: readHeadphoneMode(),
@@ -495,6 +512,8 @@ let masterVolumeGain: GainNode | null = null;
 let referenceRouteGain: GainNode | null = null;
 let preampGain: GainNode | null = null;
 let transientProcessorNode: AudioWorkletNode | null = null;
+let loudnessNormalizerNode: AudioWorkletNode | null = null;
+let multibandProcessorNode: AudioWorkletNode | null = null;
 let professionalHighpass: BiquadFilterNode | null = null;
 let professionalLowShelf: BiquadFilterNode | null = null;
 let professionalPeakFilters: BiquadFilterNode[] = [];
@@ -606,16 +625,21 @@ function userEqHasOffsets() {
   return state.eqGains.some((gain) => Math.abs(Number(gain) || 0) > 0.01);
 }
 function graphicEqProcessingRequested() {
-  return eqProcessingRequested() && userEqHasOffsets() && !eqProofActive();
+  // The visible 31-band curve is the tonal source of truth for built-in presets,
+  // custom presets, and manual edits. No hidden duplicate preset EQ is layered on top.
+  return eqProcessingRequested() && !eqProofActive();
 }
 function professionalProcessingRequested() {
-  return builtInPresetProcessingRequested() || eqProofActive();
+  // The legacy professional filter bank is retained only for the explicit EQ proof tool.
+  return eqProofActive();
 }
 function currentProPreset() {
-  if (eqProofActive()) return DSP_EQ_PROOF_PRESET;
-  return builtInPresetProcessingRequested() && isBuiltInPreset(state.eqPreset)
-    ? MUSIC_PRO_PRESETS[state.eqPreset]
-    : MUSIC_PRO_PRESETS.flat;
+  return eqProofActive() ? DSP_EQ_PROOF_PRESET : MUSIC_PRO_PRESETS.flat;
+}
+function currentTransientAmount() {
+  if (eqProofActive()) return 0;
+  if (!eqProcessingRequested() || !isBuiltInPreset(state.eqPreset)) return 0;
+  return MUSIC_PRO_PRESETS[state.eqPreset].transientAmount;
 }
 function currentOutputTuning() {
   return state.outputProfile === "reference" ? null : MUSIC_OUTPUT_TUNINGS[state.outputProfile];
@@ -805,15 +829,16 @@ function calculateProcessingGain() {
     : 0;
   const estimatedPeakDb = response.peakDb + linearPhaseUserBoost;
   const safetyDb = 0.45 + headphonePeakSafetyDb() * 0.28;
-  // Presets are deliberately modest. Keep only the static headroom actually needed and let
-  // the 4x true-peak lookahead limiter catch short inter-sample events.
-  const peakContribution = state.limiterEnabled ? estimatedPeakDb * 0.25 : estimatedPeakDb;
-  const requiredReduction = Math.max(0, requested + peakContribution + safetyDb);
+  // Preset preamps already provide intentional headroom for their visible 31-band curves.
+  // Do not erase positive manual preamp changes. The true-peak limiter remains the final
+  // safety net, while auto headroom only trims genuinely excessive EQ boost.
+  const peakContribution = state.limiterEnabled ? estimatedPeakDb * 0.42 : estimatedPeakDb;
+  const presetHeadroomCredit = Math.max(0, -requested) * 0.45;
+  const requiredReduction = Math.max(0, peakContribution + safetyDb - presetHeadroomCredit - 0.75);
   const effectivePreampDb = requested - requiredReduction;
-  const presetMakeup = builtInPresetProcessingRequested() ? currentProPreset().makeupDb : 0;
   const outputMakeup = currentOutputTuning()?.makeupDb ?? 0;
-  const limiterRecovery = state.limiterEnabled ? Math.max(0, requiredReduction - 0.45) * 0.62 : 0;
-  const makeupDb = Math.max(-0.5, Math.min(1.5, presetMakeup + outputMakeup + limiterRecovery));
+  const limiterRecovery = state.limiterEnabled ? Math.max(0, requiredReduction - 0.35) * 0.35 : 0;
+  const makeupDb = Math.max(-0.5, Math.min(1.0, outputMakeup + limiterRecovery));
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
@@ -946,9 +971,30 @@ function applyTransientSettings(now: number, active: boolean) {
   if (!transientProcessorNode) return;
   const enabled = workletParam(transientProcessorNode, "enabled");
   const amount = workletParam(transientProcessorNode, "amount");
-  const presetAmount = professionalProcessingRequested() ? currentProPreset().transientAmount : 0;
+  const presetAmount = currentTransientAmount();
   if (enabled) setAudioParam(enabled, active && presetAmount > 0.001 ? 1 : 0, now, 0.02);
   if (amount) setAudioParam(amount, Math.max(0, Math.min(1, presetAmount * sourceTransientScale())), now, 0.035);
+}
+
+function applyMultibandSettings(now: number, active: boolean) {
+  if (!multibandProcessorNode) return;
+  const enabled = workletParam(multibandProcessorNode, "enabled");
+  const amount = workletParam(multibandProcessorNode, "amount");
+  const profileAmount =
+    state.outputProfile === "speaker" ? 0.44 :
+    state.outputProfile === "car_hifi" ? 0.36 :
+    state.outputProfile === "headphones" ? 0.30 :
+    0.28;
+  if (enabled) setAudioParam(enabled, active && state.multibandEnabled ? 1 : 0, now, 0.02);
+  if (amount) setAudioParam(amount, profileAmount, now, 0.06);
+}
+
+function applyLoudnessNormalizationSettings(now: number, active: boolean) {
+  if (!loudnessNormalizerNode) return;
+  const enabled = workletParam(loudnessNormalizerNode, "enabled");
+  const target = workletParam(loudnessNormalizerNode, "targetLufs");
+  if (enabled) setAudioParam(enabled, active && state.normalizationEnabled ? 1 : 0, now, 0.03);
+  if (target) setAudioParam(target, -14, now, 0.12);
 }
 
 function applyLimiterSettings(now: number, limiterActive: boolean) {
@@ -996,6 +1042,8 @@ function applyProcessingSettings() {
   if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb), now, 0.025);
 
   applyTransientSettings(now, processed);
+  applyMultibandSettings(now, processed);
+  applyLoudnessNormalizationSettings(now, processed);
   applyHeadphoneSettings(now);
   applyLimiterSettings(now, !pureReference && state.limiterEnabled);
 
@@ -1020,6 +1068,8 @@ function releaseGraph() {
     referenceRouteGain,
     preampGain,
     transientProcessorNode,
+    loudnessNormalizerNode,
+    multibandProcessorNode,
     professionalHighpass,
     professionalLowShelf,
     professionalHighShelf,
@@ -1068,6 +1118,8 @@ function releaseGraph() {
   referenceRouteGain = null;
   preampGain = null;
   transientProcessorNode = null;
+  loudnessNormalizerNode = null;
+  multibandProcessorNode = null;
   professionalHighpass = null;
   professionalLowShelf = null;
   professionalPeakFilters = [];
@@ -1125,8 +1177,9 @@ function releaseGraph() {
 async function loadAdvancedDspModule(context: AudioContext) {
   if (!context.audioWorklet) return false;
   try {
-    const moduleUrl = new URL("./audio/mvpMusicDsp.worklet.js", import.meta.url).href;
-    await context.audioWorklet.addModule(moduleUrl);
+    const moduleUrl = new URL("./audio/mvpMusicDsp.worklet.js", import.meta.url);
+    moduleUrl.searchParams.set("v", "13.9.14");
+    await context.audioWorklet.addModule(moduleUrl.href);
     return true;
   } catch (error) {
     console.warn("Advanced music DSP worklet unavailable; using native Web Audio fallback.", error);
@@ -1303,6 +1356,30 @@ async function connectMusicGraph() {
         try {
           transientProcessorNode = new AudioWorkletNode(context, "mvp-transient-processor", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: "max" });
           linearPhaseEqNode = new AudioWorkletNode(context, "mvp-linear-phase-eq", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: "max" });
+          multibandProcessorNode = new AudioWorkletNode(context, "mvp-multiband-processor", {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+            channelCount: 2,
+            channelCountMode: "max",
+          });
+          loudnessNormalizerNode = new AudioWorkletNode(context, "mvp-loudness-normalizer", {
+            numberOfInputs: 2,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+            channelCount: 2,
+            channelCountMode: "max",
+          });
+          loudnessNormalizerNode.port.onmessage = (event) => {
+            const data = event.data;
+            if (!data || data.type !== "telemetry") return;
+            const gainDb = Number(data.gainDb);
+            const lufs = Number(data.lufs);
+            emit({
+              loudnessGainDb: Number.isFinite(gainDb) ? Math.round(gainDb * 10) / 10 : 0,
+              loudnessMomentaryLufs: Number.isFinite(lufs) ? Math.round(lufs * 10) / 10 : -70,
+            });
+          };
           headphoneProcessorNode = new AudioWorkletNode(context, "mvp-headphone-processor", {
             numberOfInputs: 1,
             numberOfOutputs: 1,
@@ -1322,6 +1399,8 @@ async function connectMusicGraph() {
           console.warn("Advanced DSP nodes failed; using native fallback.", error);
           transientProcessorNode = null;
           linearPhaseEqNode = null;
+          multibandProcessorNode = null;
+          loudnessNormalizerNode = null;
           headphoneProcessorNode = null;
           limiterWorkletNode = null;
         }
@@ -1336,7 +1415,13 @@ async function connectMusicGraph() {
       masterVolumeGain.connect(referenceRouteGain);
       referenceRouteGain.connect(mixBus);
 
-      masterVolumeGain.connect(preampGain);
+      if (loudnessNormalizerNode) {
+        masterVolumeGain.connect(loudnessNormalizerNode, 0, 0);
+        mediaSource.connect(loudnessNormalizerNode, 0, 1);
+        loudnessNormalizerNode.connect(preampGain);
+      } else {
+        masterVolumeGain.connect(preampGain);
+      }
       let processedTail: AudioNode = preampGain;
       if (transientProcessorNode) {
         processedTail.connect(transientProcessorNode);
@@ -1359,6 +1444,10 @@ async function connectMusicGraph() {
       if (linearPhaseEqNode) {
         processedTail.connect(linearPhaseEqNode);
         processedTail = linearPhaseEqNode;
+      }
+      if (multibandProcessorNode) {
+        processedTail.connect(multibandProcessorNode);
+        processedTail = multibandProcessorNode;
       }
       const outputNodes = [outputHighpass, outputLowShelf, outputPresence, outputClarity, outputHighShelf].filter(
         (node): node is BiquadFilterNode => Boolean(node),
@@ -1570,6 +1659,8 @@ async function assignTrackSource(track: MusicTrack, startAt: number, force: bool
     recordedPlayToken = "";
     audio.src = url;
     audio.dataset.trackId = track.id;
+    loudnessNormalizerNode?.port.postMessage({ type: "reset" });
+    emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
     audio.load();
   }
   const seekWhenReady = () => {
@@ -1588,6 +1679,11 @@ async function assignTrackSource(track: MusicTrack, startAt: number, force: bool
 }
 
 async function loadTrack(track: MusicTrack, startAt = 0) {
+  const shouldResetLoudness = state.currentTrack?.id !== track.id || startAt < 0.5;
+  if (shouldResetLoudness) {
+    loudnessNormalizerNode?.port.postMessage({ type: "reset" });
+    emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
+  }
   loadingTrackId = track.id;
   emit({ loading: true, error: null, currentTrack: track });
   savePlayerSetting(STORAGE_KEYS.currentTrackId, track.id);
@@ -1947,18 +2043,43 @@ export function setMusicEqEnabled(enabled: boolean) {
 }
 
 export function applyMusicEqPreset(presetName: MusicEqPreset) {
-  if (!isBuiltInPreset(presetName)) {
-    if (presetName === "custom" || isCustomPresetSlot(presetName)) {
-      savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
-      emit({ eqPreset: presetName });
+  if (isCustomPresetSlot(presetName)) {
+    const definition = readCustomPreset(presetName);
+    savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
+    if (definition) {
+      savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(definition.gains));
+      savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+      emit({
+        eqPreset: presetName,
+        eqGains: [...definition.gains],
+        preampDb: definition.preamp,
+        dspVerificationMode: "off",
+      });
+    } else {
+      emit({ eqPreset: presetName, dspVerificationMode: "off" });
     }
+    applyProcessingSettings();
+    scheduleProcessingSettle();
     return;
   }
-  const gains = MUSIC_EQ_FREQUENCIES.map(() => 0);
+  if (presetName === "custom") {
+    savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
+    emit({ eqPreset: presetName, dspVerificationMode: "off" });
+    applyProcessingSettings();
+    return;
+  }
+  if (!isBuiltInPreset(presetName)) return;
+  const definition = MUSIC_EQ_PRESETS[presetName];
+  const gains = [...definition.gains];
   savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
-  savePlayerSetting(STORAGE_KEYS.preampDb, "0");
-  emit({ eqPreset: presetName, eqGains: gains, preampDb: 0, dspVerificationMode: "off" });
+  savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
+  emit({
+    eqPreset: presetName,
+    eqGains: gains,
+    preampDb: definition.preamp,
+    dspVerificationMode: "off",
+  });
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -2003,10 +2124,21 @@ export function setMusicCrossfadeSeconds(seconds: number) {
   emit({ crossfadeSeconds: next });
 }
 
-// Retained for API compatibility. Compressor-style normalization is intentionally disabled in V12.
-export function setMusicNormalizationEnabled(_enabled: boolean) {
-  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "false");
-  emit({ normalizationEnabled: false });
+export function setMusicNormalizationEnabled(enabled: boolean) {
+  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, String(enabled));
+  emit({ normalizationEnabled: enabled });
+  applyProcessingSettings();
+  if (!enabled) {
+    emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
+  } else {
+    loudnessNormalizerNode?.port.postMessage({ type: "reset" });
+  }
+}
+
+export function setMusicMultibandEnabled(enabled: boolean) {
+  savePlayerSetting(STORAGE_KEYS.multibandEnabled, String(enabled));
+  emit({ multibandEnabled: enabled });
+  applyProcessingSettings();
 }
 
 export function setMusicLimiterEnabled(enabled: boolean) {
@@ -2095,11 +2227,9 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
   if (!Object.prototype.hasOwnProperty.call(MUSIC_OUTPUT_PROFILES, profile)) return;
   savePlayerSetting(STORAGE_KEYS.outputProfile, profile);
   savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
-  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "false");
   emit({
     outputProfile: profile,
     dspBypass: false,
-    normalizationEnabled: false,
     dspVerificationMode: "off",
   });
   applyProcessingSettings();
