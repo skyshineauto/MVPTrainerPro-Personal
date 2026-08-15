@@ -44,6 +44,7 @@ export type MusicDspStatus = "active" | "bypassed" | "recovering" | "unavailable
 export type MusicDspEngineMode = "advanced_worklet" | "native_fallback" | "unavailable";
 export type MusicImmersionStatus = "active" | "native_fallback" | "bypassed" | "unavailable";
 export type MusicDspVerificationMode = "off" | "eq" | "spatial";
+export type MusicEqTopology = "minimum_phase" | "linear_phase";
 export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "stage" | "focus" | "bass_impact";
 export type MusicOutputProfile = "reference" | "car_hifi" | "headphones" | "speaker";
 
@@ -78,29 +79,29 @@ function interpolateEqCurve(points: Array<[number, number]>) {
   });
 }
 
-function preset(label: string, preamp: number, points: Array<[number, number]>): EqDefinition {
-  return { label, preamp, gains: interpolateEqCurve(points) };
+function userOffsetPreset(label: string): EqDefinition {
+  return { label, preamp: 0, gains: MUSIC_EQ_FREQUENCIES.map(() => 0) };
 }
 
 export const MUSIC_EQ_PRESETS: Record<BuiltInMusicEqPreset, EqDefinition> = {
-  flat: preset("Flat", 0, [[20, 0], [20000, 0]]),
-  power: preset("Power Training", 0, [[20, -1.5], [70, 0.5], [180, -0.5], [300, -3.0], [900, 0.5], [1800, 2.2], [3200, 4.5], [6000, 2.4], [10000, 1.2], [20000, 0]]),
-  rock: preset("Rock", 0, [[20, -2.0], [70, 0.3], [150, -0.5], [300, -3.5], [900, 0], [1600, 1.6], [3200, 4.0], [6000, 2.0], [10000, 1.0], [20000, 0]]),
-  hard_rock: preset("Hard Rock", 0, [[20, -2.2], [75, 0.4], [160, -0.4], [280, -4.0], [900, 0.8], [1800, 2.2], [3000, 4.8], [5200, 2.7], [10000, 1.1], [20000, 0]]),
-  metal: preset("Metal", 0, [[20, -2.5], [70, 0.1], [150, -1.0], [260, -4.2], [600, -1.8], [1500, 1.5], [2400, 4.0], [4200, 5.0], [8000, 2.0], [16000, 0.7], [20000, 0]]),
-  alternative: preset("Alternative", 0, [[20, -1.5], [80, 0.2], [220, -0.5], [320, -2.5], [1100, 1.0], [2600, 3.2], [5200, 1.7], [10000, 0.7], [20000, 0]]),
-  pop: preset("Pop", 0, [[20, -1.0], [75, 0.8], [250, -1.5], [1100, 1.2], [3000, 3.2], [7000, 2.4], [14000, 1.0], [20000, 0]]),
-  hip_hop: preset("Hip-Hop", -0.5, [[20, 0.5], [45, 3.2], [80, 2.6], [180, 0.4], [320, -2.0], [1200, 0], [2500, 1.0], [6500, 1.4], [12000, 0.5], [20000, 0]]),
-  edm: preset("EDM", -0.8, [[20, 1.0], [45, 3.8], [80, 2.8], [220, -1.0], [500, -1.3], [1600, 1.0], [3500, 2.4], [7000, 3.0], [12000, 1.6], [20000, 0.4]]),
-  bass_boost: preset("Bass Boost", -0.8, [[20, 1.0], [45, 4.0], [80, 3.6], [140, 2.0], [250, 0.4], [500, 0], [20000, 0]]),
-  deep_bass: preset("Deep Bass", -1.0, [[20, 2.0], [32, 4.8], [50, 4.2], [80, 2.3], [140, 0.8], [250, 0], [20000, 0]]),
-  punch: preset("Punch", 0, [[20, -1.5], [65, 0.2], [95, 2.5], [150, 1.3], [280, -2.2], [1000, 0], [2800, 3.0], [6000, 1.5], [20000, 0]]),
-  vocal: preset("Vocal Clarity", 0, [[20, -3.0], [100, -2.0], [250, -1.2], [700, 1.0], [1400, 2.4], [2600, 4.0], [4200, 2.4], [8000, 0.8], [16000, 0], [20000, -0.5]]),
-  acoustic: preset("Acoustic", 0, [[20, -2.5], [80, -0.8], [180, 1.0], [600, 0.5], [1200, 1.2], [2600, 2.6], [5200, 1.7], [10000, 0.8], [20000, 0]]),
-  warm: preset("Warm", 0, [[20, -0.5], [90, 1.0], [250, 1.0], [700, 0.5], [1800, 0], [4500, -1.4], [10000, -2.0], [20000, -2.3]]),
-  bright: preset("Bright", 0, [[20, -1.5], [100, -0.7], [500, 0], [1400, 1.0], [3200, 2.4], [6500, 3.5], [12000, 2.6], [20000, 1.2]]),
-  late_night: preset("Late Night", -0.5, [[20, -0.5], [80, 0.3], [180, 0], [800, 0], [2600, -1.4], [5000, -2.4], [10000, -3.6], [20000, -5.0]]),
-  headphones: preset("Headphones", 0, [[20, -2.0], [80, -0.8], [250, -1.5], [1000, 0.3], [1800, 1.5], [3800, 2.4], [8000, 1.2], [16000, 0.3], [20000, 0]]),
+  flat: userOffsetPreset("Flat"),
+  power: userOffsetPreset("Power Training"),
+  rock: userOffsetPreset("Rock"),
+  hard_rock: userOffsetPreset("Hard Rock"),
+  metal: userOffsetPreset("Metal"),
+  alternative: userOffsetPreset("Alternative"),
+  pop: userOffsetPreset("Pop"),
+  hip_hop: userOffsetPreset("Hip-Hop"),
+  edm: userOffsetPreset("EDM"),
+  bass_boost: userOffsetPreset("Bass Boost"),
+  deep_bass: userOffsetPreset("Deep Bass"),
+  punch: userOffsetPreset("Punch"),
+  vocal: userOffsetPreset("Vocal Clarity"),
+  acoustic: userOffsetPreset("Acoustic"),
+  warm: userOffsetPreset("Warm"),
+  bright: userOffsetPreset("Bright"),
+  late_night: userOffsetPreset("Late Night"),
+  headphones: userOffsetPreset("Headphones"),
 };
 
 type ProPeak = { frequency: number; gain: number; q: number };
@@ -112,6 +113,7 @@ type ProPresetDefinition = {
   highShelfHz: number;
   highShelfDb: number;
   makeupDb: number;
+  transientAmount: number;
 };
 
 type OutputTuningDefinition = {
@@ -134,15 +136,16 @@ const PRO_PRESET_DEFAULT: ProPresetDefinition = {
   lowShelfHz: 90,
   lowShelfDb: 0,
   peaks: [],
-  highShelfHz: 9000,
+  highShelfHz: 12000,
   highShelfDb: 0,
   makeupDb: 0,
+  transientAmount: 0,
 };
 
 const DSP_EQ_PROOF_PRESET: ProPresetDefinition = {
-  highpassHz: 34,
-  lowShelfHz: 115,
-  lowShelfDb: -6.0,
+  highpassHz: 28,
+  lowShelfHz: 100,
+  lowShelfDb: -5.5,
   peaks: [
     { frequency: 300, gain: -5.0, q: 0.9 },
     { frequency: 1000, gain: -10.0, q: 0.82 },
@@ -152,33 +155,37 @@ const DSP_EQ_PROOF_PRESET: ProPresetDefinition = {
   highShelfHz: 11000,
   highShelfDb: 3.0,
   makeupDb: 0,
+  transientAmount: 0,
 };
 
+// V13.8 tonal engine. These are intentionally moderate, mastering-style curves.
+// The 120–350 Hz body region is preserved; output profiles no longer carry a second heavy EQ curve.
 const MUSIC_PRO_PRESETS: Record<BuiltInMusicEqPreset, ProPresetDefinition> = {
   flat: { ...PRO_PRESET_DEFAULT },
-  power: { highpassHz: 28, lowShelfHz: 96, lowShelfDb: -1.4, peaks: [{ frequency: 285, gain: -3.8, q: 0.95 }, { frequency: 1050, gain: 0.8, q: 0.85 }, { frequency: 1750, gain: 2.9, q: 0.92 }, { frequency: 3200, gain: 5.5, q: 1.08 }, { frequency: 6300, gain: 3.0, q: 1.12 }], highShelfHz: 10500, highShelfDb: 1.4, makeupDb: 1.15 },
-  rock: { highpassHz: 27, lowShelfHz: 92, lowShelfDb: -1.2, peaks: [{ frequency: 110, gain: 0.9, q: 1.05 }, { frequency: 285, gain: -3.9, q: 0.95 }, { frequency: 1500, gain: 2.1, q: 0.9 }, { frequency: 3150, gain: 4.7, q: 1.08 }, { frequency: 6200, gain: 2.5, q: 1.12 }], highShelfHz: 10800, highShelfDb: 1.1, makeupDb: 0.95 },
-  hard_rock: { highpassHz: 29, lowShelfHz: 90, lowShelfDb: -1.5, peaks: [{ frequency: 118, gain: 1.0, q: 1.1 }, { frequency: 270, gain: -4.6, q: 1.0 }, { frequency: 900, gain: 1.0, q: 0.85 }, { frequency: 1800, gain: 2.9, q: 0.95 }, { frequency: 3020, gain: 5.6, q: 1.12 }, { frequency: 5200, gain: 3.3, q: 1.12 }], highShelfHz: 10200, highShelfDb: 1.2, makeupDb: 1.05 },
-  metal: { highpassHz: 31, lowShelfHz: 84, lowShelfDb: -1.8, peaks: [{ frequency: 95, gain: 0.6, q: 1.1 }, { frequency: 250, gain: -4.8, q: 1.0 }, { frequency: 620, gain: -2.5, q: 0.95 }, { frequency: 1500, gain: 1.9, q: 0.9 }, { frequency: 2450, gain: 4.8, q: 1.12 }, { frequency: 4300, gain: 5.9, q: 1.18 }], highShelfHz: 9400, highShelfDb: 1.15, makeupDb: 0.95 },
-  alternative: { highpassHz: 26, lowShelfHz: 96, lowShelfDb: -0.8, peaks: [{ frequency: 305, gain: -3.0, q: 0.9 }, { frequency: 1120, gain: 1.3, q: 0.85 }, { frequency: 2650, gain: 3.7, q: 1.02 }, { frequency: 5250, gain: 2.0, q: 1.0 }], highShelfHz: 10200, highShelfDb: 0.85, makeupDb: 0.7 },
-  pop: { highpassHz: 25, lowShelfHz: 90, lowShelfDb: -0.1, peaks: [{ frequency: 285, gain: -1.9, q: 0.9 }, { frequency: 1150, gain: 1.4, q: 0.85 }, { frequency: 3000, gain: 3.7, q: 1.02 }, { frequency: 7100, gain: 2.7, q: 1.0 }], highShelfHz: 11800, highShelfDb: 1.2, makeupDb: 0.75 },
-  hip_hop: { highpassHz: 20, lowShelfHz: 68, lowShelfDb: 2.8, peaks: [{ frequency: 120, gain: 1.1, q: 0.95 }, { frequency: 310, gain: -2.4, q: 0.9 }, { frequency: 2200, gain: 1.2, q: 0.9 }, { frequency: 6300, gain: 1.5, q: 0.95 }], highShelfHz: 11200, highShelfDb: 0.55, makeupDb: 0.35 },
-  edm: { highpassHz: 20, lowShelfHz: 60, lowShelfDb: 3.2, peaks: [{ frequency: 105, gain: 1.2, q: 1.0 }, { frequency: 260, gain: -2.1, q: 0.95 }, { frequency: 1700, gain: 1.2, q: 0.9 }, { frequency: 3600, gain: 2.9, q: 1.0 }, { frequency: 7300, gain: 3.1, q: 1.0 }], highShelfHz: 12200, highShelfDb: 1.2, makeupDb: 0.55 },
-  bass_boost: { highpassHz: 18, lowShelfHz: 66, lowShelfDb: 3.5, peaks: [{ frequency: 105, gain: 1.5, q: 0.9 }, { frequency: 220, gain: 0.2, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0.15 },
-  deep_bass: { highpassHz: 16, lowShelfHz: 46, lowShelfDb: 4.4, peaks: [{ frequency: 72, gain: 1.5, q: 0.9 }, { frequency: 140, gain: 0.3, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0 },
-  punch: { highpassHz: 27, lowShelfHz: 90, lowShelfDb: 0.1, peaks: [{ frequency: 105, gain: 2.3, q: 1.05 }, { frequency: 275, gain: -2.7, q: 0.95 }, { frequency: 2800, gain: 3.5, q: 1.02 }, { frequency: 6100, gain: 1.8, q: 1.0 }], highShelfHz: 10300, highShelfDb: 0.55, makeupDb: 0.75 },
-  vocal: { highpassHz: 35, lowShelfHz: 110, lowShelfDb: -2.0, peaks: [{ frequency: 250, gain: -1.5, q: 0.9 }, { frequency: 750, gain: 1.2, q: 0.85 }, { frequency: 1450, gain: 2.8, q: 0.9 }, { frequency: 2600, gain: 4.5, q: 1.02 }, { frequency: 4200, gain: 2.6, q: 1.0 }], highShelfHz: 10800, highShelfDb: 0.55, makeupDb: 0.65 },
-  acoustic: { highpassHz: 31, lowShelfHz: 105, lowShelfDb: -0.9, peaks: [{ frequency: 180, gain: 1.0, q: 0.85 }, { frequency: 700, gain: 0.6, q: 0.85 }, { frequency: 1250, gain: 1.2, q: 0.9 }, { frequency: 2600, gain: 2.9, q: 1.0 }, { frequency: 5200, gain: 1.8, q: 1.0 }], highShelfHz: 11000, highShelfDb: 0.95, makeupDb: 0.5 },
-  warm: { highpassHz: 20, lowShelfHz: 105, lowShelfDb: 1.0, peaks: [{ frequency: 280, gain: 0.8, q: 0.8 }, { frequency: 4200, gain: -1.6, q: 0.9 }], highShelfHz: 9500, highShelfDb: -1.9, makeupDb: 0.2 },
-  bright: { highpassHz: 24, lowShelfHz: 95, lowShelfDb: -0.9, peaks: [{ frequency: 2500, gain: 1.9, q: 0.9 }, { frequency: 6200, gain: 3.7, q: 1.0 }], highShelfHz: 11200, highShelfDb: 2.4, makeupDb: 0.3 },
-  late_night: { highpassHz: 22, lowShelfHz: 95, lowShelfDb: 0.1, peaks: [{ frequency: 2800, gain: -1.6, q: 0.9 }, { frequency: 5200, gain: -2.5, q: 0.95 }], highShelfHz: 9000, highShelfDb: -3.8, makeupDb: -0.4 },
-  headphones: { highpassHz: 25, lowShelfHz: 94, lowShelfDb: -1.3, peaks: [{ frequency: 265, gain: -1.8, q: 0.9 }, { frequency: 1600, gain: 1.7, q: 0.9 }, { frequency: 3900, gain: 2.9, q: 1.02 }, { frequency: 7900, gain: 1.3, q: 1.0 }], highShelfHz: 12200, highShelfDb: 0.8, makeupDb: 0.7 },
+  power: { highpassHz: 22, lowShelfHz: 90, lowShelfDb: 1.2, peaks: [{ frequency: 285, gain: -0.8, q: 0.9 }, { frequency: 1250, gain: 0.7, q: 0.85 }, { frequency: 2100, gain: 1.2, q: 0.95 }, { frequency: 3400, gain: 2.2, q: 1.05 }, { frequency: 6200, gain: 1.2, q: 1.0 }], highShelfHz: 12000, highShelfDb: 0.7, makeupDb: 0.15, transientAmount: 0.72 },
+  rock: { highpassHz: 20, lowShelfHz: 88, lowShelfDb: 0.7, peaks: [{ frequency: 290, gain: -0.8, q: 0.86 }, { frequency: 1250, gain: 0.5, q: 0.82 }, { frequency: 1900, gain: 0.9, q: 0.9 }, { frequency: 3300, gain: 1.8, q: 1.0 }, { frequency: 6200, gain: 0.8, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.55, makeupDb: 0.10, transientAmount: 0.46 },
+  hard_rock: { highpassHz: 20, lowShelfHz: 86, lowShelfDb: 1.0, peaks: [{ frequency: 285, gain: -1.0, q: 0.9 }, { frequency: 900, gain: 0.35, q: 0.8 }, { frequency: 1800, gain: 1.15, q: 0.9 }, { frequency: 3200, gain: 2.25, q: 1.03 }, { frequency: 5400, gain: 1.05, q: 1.0 }], highShelfHz: 12000, highShelfDb: 0.65, makeupDb: 0.10, transientAmount: 0.68 },
+  metal: { highpassHz: 22, lowShelfHz: 82, lowShelfDb: 0.6, peaks: [{ frequency: 330, gain: -1.15, q: 0.9 }, { frequency: 650, gain: -0.45, q: 0.88 }, { frequency: 1500, gain: 0.65, q: 0.88 }, { frequency: 2450, gain: 1.45, q: 1.0 }, { frequency: 4200, gain: 2.25, q: 1.08 }], highShelfHz: 12000, highShelfDb: 0.45, makeupDb: 0.05, transientAmount: 0.76 },
+  alternative: { highpassHz: 20, lowShelfHz: 90, lowShelfDb: 0.45, peaks: [{ frequency: 310, gain: -0.7, q: 0.85 }, { frequency: 1200, gain: 0.55, q: 0.82 }, { frequency: 2700, gain: 1.35, q: 0.96 }, { frequency: 5200, gain: 0.65, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.4, makeupDb: 0.10, transientAmount: 0.38 },
+  pop: { highpassHz: 20, lowShelfHz: 90, lowShelfDb: 0.6, peaks: [{ frequency: 300, gain: -0.55, q: 0.85 }, { frequency: 1200, gain: 0.55, q: 0.82 }, { frequency: 3000, gain: 1.35, q: 0.96 }, { frequency: 7000, gain: 0.95, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.7, makeupDb: 0.10, transientAmount: 0.34 },
+  hip_hop: { highpassHz: 18, lowShelfHz: 68, lowShelfDb: 2.0, peaks: [{ frequency: 120, gain: 0.65, q: 0.9 }, { frequency: 320, gain: -0.65, q: 0.82 }, { frequency: 2200, gain: 0.65, q: 0.86 }, { frequency: 6500, gain: 0.7, q: 0.9 }], highShelfHz: 12000, highShelfDb: 0.25, makeupDb: 0, transientAmount: 0.28 },
+  edm: { highpassHz: 18, lowShelfHz: 62, lowShelfDb: 2.2, peaks: [{ frequency: 110, gain: 0.7, q: 0.92 }, { frequency: 300, gain: -0.65, q: 0.88 }, { frequency: 1800, gain: 0.6, q: 0.86 }, { frequency: 3600, gain: 1.15, q: 0.95 }, { frequency: 7600, gain: 1.15, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.65, makeupDb: 0, transientAmount: 0.50 },
+  bass_boost: { highpassHz: 18, lowShelfHz: 72, lowShelfDb: 2.8, peaks: [{ frequency: 110, gain: 0.9, q: 0.86 }, { frequency: 250, gain: 0.15, q: 0.8 }], highShelfHz: 12000, highShelfDb: 0, makeupDb: -0.05, transientAmount: 0.16 },
+  deep_bass: { highpassHz: 16, lowShelfHz: 48, lowShelfDb: 3.6, peaks: [{ frequency: 75, gain: 1.0, q: 0.86 }, { frequency: 145, gain: 0.25, q: 0.8 }], highShelfHz: 12000, highShelfDb: 0, makeupDb: -0.10, transientAmount: 0.12 },
+  punch: { highpassHz: 20, lowShelfHz: 92, lowShelfDb: 1.35, peaks: [{ frequency: 115, gain: 1.2, q: 1.0 }, { frequency: 300, gain: -0.85, q: 0.9 }, { frequency: 2850, gain: 1.45, q: 0.98 }, { frequency: 6200, gain: 0.75, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.35, makeupDb: 0.05, transientAmount: 0.82 },
+  vocal: { highpassHz: 24, lowShelfHz: 105, lowShelfDb: -0.6, peaks: [{ frequency: 300, gain: -0.7, q: 0.82 }, { frequency: 850, gain: 0.7, q: 0.82 }, { frequency: 1550, gain: 1.15, q: 0.88 }, { frequency: 2800, gain: 1.55, q: 0.96 }, { frequency: 4300, gain: 0.7, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.35, makeupDb: 0.05, transientAmount: 0.20 },
+  acoustic: { highpassHz: 20, lowShelfHz: 100, lowShelfDb: 0.15, peaks: [{ frequency: 190, gain: 0.45, q: 0.8 }, { frequency: 750, gain: 0.3, q: 0.8 }, { frequency: 1400, gain: 0.55, q: 0.85 }, { frequency: 2800, gain: 1.0, q: 0.92 }, { frequency: 5500, gain: 0.55, q: 0.92 }], highShelfHz: 12000, highShelfDb: 0.55, makeupDb: 0.05, transientAmount: 0.24 },
+  warm: { highpassHz: 18, lowShelfHz: 105, lowShelfDb: 1.0, peaks: [{ frequency: 280, gain: 0.45, q: 0.8 }, { frequency: 4200, gain: -0.65, q: 0.88 }], highShelfHz: 10500, highShelfDb: -0.9, makeupDb: 0.05, transientAmount: 0.08 },
+  bright: { highpassHz: 20, lowShelfHz: 95, lowShelfDb: -0.15, peaks: [{ frequency: 2600, gain: 0.9, q: 0.88 }, { frequency: 6500, gain: 1.35, q: 0.95 }], highShelfHz: 12000, highShelfDb: 1.2, makeupDb: 0, transientAmount: 0.20 },
+  late_night: { highpassHz: 18, lowShelfHz: 95, lowShelfDb: 0.3, peaks: [{ frequency: 2800, gain: -0.65, q: 0.86 }, { frequency: 5500, gain: -0.85, q: 0.9 }], highShelfHz: 10500, highShelfDb: -1.4, makeupDb: -0.15, transientAmount: 0.04 },
+  headphones: { highpassHz: 18, lowShelfHz: 95, lowShelfDb: 0.25, peaks: [{ frequency: 300, gain: -0.45, q: 0.82 }, { frequency: 1700, gain: 0.65, q: 0.86 }, { frequency: 3900, gain: 1.0, q: 0.96 }, { frequency: 8200, gain: 0.45, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.45, makeupDb: 0.05, transientAmount: 0.20 },
 };
 
+// Output profiles are technical device paths, not a second musical EQ.
 const MUSIC_OUTPUT_TUNINGS: Record<Exclude<MusicOutputProfile, "reference">, OutputTuningDefinition> = {
-  car_hifi: { highpassHz: 18, lowShelfHz: 92, lowShelfDb: -0.5, presenceHz: 330, presenceDb: -0.7, presenceQ: 0.82, clarityHz: 2850, clarityDb: 0.85, clarityQ: 0.9, highShelfHz: 10800, highShelfDb: 0.45, makeupDb: 0.8 },
-  headphones: { highpassHz: 24, lowShelfHz: 102, lowShelfDb: -2.1, presenceHz: 315, presenceDb: -1.25, presenceQ: 0.82, clarityHz: 3000, clarityDb: 1.35, clarityQ: 0.92, highShelfHz: 11000, highShelfDb: 1.15, makeupDb: 1.8 },
-  speaker: { highpassHz: 54, lowShelfHz: 100, lowShelfDb: -3.0, presenceHz: 300, presenceDb: -1.2, presenceQ: 0.85, clarityHz: 2550, clarityDb: 2.0, clarityQ: 0.88, highShelfHz: 9200, highShelfDb: 1.05, makeupDb: 1.25 },
+  car_hifi: { highpassHz: 18, lowShelfHz: 80, lowShelfDb: 0.15, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0.15, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0.10, makeupDb: 0 },
+  headphones: { highpassHz: 18, lowShelfHz: 90, lowShelfDb: 0, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0, makeupDb: 0 },
+  speaker: { highpassHz: 28, lowShelfHz: 90, lowShelfDb: 0, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3500, clarityDb: 0.20, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0.30, makeupDb: 0 },
 };
 
 export const MUSIC_HEADPHONE_MODES: Record<
@@ -205,17 +212,17 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   car_hifi: {
     label: "Car / Hi-Fi",
     shortLabel: "CAR / HI-FI",
-    description: "Wide-band hi-fi processing with controlled low mids, added articulation and clean top-end detail for a tuned vehicle or full-range system.",
+    description: "Near-neutral full-range path with conservative gain and true-peak protection for a tuned vehicle or hi-fi system.",
   },
   headphones: {
     label: "Headphones",
     shortLabel: "HEADPHONES",
-    description: "High-definition headphone voicing with tighter bass, clearer separation, added air and optional real-time immersion processing.",
+    description: "Near-neutral headphone path with optional binaural crossfeed, spatial processing and transparent true-peak protection.",
   },
   speaker: {
     label: "Bluetooth Speaker",
     shortLabel: "BLUETOOTH",
-    description: "Speaker-safe bass management with extra articulation, presence and clean perceived detail for compact Bluetooth playback.",
+    description: "Near-neutral Bluetooth path with gentle codec-detail compensation and no heavy bass removal.",
   },
 };
 
@@ -237,6 +244,7 @@ export type MusicPlayerState = {
   eqEnabled: boolean;
   eqPreset: MusicEqPreset;
   eqGains: number[];
+  eqTopology: MusicEqTopology;
   preampDb: number;
   effectivePreampDb: number;
   autoHeadroomDb: number;
@@ -269,6 +277,7 @@ const STORAGE_KEYS = {
   eqEnabled: "mvp_music_eq_enabled",
   eqPreset: "mvp_music_eq_preset",
   eqGains: "mvp_music_eq_gains",
+  eqTopology: "mvp_music_eq_topology_v13_8",
   preampDb: "mvp_music_eq_preamp_db",
   crossfadeSeconds: "mvp_music_crossfade_seconds",
   normalizationEnabled: "mvp_music_normalization_enabled",
@@ -288,7 +297,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v13-pro-dsp-2";
+const AUDIO_ENGINE_VERSION = "v13-8-single-stage-hifi";
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -417,15 +426,18 @@ function readOutputProfile(): MusicOutputProfile {
     ? value
     : "car_hifi";
 }
+function readEqTopology(): MusicEqTopology {
+  return readStored(STORAGE_KEYS.eqTopology) === "linear_phase" ? "linear_phase" : "minimum_phase";
+}
 
 function migrateAudioFidelitySettings() {
   if (readStored(STORAGE_KEYS.audioEngineVersion) === AUDIO_ENGINE_VERSION) return;
   const presetName = readEqPreset();
-  if (isBuiltInPreset(presetName)) {
-    const definition = MUSIC_EQ_PRESETS[presetName];
-    savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(definition.gains));
-    savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
-  }
+  const safePreset = isBuiltInPreset(presetName) ? presetName : "flat";
+  savePlayerSetting(STORAGE_KEYS.eqPreset, safePreset);
+  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(MUSIC_EQ_FREQUENCIES.map(() => 0)));
+  savePlayerSetting(STORAGE_KEYS.preampDb, "0");
+  savePlayerSetting(STORAGE_KEYS.eqTopology, "minimum_phase");
   if (!readStored(STORAGE_KEYS.eqEnabled)) savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "false");
   savePlayerSetting(STORAGE_KEYS.limiterEnabled, "true");
@@ -454,6 +466,7 @@ let state: MusicPlayerState = {
   eqEnabled: readBoolean(STORAGE_KEYS.eqEnabled, true),
   eqPreset: initialPreset,
   eqGains: readEqGains(initialPreset),
+  eqTopology: readEqTopology(),
   preampDb: readPreamp(initialPreset),
   effectivePreampDb: 0,
   autoHeadroomDb: 0,
@@ -481,11 +494,13 @@ let mediaSource: MediaElementAudioSourceNode | null = null;
 let masterVolumeGain: GainNode | null = null;
 let referenceRouteGain: GainNode | null = null;
 let preampGain: GainNode | null = null;
+let transientProcessorNode: AudioWorkletNode | null = null;
 let professionalHighpass: BiquadFilterNode | null = null;
 let professionalLowShelf: BiquadFilterNode | null = null;
 let professionalPeakFilters: BiquadFilterNode[] = [];
 let professionalHighShelf: BiquadFilterNode | null = null;
 let equalizerFilters: BiquadFilterNode[] = [];
+let linearPhaseEqNode: AudioWorkletNode | null = null;
 let outputHighpass: BiquadFilterNode | null = null;
 let outputLowShelf: BiquadFilterNode | null = null;
 let outputPresence: BiquadFilterNode | null = null;
@@ -519,6 +534,9 @@ let makeupGain: GainNode | null = null;
 let limiterWorkletNode: AudioWorkletNode | null = null;
 let limiterFallbackNode: DynamicsCompressorNode | null = null;
 let analyserNode: AnalyserNode | null = null;
+let referenceLevelAnalyser: AnalyserNode | null = null;
+let processedLevelAnalyser: AnalyserNode | null = null;
+let levelMeterSink: GainNode | null = null;
 let musicGain: GainNode | null = null;
 let analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
 let visualizerEnvelope = new Float32Array(64);
@@ -533,6 +551,9 @@ let lastDspStatus: MusicDspStatus = "recovering";
 let lastHeadroom = -1;
 let lastEffectivePreamp = Number.NaN;
 let processingSettleTimer = 0;
+let levelMeterTimer = 0;
+let lastReferenceRmsDb = Number.NaN;
+let lastProcessedRmsDb = Number.NaN;
 const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
 const SIGNED_URL_TTL_MS = 8 * 60 * 1000;
 const GRAPHIC_EQ_Q = 4.318;
@@ -581,8 +602,11 @@ function eqProofActive() {
 function builtInPresetProcessingRequested() {
   return eqProcessingRequested() && isBuiltInPreset(state.eqPreset);
 }
+function userEqHasOffsets() {
+  return state.eqGains.some((gain) => Math.abs(Number(gain) || 0) > 0.01);
+}
 function graphicEqProcessingRequested() {
-  return eqProcessingRequested() && !isBuiltInPreset(state.eqPreset) && !eqProofActive();
+  return eqProcessingRequested() && userEqHasOffsets() && !eqProofActive();
 }
 function professionalProcessingRequested() {
   return builtInPresetProcessingRequested() || eqProofActive();
@@ -621,12 +645,57 @@ function configureProfessionalFilters(now: number) {
     setAudioParam(professionalHighShelf.gain, definition.highShelfDb, now, 0.035);
   }
 }
+function buildLinearPhaseFir(gainsDb: number[], sampleRateValue: number) {
+  const half = 128;
+  const taps = half * 2 + 1;
+  const bins = 128;
+  const amplitudes = new Float64Array(bins + 1);
+  const maxHz = sampleRateValue / 2;
+  const minBand = MUSIC_EQ_FREQUENCIES[0];
+  const maxBand = MUSIC_EQ_FREQUENCIES[MUSIC_EQ_FREQUENCIES.length - 1];
+  const gainAt = (frequency: number) => {
+    if (frequency <= minBand) return Number(gainsDb[0] || 0);
+    if (frequency >= maxBand) return Number(gainsDb[gainsDb.length - 1] || 0);
+    for (let index = 0; index < MUSIC_EQ_FREQUENCIES.length - 1; index += 1) {
+      const leftHz = MUSIC_EQ_FREQUENCIES[index];
+      const rightHz = MUSIC_EQ_FREQUENCIES[index + 1];
+      if (frequency < leftHz || frequency > rightHz) continue;
+      const amount = (Math.log(frequency) - Math.log(leftHz)) / Math.max(0.000001, Math.log(rightHz) - Math.log(leftHz));
+      const leftDb = Number(gainsDb[index] || 0);
+      const rightDb = Number(gainsDb[index + 1] || 0);
+      return leftDb + (rightDb - leftDb) * amount;
+    }
+    return 0;
+  };
+  for (let bin = 0; bin <= bins; bin += 1) {
+    const frequency = (bin / bins) * maxHz;
+    amplitudes[bin] = dbToGain(gainAt(Math.max(10, frequency)));
+  }
+  const coefficients = new Float32Array(taps);
+  for (let tap = 0; tap < taps; tap += 1) {
+    const m = tap - half;
+    let value = 0.5 * amplitudes[0] + 0.5 * amplitudes[bins] * Math.cos(Math.PI * m);
+    for (let bin = 1; bin < bins; bin += 1) value += amplitudes[bin] * Math.cos(Math.PI * bin * m / bins);
+    value /= bins;
+    const window = 0.42 - 0.5 * Math.cos((2 * Math.PI * tap) / (taps - 1)) + 0.08 * Math.cos((4 * Math.PI * tap) / (taps - 1));
+    coefficients[tap] = value * window;
+  }
+  return coefficients;
+}
 function configureGraphicEq(now: number) {
   const enabled = graphicEqProcessingRequested();
+  const minimumPhase = enabled && (state.eqTopology === "minimum_phase" || !linearPhaseEqNode);
   equalizerFilters.forEach((filter, index) => {
-    const gain = enabled ? Number(state.eqGains[index] || 0) : 0;
+    const gain = minimumPhase ? Number(state.eqGains[index] || 0) : 0;
     setAudioParam(filter.gain, gain, now, 0.028);
   });
+  if (linearPhaseEqNode) {
+    const enabledParam = workletParam(linearPhaseEqNode, "enabled");
+    if (enabledParam) setAudioParam(enabledParam, enabled && state.eqTopology === "linear_phase" ? 1 : 0, now, 0.02);
+    if (enabled && state.eqTopology === "linear_phase" && audioContext) {
+      linearPhaseEqNode.port.postMessage({ type: "coefficients", coefficients: Array.from(buildLinearPhaseFir(state.eqGains, audioContext.sampleRate)) });
+    }
+  }
 }
 function configureOutputFilters(now: number) {
   if (!audioContext) return;
@@ -674,7 +743,7 @@ function activeResponseFilters() {
     filters.push(...professionalPeakFilters);
     if (professionalHighShelf) filters.push(professionalHighShelf);
   }
-  if (graphicEqProcessingRequested()) filters.push(...equalizerFilters);
+  if (graphicEqProcessingRequested() && (state.eqTopology === "minimum_phase" || !linearPhaseEqNode)) filters.push(...equalizerFilters);
   if (outputHighpass) filters.push(outputHighpass);
   if (outputLowShelf) filters.push(outputLowShelf);
   if (outputPresence) filters.push(outputPresence);
@@ -731,21 +800,28 @@ function calculateProcessingGain() {
     ? Math.max(-12, Math.min(12, Number(state.preampDb) || 0))
     : 0;
   const response = measureProcessingResponse();
-  const safetyDb = 0.35 + headphonePeakSafetyDb();
-  // Let the transparent lookahead limiter catch short musical peaks instead of throwing away
-  // the full static EQ boost as permanent attenuation. This keeps headphone output energetic.
-  const headroomPeakContribution = state.limiterEnabled ? response.peakDb * 0.58 : response.peakDb;
-  const requiredReduction = Math.max(0, requested + headroomPeakContribution + safetyDb);
+  const linearPhaseUserBoost = graphicEqProcessingRequested() && state.eqTopology === "linear_phase" && linearPhaseEqNode
+    ? Math.max(0, ...state.eqGains.map((gain) => Number(gain) || 0))
+    : 0;
+  const estimatedPeakDb = response.peakDb + linearPhaseUserBoost;
+  const safetyDb = 0.45 + headphonePeakSafetyDb() * 0.28;
+  // Presets are deliberately modest. Keep only the static headroom actually needed and let
+  // the 4x true-peak lookahead limiter catch short inter-sample events.
+  const peakContribution = state.limiterEnabled ? estimatedPeakDb * 0.25 : estimatedPeakDb;
+  const requiredReduction = Math.max(0, requested + peakContribution + safetyDb);
   const effectivePreampDb = requested - requiredReduction;
   const presetMakeup = builtInPresetProcessingRequested() ? currentProPreset().makeupDb : 0;
   const outputMakeup = currentOutputTuning()?.makeupDb ?? 0;
-  const makeupDb = Math.max(-1, Math.min(3.2, presetMakeup + outputMakeup));
-  const referenceMatchDb = Math.max(-9, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
+  const limiterRecovery = state.limiterEnabled ? Math.max(0, requiredReduction - 0.45) * 0.62 : 0;
+  const makeupDb = Math.max(-0.5, Math.min(1.5, presetMakeup + outputMakeup + limiterRecovery));
+  const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
+    ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
+    : Math.max(-6, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
   return {
     effectivePreampDb,
     autoHeadroomDb: requiredReduction,
     makeupDb,
-    referenceMatchDb,
+    referenceMatchDb: measuredMatch,
   };
 }
 function scheduleProcessingSettle() {
@@ -850,14 +926,39 @@ function currentImmersionStatus(): MusicImmersionStatus {
   if (nativeImmersionAvailable()) return "native_fallback";
   return "unavailable";
 }
+function sourceTransientScale() {
+  const track = state.currentTrack;
+  if (!track) return 1;
+  const mime = (track.mime_type || "").toLowerCase();
+  const name = (track.original_name || "").toLowerCase();
+  if (mime.includes("wav") || name.endsWith(".wav") || mime.includes("flac") || name.endsWith(".flac")) return 0.72;
+  const bytes = Number(track.file_size_bytes || 0);
+  const seconds = Number(track.duration_seconds || 0);
+  if (bytes > 0 && seconds > 0) {
+    const kbps = (bytes * 8) / seconds / 1000;
+    if (kbps < 192) return 1.12;
+    if (kbps < 256) return 1.0;
+    return 0.88;
+  }
+  return 0.92;
+}
+function applyTransientSettings(now: number, active: boolean) {
+  if (!transientProcessorNode) return;
+  const enabled = workletParam(transientProcessorNode, "enabled");
+  const amount = workletParam(transientProcessorNode, "amount");
+  const presetAmount = professionalProcessingRequested() ? currentProPreset().transientAmount : 0;
+  if (enabled) setAudioParam(enabled, active && presetAmount > 0.001 ? 1 : 0, now, 0.02);
+  if (amount) setAudioParam(amount, Math.max(0, Math.min(1, presetAmount * sourceTransientScale())), now, 0.035);
+}
+
 function applyLimiterSettings(now: number, limiterActive: boolean) {
   if (limiterWorkletNode) {
     const enabled = workletParam(limiterWorkletNode, "enabled");
     const ceiling = workletParam(limiterWorkletNode, "ceilingDb");
     const release = workletParam(limiterWorkletNode, "releaseMs");
     if (enabled) setAudioParam(enabled, limiterActive ? 1 : 0, now, 0.01);
-    if (ceiling) setAudioParam(ceiling, -0.7, now, 0.02);
-    if (release) setAudioParam(release, state.outputProfile === "speaker" ? 120 : 92, now, 0.03);
+    if (ceiling) setAudioParam(ceiling, state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0, now, 0.02);
+    if (release) setAudioParam(release, state.outputProfile === "speaker" ? 125 : state.outputProfile === "car_hifi" ? 88 : 98, now, 0.03);
   }
   if (limiterFallbackNode) {
     if (limiterActive) {
@@ -894,6 +995,7 @@ function applyProcessingSettings() {
   if (preampGain) setAudioParam(preampGain.gain, dbToGain(effectivePreampDb), now, 0.018);
   if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb), now, 0.025);
 
+  applyTransientSettings(now, processed);
   applyHeadphoneSettings(now);
   applyLimiterSettings(now, !pureReference && state.limiterEnabled);
 
@@ -917,6 +1019,7 @@ function releaseGraph() {
     masterVolumeGain,
     referenceRouteGain,
     preampGain,
+    transientProcessorNode,
     professionalHighpass,
     professionalLowShelf,
     professionalHighShelf,
@@ -953,6 +1056,9 @@ function releaseGraph() {
     limiterWorkletNode,
     limiterFallbackNode,
     analyserNode,
+    referenceLevelAnalyser,
+    processedLevelAnalyser,
+    levelMeterSink,
     musicGain,
   ].forEach(disconnectNode);
   professionalPeakFilters.forEach(disconnectNode);
@@ -961,11 +1067,13 @@ function releaseGraph() {
   masterVolumeGain = null;
   referenceRouteGain = null;
   preampGain = null;
+  transientProcessorNode = null;
   professionalHighpass = null;
   professionalLowShelf = null;
   professionalPeakFilters = [];
   professionalHighShelf = null;
   equalizerFilters = [];
+  linearPhaseEqNode = null;
   outputHighpass = null;
   outputLowShelf = null;
   outputPresence = null;
@@ -999,8 +1107,15 @@ function releaseGraph() {
   limiterWorkletNode = null;
   limiterFallbackNode = null;
   analyserNode = null;
+  referenceLevelAnalyser = null;
+  processedLevelAnalyser = null;
+  levelMeterSink = null;
   musicGain = null;
   analyserBuffer = null;
+  if (levelMeterTimer && typeof window !== "undefined") window.clearInterval(levelMeterTimer);
+  levelMeterTimer = 0;
+  lastReferenceRmsDb = Number.NaN;
+  lastProcessedRmsDb = Number.NaN;
   mediaSourceConnected = false;
   graphBuildPromise = null;
   if (state.dspEngineMode !== "unavailable" || state.immersionStatus !== "bypassed") {
@@ -1176,10 +1291,18 @@ async function connectMusicGraph() {
       analyserNode.maxDecibels = -10;
       musicGain = context.createGain();
       musicGain.gain.value = 1;
+      referenceLevelAnalyser = context.createAnalyser();
+      processedLevelAnalyser = context.createAnalyser();
+      referenceLevelAnalyser.fftSize = 2048;
+      processedLevelAnalyser.fftSize = 2048;
+      levelMeterSink = context.createGain();
+      levelMeterSink.gain.value = 0;
 
       let engineMode: MusicDspEngineMode = "native_fallback";
       if (advancedDsp) {
         try {
+          transientProcessorNode = new AudioWorkletNode(context, "mvp-transient-processor", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: "max" });
+          linearPhaseEqNode = new AudioWorkletNode(context, "mvp-linear-phase-eq", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 2, channelCountMode: "max" });
           headphoneProcessorNode = new AudioWorkletNode(context, "mvp-headphone-processor", {
             numberOfInputs: 1,
             numberOfOutputs: 1,
@@ -1197,6 +1320,8 @@ async function connectMusicGraph() {
           engineMode = "advanced_worklet";
         } catch (error) {
           console.warn("Advanced DSP nodes failed; using native fallback.", error);
+          transientProcessorNode = null;
+          linearPhaseEqNode = null;
           headphoneProcessorNode = null;
           limiterWorkletNode = null;
         }
@@ -1213,6 +1338,10 @@ async function connectMusicGraph() {
 
       masterVolumeGain.connect(preampGain);
       let processedTail: AudioNode = preampGain;
+      if (transientProcessorNode) {
+        processedTail.connect(transientProcessorNode);
+        processedTail = transientProcessorNode;
+      }
       const professionalNodes = [
         professionalHighpass,
         professionalLowShelf,
@@ -1227,6 +1356,10 @@ async function connectMusicGraph() {
         processedTail.connect(filter);
         processedTail = filter;
       });
+      if (linearPhaseEqNode) {
+        processedTail.connect(linearPhaseEqNode);
+        processedTail = linearPhaseEqNode;
+      }
       const outputNodes = [outputHighpass, outputLowShelf, outputPresence, outputClarity, outputHighShelf].filter(
         (node): node is BiquadFilterNode => Boolean(node),
       );
@@ -1257,6 +1390,13 @@ async function connectMusicGraph() {
       limiterTail.connect(analyserNode);
       analyserNode.connect(musicGain);
       musicGain.connect(context.destination);
+      if (referenceLevelAnalyser && processedLevelAnalyser && levelMeterSink) {
+        masterVolumeGain.connect(referenceLevelAnalyser);
+        referenceLevelAnalyser.connect(levelMeterSink);
+        makeupGain.connect(processedLevelAnalyser);
+        processedLevelAnalyser.connect(levelMeterSink);
+        levelMeterSink.connect(context.destination);
+      }
 
       mediaSourceConnected = true;
       audio.volume = 1;
@@ -1273,11 +1413,38 @@ async function connectMusicGraph() {
     if (!mediaSourceConnected) graphBuildPromise = null;
   }
 }
+function rmsDbFromAnalyser(analyser: AnalyserNode) {
+  const values = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(values);
+  let sum = 0;
+  for (let index = 0; index < values.length; index += 1) sum += values[index] * values[index];
+  return gainToDb(Math.sqrt(sum / Math.max(1, values.length)));
+}
+function startLevelMeter() {
+  if (typeof window === "undefined" || levelMeterTimer) return;
+  levelMeterTimer = window.setInterval(() => {
+    if (!state.playing || !referenceLevelAnalyser || !processedLevelAnalyser) return;
+    const referenceDb = rmsDbFromAnalyser(referenceLevelAnalyser);
+    if (Number.isFinite(referenceDb) && referenceDb > -80) {
+      lastReferenceRmsDb = Number.isFinite(lastReferenceRmsDb) ? lastReferenceRmsDb * 0.86 + referenceDb * 0.14 : referenceDb;
+    }
+    if (state.outputProfile !== "reference" && !state.dspBypass) {
+      const processedDb = rmsDbFromAnalyser(processedLevelAnalyser);
+      if (Number.isFinite(processedDb) && processedDb > -80) {
+        lastProcessedRmsDb = Number.isFinite(lastProcessedRmsDb) ? lastProcessedRmsDb * 0.86 + processedDb * 0.14 : processedDb;
+      }
+    }
+  }, 350);
+}
+
 async function unlockMusicAudio() {
   await connectMusicGraph();
   const context = getAudioContext();
   if (context?.state === "suspended") await context.resume();
-  if (mediaSourceConnected) applyProcessingSettings();
+  if (mediaSourceConnected) {
+    applyProcessingSettings();
+    startLevelMeter();
+  }
 }
 
 function configureMediaSession() {
@@ -1780,26 +1947,18 @@ export function setMusicEqEnabled(enabled: boolean) {
 }
 
 export function applyMusicEqPreset(presetName: MusicEqPreset) {
-  if (presetName === "custom") {
-    savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
-    emit({ eqPreset: presetName });
+  if (!isBuiltInPreset(presetName)) {
+    if (presetName === "custom" || isCustomPresetSlot(presetName)) {
+      savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
+      emit({ eqPreset: presetName });
+    }
     return;
   }
-  const definition = isCustomPresetSlot(presetName)
-    ? readCustomPreset(presetName)
-    : isBuiltInPreset(presetName)
-      ? MUSIC_EQ_PRESETS[presetName]
-      : null;
-  if (!definition) {
-    savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
-    emit({ eqPreset: presetName });
-    return;
-  }
-  const gains = [...definition.gains];
+  const gains = MUSIC_EQ_FREQUENCIES.map(() => 0);
   savePlayerSetting(STORAGE_KEYS.eqPreset, presetName);
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
-  savePlayerSetting(STORAGE_KEYS.preampDb, String(definition.preamp));
-  emit({ eqPreset: presetName, eqGains: gains, preampDb: definition.preamp });
+  savePlayerSetting(STORAGE_KEYS.preampDb, "0");
+  emit({ eqPreset: presetName, eqGains: gains, preampDb: 0, dspVerificationMode: "off" });
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -1811,26 +1970,29 @@ export function saveMusicEqCustomPreset(slot: MusicCustomPresetSlot) {
     preamp: state.preampDb,
   };
   savePlayerSetting(customPresetStorageKey(slot), JSON.stringify(definition));
-  savePlayerSetting(STORAGE_KEYS.eqPreset, slot);
-  emit({ eqPreset: slot });
 }
 
 export function setMusicEqBand(index: number, gainDb: number) {
   if (index < 0 || index >= MUSIC_EQ_FREQUENCIES.length) return;
   const gains = [...state.eqGains];
   gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0));
-  const nextPreset: MusicEqPreset = isCustomPresetSlot(state.eqPreset) ? state.eqPreset : "custom";
-  savePlayerSetting(STORAGE_KEYS.eqPreset, nextPreset);
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
-  emit({ eqPreset: nextPreset, eqGains: gains });
+  emit({ eqGains: gains });
   applyProcessingSettings();
 }
 
 export function setMusicPreamp(preampDb: number) {
   const next = Math.max(-12, Math.min(12, Number(preampDb) || 0));
-  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
   savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
-  emit({ eqPreset: "custom", preampDb: next });
+  emit({ preampDb: next });
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
+export function setMusicEqTopology(topology: MusicEqTopology) {
+  const next: MusicEqTopology = topology === "linear_phase" ? "linear_phase" : "minimum_phase";
+  savePlayerSetting(STORAGE_KEYS.eqTopology, next);
+  emit({ eqTopology: next });
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
