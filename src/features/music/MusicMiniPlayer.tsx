@@ -1296,6 +1296,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [sourcePulse, setSourcePulse] = useState(false);
   const restoredProfileRef = useRef<string>("");
   const heroIdentityRef = useRef<HTMLDivElement | null>(null);
+  const sourceDesktopValueRef = useRef<HTMLSpanElement | null>(null);
+  const sourceMobileValueRef = useRef<HTMLSpanElement | null>(null);
   const heroTitleRef = useRef<HTMLElement | null>(null);
   const heroArtistRef = useRef<HTMLElement | null>(null);
   const heroActionsRef = useRef<HTMLDivElement | null>(null);
@@ -1683,7 +1685,60 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const activePlaylistLabel = player.activePlaylistId
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : "All Uploaded Songs";
-  const activePlaylistMobileLabel = player.activePlaylistId ? "PLAYLIST" : "ALL SONGS";
+  const activePlaylistMobileLabel = activePlaylistLabel;
+
+  useEffect(() => {
+    let frame = 0;
+
+    const fitLabel = (
+      element: HTMLSpanElement | null,
+      maxSize: number,
+      minSize: number
+    ) => {
+      if (!element) return;
+
+      element.style.fontSize = `${maxSize}px`;
+      element.style.letterSpacing = "0.015em";
+
+      let size = maxSize;
+      while (element.scrollWidth > element.clientWidth + 1 && size > minSize) {
+        size = Math.max(minSize, size - 0.25);
+        element.style.fontSize = `${size}px`;
+      }
+
+      if (element.scrollWidth > element.clientWidth + 1) {
+        element.style.letterSpacing = "0";
+      }
+    };
+
+    const fitSourceLabels = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        fitLabel(sourceDesktopValueRef.current, 12, 9.5);
+        fitLabel(sourceMobileValueRef.current, 14, 10.5);
+      });
+    };
+
+    fitSourceLabels();
+
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(fitSourceLabels)
+        : null;
+
+    if (sourceDesktopValueRef.current) observer?.observe(sourceDesktopValueRef.current);
+    if (sourceMobileValueRef.current) observer?.observe(sourceMobileValueRef.current);
+
+    window.addEventListener("resize", fitSourceLabels);
+    window.addEventListener("orientationchange", fitSourceLabels);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", fitSourceLabels);
+      window.removeEventListener("orientationchange", fitSourceLabels);
+    };
+  }, [activePlaylistLabel]);
 
   return (
     <section
@@ -1760,8 +1815,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <span>PLAYING FROM</span>
             <span className="tr-audioQueueSelectorField">
               <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="music" /></i>
-              <span className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--desktop" aria-hidden>{activePlaylistLabel}</span>
-              <span className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--mobile" aria-hidden>{activePlaylistMobileLabel}</span>
+              <span ref={sourceDesktopValueRef} className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--desktop" aria-hidden>{activePlaylistLabel}</span>
+              <span ref={sourceMobileValueRef} className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--mobile" aria-hidden>{activePlaylistMobileLabel}</span>
               <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
@@ -4294,6 +4349,25 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             font-size:13px!important;
             padding:0 9px!important;
           }
+        }
+
+
+        /* V13.8.5 SOURCE LABEL AUTO-FIT */
+        .tr-audioQueueSelectorValue{
+          text-transform:none!important;
+          min-width:0!important;
+          max-width:none!important;
+          white-space:nowrap!important;
+          overflow:hidden!important;
+          text-overflow:clip!important;
+          line-height:1!important;
+          font-weight:950!important;
+        }
+
+        /* Only fall back to an ellipsis if an unusually long name still cannot fit at the safe minimum. */
+        .tr-audioQueueSelectorValue[style*="10.5px"],
+        .tr-audioQueueSelectorValue[style*="9.5px"]{
+          text-overflow:ellipsis!important;
         }
 
       `}</style>
