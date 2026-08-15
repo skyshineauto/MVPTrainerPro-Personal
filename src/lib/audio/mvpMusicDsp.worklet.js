@@ -393,7 +393,296 @@ class MvpLookaheadLimiterProcessor extends AudioWorkletProcessor {
   }
 }
 
+class MvpBiquad {
+  constructor(type, frequency, q = 0.70710678, gainDb = 0) {
+    this.type = type;
+    this.frequency = frequency;
+    this.q = q;
+    this.gainDb = gainDb;
+    this.x1 = 0;
+    this.x2 = 0;
+    this.y1 = 0;
+    this.y2 = 0;
+    this.update();
+  }
+
+  update() {
+    const frequency = Math.max(10, Math.min(sampleRate * 0.45, this.frequency));
+    const omega = 2 * Math.PI * frequency / sampleRate;
+    const cos = Math.cos(omega);
+    const sin = Math.sin(omega);
+    const q = Math.max(0.05, this.q);
+    const alpha = sin / (2 * q);
+    let b0 = 1;
+    let b1 = 0;
+    let b2 = 0;
+    let a0 = 1;
+    let a1 = 0;
+    let a2 = 0;
+
+    if (this.type === "lowpass") {
+      b0 = (1 - cos) * 0.5;
+      b1 = 1 - cos;
+      b2 = (1 - cos) * 0.5;
+      a0 = 1 + alpha;
+      a1 = -2 * cos;
+      a2 = 1 - alpha;
+    } else if (this.type === "highpass") {
+      b0 = (1 + cos) * 0.5;
+      b1 = -(1 + cos);
+      b2 = (1 + cos) * 0.5;
+      a0 = 1 + alpha;
+      a1 = -2 * cos;
+      a2 = 1 - alpha;
+    } else if (this.type === "highshelf") {
+      const A = Math.pow(10, this.gainDb / 40);
+      const beta = 2 * Math.sqrt(A) * alpha;
+      b0 = A * ((A + 1) + (A - 1) * cos + beta);
+      b1 = -2 * A * ((A - 1) + (A + 1) * cos);
+      b2 = A * ((A + 1) + (A - 1) * cos - beta);
+      a0 = (A + 1) - (A - 1) * cos + beta;
+      a1 = 2 * ((A - 1) - (A + 1) * cos);
+      a2 = (A + 1) - (A - 1) * cos - beta;
+    }
+
+    this.b0 = b0 / a0;
+    this.b1 = b1 / a0;
+    this.b2 = b2 / a0;
+    this.a1 = a1 / a0;
+    this.a2 = a2 / a0;
+  }
+
+  process(input) {
+    const output = this.b0 * input + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2;
+    this.x2 = this.x1;
+    this.x1 = input;
+    this.y2 = this.y1;
+    this.y1 = output;
+    return output;
+  }
+
+  reset() {
+    this.x1 = this.x2 = this.y1 = this.y2 = 0;
+  }
+}
+
+class MvpMultibandProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: "enabled", defaultValue: 1, minValue: 0, maxValue: 1, automationRate: "k-rate" },
+      { name: "amount", defaultValue: 0.34, minValue: 0, maxValue: 1, automationRate: "k-rate" },
+    ];
+  }
+
+  constructor() {
+    super();
+    this.crossovers = [120, 500, 4000];
+    this.filters = [0, 1].map(() => ({
+      low120a: new MvpBiquad("lowpass", 120),
+      low120b: new MvpBiquad("lowpass", 120),
+      low500a: new MvpBiquad("lowpass", 500),
+      low500b: new MvpBiquad("lowpass", 500),
+      low4000a: new MvpBiquad("lowpass", 4000),
+      low4000b: new MvpBiquad("lowpass", 4000),
+    }));
+    this.bandGain = new Float64Array([1, 1, 1, 1]);
+    this.bandEnvelope = new Float64Array(4);
+  }
+
+  param(parameters, name, index) {
+    const values = parameters[name];
+    if (!values || values.length === 0) return 0;
+    return values.length === 1 ? values[0] : values[index];
+  }
+
+  split(channel, sample) {
+    const f = this.filters[channel];
+    // Perfect-reconstruction telescoping crossover. With all band gains at unity:
+    // low + (low500-low120) + (low4000-low500) + (input-low4000) === input.
+    // This keeps the multiband stage tonally transparent until gain reduction occurs.
+    const low120 = f.low120b.process(f.low120a.process(sample));
+    const low500 = f.low500b.process(f.low500a.process(sample));
+    const low4000 = f.low4000b.process(f.low4000a.process(sample));
+    return [
+      low120,
+      low500 - low120,
+      low4000 - low500,
+      sample - low4000,
+    ];
+  }
+
+  compressorGain(band, detector, amount) {
+    const thresholds = [-14.0, -17.0, -16.0, -14.5];
+    const ratios = [1.55, 1.42, 1.48, 1.36];
+    const attacks = [0.030, 0.020, 0.010, 0.006];
+    const releases = [0.220, 0.170, 0.125, 0.095];
+    const levelDb = 20 * Math.log10(Math.max(1e-7, detector));
+    const ratio = 1 + (ratios[band] - 1) * amount;
+    let reductionDb = 0;
+    if (levelDb > thresholds[band] && ratio > 1.0001) {
+      const compressedDb = thresholds[band] + (levelDb - thresholds[band]) / ratio;
+      reductionDb = compressedDb - levelDb;
+    }
+    const target = Math.pow(10, reductionDb / 20);
+    const time = target < this.bandGain[band] ? attacks[band] : releases[band];
+    const coeff = Math.exp(-1 / Math.max(1, sampleRate * time));
+    this.bandGain[band] = target + coeff * (this.bandGain[band] - target);
+    return this.bandGain[band];
+  }
+
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    const output = outputs[0];
+    if (!output || output.length === 0) return true;
+    const inL = input[0];
+    const inR = input[1] || input[0];
+    const outL = output[0];
+    const outR = output[1] || output[0];
+    if (!inL || !outL) return true;
+
+    for (let i = 0; i < outL.length; i += 1) {
+      const left = inL[i] || 0;
+      const right = inR ? inR[i] || 0 : left;
+      const enabled = this.param(parameters, "enabled", i) >= 0.5;
+      const amount = Math.max(0, Math.min(1, this.param(parameters, "amount", i)));
+      if (!enabled || amount <= 0.0001) {
+        // Keep crossover state warm so toggling the stage does not create a stale-filter transient.
+        this.split(0, left);
+        this.split(1, right);
+        this.bandGain[0] = 1;
+        this.bandGain[1] = 1;
+        this.bandGain[2] = 1;
+        this.bandGain[3] = 1;
+        outL[i] = left;
+        outR[i] = right;
+        continue;
+      }
+
+      const bandsL = this.split(0, left);
+      const bandsR = this.split(1, right);
+      let sumL = 0;
+      let sumR = 0;
+      for (let band = 0; band < 4; band += 1) {
+        const detector = Math.max(Math.abs(bandsL[band]), Math.abs(bandsR[band]));
+        const gain = this.compressorGain(band, detector, amount);
+        sumL += bandsL[band] * gain;
+        sumR += bandsR[band] * gain;
+      }
+      outL[i] = sumL;
+      outR[i] = sumR;
+    }
+    return true;
+  }
+}
+
+class MvpLoudnessNormalizerProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: "enabled", defaultValue: 1, minValue: 0, maxValue: 1, automationRate: "k-rate" },
+      { name: "targetLufs", defaultValue: -14, minValue: -20, maxValue: -9, automationRate: "k-rate" },
+    ];
+  }
+
+  constructor() {
+    super();
+    this.kShelfL = new MvpBiquad("highshelf", 1681.974, 0.707, 4.0);
+    this.kShelfR = new MvpBiquad("highshelf", 1681.974, 0.707, 4.0);
+    this.kHighL = new MvpBiquad("highpass", 38.135, 0.5);
+    this.kHighR = new MvpBiquad("highpass", 38.135, 0.5);
+    this.meanSquare = 0;
+    this.gain = 1;
+    this.samplesSeen = 0;
+    this.reportCounter = 0;
+    this.lastLufs = -70;
+    this.port.onmessage = (event) => {
+      if (event.data?.type === "reset") this.reset();
+    };
+  }
+
+  reset() {
+    this.kShelfL.reset();
+    this.kShelfR.reset();
+    this.kHighL.reset();
+    this.kHighR.reset();
+    this.meanSquare = 0;
+    this.gain = 1;
+    this.samplesSeen = 0;
+    this.lastLufs = -70;
+  }
+
+  param(parameters, name, index) {
+    const values = parameters[name];
+    if (!values || values.length === 0) return 0;
+    return values.length === 1 ? values[0] : values[index];
+  }
+
+  process(inputs, outputs, parameters) {
+    const signal = inputs[0];
+    const detectorInput = inputs[1] && inputs[1][0] ? inputs[1] : signal;
+    const output = outputs[0];
+    if (!output || output.length === 0) return true;
+    const inL = signal[0];
+    const inR = signal[1] || signal[0];
+    const detL = detectorInput[0];
+    const detR = detectorInput[1] || detectorInput[0];
+    const outL = output[0];
+    const outR = output[1] || output[0];
+    if (!inL || !outL) return true;
+
+    const energyCoeff = 1 - Math.exp(-1 / (sampleRate * 3.0));
+    for (let i = 0; i < outL.length; i += 1) {
+      const left = inL[i] || 0;
+      const right = inR ? inR[i] || 0 : left;
+      const dLeft = detL ? detL[i] || 0 : left;
+      const dRight = detR ? detR[i] || 0 : dLeft;
+      const enabled = this.param(parameters, "enabled", i) >= 0.5;
+      const targetLufs = this.param(parameters, "targetLufs", i);
+
+      if (!enabled) {
+        this.gain += (1 - this.gain) * 0.0008;
+        outL[i] = left;
+        outR[i] = right;
+        continue;
+      }
+
+      const weightedL = this.kHighL.process(this.kShelfL.process(dLeft));
+      const weightedR = this.kHighR.process(this.kShelfR.process(dRight));
+      const energy = 0.5 * (weightedL * weightedL + weightedR * weightedR);
+      this.meanSquare += energyCoeff * (energy - this.meanSquare);
+      this.samplesSeen += 1;
+
+      const lufs = -0.691 + 10 * Math.log10(Math.max(1e-12, this.meanSquare));
+      this.lastLufs = lufs;
+      let targetGainDb = 0;
+      if (this.samplesSeen > sampleRate * 0.75 && lufs > -55) {
+        targetGainDb = Math.max(-8, Math.min(6, targetLufs - lufs));
+      }
+      const targetGain = Math.pow(10, targetGainDb / 20);
+      const tau = targetGain < this.gain ? 1.8 : 7.5;
+      const gainCoeff = 1 - Math.exp(-1 / (sampleRate * tau));
+      this.gain += gainCoeff * (targetGain - this.gain);
+
+      outL[i] = left * this.gain;
+      outR[i] = right * this.gain;
+    }
+
+    this.reportCounter += outL.length;
+    if (this.reportCounter >= sampleRate * 1.0) {
+      this.reportCounter = 0;
+      this.port.postMessage({
+        type: "telemetry",
+        gainDb: 20 * Math.log10(Math.max(1e-6, this.gain)),
+        lufs: this.lastLufs,
+      });
+    }
+    return true;
+  }
+}
+
+
 registerProcessor("mvp-transient-processor", MvpTransientProcessor);
 registerProcessor("mvp-linear-phase-eq", MvpLinearPhaseEqProcessor);
 registerProcessor("mvp-headphone-processor", MvpHeadphoneProcessor);
 registerProcessor("mvp-lookahead-limiter", MvpLookaheadLimiterProcessor);
+registerProcessor("mvp-multiband-processor", MvpMultibandProcessor);
+registerProcessor("mvp-loudness-normalizer", MvpLoudnessNormalizerProcessor);
