@@ -1683,6 +1683,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const activePlaylistLabel = player.activePlaylistId
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : "All Uploaded Songs";
+  const activePlaylistMobileLabel = player.activePlaylistId ? activePlaylistLabel : "ALL";
 
   return (
     <section
@@ -1759,7 +1760,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <span>PLAYING FROM</span>
             <span className="tr-audioQueueSelectorField">
               <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="music" /></i>
-              <span className="tr-audioQueueSelectorValue" aria-hidden>{activePlaylistLabel}</span>
+              <span className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--desktop" aria-hidden>{activePlaylistLabel}</span>
+              <span className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--mobile" aria-hidden>{activePlaylistMobileLabel}</span>
               <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
@@ -3999,6 +4001,163 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-playerModeStage .tr-audioModeButton{padding:0 24px 0 9px!important}
           .tr-playerModeStage .tr-audioModeButton>span{font-size:8.6px!important}
           .tr-audioQueueSelectorValue{font-size:11.4px!important;padding:0 6px!important}
+        }
+
+
+        /* V13.8.3 MOBILE CONTROL LAYOUT — STRUCTURAL FIX */
+        .tr-audioQueueSelectorValue--mobile{display:none!important}
+
+        /* Force both mode controls to remain real, centered grid items. */
+        .tr-playerModeStage .tr-audioModeButton.is-repeat,
+        .tr-playerModeStage .tr-audioModeButton.is-shuffle{
+          display:grid!important;
+          position:relative!important;
+          inset:auto!important;
+          float:none!important;
+          visibility:visible!important;
+          opacity:1!important;
+          transform:none!important;
+          grid-column:auto!important;
+          grid-row:auto!important;
+          order:0!important;
+        }
+
+        @media(max-width:900px){
+          /* Repeat + Shuffle are always a centered matched pair on phone/tablet layouts. */
+          .tr-playerModeStage{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:calc(100% - 24px)!important;
+            max-width:520px!important;
+            margin:8px auto 12px!important;
+            padding:0!important;
+            gap:10px!important;
+            justify-content:center!important;
+            align-items:stretch!important;
+            overflow:visible!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton.is-repeat,
+          .tr-playerModeStage .tr-audioModeButton.is-shuffle{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:46px!important;
+            min-height:46px!important;
+            padding:0 34px 0 13px!important;
+            grid-template-columns:18px minmax(0,1fr)!important;
+            column-gap:8px!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton>span{
+            text-align:left!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+          }
+
+          /* Do not crush PLAYING FROM beside DSP/EQ on mobile. Stack both at full width. */
+          .tr-playerUtilityRow{
+            grid-template-columns:1fr!important;
+            width:calc(100% - 24px)!important;
+            margin-left:auto!important;
+            margin-right:auto!important;
+            gap:12px!important;
+          }
+          .tr-playerSourceTools{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            max-width:none!important;
+            gap:10px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+          }
+          .tr-audioQueueSelectorField{
+            width:100%!important;
+            height:50px!important;
+            min-height:50px!important;
+            grid-template-columns:42px minmax(0,1fr) 42px!important;
+          }
+          .tr-audioQueueSelectorField .tr-sourceIcon,
+          .tr-audioQueueSelectorField .tr-sourceChevron{
+            width:42px!important;
+          }
+          .tr-audioQueueSelectorValue{
+            left:42px!important;
+            right:42px!important;
+            padding:0 12px!important;
+            font-size:14px!important;
+            font-weight:950!important;
+            letter-spacing:.015em!important;
+          }
+          .tr-audioQueueSelectorValue--desktop{display:none!important}
+          .tr-audioQueueSelectorValue--mobile{display:flex!important}
+          .tr-playerSourceTools .tr-dspStatusToggle{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:50px!important;
+            min-height:50px!important;
+          }
+        }
+
+        @media(max-width:650px){
+          .tr-playerModeStage{
+            width:calc(100% - 24px)!important;
+            gap:8px!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton.is-repeat,
+          .tr-playerModeStage .tr-audioModeButton.is-shuffle{
+            height:48px!important;
+            min-height:48px!important;
+          }
+          .tr-playerTransportStage .tr-audioTransportFace svg{
+            width:25px!important;
+            height:25px!important;
+          }
+          .tr-audioQueueSelectorValue{
+            font-size:13.5px!important;
+          }
+        }
+
+        @media(max-width:390px){
+          .tr-playerModeStage{gap:7px!important}
+          .tr-playerModeStage .tr-audioModeButton.is-repeat,
+          .tr-playerModeStage .tr-audioModeButton.is-shuffle{
+            padding:0 30px 0 11px!important;
+            column-gap:7px!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton>span{
+            font-size:9.4px!important;
+          }
+          .tr-playerModeStage .tr-modeState{
+            right:8px!important;
+            font-size:6.8px!important;
+          }
+          .tr-audioQueueSelectorValue{
+            font-size:13px!important;
+            padding:0 9px!important;
+          }
+        }
+
+        @media(max-width:350px){
+          .tr-playerModeStage{
+            width:calc(100% - 20px)!important;
+            gap:6px!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton.is-repeat,
+          .tr-playerModeStage .tr-audioModeButton.is-shuffle{
+            padding:0 27px 0 9px!important;
+            column-gap:5px!important;
+          }
+          .tr-playerModeStage .tr-audioModeButton>span{
+            font-size:8.8px!important;
+          }
+          .tr-audioQueueSelectorValue{
+            font-size:12.4px!important;
+            padding:0 7px!important;
+          }
         }
 
       `}</style>
