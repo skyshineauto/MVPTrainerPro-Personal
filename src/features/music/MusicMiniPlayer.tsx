@@ -1956,13 +1956,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
           <div className="tr-audioEqScroll" aria-label="31 band user offset equalizer">
             <div className="tr-audioEqBands tr-audioEqBands--31">
-              {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
-                <label key={frequency} className="tr-audioEqBand">
-                  <span className="tr-audioEqGain">{Number(player.eqGains[index] || 0) > 0 ? "+" : ""}{Number(player.eqGains[index] || 0).toFixed(0)}</span>
-                  <span className="tr-audioEqSliderShell"><input type="range" min="-12" max="12" step="0.5" value={player.eqGains[index] || 0} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqBand(index, Number(event.target.value)), true)} aria-label={`${frequency} hertz equalizer gain`} /></span>
-                  <span>{formatHz(frequency)}</span>
-                </label>
-              ))}
+              {MUSIC_EQ_FREQUENCIES.map((frequency, index) => {
+                const gain = Number(player.eqGains[index] ?? 0);
+                return (
+                  <label key={frequency} className="tr-audioEqBand" data-band-index={index} data-frequency={frequency}>
+                    <span className="tr-audioEqGain">{gain > 0 ? "+" : ""}{gain.toFixed(1)} dB</span>
+                    <span className="tr-audioEqSliderShell">
+                      <input type="range" min="-12" max="12" step="0.5" value={gain} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqBand(index, Number(event.target.value)), true)} aria-label={`${formatHz(frequency)} equalizer gain, ${gain.toFixed(1)} decibels`} />
+                    </span>
+                    <span className="tr-audioEqFrequency">{formatHz(frequency)}</span>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
@@ -4876,6 +4881,109 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-rtaEqCopy,.tr-rtaFidelityHead>strong>b{display:none!important}
           .tr-rtaSourceQuality{font-size:5.9px!important}
           .tr-rtaFidelityHead>strong{gap:3px!important}
+        }
+
+        /* V13.9.13 31-BAND EQ GEOMETRY LOCK: one gain + one centered slider + one label per frequency */
+        .tr-audioEqBands--31{
+          display:grid!important;
+          grid-template-columns:repeat(31,48px)!important;
+          grid-auto-columns:48px!important;
+          gap:6px!important;
+          width:max-content!important;
+          min-width:max-content!important;
+          padding:0 6px!important;
+          align-items:stretch!important;
+          box-sizing:border-box!important;
+        }
+        .tr-audioEqBands--31 .tr-audioEqBand{
+          position:relative!important;
+          width:48px!important;
+          min-width:48px!important;
+          max-width:48px!important;
+          height:178px!important;
+          padding:7px 2px 6px!important;
+          margin:0!important;
+          display:grid!important;
+          grid-template-rows:24px 126px 15px!important;
+          justify-items:center!important;
+          align-items:center!important;
+          gap:0!important;
+          box-sizing:border-box!important;
+          overflow:visible!important;
+          text-align:center!important;
+        }
+        .tr-audioEqBands--31 .tr-audioEqGain{
+          display:block!important;
+          width:100%!important;
+          min-width:0!important;
+          margin:0!important;
+          padding:0!important;
+          align-self:center!important;
+          justify-self:center!important;
+          text-align:center!important;
+          color:#ff9f2f!important;
+          font-size:7.5px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:-.02em!important;
+          white-space:nowrap!important;
+          font-variant-numeric:tabular-nums!important;
+          text-shadow:0 0 8px rgba(255,159,47,.16)!important;
+        }
+        .tr-audioEqBands--31 .tr-audioEqSliderShell{
+          position:relative!important;
+          display:block!important;
+          width:48px!important;
+          min-width:48px!important;
+          max-width:48px!important;
+          height:126px!important;
+          margin:0!important;
+          padding:0!important;
+          justify-self:center!important;
+          align-self:center!important;
+          overflow:visible!important;
+          box-sizing:border-box!important;
+        }
+        .tr-audioEqBands--31 .tr-audioEqSliderShell input[type="range"]{
+          position:absolute!important;
+          inset:auto!important;
+          left:50%!important;
+          top:50%!important;
+          right:auto!important;
+          bottom:auto!important;
+          width:112px!important;
+          min-width:112px!important;
+          max-width:112px!important;
+          height:18px!important;
+          margin:0!important;
+          padding:0!important;
+          transform:translate(-50%,-50%) rotate(-90deg)!important;
+          transform-origin:50% 50%!important;
+          accent-color:#43d3ff!important;
+          box-sizing:border-box!important;
+          cursor:pointer!important;
+          z-index:2!important;
+        }
+        .tr-audioEqBands--31 .tr-audioEqFrequency{
+          display:block!important;
+          width:100%!important;
+          min-width:0!important;
+          margin:0!important;
+          padding:0!important;
+          align-self:end!important;
+          justify-self:center!important;
+          text-align:center!important;
+          color:#ffffff!important;
+          font-size:8px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.01em!important;
+          white-space:nowrap!important;
+          text-shadow:0 0 8px rgba(255,255,255,.14)!important;
+        }
+        @media(max-width:700px){
+          .tr-audioEqBands--31{grid-template-columns:repeat(31,48px)!important;grid-auto-columns:48px!important;min-width:max-content!important;width:max-content!important}
+          .tr-audioEqBands--31 .tr-audioEqBand{width:48px!important;min-width:48px!important;max-width:48px!important}
         }
       `}</style>
     </section>
