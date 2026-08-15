@@ -3,6 +3,16 @@ import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import { inferSymptomKey, isSymptomMode, type SymptomKey } from "../../lib/sessionLabel";
 import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
+import {
+  APP_BRANDING_CHANGED_EVENT,
+  fetchCurrentWeather,
+  formatWeatherLocalTime,
+  getAppBrandingWeatherSettings,
+  getHeaderLogoSignedUrl,
+  type AppBrandingWeatherSettings,
+  type CurrentWeatherSnapshot,
+  type WeatherIconKind,
+} from "../../lib/appBrandingWeather";
 
 const LS = {
   isPaused: "mvp_is_paused",
@@ -636,6 +646,340 @@ const HUD_FORCE_CSS = `
 `;
 
 
+
+function HeaderWeatherIcon({
+  kind,
+  isDay,
+}: {
+  kind: WeatherIconKind;
+  isDay: boolean;
+}) {
+  const cloud = (
+    <path d="M7.2 18.2h9.8a4 4 0 0 0 .35-7.98A5.4 5.4 0 0 0 7.1 8.65 4.8 4.8 0 0 0 7.2 18.2Z" />
+  );
+
+  if (kind === "clear") {
+    return isDay ? (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.2v2.1M12 19.7v2.1M2.2 12h2.1M19.7 12h2.1M5.1 5.1l1.5 1.5M17.4 17.4l1.5 1.5M18.9 5.1l-1.5 1.5M6.6 17.4l-1.5 1.5" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18.8 15.5A7.8 7.8 0 0 1 8.5 5.2 7.9 7.9 0 1 0 18.8 15.5Z" />
+      </svg>
+    );
+  }
+
+  if (kind === "partly_cloudy") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {isDay ? <circle cx="8" cy="8" r="3" /> : <path d="M10.2 9.6A4.4 4.4 0 0 1 6.4 4a4.7 4.7 0 0 0 3.8 7.4" />}
+        {cloud}
+      </svg>
+    );
+  }
+
+  if (kind === "fog") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {cloud}
+        <path d="M5 20.5h14M7 23h10" />
+      </svg>
+    );
+  }
+
+  if (kind === "drizzle" || kind === "rain") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {cloud}
+        <path d={kind === "drizzle" ? "M8 20.5l-.5 1M12 20.5l-.5 1M16 20.5l-.5 1" : "M8.5 20l-1 2M12.5 20l-1 2M16.5 20l-1 2"} />
+      </svg>
+    );
+  }
+
+  if (kind === "snow") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {cloud}
+        <path d="M8 20.5v2M7 21.5h2M12 20.5v2M11 21.5h2M16 20.5v2M15 21.5h2" />
+      </svg>
+    );
+  }
+
+  if (kind === "storm") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        {cloud}
+        <path d="m13.3 18.2-3 4.2h2.6l-1 3.1 4-5.2h-2.7l.1-2.1Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">{cloud}</svg>
+  );
+}
+
+const APP_HEADER_CSS = `
+.tr-appHeader{
+  position:relative;
+  z-index:1400;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(260px,360px) minmax(0,1fr);
+  align-items:center;
+  gap:16px;
+  min-height:82px;
+  margin:0 0 18px;
+  overflow:visible;
+}
+.tr-appHeaderWeather{
+  justify-self:start;
+  width:min(100%,310px);
+  min-width:0;
+  min-height:62px;
+  padding:8px 11px;
+  display:grid;
+  align-content:center;
+  gap:5px;
+  border:1px solid rgba(72,203,244,.30);
+  border-radius:14px;
+  background:
+    radial-gradient(250px 80px at 0 0,rgba(0,181,242,.13),transparent 72%),
+    linear-gradient(180deg,rgba(10,27,36,.96),rgba(4,12,17,.98));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 8px 24px rgba(0,0,0,.28);
+  color:#eafaff;
+  text-align:left;
+  cursor:pointer;
+}
+.tr-appHeaderWeather:hover,
+.tr-appHeaderWeather:focus-visible{
+  border-color:rgba(84,220,255,.58);
+  outline:none;
+}
+.tr-appHeaderWeatherMain{
+  min-width:0;
+  display:grid;
+  grid-template-columns:30px auto minmax(0,1fr);
+  align-items:center;
+  gap:8px;
+  white-space:nowrap;
+}
+.tr-appHeaderWeatherIcon{
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  color:#63dcff;
+  filter:drop-shadow(0 0 9px rgba(50,205,248,.28));
+}
+.tr-appHeaderWeatherIcon svg{
+  width:27px;
+  height:27px;
+  overflow:visible;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.75;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.tr-appHeaderWeatherTemp{
+  color:#fff;
+  font-size:22px;
+  line-height:1;
+  font-weight:1100;
+  letter-spacing:-.025em;
+  font-variant-numeric:tabular-nums;
+}
+.tr-appHeaderWeatherTime{
+  min-width:0;
+  color:#ffe18a;
+  font-size:13px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.025em;
+  font-variant-numeric:tabular-nums;
+}
+.tr-appHeaderWeatherDetail{
+  min-width:0;
+  color:rgba(215,234,242,.82);
+  font-size:9px;
+  line-height:1.08;
+  font-weight:950;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+.tr-appHeaderWeatherDetail b{color:#fff;font-weight:1100}
+.tr-appHeaderBrand{
+  justify-self:center;
+  width:100%;
+  height:76px;
+  min-width:0;
+  display:grid;
+  place-items:center;
+  overflow:visible;
+  pointer-events:none;
+}
+.tr-appHeaderBrand img{
+  display:block;
+  width:auto;
+  height:auto;
+  max-width:100%;
+  max-height:76px;
+  object-fit:contain;
+  object-position:center;
+  overflow:visible;
+  filter:drop-shadow(0 4px 12px rgba(0,0,0,.58)) drop-shadow(0 0 10px rgba(34,163,255,.13));
+}
+.tr-appHeaderBrandFallback{
+  color:#ffe36f;
+  font-size:23px;
+  font-weight:1100;
+  letter-spacing:.035em;
+  white-space:nowrap;
+  text-shadow:0 2px 0 rgba(0,0,0,.75),0 0 18px rgba(255,215,71,.16);
+}
+.tr-appHeaderActions{
+  justify-self:end;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  overflow:visible;
+}
+.tr-appHeaderWorkout,
+.tr-appHeaderMenuButton{
+  min-height:40px;
+  padding:0 12px;
+  border:1px solid rgba(115,191,219,.27);
+  border-radius:10px;
+  background:linear-gradient(180deg,#0b1b23,#061016);
+  color:#fff;
+  font-size:10px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.04em;
+  white-space:nowrap;
+  cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 6px 18px rgba(0,0,0,.24);
+}
+.tr-appHeaderWorkout{
+  border-color:rgba(255,173,52,.48);
+  background:linear-gradient(180deg,rgba(74,42,6,.97),rgba(26,16,5,.99));
+  color:#ffd483;
+}
+.tr-appHeaderWorkout.is-resume{
+  border-color:rgba(55,220,130,.48);
+  background:linear-gradient(180deg,rgba(13,64,43,.98),rgba(5,29,21,.99));
+  color:#8df0b7;
+}
+.tr-appHeaderWorkout:hover,
+.tr-appHeaderMenuButton:hover,
+.tr-appHeaderWorkout:focus-visible,
+.tr-appHeaderMenuButton:focus-visible{
+  outline:none;
+  filter:brightness(1.12);
+}
+.tr-appHeaderMenuWrap{position:relative;flex:0 0 auto}
+.tr-appHeaderMenuButton--mobile{display:none}
+.tr-appHeaderMenuButton svg{width:14px;height:14px;fill:currentColor;vertical-align:-2px;margin-right:5px}
+.tr-appHeaderMenu{
+  position:absolute;
+  right:0;
+  top:calc(100% + 8px);
+  z-index:8000;
+  width:190px;
+  padding:7px;
+  display:grid;
+  gap:5px;
+  border:1px solid rgba(91,194,227,.28);
+  border-radius:12px;
+  background:linear-gradient(180deg,#0a1820,#040a0e);
+  box-shadow:0 22px 56px rgba(0,0,0,.64),inset 0 1px 0 rgba(255,255,255,.045);
+}
+.tr-appHeaderMenu button{
+  width:100%;
+  min-height:42px;
+  padding:0 11px;
+  border:1px solid transparent;
+  border-radius:8px;
+  background:transparent;
+  color:#eef9fc;
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.045em;
+  text-align:left;
+  cursor:pointer;
+}
+.tr-appHeaderMenu button:hover{border-color:rgba(75,208,248,.22);background:rgba(28,85,104,.20)}
+.tr-appHeaderMenu button.is-signout{color:#ffaaa4}
+.tr-appHeaderWorkout .tr-mobileOnly{display:none}
+
+@media(max-width:820px){
+  .tr-appHeader{
+    grid-template-columns:minmax(116px,1fr) minmax(120px,1fr) auto;
+    gap:7px;
+    min-height:76px;
+    margin-bottom:14px;
+  }
+  .tr-appHeaderWeather{
+    width:100%;
+    min-height:64px;
+    padding:7px 8px;
+    border-radius:12px;
+    gap:5px;
+  }
+  .tr-appHeaderWeatherMain{grid-template-columns:25px auto minmax(0,1fr);gap:5px}
+  .tr-appHeaderWeatherIcon{width:25px;height:25px}
+  .tr-appHeaderWeatherIcon svg{width:23px;height:23px}
+  .tr-appHeaderWeatherTemp{font-size:18px}
+  .tr-appHeaderWeatherTime{font-size:10px;letter-spacing:0}
+  .tr-appHeaderWeatherDetail{font-size:7.2px;letter-spacing:.018em}
+  .tr-appHeaderBrand{height:68px;min-width:0}
+  .tr-appHeaderBrand img{max-height:66px;max-width:100%}
+  .tr-appHeaderBrandFallback{font-size:15px;white-space:normal;text-align:center;line-height:1.05}
+  .tr-appHeaderActions{gap:5px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:40px;padding:0 8px;font-size:8.5px;border-radius:9px}
+  .tr-appHeaderWorkout .tr-desktopOnly{display:none}
+  .tr-appHeaderWorkout .tr-mobileOnly{display:inline}
+  .tr-appHeaderMenuButton--desktop{display:none}
+  .tr-appHeaderMenuButton--mobile{display:inline-flex;align-items:center;justify-content:center}
+  .tr-appHeaderMenu{width:178px}
+}
+
+@media(max-width:430px){
+  .tr-appHeader{
+    grid-template-columns:minmax(112px,1fr) minmax(112px,1fr) auto;
+    gap:6px;
+    min-height:72px;
+  }
+  .tr-appHeaderWeather{min-height:60px;padding:6px 7px}
+  .tr-appHeaderWeatherMain{grid-template-columns:23px auto minmax(0,1fr);gap:4px}
+  .tr-appHeaderWeatherIcon{width:23px;height:23px}
+  .tr-appHeaderWeatherIcon svg{width:21px;height:21px}
+  .tr-appHeaderWeatherTemp{font-size:17px}
+  .tr-appHeaderWeatherTime{font-size:9px}
+  .tr-appHeaderWeatherDetail{font-size:6.8px;letter-spacing:0}
+  .tr-appHeaderBrand{height:62px}
+  .tr-appHeaderBrand img{max-height:60px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:38px;padding:0 7px;font-size:8px}
+  .tr-appHeaderMenuButton svg{width:12px;height:12px;margin-right:4px}
+}
+
+@media(max-width:365px){
+  .tr-appHeader{
+    grid-template-columns:minmax(102px,1fr) minmax(90px,.9fr) auto;
+    gap:4px;
+  }
+  .tr-appHeaderWeather{padding-left:6px;padding-right:6px}
+  .tr-appHeaderWeatherTemp{font-size:16px}
+  .tr-appHeaderWeatherTime{font-size:8.2px}
+  .tr-appHeaderWeatherDetail{font-size:6.2px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{padding:0 6px;font-size:7.4px}
+}
+`;
+
 const RUNTIME_DIAGNOSTICS_KEY = "mvp_runtime_diagnostics_v1";
 
 type RuntimeDiagnosticsRecord = {
@@ -721,6 +1065,11 @@ export function AppShell({
 
   const [hud, setHud] = useState<Hud>({ mode: "signed_out" });
   const [nowTick, setNowTick] = useState(Date.now());
+  const [branding, setBranding] = useState<AppBrandingWeatherSettings | null>(null);
+  const [headerLogoUrl, setHeaderLogoUrl] = useState<string | null>(null);
+  const [weather, setWeather] = useState<CurrentWeatherSnapshot | null>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef<HTMLDivElement | null>(null);
 
   const pollRef = useRef<any>(null);
   const refreshInFlightRef = useRef(false);
@@ -869,6 +1218,98 @@ export function AppShell({
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setUser(s?.user ?? null));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+
+  useEffect(() => {
+    if (!user?.id) {
+      setBranding(null);
+      setHeaderLogoUrl(null);
+      setWeather(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadBranding = async () => {
+      try {
+        const settings = await getAppBrandingWeatherSettings();
+        if (cancelled) return;
+        setBranding(settings);
+
+        if (settings.headerLogoPath) {
+          try {
+            const url = await getHeaderLogoSignedUrl(settings.headerLogoPath);
+            if (!cancelled) setHeaderLogoUrl(url);
+          } catch {
+            if (!cancelled) setHeaderLogoUrl(null);
+          }
+        } else {
+          setHeaderLogoUrl(null);
+        }
+      } catch (error) {
+        console.warn("Could not load MVP Trainer header branding.", error);
+      }
+    };
+
+    void loadBranding();
+    const onBrandingChanged = () => void loadBranding();
+    window.addEventListener(APP_BRANDING_CHANGED_EVENT, onBrandingChanged);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(APP_BRANDING_CHANGED_EVENT, onBrandingChanged);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const location = branding?.weatherLocation;
+    if (!user?.id || !location) {
+      setWeather(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshWeather = async () => {
+      try {
+        const snapshot = await fetchCurrentWeather(location);
+        if (!cancelled) setWeather(snapshot);
+      } catch (error) {
+        console.warn("Could not refresh MVP Trainer weather.", error);
+      }
+    };
+
+    void refreshWeather();
+    const timer = window.setInterval(refreshWeather, 10 * 60 * 1000);
+    const onFocus = () => void refreshWeather();
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [user?.id, branding?.weatherLocation?.latitude, branding?.weatherLocation?.longitude]);
+
+  useEffect(() => {
+    if (!headerMenuOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !headerMenuRef.current?.contains(target)) {
+        setHeaderMenuOpen(false);
+      }
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHeaderMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [headerMenuOpen]);
 
   useEffect(() => {
     setNowTick(Date.now());
@@ -1350,125 +1791,126 @@ export function AppShell({
 
 
   const clockParts = hud.mode !== "active" ? fmtClockParts(nowTick) : null;
+  const weatherLocation = branding?.weatherLocation ?? null;
+  const weatherTimezone = weather?.timezone || weatherLocation?.timezone || "UTC";
+  const weatherTime = formatWeatherLocalTime(weatherTimezone, new Date(nowTick));
+  const weatherTemp = weather ? `${Math.round(weather.temperatureF)}°` : "--°";
+  const weatherCondition = weather?.condition?.toUpperCase() || (weatherLocation ? "LOADING" : "SET WEATHER");
+  const weatherFeels = weather ? `${Math.round(weather.apparentTemperatureF)}°` : "--°";
+  const weatherCity = weatherLocation?.displayName?.toUpperCase() || "LOCATION";
+  const showHeaderWorkoutAction = hud.mode === "active" && (hud.isPaused || !isWorkoutSession);
+  const headerWorkoutLabel = hud.mode === "active"
+    ? hud.isPaused
+      ? "RESUME"
+      : "RETURN TO WORKOUT"
+    : "";
+
+  const runHeaderWorkoutAction = () => {
+    if (hud.mode !== "active") return;
+    setHeaderMenuOpen(false);
+    if (hud.isPaused) {
+      void onTogglePause();
+      return;
+    }
+    navigate(`/workout/${hud.sessionId}`);
+  };
 
   return (
     <div className="tr-shellRoot">
       <div className="tr-shellInner">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="tr-topTitle">MVP Trainer Pro</div>
-
-          {user ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {user ? (
+          <>
+            <header className="tr-appHeader">
               <button
                 type="button"
-                onClick={() => navigate("/music")}
-                style={{
-                  background: "rgba(255,145,0,.12)",
-                  color: "rgba(255,235,205,.98)",
-                  border: "1px solid rgba(255,145,0,.38)",
-                  borderRadius: 12,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                  letterSpacing: ".06em",
-                }}
-              >
-                MY MUSIC
-              </button>
-
-              <button
-                type="button"
+                className="tr-appHeaderWeather"
                 onClick={() => navigate("/sound-alerts")}
-                style={{
-                  background: "rgba(0,170,255,.10)",
-                  color: "rgba(190,235,255,.96)",
-                  border: "1px solid rgba(0,170,255,.28)",
-                  borderRadius: 12,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                  letterSpacing: ".06em",
-                }}
+                title="Weather location settings"
+                aria-label={`${weatherCondition}, ${weatherTemp}, ${weatherTime}, ${weatherCity}, feels like ${weatherFeels}`}
               >
-                SOUND & ALERTS
+                <span className="tr-appHeaderWeatherMain">
+                  <span className="tr-appHeaderWeatherIcon" aria-hidden="true">
+                    <HeaderWeatherIcon kind={weather?.icon || "cloudy"} isDay={weather?.isDay ?? true} />
+                  </span>
+                  <strong className="tr-appHeaderWeatherTemp">{weatherTemp}</strong>
+                  <span className="tr-appHeaderWeatherTime">{weatherTime}</span>
+                </span>
+                <span className="tr-appHeaderWeatherDetail">
+                  <b>{weatherCondition}</b> · {weatherCity} · FEELS {weatherFeels}
+                </span>
               </button>
 
-              <button
-                type="button"
-                onClick={signOut}
-                disabled={busy}
-                style={{
-                  background: "transparent",
-                  color: "rgba(255,255,255,.85)",
-                  border: "1px solid rgba(255,255,255,.12)",
-                  borderRadius: 12,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                  opacity: busy ? 0.7 : 1,
-                }}
-              >
-                SIGN OUT
-              </button>
-            </div>
-          ) : null}
-        </div>
+              <div className="tr-appHeaderBrand" aria-label="MVP Trainer Pro">
+                {headerLogoUrl ? (
+                  <img src={headerLogoUrl} alt="MVP Trainer Pro" />
+                ) : (
+                  <span className="tr-appHeaderBrandFallback">MVP Trainer Pro</span>
+                )}
+              </div>
 
-        <style>{`
-          .tr-topTitle{
-            font-weight: 1000;
-            font-size: 24px;
-            line-height: 1;
-            letter-spacing: .04em;
-            color: rgba(255,230,120,.98);
-            text-shadow:
-              0 2px 0 rgba(0,0,0,.70),
-              0 0 14px rgba(255,230,120,.18),
-              0 0 28px rgba(0,170,255,.08);
-            position: relative;
-            display: inline-block;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-          }
-          .tr-topTitle::after{
-            content:"";
-            position:absolute;
-            inset:-40% -60%;
-            background: linear-gradient(
-              110deg,
-              transparent 0%,
-              rgba(255,255,255,0) 42%,
-              rgba(255,255,255,.28) 50%,
-              rgba(255,255,255,0) 58%,
-              transparent 100%
-            );
-            transform: translateX(-60%);
-            opacity: .0;
-            pointer-events:none;
-            mix-blend-mode: screen;
-            animation: trTopTitleShimmer 3.8s ease-in-out infinite;
-          }
-          @keyframes trTopTitleShimmer{
-            0%   { transform: translateX(-60%); opacity: .0; }
-            12%  { opacity: .9; }
-            28%  { opacity: .9; }
-            40%  { opacity: .0; }
-            100% { transform: translateX(60%); opacity: .0; }
-          }
-          @media (prefers-reduced-motion: reduce){
-            .tr-topTitle::after{ animation: none; opacity: 0; }
-          }
-        `}</style>
+              <div className="tr-appHeaderActions">
+                {showHeaderWorkoutAction ? (
+                  <button
+                    type="button"
+                    className={`tr-appHeaderWorkout ${hud.mode === "active" && hud.isPaused ? "is-resume" : "is-return"}`}
+                    onClick={runHeaderWorkoutAction}
+                  >
+                    <span className="tr-desktopOnly">{headerWorkoutLabel}</span>
+                    <span className="tr-mobileOnly">{hud.mode === "active" && hud.isPaused ? "RESUME" : "RETURN"}</span>
+                  </button>
+                ) : null}
+
+                <div ref={headerMenuRef} className="tr-appHeaderMenuWrap">
+                  <button
+                    type="button"
+                    className="tr-appHeaderMenuButton tr-appHeaderMenuButton--desktop"
+                    onClick={() => setHeaderMenuOpen((open) => !open)}
+                    aria-expanded={headerMenuOpen}
+                  >
+                    ACCOUNT ▾
+                  </button>
+                  <button
+                    type="button"
+                    className="tr-appHeaderMenuButton tr-appHeaderMenuButton--mobile"
+                    onClick={() => setHeaderMenuOpen((open) => !open)}
+                    aria-expanded={headerMenuOpen}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z" /></svg>
+                    MENU
+                  </button>
+
+                  {headerMenuOpen ? (
+                    <div className="tr-appHeaderMenu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          navigate("/sound-alerts");
+                        }}
+                      >
+                        SOUND & ALERTS
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="is-signout"
+                        disabled={busy}
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          void signOut();
+                        }}
+                      >
+                        {busy ? "SIGNING OUT…" : "SIGN OUT"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </header>
+            <style>{APP_HEADER_CSS}</style>
+          </>
+        ) : null}
 
         {user ? <MusicMiniPlayer navigate={navigate} /> : null}
 
