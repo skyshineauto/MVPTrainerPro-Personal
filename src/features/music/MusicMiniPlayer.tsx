@@ -459,7 +459,7 @@ function MusicActivityRta({
       <canvas ref={canvasRef} />
       <div className="tr-rtaFidelityHead" aria-hidden>
         <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
-        <strong><span className="tr-rtaOutputIcon"><PlayerIcon name={outputProfileIconName(outputProfile)} /></span>{profileLabel}<b>•</b>{eqLabel}</strong>
+        <strong><span className="tr-rtaOutputIcon" data-profile={outputProfile}><PlayerIcon name={outputProfileIconName(outputProfile)} /></span><span className="tr-rtaProfileCopy">{profileLabel}</span><b>•</b>{eqLabel}</strong>
       </div>
       <div className="tr-activityRtaLabels" aria-hidden>
         {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
@@ -1761,10 +1761,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
             </select>
           </label>
-          <button type="button" className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
+          <button type="button" data-profile={player.outputProfile} className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
             <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
             <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
-            <i className={`tr-dspStatusLed ${player.dspStatus === "active" ? "is-live" : ""}`} aria-hidden />
+            <i className={`tr-dspStatusLed is-${player.dspStatus}`} aria-hidden />
           </button>
         </div>
       </div>
@@ -1776,24 +1776,24 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <div className="tr-outputProfilePanel">
             <div className="tr-outputProfileIntro">
               <small>HIGH-FIDELITY OUTPUT</small>
-              <strong className="tr-outputProfileTitle"><span className="tr-outputProfileIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</strong>
+              <strong className="tr-outputProfileTitle"><span className="tr-outputProfileIcon" data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span><span>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</span></strong>
               <p>{MUSIC_OUTPUT_PROFILES[player.outputProfile].description}</p>
             </div>
             <label className="tr-outputProfileSelect">
-              <span className="tr-outputProfileSelectLabel"><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i>OUTPUT PROFILE</span>
+              <span className="tr-outputProfileSelectLabel"><i data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>OUTPUT PROFILE</b></span>
               <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicOutputProfile(event.target.value as MusicOutputProfile)}>
                 {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
               </select>
             </label>
             <div className="tr-outputProfileChoices" aria-label="Output profile quick select">
               {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => (
-                <button key={value} type="button" className={player.outputProfile === value ? "is-active" : ""} onClick={() => setMusicOutputProfile(value)} aria-pressed={player.outputProfile === value}>
+                <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => setMusicOutputProfile(value)} aria-pressed={player.outputProfile === value}>
                   <i><PlayerIcon name={outputProfileIconName(value)} /></i><span>{profile.shortLabel}</span>
                 </button>
               ))}
             </div>
             <div className="tr-outputProfileTelemetry">
-              <span className={`tr-outputProfileTelemetryActive ${player.outputProfile === "car_hifi" ? "is-car" : ""}`}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span>
+              <span className="tr-outputProfileTelemetryActive" data-profile={player.outputProfile}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</b></span>
               <span>AUTO HEADROOM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
               <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
               <span>NORMALIZER <b>OFF</b></span>
@@ -1811,7 +1811,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <button type="button" className={player.dspVerificationMode === "spatial" ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => setMusicDspVerificationMode(player.dspVerificationMode === "spatial" ? "off" : "spatial")}>SPATIAL PROOF</button>
               {player.dspVerificationMode !== "off" ? <button type="button" className="is-reset" onClick={() => setMusicDspVerificationMode("off")}>RESET</button> : null}
             </div>
-            <small>Temporary verification only. EQ PROOF should sound radically thinner through the mids with strong presence. SPATIAL PROOF should immediately open the image. If either sounds unchanged, the DSP path is not reaching the output.</small>
+            <small>Temporary verification only. EQ PROOF should sound radically different. SPATIAL PROOF now uses an intentionally exaggerated asymmetric-delay image, so the spatial change should be unmistakable before final listening levels are judged.</small>
           </section>
 
           <div className="tr-audioEqHead">
@@ -3711,6 +3711,81 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-outputProfileChoices button.is-active{border-color:rgba(73,210,249,.42)!important;color:#dff8ff!important;background:linear-gradient(180deg,rgba(12,55,69,.78),rgba(4,23,31,.92))!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 0 18px rgba(58,205,244,.07)!important}
         .tr-outputProfileChoices button.is-active i{border-color:rgba(76,216,253,.32)!important;color:#9cecff!important;background:rgba(5,45,58,.84)!important}
         @media(max-width:650px){.tr-outputProfileChoices{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tr-outputProfileChoices button{min-height:40px!important;font-size:6.7px!important}}
+
+
+        /* V13.7.2 OUTPUT IDENTITY + STATUS ALIGNMENT */
+        .tr-playerSourceTools .tr-dspStatusToggle{
+          grid-template-columns:29px minmax(0,1fr)!important;
+          gap:11px!important;
+          padding:0 28px 0 11px!important;
+          overflow:hidden!important;
+        }
+        .tr-dspStatusIcon{margin:0!important;justify-self:start!important}
+        .tr-dspStatusCopy{width:100%!important;min-width:0!important;padding:0!important;margin:0!important;overflow:hidden!important}
+        .tr-dspStatusCopy small{max-width:100%!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        .tr-dspStatusLed{
+          position:absolute!important;right:10px!important;top:50%!important;transform:translateY(-50%)!important;
+          width:7px!important;height:7px!important;margin:0!important;justify-self:auto!important;align-self:auto!important;
+          background:#43555c!important;box-shadow:0 0 0 3px rgba(70,91,99,.07)!important;
+        }
+        .tr-dspStatusLed.is-active{background:#56e6b0!important;box-shadow:0 0 9px rgba(86,230,176,.54),0 0 0 3px rgba(86,230,176,.06)!important}
+        .tr-dspStatusLed.is-recovering{background:#ffb84d!important;box-shadow:0 0 9px rgba(255,184,77,.48),0 0 0 3px rgba(255,184,77,.06)!important}
+        .tr-dspStatusLed.is-unavailable{background:#ff626e!important;box-shadow:0 0 9px rgba(255,98,110,.48),0 0 0 3px rgba(255,98,110,.06)!important}
+        .tr-dspStatusLed.is-bypassed{background:#71848c!important;box-shadow:0 0 0 3px rgba(113,132,140,.07)!important}
+
+        .tr-outputProfileTitle{gap:11px!important}
+        .tr-outputProfileSelectLabel{gap:8px!important}
+        .tr-outputProfileSelectLabel>b{font:inherit!important;color:inherit!important}
+        .tr-outputProfileTelemetryActive{gap:8px!important}
+        .tr-rtaFidelityHead>strong{gap:7px!important}
+        .tr-rtaFidelityHead>strong .tr-rtaProfileCopy{margin-left:1px!important}
+        .tr-rtaFidelityHead>strong b{margin:0 3px!important}
+        .tr-outputProfileChoices button{gap:9px!important}
+        .tr-outputProfileChoices button i{margin-right:1px!important}
+
+        /* Profile colors are identity colors. DSP status remains a separate green/amber/red signal. */
+        .tr-dspStatusToggle[data-profile="headphones"] .tr-dspStatusIcon,
+        [data-profile="headphones"].tr-outputProfileIcon,
+        [data-profile="headphones"].tr-rtaOutputIcon,
+        .tr-outputProfileSelectLabel i[data-profile="headphones"],
+        .tr-outputProfileTelemetryActive[data-profile="headphones"] i,
+        .tr-outputProfileChoices button[data-profile="headphones"] i{color:#52dcff!important;border-color:rgba(82,220,255,.38)!important;background:rgba(4,49,65,.78)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 14px rgba(82,220,255,.10)!important}
+        .tr-dspStatusToggle[data-profile="car_hifi"] .tr-dspStatusIcon,
+        [data-profile="car_hifi"].tr-outputProfileIcon,
+        [data-profile="car_hifi"].tr-rtaOutputIcon,
+        .tr-outputProfileSelectLabel i[data-profile="car_hifi"],
+        .tr-outputProfileTelemetryActive[data-profile="car_hifi"] i,
+        .tr-outputProfileChoices button[data-profile="car_hifi"] i{color:#ffc35a!important;border-color:rgba(255,195,90,.40)!important;background:rgba(68,42,6,.76)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 14px rgba(255,185,62,.09)!important}
+        .tr-dspStatusToggle[data-profile="speaker"] .tr-dspStatusIcon,
+        [data-profile="speaker"].tr-outputProfileIcon,
+        [data-profile="speaker"].tr-rtaOutputIcon,
+        .tr-outputProfileSelectLabel i[data-profile="speaker"],
+        .tr-outputProfileTelemetryActive[data-profile="speaker"] i,
+        .tr-outputProfileChoices button[data-profile="speaker"] i{color:#b88cff!important;border-color:rgba(184,140,255,.40)!important;background:rgba(45,24,74,.78)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 14px rgba(174,118,255,.10)!important}
+        .tr-dspStatusToggle[data-profile="reference"] .tr-dspStatusIcon,
+        [data-profile="reference"].tr-outputProfileIcon,
+        [data-profile="reference"].tr-rtaOutputIcon,
+        .tr-outputProfileSelectLabel i[data-profile="reference"],
+        .tr-outputProfileTelemetryActive[data-profile="reference"] i,
+        .tr-outputProfileChoices button[data-profile="reference"] i{color:#edf5f8!important;border-color:rgba(214,231,237,.30)!important;background:rgba(47,58,64,.72)!important;box-shadow:inset 0 1px rgba(255,255,255,.06),0 0 12px rgba(225,240,245,.05)!important}
+
+        .tr-outputProfileChoices button[data-profile="headphones"].is-active{border-color:rgba(82,220,255,.48)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 18px rgba(82,220,255,.08)!important}
+        .tr-outputProfileChoices button[data-profile="car_hifi"].is-active{border-color:rgba(255,195,90,.48)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 18px rgba(255,195,90,.07)!important}
+        .tr-outputProfileChoices button[data-profile="speaker"].is-active{border-color:rgba(184,140,255,.48)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 18px rgba(184,140,255,.08)!important}
+        .tr-outputProfileChoices button[data-profile="reference"].is-active{border-color:rgba(220,235,241,.36)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 16px rgba(220,235,241,.04)!important}
+
+        @media(max-width:650px){
+          .tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:25px minmax(0,1fr)!important;gap:9px!important;padding:0 23px 0 8px!important}
+          .tr-dspStatusLed{right:8px!important;width:6px!important;height:6px!important}
+          .tr-rtaFidelityHead>strong{gap:5px!important}
+          .tr-rtaFidelityHead>strong b{margin:0 1px!important}
+          .tr-outputProfileTitle{gap:9px!important}
+          .tr-outputProfileChoices button{gap:8px!important}
+        }
+        @media(max-width:380px){
+          .tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:24px minmax(0,1fr)!important;gap:8px!important;padding:0 21px 0 7px!important}
+          .tr-dspStatusLed{right:7px!important;width:5px!important;height:5px!important}
+        }
 
 
       `}</style>
