@@ -17,6 +17,17 @@ import {
 } from "../../lib/motivationVideoStorage";
 import { playWorkoutAlert, primeWorkoutAudio } from "../../lib/workoutAudio";
 import { Card } from "../../ui/Card";
+import {
+  clearWeatherLocation,
+  getAppBrandingWeatherSettings,
+  getHeaderLogoSignedUrl,
+  resetHeaderLogo,
+  saveWeatherLocation,
+  searchWeatherLocations,
+  uploadHeaderLogo,
+  type AppBrandingWeatherSettings,
+  type WeatherLocation,
+} from "../../lib/appBrandingWeather";
 
 const ALERT_LABELS: Record<
   AlertSoundType,
@@ -92,6 +103,16 @@ export function SoundAlertsPage({
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const replaceTargetRef = useRef<MotivationVideoRecord | null>(null);
 
+  const [branding, setBranding] = useState<AppBrandingWeatherSettings | null>(null);
+  const [brandingLoading, setBrandingLoading] = useState(true);
+  const [brandingBusy, setBrandingBusy] = useState(false);
+  const [brandingNotice, setBrandingNotice] = useState<Notice>(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [weatherQuery, setWeatherQuery] = useState("");
+  const [weatherResults, setWeatherResults] = useState<WeatherLocation[]>([]);
+  const [weatherSearching, setWeatherSearching] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
   async function load() {
     setLoading(true);
     setNotice(null);
@@ -107,6 +128,120 @@ export function SoundAlertsPage({
       });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadBranding() {
+    setBrandingLoading(true);
+    setBrandingNotice(null);
+
+    try {
+      const settings = await getAppBrandingWeatherSettings();
+      setBranding(settings);
+      setWeatherQuery(settings.weatherLocation?.displayName || "");
+      if (settings.headerLogoPath) {
+        try {
+          setLogoPreviewUrl(await getHeaderLogoSignedUrl(settings.headerLogoPath));
+        } catch {
+          setLogoPreviewUrl(null);
+        }
+      } else {
+        setLogoPreviewUrl(null);
+      }
+    } catch (error: any) {
+      setBrandingNotice({
+        tone: "err",
+        text: error?.message || "App branding settings could not be loaded.",
+      });
+    } finally {
+      setBrandingLoading(false);
+    }
+  }
+
+  async function handleLogoUpload(file: File) {
+    setBrandingBusy(true);
+    setBrandingNotice(null);
+
+    try {
+      const settings = await uploadHeaderLogo(file);
+      setBranding(settings);
+      setLogoPreviewUrl(await getHeaderLogoSignedUrl(settings.headerLogoPath));
+      setBrandingNotice({ tone: "ok", text: "Header logo saved. The top bar updates automatically." });
+    } catch (error: any) {
+      setBrandingNotice({ tone: "err", text: error?.message || "The header logo could not be uploaded." });
+    } finally {
+      setBrandingBusy(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  }
+
+  async function handleLogoReset() {
+    setBrandingBusy(true);
+    setBrandingNotice(null);
+
+    try {
+      const settings = await resetHeaderLogo();
+      setBranding(settings);
+      setLogoPreviewUrl(null);
+      setBrandingNotice({ tone: "ok", text: "Header logo reset to the MVP Trainer Pro text fallback." });
+    } catch (error: any) {
+      setBrandingNotice({ tone: "err", text: error?.message || "The header logo could not be reset." });
+    } finally {
+      setBrandingBusy(false);
+    }
+  }
+
+  async function handleWeatherSearch() {
+    const query = weatherQuery.trim();
+    if (!query) return;
+    setWeatherSearching(true);
+    setBrandingNotice(null);
+
+    try {
+      const results = await searchWeatherLocations(query);
+      setWeatherResults(results);
+      if (!results.length) {
+        setBrandingNotice({ tone: "err", text: "No matching weather location was found. Try city + state or ZIP code." });
+      }
+    } catch (error: any) {
+      setWeatherResults([]);
+      setBrandingNotice({ tone: "err", text: error?.message || "Weather location lookup failed." });
+    } finally {
+      setWeatherSearching(false);
+    }
+  }
+
+  async function handleWeatherSelect(location: WeatherLocation) {
+    setBrandingBusy(true);
+    setBrandingNotice(null);
+
+    try {
+      const settings = await saveWeatherLocation(location);
+      setBranding(settings);
+      setWeatherQuery(location.displayName);
+      setWeatherResults([]);
+      setBrandingNotice({ tone: "ok", text: `Weather location saved as ${location.displayName}.` });
+    } catch (error: any) {
+      setBrandingNotice({ tone: "err", text: error?.message || "Weather location could not be saved." });
+    } finally {
+      setBrandingBusy(false);
+    }
+  }
+
+  async function handleWeatherClear() {
+    setBrandingBusy(true);
+    setBrandingNotice(null);
+
+    try {
+      const settings = await clearWeatherLocation();
+      setBranding(settings);
+      setWeatherQuery("");
+      setWeatherResults([]);
+      setBrandingNotice({ tone: "ok", text: "Weather location removed from the top bar." });
+    } catch (error: any) {
+      setBrandingNotice({ tone: "err", text: error?.message || "Weather location could not be removed." });
+    } finally {
+      setBrandingBusy(false);
     }
   }
 
@@ -131,6 +266,7 @@ export function SoundAlertsPage({
   useEffect(() => {
     void load();
     void loadVideos();
+    void loadBranding();
   }, []);
 
   async function handleUpload(alertType: AlertSoundType, file: File) {
@@ -345,6 +481,159 @@ export function SoundAlertsPage({
           </button>
         }
       >
+        <section className="tr-appBrandingManager">
+          <div className="tr-appBrandingHeader">
+            <div>
+              <div className="tr-kicker">APP BRANDING + WEATHER</div>
+              <div className="tr-appBrandingTitle">TOP BAR</div>
+              <div className="tr-sub">
+                Upload the wide MVP header logo and save the city used by the compact weather display.
+              </div>
+            </div>
+            <div className="tr-appBrandingStatus">
+              {brandingLoading ? "LOADING" : branding?.headerLogoPath ? "LOGO ACTIVE" : "TEXT FALLBACK"}
+            </div>
+          </div>
+
+          {brandingNotice ? (
+            <div className={`tr-soundAlertsNotice is-${brandingNotice.tone}`} role="status">
+              {brandingNotice.text}
+            </div>
+          ) : null}
+
+          <div className="tr-appBrandingGrid">
+            <article className="tr-brandLogoCard">
+              <div className="tr-brandControlHead">
+                <div>
+                  <span>HEADER IDENTITY</span>
+                  <strong>HEADER LOGO</strong>
+                </div>
+                <small>PNG / WEBP • 5 MB MAX</small>
+              </div>
+
+              <div className={`tr-brandLogoPreview ${logoPreviewUrl ? "has-logo" : "is-empty"}`}>
+                {logoPreviewUrl ? (
+                  <img src={logoPreviewUrl} alt="Current MVP Trainer header logo" />
+                ) : (
+                  <div>
+                    <b>MVP TRAINER PRO</b>
+                    <span>Upload the wide transparent logo for the centered top bar.</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="tr-brandSavedFile">
+                <span>CURRENT</span>
+                <b>{branding?.headerLogoName || "MVP Trainer Pro text fallback"}</b>
+              </div>
+
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept=".png,.webp,image/png,image/webp"
+                className="tr-soundAlertHiddenInput"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleLogoUpload(file);
+                }}
+              />
+
+              <div className="tr-brandActions">
+                <button
+                  type="button"
+                  className="tr-btn tr-btn--primary"
+                  disabled={brandingBusy || brandingLoading}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  {brandingBusy ? "WORKING…" : branding?.headerLogoPath ? "REPLACE LOGO" : "UPLOAD LOGO"}
+                </button>
+                <button
+                  type="button"
+                  className="tr-btn tr-brandResetButton"
+                  disabled={brandingBusy || brandingLoading || !branding?.headerLogoPath}
+                  onClick={() => void handleLogoReset()}
+                >
+                  RESET
+                </button>
+              </div>
+            </article>
+
+            <article className="tr-weatherSetupCard">
+              <div className="tr-brandControlHead">
+                <div>
+                  <span>WEATHER LOCATION</span>
+                  <strong>CITY / ZIP LOOKUP</strong>
+                </div>
+                <small>NO GPS REQUIRED</small>
+              </div>
+
+              <div className="tr-weatherSavedLocation">
+                <span>SAVED LOCATION</span>
+                <b>{branding?.weatherLocation?.displayName || "NOT SET"}</b>
+              </div>
+
+              <div className="tr-weatherSearchRow">
+                <input
+                  value={weatherQuery}
+                  onChange={(event) => setWeatherQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleWeatherSearch();
+                    }
+                  }}
+                  placeholder="Brooklyn, CT or 06234"
+                  aria-label="Weather city, state, or ZIP code"
+                />
+                <button
+                  type="button"
+                  className="tr-btn tr-btn--primary"
+                  disabled={weatherSearching || brandingBusy || !weatherQuery.trim()}
+                  onClick={() => void handleWeatherSearch()}
+                >
+                  {weatherSearching ? "SEARCHING…" : "LOOK UP"}
+                </button>
+              </div>
+
+              {weatherResults.length ? (
+                <div className="tr-weatherResults" aria-label="Weather location matches">
+                  {weatherResults.map((location) => (
+                    <button
+                      key={`${location.id ?? "geo"}-${location.latitude}-${location.longitude}`}
+                      type="button"
+                      disabled={brandingBusy}
+                      onClick={() => void handleWeatherSelect(location)}
+                    >
+                      <span>
+                        <b>{location.displayName}</b>
+                        <small>{[location.country, location.timezone].filter(Boolean).join(" • ")}</small>
+                      </span>
+                      <strong>SAVE</strong>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="tr-weatherHeaderPreview">
+                <span>TOP BAR SHOWS</span>
+                <b>CONDITION • TIME • CITY • FEELS LIKE</b>
+              </div>
+              <small className="tr-weatherAttribution">Weather: Open-Meteo • Location data: GeoNames</small>
+
+              <div className="tr-brandActions">
+                <button
+                  type="button"
+                  className="tr-btn tr-brandResetButton"
+                  disabled={brandingBusy || brandingLoading || !branding?.weatherLocation}
+                  onClick={() => void handleWeatherClear()}
+                >
+                  REMOVE WEATHER
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <div className="tr-soundAlertsIntro">
           <div className="tr-soundAlertsIntroIcon" aria-hidden>♪</div>
           <div>
@@ -662,6 +951,26 @@ export function SoundAlertsPage({
       ) : null}
 
       <style>{`
+        .tr-appBrandingManager{
+          margin-bottom:24px;
+          padding:18px;
+          display:grid;
+          gap:14px;
+          border:1px solid rgba(52,201,255,.24);
+          border-radius:20px;
+          background:
+            radial-gradient(760px 240px at 50% -80px,rgba(0,176,255,.11),transparent 70%),
+            linear-gradient(180deg,rgba(10,19,27,.98),rgba(4,8,12,.99));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 20px 54px rgba(0,0,0,.24);
+        }
+        .tr-appBrandingHeader{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}.tr-appBrandingHeader>div:first-child{display:grid;gap:6px}.tr-appBrandingTitle{color:#fff;font-size:clamp(24px,3vw,34px);font-weight:1100;line-height:1;letter-spacing:-.025em}.tr-appBrandingStatus{flex:0 0 auto;padding:7px 10px;border:1px solid rgba(74,210,250,.28);border-radius:999px;background:rgba(0,167,224,.08);color:#9ceaff;font-size:8px;font-weight:1100;letter-spacing:.13em}
+        .tr-appBrandingGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tr-brandLogoCard,.tr-weatherSetupCard{min-width:0;padding:14px;display:grid;align-content:start;gap:12px;border:1px solid rgba(255,255,255,.085);border-radius:17px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.16));box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+        .tr-brandControlHead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.tr-brandControlHead>div{display:grid;gap:3px}.tr-brandControlHead span,.tr-brandSavedFile span,.tr-weatherSavedLocation span,.tr-weatherHeaderPreview span{color:#58d8ff;font-size:7px;font-weight:1100;letter-spacing:.15em}.tr-brandControlHead strong{color:#fff;font-size:15px;font-weight:1100}.tr-brandControlHead small{color:rgba(184,211,224,.52);font-size:7px;font-weight:950;letter-spacing:.08em;white-space:nowrap}
+        .tr-brandLogoPreview{height:150px;overflow:hidden;display:grid;place-items:center;padding:12px;border:1px solid rgba(91,197,230,.14);border-radius:14px;background:radial-gradient(circle at 50% 45%,rgba(21,73,96,.30),rgba(1,5,8,.94) 72%)}.tr-brandLogoPreview img{display:block;width:100%;height:100%;object-fit:contain}.tr-brandLogoPreview>div{max-width:340px;display:grid;gap:7px;text-align:center}.tr-brandLogoPreview b{color:#ffd05f;font-size:20px;font-weight:1100;letter-spacing:.02em}.tr-brandLogoPreview span{color:rgba(213,229,237,.58);font-size:10px;line-height:1.4}
+        .tr-brandSavedFile,.tr-weatherSavedLocation,.tr-weatherHeaderPreview{min-width:0;padding:10px 11px;display:grid;gap:4px;border:1px solid rgba(255,255,255,.06);border-radius:11px;background:rgba(0,0,0,.15)}.tr-brandSavedFile b,.tr-weatherSavedLocation b,.tr-weatherHeaderPreview b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eef9fc;font-size:10px;font-weight:1000}
+        .tr-brandActions{display:flex;gap:8px;flex-wrap:wrap}.tr-brandActions .tr-btn{min-height:40px}.tr-brandResetButton{border-color:rgba(255,150,79,.20)!important;color:#ffc187!important}
+        .tr-weatherSearchRow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.tr-weatherSearchRow input{min-width:0;height:43px;padding:0 12px;border:1px solid rgba(100,196,229,.20);border-radius:11px;outline:none;background:#050c11;color:#fff;font:inherit;font-size:12px;font-weight:850;box-shadow:inset 0 1px 5px rgba(0,0,0,.38)}.tr-weatherSearchRow input:focus{border-color:rgba(70,211,252,.56);box-shadow:0 0 0 3px rgba(41,190,235,.08),inset 0 1px 5px rgba(0,0,0,.38)}.tr-weatherSearchRow .tr-btn{height:43px;min-width:104px}
+        .tr-weatherResults{display:grid;gap:6px}.tr-weatherResults button{width:100%;min-height:48px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(91,190,222,.13);border-radius:11px;background:linear-gradient(180deg,rgba(12,29,38,.94),rgba(5,13,18,.98));color:#e9f7fb;text-align:left;cursor:pointer}.tr-weatherResults button:hover{border-color:rgba(65,210,250,.42);background:linear-gradient(180deg,rgba(11,47,60,.96),rgba(5,22,29,.98))}.tr-weatherResults button>span{min-width:0;display:grid;gap:3px}.tr-weatherResults button b{font-size:10px}.tr-weatherResults button small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(184,208,218,.56);font-size:8px}.tr-weatherResults button>strong{flex:0 0 auto;color:#62ddff;font-size:8px;letter-spacing:.12em}.tr-weatherAttribution{color:rgba(170,195,205,.42);font-size:7px;font-weight:800;letter-spacing:.035em}
         .tr-motivationManager{
           margin-top:24px;
           padding-top:24px;
@@ -992,6 +1301,7 @@ export function SoundAlertsPage({
           gap:7px;
         }
         @media(max-width:820px){
+          .tr-appBrandingHeader{align-items:stretch;flex-direction:column}.tr-appBrandingStatus{justify-self:start;align-self:flex-start}.tr-appBrandingGrid{grid-template-columns:1fr}.tr-brandLogoPreview{height:135px}
           .tr-motivationHeader{
             align-items:stretch;
             flex-direction:column;
@@ -1001,6 +1311,7 @@ export function SoundAlertsPage({
           .tr-motivationPreviewStage{ height:260px; }
         }
         @media(max-width:560px){
+          .tr-appBrandingManager{padding:12px;border-radius:16px}.tr-brandControlHead{align-items:flex-start;flex-direction:column;gap:5px}.tr-brandLogoPreview{height:112px}.tr-weatherSearchRow{grid-template-columns:1fr}.tr-weatherSearchRow .tr-btn{width:100%}.tr-brandActions{display:grid;grid-template-columns:1fr}.tr-brandActions .tr-btn{width:100%}
           .tr-motivationStats{ gap:7px; }
           .tr-motivationStats > div{ min-height:70px; padding:10px 8px; }
           .tr-motivationStats strong{ font-size:18px; }
