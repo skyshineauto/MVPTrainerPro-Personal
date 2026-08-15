@@ -618,12 +618,6 @@ function eqProcessingRequested() {
 function eqProofActive() {
   return state.dspVerificationMode === "eq" && state.outputProfile !== "reference" && !state.dspBypass;
 }
-function builtInPresetProcessingRequested() {
-  return eqProcessingRequested() && isBuiltInPreset(state.eqPreset);
-}
-function userEqHasOffsets() {
-  return state.eqGains.some((gain) => Math.abs(Number(gain) || 0) > 0.01);
-}
 function graphicEqProcessingRequested() {
   // The visible 31-band curve is the tonal source of truth for built-in presets,
   // custom presets, and manual edits. No hidden duplicate preset EQ is layered on top.
