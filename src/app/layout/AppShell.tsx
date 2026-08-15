@@ -647,6 +647,62 @@ const HUD_FORCE_CSS = `
 
 
 
+function AutoFitText({
+  className,
+  children,
+  maxPx,
+  minPx,
+}: {
+  className: string;
+  children: React.ReactNode;
+  maxPx: number;
+  minPx: number;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    let frame = 0;
+
+    const fit = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        element.style.fontSize = `${maxPx}px`;
+        let size = maxPx;
+        while (element.scrollWidth > element.clientWidth + 1 && size > minPx) {
+          size = Math.max(minPx, size - 0.25);
+          element.style.fontSize = `${size}px`;
+        }
+      });
+    };
+
+    fit();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    observer?.observe(element);
+    window.addEventListener("resize", fit);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [children, maxPx, minPx]);
+
+  return <span ref={ref} className={className}>{children}</span>;
+}
+
+function temperatureToneClass(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(Number(value))) return "is-neutral";
+  const temp = Number(value);
+  if (temp < 32) return "is-freezing";
+  if (temp < 50) return "is-cold";
+  if (temp < 60) return "is-cool";
+  if (temp < 70) return "is-mild";
+  if (temp < 80) return "is-comfortable";
+  if (temp < 90) return "is-warm";
+  return "is-hot";
+}
+
 function HeaderWeatherIcon({
   kind,
   isDay,
@@ -655,18 +711,22 @@ function HeaderWeatherIcon({
   isDay: boolean;
 }) {
   const cloud = (
-    <path d="M7.2 18.2h9.8a4 4 0 0 0 .35-7.98A5.4 5.4 0 0 0 7.1 8.65 4.8 4.8 0 0 0 7.2 18.2Z" />
+    <path
+      d="M7.2 18.2h9.8a4 4 0 0 0 .35-7.98A5.4 5.4 0 0 0 7.1 8.65 4.8 4.8 0 0 0 7.2 18.2Z"
+      fill="#BAC7D1"
+      stroke="#F1F6F9"
+    />
   );
 
   if (kind === "clear") {
     return isDay ? (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="4.2" />
-        <path d="M12 2.2v2.1M12 19.7v2.1M2.2 12h2.1M19.7 12h2.1M5.1 5.1l1.5 1.5M17.4 17.4l1.5 1.5M18.9 5.1l-1.5 1.5M6.6 17.4l-1.5 1.5" />
+        <circle cx="12" cy="12" r="4.2" fill="#FFD24D" stroke="#FFE78A" />
+        <path className="wx-sunRay" d="M12 2.2v2.1M12 19.7v2.1M2.2 12h2.1M19.7 12h2.1M5.1 5.1l1.5 1.5M17.4 17.4l1.5 1.5M18.9 5.1l-1.5 1.5M6.6 17.4l-1.5 1.5" />
       </svg>
     ) : (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M18.8 15.5A7.8 7.8 0 0 1 8.5 5.2 7.9 7.9 0 1 0 18.8 15.5Z" />
+        <path d="M18.8 15.5A7.8 7.8 0 0 1 8.5 5.2 7.9 7.9 0 1 0 18.8 15.5Z" fill="#9EC7FF" stroke="#D9E9FF" />
       </svg>
     );
   }
@@ -674,7 +734,11 @@ function HeaderWeatherIcon({
   if (kind === "partly_cloudy") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        {isDay ? <circle cx="8" cy="8" r="3" /> : <path d="M10.2 9.6A4.4 4.4 0 0 1 6.4 4a4.7 4.7 0 0 0 3.8 7.4" />}
+        {isDay ? (
+          <circle cx="8" cy="8" r="3" fill="#FFD24D" stroke="#FFE78A" />
+        ) : (
+          <path d="M10.2 9.6A4.4 4.4 0 0 1 6.4 4a4.7 4.7 0 0 0 3.8 7.4" fill="#9EC7FF" stroke="#D9E9FF" />
+        )}
         {cloud}
       </svg>
     );
@@ -684,7 +748,7 @@ function HeaderWeatherIcon({
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {cloud}
-        <path d="M5 20.5h14M7 23h10" />
+        <path d="M5 20.5h14M7 23h10" stroke="#AEBCC5" />
       </svg>
     );
   }
@@ -693,7 +757,10 @@ function HeaderWeatherIcon({
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {cloud}
-        <path d={kind === "drizzle" ? "M8 20.5l-.5 1M12 20.5l-.5 1M16 20.5l-.5 1" : "M8.5 20l-1 2M12.5 20l-1 2M16.5 20l-1 2"} />
+        <path
+          d={kind === "drizzle" ? "M8 20.5l-.5 1M12 20.5l-.5 1M16 20.5l-.5 1" : "M8.5 20l-1 2M12.5 20l-1 2M16.5 20l-1 2"}
+          stroke="#4DB8FF"
+        />
       </svg>
     );
   }
@@ -702,7 +769,7 @@ function HeaderWeatherIcon({
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {cloud}
-        <path d="M8 20.5v2M7 21.5h2M12 20.5v2M11 21.5h2M16 20.5v2M15 21.5h2" />
+        <path d="M8 20.5v2M7 21.5h2M12 20.5v2M11 21.5h2M16 20.5v2M15 21.5h2" stroke="#BFEAFF" />
       </svg>
     );
   }
@@ -711,14 +778,13 @@ function HeaderWeatherIcon({
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         {cloud}
-        <path d="m13.3 18.2-3 4.2h2.6l-1 3.1 4-5.2h-2.7l.1-2.1Z" />
+        <path d="m13.3 18.2-3 4.2h2.6l-1 3.1 4-5.2h-2.7l.1-2.1Z" fill="#FFD24D" stroke="#FFE78A" />
+        <path d="M7.2 20.2 6.5 22M17.5 20.1 16.7 22" stroke="#4DB8FF" />
       </svg>
     );
   }
 
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">{cloud}</svg>
-  );
+  return <svg viewBox="0 0 24 24" aria-hidden="true">{cloud}</svg>;
 }
 
 const APP_HEADER_CSS = `
@@ -726,21 +792,23 @@ const APP_HEADER_CSS = `
   position:relative;
   z-index:1400;
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(260px,360px) minmax(0,1fr);
+  grid-template-columns:minmax(0,1fr) minmax(360px,500px) minmax(0,1fr);
   align-items:center;
-  gap:16px;
-  min-height:82px;
-  margin:0 0 18px;
+  gap:14px;
+  min-height:72px;
+  margin:0 0 12px;
   overflow:visible;
 }
 .tr-appHeaderWeather{
   justify-self:start;
-  width:min(100%,310px);
+  width:min(100%,330px);
   min-width:0;
-  min-height:62px;
-  padding:8px 11px;
+  min-height:58px;
+  padding:7px 12px 8px;
+  box-sizing:border-box;
   display:grid;
   align-content:center;
+  justify-items:center;
   gap:5px;
   border:1px solid rgba(72,203,244,.30);
   border-radius:14px;
@@ -749,8 +817,9 @@ const APP_HEADER_CSS = `
     linear-gradient(180deg,rgba(10,27,36,.96),rgba(4,12,17,.98));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 8px 24px rgba(0,0,0,.28);
   color:#eafaff;
-  text-align:left;
+  text-align:center;
   cursor:pointer;
+  overflow:hidden;
 }
 .tr-appHeaderWeather:hover,
 .tr-appHeaderWeather:focus-visible{
@@ -758,62 +827,80 @@ const APP_HEADER_CSS = `
   outline:none;
 }
 .tr-appHeaderWeatherMain{
+  width:100%;
   min-width:0;
-  display:grid;
-  grid-template-columns:30px auto minmax(0,1fr);
+  display:flex;
   align-items:center;
-  gap:8px;
+  justify-content:center;
+  gap:9px;
   white-space:nowrap;
+  overflow:hidden;
 }
 .tr-appHeaderWeatherIcon{
-  width:30px;
-  height:30px;
+  flex:0 0 31px;
+  width:31px;
+  height:31px;
   display:grid;
   place-items:center;
-  color:#63dcff;
-  filter:drop-shadow(0 0 9px rgba(50,205,248,.28));
+  filter:drop-shadow(0 2px 7px rgba(0,0,0,.46));
 }
 .tr-appHeaderWeatherIcon svg{
-  width:27px;
-  height:27px;
+  width:29px;
+  height:29px;
   overflow:visible;
   fill:none;
-  stroke:currentColor;
-  stroke-width:1.75;
+  stroke-width:1.7;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
+.tr-appHeaderWeatherIcon .wx-sunRay{stroke:#FFD24D}
 .tr-appHeaderWeatherTemp{
-  color:#fff;
-  font-size:22px;
+  flex:0 0 auto;
+  font-size:23px;
   line-height:1;
   font-weight:1100;
   letter-spacing:-.025em;
   font-variant-numeric:tabular-nums;
 }
 .tr-appHeaderWeatherTime{
+  flex:0 1 auto;
   min-width:0;
-  color:#ffe18a;
-  font-size:13px;
+  color:#fff3c4;
+  font-size:14px;
   line-height:1;
-  font-weight:1000;
-  letter-spacing:.025em;
+  font-weight:1100;
+  letter-spacing:.005em;
   font-variant-numeric:tabular-nums;
+  text-shadow:0 1px 0 rgba(0,0,0,.85),0 0 12px rgba(255,219,107,.18);
 }
 .tr-appHeaderWeatherDetail{
+  display:block;
+  width:100%;
   min-width:0;
-  color:rgba(215,234,242,.82);
-  font-size:9px;
+  max-width:100%;
+  color:rgba(218,235,243,.86);
+  font-size:9.4px;
   line-height:1.08;
   font-weight:950;
-  letter-spacing:.035em;
+  letter-spacing:.025em;
   white-space:nowrap;
+  overflow:hidden;
+  text-align:center;
 }
 .tr-appHeaderWeatherDetail b{color:#fff;font-weight:1100}
+.tr-appHeaderWeatherTemp.is-hot,.tr-appHeaderWeatherFeels.is-hot{color:#ff7148;text-shadow:0 0 12px rgba(255,86,45,.34)}
+.tr-appHeaderWeatherTemp.is-warm,.tr-appHeaderWeatherFeels.is-warm{color:#ffb84d;text-shadow:0 0 10px rgba(255,174,49,.24)}
+.tr-appHeaderWeatherTemp.is-comfortable,.tr-appHeaderWeatherFeels.is-comfortable{color:#d9e96a}
+.tr-appHeaderWeatherTemp.is-mild,.tr-appHeaderWeatherFeels.is-mild{color:#61dff2}
+.tr-appHeaderWeatherTemp.is-cool,.tr-appHeaderWeatherFeels.is-cool{color:#5fbfff}
+.tr-appHeaderWeatherTemp.is-cold,.tr-appHeaderWeatherFeels.is-cold{color:#4c8fff}
+.tr-appHeaderWeatherTemp.is-freezing,.tr-appHeaderWeatherFeels.is-freezing{color:#d8f3ff;text-shadow:0 0 12px rgba(134,220,255,.34)}
+.tr-appHeaderWeatherTemp.is-neutral,.tr-appHeaderWeatherFeels.is-neutral{color:#f4fbfe}
+.tr-appHeaderWeatherFeels{font-weight:1100}
 .tr-appHeaderBrand{
   justify-self:center;
   width:100%;
-  height:76px;
+  height:70px;
   min-width:0;
   display:grid;
   place-items:center;
@@ -822,14 +909,14 @@ const APP_HEADER_CSS = `
 }
 .tr-appHeaderBrand img{
   display:block;
-  width:auto;
+  width:min(100%,430px);
   height:auto;
-  max-width:100%;
-  max-height:76px;
+  max-width:430px;
+  max-height:100px;
   object-fit:contain;
   object-position:center;
   overflow:visible;
-  filter:drop-shadow(0 4px 12px rgba(0,0,0,.58)) drop-shadow(0 0 10px rgba(34,163,255,.13));
+  filter:drop-shadow(0 4px 12px rgba(0,0,0,.58)) drop-shadow(0 0 12px rgba(34,163,255,.15));
 }
 .tr-appHeaderBrandFallback{
   color:#ffe36f;
@@ -841,38 +928,41 @@ const APP_HEADER_CSS = `
 }
 .tr-appHeaderActions{
   justify-self:end;
+  width:100%;
   min-width:0;
   display:flex;
   align-items:center;
   justify-content:flex-end;
-  gap:8px;
+  gap:7px;
   overflow:visible;
 }
 .tr-appHeaderWorkout,
 .tr-appHeaderMenuButton{
-  min-height:40px;
-  padding:0 12px;
+  min-height:39px;
+  padding:0 11px;
   border:1px solid rgba(115,191,219,.27);
   border-radius:10px;
   background:linear-gradient(180deg,#0b1b23,#061016);
   color:#fff;
-  font-size:10px;
+  font-size:9.5px;
   line-height:1;
   font-weight:1000;
-  letter-spacing:.04em;
+  letter-spacing:.035em;
   white-space:nowrap;
   cursor:pointer;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 6px 18px rgba(0,0,0,.24);
 }
-.tr-appHeaderWorkout{
-  border-color:rgba(255,173,52,.48);
-  background:linear-gradient(180deg,rgba(74,42,6,.97),rgba(26,16,5,.99));
-  color:#ffd483;
-}
 .tr-appHeaderWorkout.is-resume{
-  border-color:rgba(55,220,130,.48);
-  background:linear-gradient(180deg,rgba(13,64,43,.98),rgba(5,29,21,.99));
-  color:#8df0b7;
+  border-color:rgba(255,172,48,.58);
+  background:linear-gradient(180deg,rgba(86,48,5,.98),rgba(32,18,4,.99));
+  color:#ffd18a;
+  box-shadow:inset 0 1px 0 rgba(255,240,201,.06),0 0 18px rgba(255,149,32,.13);
+}
+.tr-appHeaderWorkout.is-return{
+  border-color:rgba(64,205,248,.55);
+  background:linear-gradient(180deg,rgba(7,57,76,.98),rgba(3,27,38,.99));
+  color:#9ce7ff;
+  box-shadow:inset 0 1px 0 rgba(217,248,255,.05),0 0 18px rgba(46,190,235,.12);
 }
 .tr-appHeaderWorkout:hover,
 .tr-appHeaderMenuButton:hover,
@@ -918,29 +1008,29 @@ const APP_HEADER_CSS = `
 
 @media(max-width:820px){
   .tr-appHeader{
-    grid-template-columns:minmax(116px,1fr) minmax(120px,1fr) auto;
-    gap:7px;
-    min-height:76px;
-    margin-bottom:14px;
+    grid-template-columns:minmax(112px,1fr) minmax(96px,118px) minmax(112px,1fr);
+    gap:6px;
+    min-height:68px;
+    margin-bottom:12px;
   }
   .tr-appHeaderWeather{
     width:100%;
-    min-height:64px;
-    padding:7px 8px;
+    min-height:61px;
+    padding:6px 7px;
     border-radius:12px;
     gap:5px;
   }
-  .tr-appHeaderWeatherMain{grid-template-columns:25px auto minmax(0,1fr);gap:5px}
-  .tr-appHeaderWeatherIcon{width:25px;height:25px}
-  .tr-appHeaderWeatherIcon svg{width:23px;height:23px}
-  .tr-appHeaderWeatherTemp{font-size:18px}
-  .tr-appHeaderWeatherTime{font-size:10px;letter-spacing:0}
-  .tr-appHeaderWeatherDetail{font-size:7.2px;letter-spacing:.018em}
-  .tr-appHeaderBrand{height:68px;min-width:0}
-  .tr-appHeaderBrand img{max-height:66px;max-width:100%}
-  .tr-appHeaderBrandFallback{font-size:15px;white-space:normal;text-align:center;line-height:1.05}
+  .tr-appHeaderWeatherMain{gap:5px}
+  .tr-appHeaderWeatherIcon{flex-basis:25px;width:25px;height:25px}
+  .tr-appHeaderWeatherIcon svg{width:24px;height:24px}
+  .tr-appHeaderWeatherTemp{font-size:18.5px}
+  .tr-appHeaderWeatherTime{font-size:10.3px;letter-spacing:0}
+  .tr-appHeaderWeatherDetail{font-size:7.4px;letter-spacing:.005em}
+  .tr-appHeaderBrand{height:62px;min-width:0}
+  .tr-appHeaderBrand img{width:100%;max-width:118px;max-height:62px}
+  .tr-appHeaderBrandFallback{font-size:14px;white-space:normal;text-align:center;line-height:1.05}
   .tr-appHeaderActions{gap:5px}
-  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:40px;padding:0 8px;font-size:8.5px;border-radius:9px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:38px;padding:0 7px;font-size:8px;border-radius:9px}
   .tr-appHeaderWorkout .tr-desktopOnly{display:none}
   .tr-appHeaderWorkout .tr-mobileOnly{display:inline}
   .tr-appHeaderMenuButton--desktop{display:none}
@@ -950,33 +1040,34 @@ const APP_HEADER_CSS = `
 
 @media(max-width:430px){
   .tr-appHeader{
-    grid-template-columns:minmax(112px,1fr) minmax(112px,1fr) auto;
-    gap:6px;
-    min-height:72px;
+    grid-template-columns:minmax(108px,1fr) minmax(92px,112px) minmax(108px,1fr);
+    gap:5px;
+    min-height:65px;
   }
-  .tr-appHeaderWeather{min-height:60px;padding:6px 7px}
-  .tr-appHeaderWeatherMain{grid-template-columns:23px auto minmax(0,1fr);gap:4px}
-  .tr-appHeaderWeatherIcon{width:23px;height:23px}
-  .tr-appHeaderWeatherIcon svg{width:21px;height:21px}
+  .tr-appHeaderWeather{min-height:59px;padding:5px 6px}
+  .tr-appHeaderWeatherMain{gap:4px}
+  .tr-appHeaderWeatherIcon{flex-basis:23px;width:23px;height:23px}
+  .tr-appHeaderWeatherIcon svg{width:22px;height:22px}
   .tr-appHeaderWeatherTemp{font-size:17px}
-  .tr-appHeaderWeatherTime{font-size:9px}
-  .tr-appHeaderWeatherDetail{font-size:6.8px;letter-spacing:0}
-  .tr-appHeaderBrand{height:62px}
-  .tr-appHeaderBrand img{max-height:60px}
-  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:38px;padding:0 7px;font-size:8px}
+  .tr-appHeaderWeatherTime{font-size:9.3px}
+  .tr-appHeaderWeatherDetail{font-size:6.9px;letter-spacing:0}
+  .tr-appHeaderBrand{height:58px}
+  .tr-appHeaderBrand img{max-width:112px;max-height:58px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:36px;padding:0 6px;font-size:7.5px}
   .tr-appHeaderMenuButton svg{width:12px;height:12px;margin-right:4px}
 }
 
 @media(max-width:365px){
   .tr-appHeader{
-    grid-template-columns:minmax(102px,1fr) minmax(90px,.9fr) auto;
+    grid-template-columns:minmax(104px,1fr) minmax(84px,104px) minmax(104px,1fr);
     gap:4px;
   }
-  .tr-appHeaderWeather{padding-left:6px;padding-right:6px}
+  .tr-appHeaderWeather{padding-left:5px;padding-right:5px}
   .tr-appHeaderWeatherTemp{font-size:16px}
-  .tr-appHeaderWeatherTime{font-size:8.2px}
-  .tr-appHeaderWeatherDetail{font-size:6.2px}
-  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{padding:0 6px;font-size:7.4px}
+  .tr-appHeaderWeatherTime{font-size:8.6px}
+  .tr-appHeaderWeatherDetail{font-size:6.4px}
+  .tr-appHeaderBrand img{max-width:104px}
+  .tr-appHeaderWorkout,.tr-appHeaderMenuButton{padding:0 5px;font-size:7px}
 }
 `;
 
@@ -1798,6 +1889,8 @@ export function AppShell({
   const weatherCondition = weather?.condition?.toUpperCase() || (weatherLocation ? "LOADING" : "SET WEATHER");
   const weatherFeels = weather ? `${Math.round(weather.apparentTemperatureF)}°` : "--°";
   const weatherCity = weatherLocation?.displayName?.toUpperCase() || "LOCATION";
+  const weatherTempTone = temperatureToneClass(weather?.temperatureF);
+  const weatherFeelsTone = temperatureToneClass(weather?.apparentTemperatureF);
   const showHeaderWorkoutAction = hud.mode === "active" && (hud.isPaused || !isWorkoutSession);
   const headerWorkoutLabel = hud.mode === "active"
     ? hud.isPaused
@@ -1832,12 +1925,12 @@ export function AppShell({
                   <span className="tr-appHeaderWeatherIcon" aria-hidden="true">
                     <HeaderWeatherIcon kind={weather?.icon || "cloudy"} isDay={weather?.isDay ?? true} />
                   </span>
-                  <strong className="tr-appHeaderWeatherTemp">{weatherTemp}</strong>
+                  <strong className={`tr-appHeaderWeatherTemp ${weatherTempTone}`}>{weatherTemp}</strong>
                   <span className="tr-appHeaderWeatherTime">{weatherTime}</span>
                 </span>
-                <span className="tr-appHeaderWeatherDetail">
-                  <b>{weatherCondition}</b> · {weatherCity} · FEELS {weatherFeels}
-                </span>
+                <AutoFitText className="tr-appHeaderWeatherDetail" maxPx={9.4} minPx={6.2}>
+                  <b>{weatherCondition}</b> · {weatherCity} · FEELS <b className={`tr-appHeaderWeatherFeels ${weatherFeelsTone}`}>{weatherFeels}</b>
+                </AutoFitText>
               </button>
 
               <div className="tr-appHeaderBrand" aria-label="MVP Trainer Pro">
