@@ -57,6 +57,16 @@ import {
   type MusicOutputProfile,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
+import {
+  APP_BRANDING_CHANGED_EVENT,
+  fetchCurrentWeather,
+  formatWeatherLocalTime,
+  getAppBrandingWeatherSettings,
+  getHeaderLogoSignedUrl,
+  type AppBrandingWeatherSettings,
+  type CurrentWeatherSnapshot,
+  type WeatherIconKind,
+} from "../../lib/appBrandingWeather";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
@@ -86,6 +96,17 @@ function outputProfileIconName(profile: MusicOutputProfile): IconName {
   if (profile === "car_hifi") return "car";
   if (profile === "speaker") return "speaker";
   return "equalizer";
+}
+
+function headerWeatherGlyph(kind: WeatherIconKind, isDay: boolean) {
+  if (kind === "clear") return isDay ? "☀" : "☾";
+  if (kind === "partly_cloudy") return "◒";
+  if (kind === "fog") return "≋";
+  if (kind === "drizzle") return "⋰";
+  if (kind === "rain") return "▥";
+  if (kind === "snow") return "✦";
+  if (kind === "storm") return "ϟ";
+  return "☁";
 }
 
 type SavedDspProfile = {
@@ -1292,6 +1313,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
   const [headerWorkoutState, setHeaderWorkoutState] = useState("");
+  const [headerUiSettings, setHeaderUiSettings] = useState<AppBrandingWeatherSettings | null>(null);
+  const [headerLogoUrl, setHeaderLogoUrl] = useState<string | null>(null);
+  const [headerWeather, setHeaderWeather] = useState<CurrentWeatherSnapshot | null>(null);
+  const [headerWeatherLoading, setHeaderWeatherLoading] = useState(false);
+  const [headerClock, setHeaderClock] = useState(() => Date.now());
   const [presetSaveFlash, setPresetSaveFlash] = useState(false);
   const [sourcePulse, setSourcePulse] = useState(false);
   const restoredProfileRef = useRef<string>("");
@@ -1327,14 +1353,108 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const refreshHeaderUi = async () => {
+      try {
+        const settings = await getAppBrandingWeatherSettings();
+        if (cancelled) return;
+        setHeaderUiSettings(settings);
+
+        if (settings.headerLogoPath) {
+          try {
+            const signedUrl = await getHeaderLogoSignedUrl(settings.headerLogoPath);
+            if (!cancelled) setHeaderLogoUrl(signedUrl);
+          } catch {
+            if (!cancelled) setHeaderLogoUrl(null);
+          }
+        } else {
+          setHeaderLogoUrl(null);
+        }
+
+        if (settings.weatherLocation) {
+          setHeaderWeatherLoading(true);
+          try {
+            const weather = await fetchCurrentWeather(settings.weatherLocation);
+            if (!cancelled) setHeaderWeather(weather);
+          } catch {
+            if (!cancelled) setHeaderWeather(null);
+          } finally {
+            if (!cancelled) setHeaderWeatherLoading(false);
+          }
+        } else {
+          setHeaderWeather(null);
+          setHeaderWeatherLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setHeaderUiSettings(null);
+          setHeaderLogoUrl(null);
+          setHeaderWeather(null);
+          setHeaderWeatherLoading(false);
+        }
+      }
+    };
+
+    const handleSettingsChanged = () => {
+      void refreshHeaderUi();
+    };
+
+    void refreshHeaderUi();
+    const weatherRefreshTimer = window.setInterval(refreshHeaderUi, 15 * 60 * 1000);
+    const clockTimer = window.setInterval(() => setHeaderClock(Date.now()), 30 * 1000);
+    window.addEventListener(APP_BRANDING_CHANGED_EVENT, handleSettingsChanged);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(weatherRefreshTimer);
+      window.clearInterval(clockTimer);
+      window.removeEventListener(APP_BRANDING_CHANGED_EVENT, handleSettingsChanged);
+    };
+  }, []);
+
+  useEffect(() => {
     const title = document.querySelector<HTMLElement>(".tr-topTitle");
     const header = title?.parentElement;
-    if (!header) return;
-    const originalActions = Array.from(header.children).find((node) => node !== title && node instanceof HTMLElement) as HTMLElement | undefined;
+    if (!header || !title) return;
+    const originalActions = Array.from(header.children).find((node) => node !== title && node instanceof HTMLElement && !node.classList.contains("tr-proHeaderWeather") && !node.classList.contains("tr-proHeaderBrand") && !node.classList.contains("tr-proGlobalActions")) as HTMLElement | undefined;
     if (!originalActions) return;
 
-    const oldDisplay = originalActions.style.display;
+    const oldActionDisplay = originalActions.style.display;
+    const oldTitleDisplay = title.style.display;
     originalActions.style.display = "none";
+    title.style.display = "none";
+    header.classList.add("tr-proHeaderHost");
+
+    let weatherMount = header.querySelector<HTMLButtonElement>(".tr-proHeaderWeather");
+    if (!weatherMount) {
+      weatherMount = document.createElement("button");
+      weatherMount.type = "button";
+      weatherMount.className = "tr-proHeaderWeather";
+      weatherMount.setAttribute("aria-label", "Open weather and branding settings");
+      weatherMount.addEventListener("click", () => navigate("/sound-alerts"));
+      header.appendChild(weatherMount);
+    }
+
+    let brandMount = header.querySelector<HTMLElement>(".tr-proHeaderBrand");
+    if (!brandMount) {
+      brandMount = document.createElement("div");
+      brandMount.className = "tr-proHeaderBrand";
+      header.appendChild(brandMount);
+    }
+    brandMount.innerHTML = "";
+    if (headerLogoUrl) {
+      const logo = document.createElement("img");
+      logo.src = headerLogoUrl;
+      logo.alt = "MVP Trainer Pro";
+      logo.className = "tr-proHeaderLogoImage";
+      brandMount.appendChild(logo);
+    } else {
+      const fallback = document.createElement("span");
+      fallback.className = "tr-proHeaderLogoFallback";
+      fallback.textContent = "MVP TRAINER PRO";
+      brandMount.appendChild(fallback);
+    }
 
     let mount = header.querySelector<HTMLElement>(".tr-proGlobalActions");
     if (!mount) {
@@ -1349,6 +1469,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       button.type = "button";
       button.className = `tr-proHeaderButton ${className}`.trim();
       button.textContent = label;
+      button.title = label;
       button.addEventListener("click", action);
       mount?.appendChild(button);
       return button;
@@ -1386,11 +1507,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           return;
         }
 
-        /*
-         * Defensive fallback for layouts where the AppShell control is not
-         * currently mounted. Mirror the same local pause accounting, then
-         * force the shell's existing focus refresh.
-         */
         const pausedAtISO = window.localStorage.getItem("mvp_paused_at_iso");
         const pausedTotal =
           Number(window.localStorage.getItem("mvp_paused_total_seconds") ?? "0") || 0;
@@ -1418,7 +1534,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       makeButton(
         workoutPaused ? "RESUME" : "RETURN TO WORKOUT",
         workoutPaused ? resumeActiveWorkout : () => navigate(workoutTarget),
-        "is-resume"
+        workoutPaused ? "is-resume" : "is-resume is-return"
       );
     }
 
@@ -1430,6 +1546,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     accountButton.type = "button";
     accountButton.className = "tr-proHeaderButton tr-proHeaderButton--account";
     accountButton.textContent = "ACCOUNT ▾";
+    accountButton.title = "Account";
     const menu = document.createElement("div");
     menu.className = "tr-proAccountMenu";
     menu.hidden = true;
@@ -1446,10 +1563,67 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     mount.appendChild(accountWrap);
 
     return () => {
-      originalActions.style.display = oldDisplay;
+      originalActions.style.display = oldActionDisplay;
+      title.style.display = oldTitleDisplay;
+      header.classList.remove("tr-proHeaderHost");
+      weatherMount?.remove();
+      brandMount?.remove();
       mount?.remove();
     };
-  }, [navigate, headerWorkoutState]);
+  }, [navigate, headerWorkoutState, headerLogoUrl]);
+
+  useEffect(() => {
+    const mount = document.querySelector<HTMLButtonElement>(".tr-proHeaderWeather");
+    if (!mount) return;
+
+    mount.innerHTML = "";
+    const location = headerUiSettings?.weatherLocation ?? null;
+
+    const icon = document.createElement("span");
+    icon.className = "tr-proWeatherIcon";
+
+    const copy = document.createElement("span");
+    copy.className = "tr-proWeatherCopy";
+    const primary = document.createElement("span");
+    primary.className = "tr-proWeatherPrimary";
+    const secondary = document.createElement("span");
+    secondary.className = "tr-proWeatherSecondary";
+
+    if (!location) {
+      icon.textContent = "☀";
+      primary.innerHTML = "<b>SET WEATHER</b>";
+      secondary.textContent = "CITY / ZIP";
+      mount.classList.add("is-empty");
+      mount.classList.remove("is-live");
+    } else if (headerWeather) {
+      const localTime = formatWeatherLocalTime(headerWeather.timezone || location.timezone, new Date(headerClock));
+      icon.textContent = headerWeatherGlyph(headerWeather.icon, headerWeather.isDay);
+
+      const condition = document.createElement("b");
+      condition.textContent = headerWeather.condition;
+      const time = document.createElement("span");
+      time.textContent = localTime;
+      primary.append(condition, time);
+
+      const city = document.createElement("span");
+      city.className = "tr-proWeatherCity";
+      city.textContent = location.displayName;
+      const feels = document.createElement("strong");
+      feels.textContent = `FEELS ${Math.round(headerWeather.apparentTemperatureF)}°`;
+      secondary.append(city, feels);
+
+      mount.classList.remove("is-empty");
+      mount.classList.add("is-live");
+    } else {
+      icon.textContent = "☁";
+      primary.innerHTML = `<b>${headerWeatherLoading ? "LOADING WEATHER" : "WEATHER OFFLINE"}</b>`;
+      secondary.textContent = location.displayName;
+      mount.classList.remove("is-empty", "is-live");
+    }
+
+    copy.append(primary, secondary);
+    mount.append(icon, copy);
+  }, [headerUiSettings, headerWeather, headerWeatherLoading, headerClock]);
 
   useEffect(() => {
     const refreshPlaylists = () => {
@@ -4368,6 +4542,92 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-audioQueueSelectorValue[style*="10.5px"],
         .tr-audioQueueSelectorValue[style*="9.5px"]{
           text-overflow:ellipsis!important;
+        }
+
+        /* V13.9 CENTERED BRAND HEADER + COMPACT WEATHER */
+        .tr-proHeaderHost{
+          position:relative!important;
+          display:grid!important;
+          grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important;
+          align-items:center!important;
+          column-gap:12px!important;
+          min-height:66px!important;
+          overflow:visible!important;
+        }
+        .tr-proHeaderWeather{
+          grid-column:1!important;
+          justify-self:start!important;
+          min-width:0!important;
+          max-width:min(100%,410px)!important;
+          min-height:42px!important;
+          padding:5px 10px 5px 7px!important;
+          display:flex!important;
+          align-items:center!important;
+          gap:8px!important;
+          border:1px solid rgba(82,199,236,.18)!important;
+          border-radius:12px!important;
+          background:linear-gradient(180deg,rgba(8,27,37,.90),rgba(4,13,19,.96))!important;
+          color:#eefaff!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 5px 14px rgba(0,0,0,.18)!important;
+          cursor:pointer!important;
+          overflow:hidden!important;
+        }
+        .tr-proHeaderWeather:hover{border-color:rgba(75,213,252,.40)!important;background:linear-gradient(180deg,rgba(10,43,56,.94),rgba(5,23,31,.98))!important}
+        .tr-proWeatherIcon{
+          flex:0 0 30px!important;
+          width:30px!important;
+          height:30px!important;
+          display:grid!important;
+          place-items:center!important;
+          border:1px solid rgba(82,213,252,.22)!important;
+          border-radius:9px!important;
+          background:radial-gradient(circle at 40% 30%,rgba(55,207,250,.19),rgba(3,21,29,.82))!important;
+          color:#71ddff!important;
+          font-size:18px!important;
+          line-height:1!important;
+          text-shadow:0 0 12px rgba(76,210,250,.30)!important;
+        }
+        .tr-proHeaderWeather.is-live .tr-proWeatherIcon{color:#ffd36c!important;border-color:rgba(255,191,71,.28)!important;background:radial-gradient(circle at 40% 30%,rgba(255,173,46,.19),rgba(32,19,3,.80))!important;text-shadow:0 0 12px rgba(255,171,45,.28)!important}
+        .tr-proWeatherCopy{min-width:0!important;display:flex!important;align-items:center!important;gap:9px!important;overflow:hidden!important}.tr-proWeatherPrimary,.tr-proWeatherSecondary{min-width:0!important;display:flex!important;align-items:center!important;gap:6px!important;white-space:nowrap!important}.tr-proWeatherPrimary:after{content:"•";color:rgba(141,181,196,.42)!important;margin-left:2px!important}.tr-proWeatherPrimary b{max-width:150px!important;overflow:hidden!important;text-overflow:ellipsis!important;color:#f5fbfd!important;font-size:8px!important;font-weight:1100!important;letter-spacing:.055em!important;text-transform:uppercase!important}.tr-proWeatherPrimary span{color:#9eb7c1!important;font-size:8px!important;font-weight:900!important;font-variant-numeric:tabular-nums!important}.tr-proWeatherSecondary{color:#b9d0d9!important;font-size:8px!important;font-weight:900!important}.tr-proWeatherCity{max-width:145px!important;overflow:hidden!important;text-overflow:ellipsis!important}.tr-proWeatherSecondary strong{color:#71e0ff!important;font-size:8px!important;font-weight:1100!important;letter-spacing:.035em!important}
+        .tr-proHeaderBrand{
+          grid-column:2!important;
+          justify-self:center!important;
+          align-self:center!important;
+          width:clamp(150px,18vw,218px)!important;
+          height:58px!important;
+          display:grid!important;
+          place-items:center!important;
+          pointer-events:none!important;
+          overflow:visible!important;
+          z-index:2!important;
+        }
+        .tr-proHeaderLogoImage{display:block!important;width:100%!important;height:100%!important;object-fit:contain!important;filter:drop-shadow(0 5px 13px rgba(0,0,0,.34))!important}.tr-proHeaderLogoFallback{color:#ffd45d!important;font-size:16px!important;font-weight:1100!important;letter-spacing:.035em!important;text-shadow:0 0 16px rgba(255,176,42,.14)!important;white-space:nowrap!important}
+        .tr-proHeaderHost>.tr-proGlobalActions{grid-column:3!important;justify-self:end!important;align-self:center!important;margin:0!important;z-index:3!important}.tr-proHeaderHost .tr-proHeaderButton{box-sizing:border-box!important}
+
+        /* V13.9 HIGH-FIDELITY OUTPUT ICON GEOMETRY: ICON -> FIXED SPACE -> TEXT */
+        .tr-outputProfileTitle{
+          display:grid!important;
+          grid-template-columns:32px minmax(0,1fr)!important;
+          align-items:center!important;
+          justify-content:start!important;
+          column-gap:12px!important;
+        }
+        .tr-outputProfileTitle>.tr-outputProfileIcon{grid-column:1!important;width:32px!important;min-width:32px!important;height:32px!important;margin:0!important}.tr-outputProfileTitle>span:last-child{grid-column:2!important;min-width:0!important;margin:0!important;padding:0!important;line-height:1.05!important}
+        .tr-outputProfileSelectLabel{display:grid!important;grid-template-columns:24px minmax(0,1fr)!important;align-items:center!important;justify-content:start!important;column-gap:10px!important}.tr-outputProfileSelectLabel>i{grid-column:1!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important}.tr-outputProfileSelectLabel>b{grid-column:2!important;margin:0!important;padding:0!important}
+        .tr-outputProfileTelemetryActive{display:grid!important;grid-template-columns:18px minmax(0,1fr)!important;align-items:center!important;justify-content:start!important;column-gap:9px!important}.tr-outputProfileTelemetryActive>i{grid-column:1!important;width:18px!important;min-width:18px!important;height:18px!important;margin:0!important}.tr-outputProfileTelemetryActive>b{grid-column:2!important;margin:0!important;padding:0!important}
+        .tr-outputProfileChoices button{display:grid!important;grid-template-columns:24px auto!important;align-items:center!important;justify-content:center!important;column-gap:10px!important}.tr-outputProfileChoices button>i{grid-column:1!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important}.tr-outputProfileChoices button>span{grid-column:2!important;margin:0!important;padding:0!important;white-space:nowrap!important}
+
+        @media(max-width:650px){
+          .tr-proHeaderHost{column-gap:6px!important;min-height:56px!important;grid-template-columns:minmax(0,1fr) 108px minmax(0,1fr)!important}
+          .tr-proHeaderWeather{max-width:118px!important;min-height:39px!important;height:39px!important;padding:3px 5px!important;gap:5px!important;border-radius:9px!important}
+          .tr-proWeatherIcon{flex-basis:25px!important;width:25px!important;height:25px!important;border-radius:7px!important;font-size:15px!important}
+          .tr-proWeatherCopy{display:grid!important;grid-template-columns:1fr!important;gap:2px!important;align-content:center!important}.tr-proWeatherPrimary,.tr-proWeatherSecondary{gap:4px!important}.tr-proWeatherPrimary:after{display:none!important}.tr-proWeatherPrimary b{max-width:68px!important;font-size:6.2px!important;letter-spacing:.02em!important}.tr-proWeatherPrimary span{font-size:6.2px!important}.tr-proWeatherSecondary{font-size:6.1px!important;gap:3px!important}.tr-proWeatherCity{max-width:62px!important}.tr-proWeatherSecondary strong{font-size:6.1px!important;letter-spacing:0!important}
+          .tr-proHeaderBrand{width:108px!important;height:44px!important}.tr-proHeaderLogoFallback{font-size:9px!important;letter-spacing:.015em!important}
+          .tr-proHeaderHost>.tr-proGlobalActions{gap:3px!important;max-width:118px!important}.tr-proHeaderHost .tr-proHeaderButton{height:30px!important;min-height:30px!important;padding:0 5px!important;font-size:7px!important}.tr-proHeaderHost .tr-proHeaderButton.is-return{font-size:0!important;max-width:53px!important}.tr-proHeaderHost .tr-proHeaderButton.is-return:before{content:"RETURN";font-size:6.5px!important}.tr-proHeaderHost .tr-proHeaderButton.is-sound,.tr-proHeaderHost .tr-proHeaderButton--account,.tr-proHeaderHost .tr-proAccountWrap>.tr-proHeaderButton{width:31px!important;min-width:31px!important;height:30px!important;min-height:30px!important}.tr-proHeaderHost .tr-proHeaderButton.is-sound:after{font-size:15px!important}.tr-proHeaderHost .tr-proHeaderButton--account:after{font-size:10px!important}
+          .tr-outputProfileTitle{grid-template-columns:29px minmax(0,1fr)!important;column-gap:10px!important}.tr-outputProfileTitle>.tr-outputProfileIcon{width:29px!important;min-width:29px!important;height:29px!important}.tr-outputProfileChoices button{grid-template-columns:24px auto!important;column-gap:9px!important}
+        }
+        @media(max-width:380px){
+          .tr-proHeaderHost{grid-template-columns:minmax(0,1fr) 96px minmax(0,1fr)!important;column-gap:4px!important}.tr-proHeaderWeather{max-width:110px!important}.tr-proHeaderBrand{width:96px!important;height:41px!important}.tr-proHeaderHost>.tr-proGlobalActions{max-width:110px!important;gap:2px!important}.tr-proHeaderHost .tr-proHeaderButton{padding:0 4px!important}.tr-proHeaderHost .tr-proHeaderButton.is-resume:not(.is-return){max-width:47px!important;font-size:6.4px!important}.tr-proWeatherPrimary b{max-width:61px!important}.tr-proWeatherCity{max-width:56px!important}
         }
 
       `}</style>
