@@ -551,9 +551,6 @@ let lastDspStatus: MusicDspStatus = "recovering";
 let lastHeadroom = -1;
 let lastEffectivePreamp = Number.NaN;
 let processingSettleTimer = 0;
-let dspRecoveryTimer = 0;
-let dspRecoveryPromise: Promise<void> | null = null;
-let dspLifecycleRecoveryInstalled = false;
 let levelMeterTimer = 0;
 let lastReferenceRmsDb = Number.NaN;
 let lastProcessedRmsDb = Number.NaN;
@@ -573,10 +570,7 @@ function getAudioContext() {
     (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Context) return null;
   if (audioContext?.state === "closed") audioContext = null;
-  if (!audioContext) {
-    audioContext = new Context();
-    audioContext.addEventListener("statechange", handleMusicAudioContextStateChange);
-  }
+  if (!audioContext) audioContext = new Context();
   return audioContext;
 }
 function dbToGain(db: number) {
@@ -837,51 +831,6 @@ function scheduleProcessingSettle() {
     processingSettleTimer = 0;
     applyProcessingSettings();
   }, 140);
-}
-function queueMusicDspRecovery(delayMs = 0) {
-  if (typeof window === "undefined") return;
-  if (dspRecoveryTimer) window.clearTimeout(dspRecoveryTimer);
-  dspRecoveryTimer = window.setTimeout(() => {
-    dspRecoveryTimer = 0;
-    void recoverMusicDsp();
-  }, Math.max(0, delayMs));
-}
-function applyProcessingSettingsReliable(settle = false) {
-  applyProcessingSettings();
-  if (!audioContext || !mediaSourceConnected || audioContext.state !== "running") {
-    queueMusicDspRecovery(0);
-  }
-  if (settle) scheduleProcessingSettle();
-}
-function handleMusicAudioContextStateChange() {
-  const context = audioContext;
-  if (!context) return;
-  if (context.state === "running") {
-    applyProcessingSettings();
-    return;
-  }
-  if (
-    context.state === "suspended" &&
-    typeof document !== "undefined" &&
-    document.visibilityState === "visible" &&
-    (playbackIntent || state.playing)
-  ) {
-    queueMusicDspRecovery(80);
-  }
-}
-function installMusicDspLifecycleRecovery() {
-  if (dspLifecycleRecoveryInstalled || typeof window === "undefined" || typeof document === "undefined") return;
-  dspLifecycleRecoveryInstalled = true;
-
-  const recoverWhenVisible = () => {
-    if (document.visibilityState !== "visible") return;
-    if (!playbackIntent && !state.playing) return;
-    queueMusicDspRecovery(0);
-  };
-
-  document.addEventListener("visibilitychange", recoverWhenVisible);
-  window.addEventListener("pageshow", recoverWhenVisible);
-  window.addEventListener("focus", recoverWhenVisible);
 }
 function setDspTelemetry(status: MusicDspStatus, effectivePreampDb: number, autoHeadroomDb: number) {
   const roundedPreamp = Math.round(effectivePreampDb * 10) / 10;
@@ -1164,9 +1113,7 @@ function releaseGraph() {
   musicGain = null;
   analyserBuffer = null;
   if (levelMeterTimer && typeof window !== "undefined") window.clearInterval(levelMeterTimer);
-  if (dspRecoveryTimer && typeof window !== "undefined") window.clearTimeout(dspRecoveryTimer);
   levelMeterTimer = 0;
-  dspRecoveryTimer = 0;
   lastReferenceRmsDb = Number.NaN;
   lastProcessedRmsDb = Number.NaN;
   mediaSourceConnected = false;
@@ -1559,7 +1506,6 @@ function savePlaybackPosition() {
 }
 
 function ensureAudioElement() {
-  installMusicDspLifecycleRecovery();
   if (audioElement) return audioElement;
   const audio = new Audio();
   audio.preload = "metadata";
@@ -1569,7 +1515,6 @@ function ensureAudioElement() {
     playbackIntent = true;
     emit({ playing: true, error: null });
     configureMediaSession();
-    queueMusicDspRecovery(0);
     const trackId = audio.dataset.trackId;
     const token = trackId ? `${trackId}:${audio.currentSrc || audio.src}` : "";
     if (trackId && token !== recordedPlayToken) {
@@ -1997,7 +1942,8 @@ export function setMusicVolume(value: number) {
 export function setMusicEqEnabled(enabled: boolean) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(enabled));
   emit({ eqEnabled: enabled });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
 }
 
 export function applyMusicEqPreset(presetName: MusicEqPreset) {
@@ -2013,7 +1959,8 @@ export function applyMusicEqPreset(presetName: MusicEqPreset) {
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
   savePlayerSetting(STORAGE_KEYS.preampDb, "0");
   emit({ eqPreset: presetName, eqGains: gains, preampDb: 0, dspVerificationMode: "off" });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
 }
 
 export function saveMusicEqCustomPreset(slot: MusicCustomPresetSlot) {
@@ -2031,21 +1978,23 @@ export function setMusicEqBand(index: number, gainDb: number) {
   gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0));
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
   emit({ eqGains: gains });
-  applyProcessingSettingsReliable();
+  applyProcessingSettings();
 }
 
 export function setMusicPreamp(preampDb: number) {
   const next = Math.max(-12, Math.min(12, Number(preampDb) || 0));
   savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
   emit({ preampDb: next });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
 }
 
 export function setMusicEqTopology(topology: MusicEqTopology) {
   const next: MusicEqTopology = topology === "linear_phase" ? "linear_phase" : "minimum_phase";
   savePlayerSetting(STORAGE_KEYS.eqTopology, next);
   emit({ eqTopology: next });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
 }
 
 export function setMusicCrossfadeSeconds(seconds: number) {
@@ -2063,7 +2012,7 @@ export function setMusicNormalizationEnabled(_enabled: boolean) {
 export function setMusicLimiterEnabled(enabled: boolean) {
   savePlayerSetting(STORAGE_KEYS.limiterEnabled, String(enabled));
   emit({ limiterEnabled: enabled });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
 }
 
 export function setMusicDuckingStrength(value: MusicDuckingStrength) {
@@ -2097,7 +2046,7 @@ function applyHeadphoneModeValues(mode: MusicHeadphoneMode) {
     headphoneCenter: values.center,
     headphoneBassImpact: values.bass,
   });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
 }
 export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) {
   applyHeadphoneModeValues(mode);
@@ -2117,7 +2066,7 @@ function setHeadphoneValue(
   const next = Math.max(0, Math.min(100, Number(value) || 0));
   savePlayerSetting(storageKey, String(next));
   emit({ [key]: next } as Pick<MusicPlayerState, typeof key>);
-  applyProcessingSettingsReliable();
+  applyProcessingSettings();
 }
 export function setMusicHeadphoneWidth(value: number) {
   setHeadphoneValue("headphoneWidth", STORAGE_KEYS.headphoneWidth, value);
@@ -2138,7 +2087,8 @@ export function setMusicHeadphoneBassImpact(value: number) {
 export function setMusicDspVerificationMode(mode: MusicDspVerificationMode) {
   const next: MusicDspVerificationMode = mode === "eq" || mode === "spatial" ? mode : "off";
   emit({ dspVerificationMode: next });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
 }
 
 export function setMusicOutputProfile(profile: MusicOutputProfile) {
@@ -2152,39 +2102,22 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
     normalizationEnabled: false,
     dspVerificationMode: "off",
   });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
 }
 
 export function setMusicDspBypass(bypassed: boolean) {
   savePlayerSetting(STORAGE_KEYS.dspBypass, String(bypassed));
   emit({ dspBypass: bypassed, dspVerificationMode: "off" });
-  applyProcessingSettingsReliable(true);
+  applyProcessingSettings();
 }
 
 export async function recoverMusicDsp() {
-  if (dspRecoveryPromise) return dspRecoveryPromise;
-
-  dspRecoveryPromise = (async () => {
-    try {
-      await unlockMusicAudio();
-      const context = getAudioContext();
-      if (!context || !mediaSourceConnected) {
-        emit({ dspStatus: "unavailable" });
-        return;
-      }
-      if (context.state === "suspended") {
-        await context.resume();
-      }
-      applyProcessingSettings();
-      scheduleProcessingSettle();
-    } catch {
-      emit({ dspStatus: "unavailable" });
-    } finally {
-      dspRecoveryPromise = null;
-    }
-  })();
-
-  return dspRecoveryPromise;
+  try {
+    await unlockMusicAudio();
+    applyProcessingSettings();
+  } catch {
+    emit({ dspStatus: "unavailable" });
+  }
 }
 
 export async function rebuildMusicAudioEngine() {
