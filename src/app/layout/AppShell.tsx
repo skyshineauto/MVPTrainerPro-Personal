@@ -890,6 +890,7 @@ const APP_HEADER_CSS = `
 .tr-appHeaderWeatherTemp.is-freezing,.tr-appHeaderWeatherFeels.is-freezing{color:#d8f3ff;text-shadow:0 0 12px rgba(134,220,255,.34)}
 .tr-appHeaderWeatherTemp.is-neutral,.tr-appHeaderWeatherFeels.is-neutral{color:#f4fbfe}
 .tr-appHeaderWeatherFeels{font-weight:1100}
+.tr-appHeaderWeatherFeelsTop,.tr-appHeaderWeatherTime--mobile{display:none}
 .tr-appHeaderBrand{
   justify-self:center;
   width:100%;
@@ -1047,35 +1048,72 @@ const APP_HEADER_CSS = `
     gap:5px;
     min-height:65px;
   }
-  .tr-appHeaderWeather{min-height:72px;padding:6px 6px 7px}
+  .tr-appHeaderWeather{
+    min-height:78px;
+    padding:7px 6px 7px;
+    gap:3px;
+    align-content:center;
+  }
   .tr-appHeaderWeatherMain{
     grid-template-columns:24px max-content minmax(0,1fr);
     column-gap:4px;
+    align-items:center;
   }
   .tr-appHeaderWeatherIcon{width:24px;height:24px}
   .tr-appHeaderWeatherIcon svg{width:23px;height:23px}
   .tr-appHeaderWeatherTemp{font-size:18px}
-  .tr-appHeaderWeatherTime{font-size:9.5px;font-weight:1100;text-align:center}
-  .tr-appHeaderWeatherDetail{
-    display:grid;
-    justify-items:center;
-    gap:1px;
-    font-size:7.1px;
-    line-height:1.08;
+  .tr-appHeaderWeatherTime--desktop{display:none}
+  .tr-appHeaderWeatherFeelsTop{
+    min-width:0;
+    display:flex;
+    align-items:baseline;
+    justify-content:center;
+    gap:3px;
+    white-space:nowrap;
+    color:rgba(229,239,245,.88);
+    font-size:6.9px;
+    line-height:1;
+    font-weight:1000;
+    letter-spacing:.015em;
   }
-  .tr-appHeaderWeatherDetailPrimary,
-  .tr-appHeaderWeatherDetailFeels{
+  .tr-appHeaderWeatherFeelsTop b{font-size:7.8px;line-height:1}
+  .tr-appHeaderWeatherDetail{
+    display:block;
     width:100%;
     min-width:0;
+    font-size:7px;
+    line-height:1.05;
+  }
+  .tr-appHeaderWeatherDetailPrimary{
+    width:100%;
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
     gap:3px;
+    white-space:nowrap;
+    overflow:hidden;
   }
+  .tr-appHeaderWeatherDetailPrimary>b{flex:0 0 auto}
   .tr-appHeaderWeatherDetailPrimary>span{
-    overflow:visible;
-    text-overflow:clip;
-    white-space:normal;
-    text-wrap:balance;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
   }
-  .tr-appHeaderWeatherDetailFeels>i{display:none}
+  .tr-appHeaderWeatherDetailFeels{display:none}
+  .tr-appHeaderWeatherTime--mobile{
+    display:block;
+    width:100%;
+    color:#fff7dc;
+    font-size:9.8px;
+    line-height:1;
+    font-weight:1100;
+    letter-spacing:.02em;
+    text-align:center;
+    white-space:nowrap;
+    text-shadow:0 1px 0 rgba(0,0,0,.92),0 0 12px rgba(255,222,121,.24);
+  }
   .tr-appHeaderBrand{height:58px}
   .tr-appHeaderBrand img{max-width:112px;max-height:58px}
   .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:36px;padding:0 6px;font-size:7.5px}
@@ -1087,13 +1125,15 @@ const APP_HEADER_CSS = `
     grid-template-columns:minmax(104px,1fr) minmax(84px,104px) minmax(104px,1fr);
     gap:4px;
   }
-  .tr-appHeaderWeather{min-height:74px;padding-left:5px;padding-right:5px}
+  .tr-appHeaderWeather{min-height:78px;padding-left:5px;padding-right:5px}
   .tr-appHeaderWeatherMain{grid-template-columns:22px max-content minmax(0,1fr);column-gap:3px}
   .tr-appHeaderWeatherIcon{width:22px;height:22px}
   .tr-appHeaderWeatherIcon svg{width:21px;height:21px}
   .tr-appHeaderWeatherTemp{font-size:17px}
-  .tr-appHeaderWeatherTime{font-size:8.8px}
-  .tr-appHeaderWeatherDetail{font-size:6.8px}
+  .tr-appHeaderWeatherFeelsTop{font-size:6.3px;gap:2px}
+  .tr-appHeaderWeatherFeelsTop b{font-size:7.1px}
+  .tr-appHeaderWeatherDetail{font-size:6.5px}
+  .tr-appHeaderWeatherTime--mobile{font-size:9.2px}
   .tr-appHeaderBrand img{max-width:104px}
   .tr-appHeaderWorkout,.tr-appHeaderMenuButton{padding:0 5px;font-size:7px}
 }
@@ -1956,7 +1996,11 @@ export function AppShell({
                     <HeaderWeatherIcon kind={weather?.icon || "cloudy"} isDay={weather?.isDay ?? true} />
                   </span>
                   <strong className={`tr-appHeaderWeatherTemp ${weatherTempTone}`}>{weatherTemp}</strong>
-                  <span className="tr-appHeaderWeatherTime">{weatherTime}</span>
+                  <span className="tr-appHeaderWeatherTime tr-appHeaderWeatherTime--desktop">{weatherTime}</span>
+                  <span className="tr-appHeaderWeatherFeelsTop">
+                    <span>FEELS</span>
+                    <b className={`tr-appHeaderWeatherFeels ${weatherFeelsTone}`}>{weatherFeels}</b>
+                  </span>
                 </span>
                 <span className="tr-appHeaderWeatherDetail">
                   <span className="tr-appHeaderWeatherDetailPrimary">
@@ -1970,6 +2014,7 @@ export function AppShell({
                     <b className={`tr-appHeaderWeatherFeels ${weatherFeelsTone}`}>{weatherFeels}</b>
                   </span>
                 </span>
+                <span className="tr-appHeaderWeatherTime tr-appHeaderWeatherTime--mobile">{weatherTime}</span>
               </button>
 
               <div className="tr-appHeaderBrand" aria-label="MVP Trainer Pro">
