@@ -992,6 +992,16 @@ function MusicHeroSceneEngine({
   const palettePoolRef = useRef<HeroColorPool>(HERO_NEUTRAL_PALETTE.slice(0, 4).map((color) => ({ ...color })));
   const targetPaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
   const livePaletteRef = useRef<HeroPalette>(HERO_NEUTRAL_PALETTE.map((color) => ({ ...color })) as HeroPalette);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [engineGeneration, setEngineGeneration] = useState(0);
+  const lastRecoveryAtRef = useRef(0);
+
+  const requestEngineRecovery = () => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (lastRecoveryAtRef.current && now - lastRecoveryAtRef.current < 750) return;
+    lastRecoveryAtRef.current = now;
+    setEngineGeneration((generation) => generation + 1);
+  };
 
   useEffect(() => {
     playingRef.current = playing;
@@ -1045,7 +1055,22 @@ function MusicHeroSceneEngine({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const host = hostRef.current;
+    if (!canvas || !host) return;
+
+    let engineVisible = true;
+    let contextLost = false;
+    let lastSuccessfulFrame = performance.now();
+    let retryTimer = 0;
+
+    const visibilityObserver = typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver((entries) => {
+          const nextVisible = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
+          if (nextVisible && !engineVisible) lastSuccessfulFrame = performance.now();
+          engineVisible = nextVisible;
+        }, { rootMargin: "120px 0px", threshold: 0.01 })
+      : null;
+    visibilityObserver?.observe(host);
 
     const gl = canvas.getContext("webgl", {
       alpha: true,
@@ -1056,7 +1081,13 @@ function MusicHeroSceneEngine({
       preserveDrawingBuffer: false,
       powerPreference: "high-performance",
     });
-    if (!gl) return;
+    if (!gl) {
+      retryTimer = window.setTimeout(requestEngineRecovery, 600);
+      return () => {
+        window.clearTimeout(retryTimer);
+        visibilityObserver?.disconnect();
+      };
+    }
 
     const compileShader = (type: number, source: string) => {
       const shader = gl.createShader(type);
@@ -1166,10 +1197,33 @@ function MusicHeroSceneEngine({
       gl.uniform3f(location, color.r / 255, color.g / 255, color.b / 255);
     };
 
+    const recoverSilently = () => {
+      requestEngineRecovery();
+    };
+
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      contextLost = true;
+      window.cancelAnimationFrame(frame);
+      retryTimer = window.setTimeout(recoverSilently, 120);
+    };
+
+    const onContextRestored = () => {
+      contextLost = false;
+      recoverSilently();
+    };
+
+    canvas.addEventListener("webglcontextlost", onContextLost, false);
+    canvas.addEventListener("webglcontextrestored", onContextRestored, false);
+
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
-      if (typeof document !== "undefined" && document.hidden) {
+      if (typeof document !== "undefined" && (document.hidden || !engineVisible)) {
         lastNow = now;
+        return;
+      }
+      if (contextLost || gl.isContextLost()) {
+        recoverSilently();
         return;
       }
 
@@ -1255,23 +1309,50 @@ function MusicHeroSceneEngine({
       gl.uniform1f(characterLocation, liveCharacter);
       colorLocations.forEach((location, index) => setColor(location, livePalette[index]));
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+      lastSuccessfulFrame = now;
     };
+
+    const watchdog = window.setInterval(() => {
+      if (document.hidden || !engineVisible) return;
+      if (contextLost || gl.isContextLost() || performance.now() - lastSuccessfulFrame > 4500) {
+        recoverSilently();
+      }
+    }, 2200);
+
+    const onVisibilityChange = () => {
+      if (document.hidden || !engineVisible) return;
+      const now = performance.now();
+      if (contextLost || gl.isContextLost() || now - lastSuccessfulFrame > 4500) {
+        recoverSilently();
+      } else {
+        lastNow = now;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     frame = window.requestAnimationFrame(draw);
     return () => {
       window.cancelAnimationFrame(frame);
+      window.clearInterval(watchdog);
+      window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      canvas.removeEventListener("webglcontextlost", onContextLost, false);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored, false);
+      visibilityObserver?.disconnect();
       resizeObserver?.disconnect();
-      gl.deleteBuffer(buffer);
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
+      if (!gl.isContextLost()) {
+        gl.deleteBuffer(buffer);
+        gl.deleteProgram(program);
+        gl.deleteShader(vertexShader);
+        gl.deleteShader(fragmentShader);
+      }
     };
-  }, []);
+  }, [engineGeneration]);
 
   return (
-    <div className="tr-playerVisualEngine" aria-hidden="true">
+    <div ref={hostRef} className="tr-playerVisualEngine" aria-hidden="true">
       {artworkUrl ? <img className="tr-playerVisualArtwork" src={artworkUrl} alt="" /> : null}
-      <canvas ref={canvasRef} />
+      <canvas key={engineGeneration} ref={canvasRef} />
       <span className="tr-playerVisualGlass" />
     </div>
   );
