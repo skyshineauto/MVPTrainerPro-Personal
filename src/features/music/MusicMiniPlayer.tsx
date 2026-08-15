@@ -73,7 +73,17 @@ type IconName =
   | "dislike"
   | "guitar"
   | "discover"
-  | "music";
+  | "music"
+  | "headphones"
+  | "car"
+  | "speaker";
+
+function outputProfileIconName(profile: MusicOutputProfile): IconName {
+  if (profile === "headphones") return "headphones";
+  if (profile === "car_hifi") return "car";
+  if (profile === "speaker") return "speaker";
+  return "equalizer";
+}
 
 type SavedDspProfile = {
   name: string;
@@ -170,6 +180,9 @@ function PlayerIcon({ name }: { name: IconName }) {
   if (name === "guitar") return <svg viewBox="0 0 24 24" aria-hidden><path d="M15.7 2.7 21.3 8.3l-2.1 2.1-1.3-1.3-4.3 4.3c.7 2 .2 4.3-1.5 6-2.5 2.5-6.4 2.7-8.7.4-2.3-2.3-2.1-6.2.4-8.7 1.7-1.7 4-2.2 6-1.5l4.3-4.3-1.3-1.3 2.9-1.3ZM7.1 12.2a2.35 2.35 0 1 0 0 4.7 2.35 2.35 0 0 0 0-4.7Zm4-1.1 1.8 1.8 4.3-4.3-1.8-1.8-4.3 4.3Z" /></svg>;
   if (name === "discover") return <svg viewBox="0 0 24 24" aria-hidden><path d="m12 1.7 2.05 5.25L19.3 9 14.05 11.05 12 16.3l-2.05-5.25L4.7 9l5.25-2.05L12 1.7Zm6.2 11.6 1.15 2.95 2.95 1.15-2.95 1.15-1.15 2.95-1.15-2.95-2.95-1.15 2.95-1.15 1.15-2.95ZM5.1 14.6l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z" /></svg>;
   if (name === "equalizer") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h2v18H5V3Zm6 4h2v14h-2V7Zm6-4h2v18h-2V3ZM3 8h6v3H3V8Zm6 5h6v3H9v-3Zm6-4h6v3h-6V9Z" /></svg>;
+  if (name === "headphones") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 3a8 8 0 0 0-8 8v6.2A2.8 2.8 0 0 0 6.8 20H9v-7H6v-2a6 6 0 0 1 12 0v2h-3v7h2.2a2.8 2.8 0 0 0 2.8-2.8V11a8 8 0 0 0-8-8ZM7 15v3h-.2a.8.8 0 0 1-.8-.8V15h1Zm11 2.2a.8.8 0 0 1-.8.8H17v-3h1v2.2Z" /></svg>;
+  if (name === "car") return <svg viewBox="0 0 24 24" aria-hidden><path d="m5.2 6.2 1.4-2.8A2.5 2.5 0 0 1 8.8 2h6.4a2.5 2.5 0 0 1 2.2 1.4l1.4 2.8 1.4.5c1.1.4 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2h-1v1.2a.8.8 0 0 1-.8.8h-1.4a.8.8 0 0 1-.8-.8V20H8v1.2a.8.8 0 0 1-.8.8H5.8a.8.8 0 0 1-.8-.8V20H4a2 2 0 0 1-2-2V9.3c0-1.2.7-2.2 1.8-2.6l1.4-.5ZM7.4 6h9.2l-.9-1.8a.6.6 0 0 0-.5-.3H8.8a.6.6 0 0 0-.5.3L7.4 6ZM5.5 10a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm13 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM7 16h10v-2H7v2Z" /></svg>;
+  if (name === "speaker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm5 3.2a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Zm0 6.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2Zm0 2a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2Z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
 
@@ -179,10 +192,12 @@ function MusicActivityRta({
   playing,
   profileLabel,
   eqLabel,
+  outputProfile,
 }: {
   playing: boolean;
   profileLabel: string;
   eqLabel: string;
+  outputProfile: MusicOutputProfile;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -443,7 +458,7 @@ function MusicActivityRta({
       <canvas ref={canvasRef} />
       <div className="tr-rtaFidelityHead" aria-hidden>
         <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
-        <strong>{profileLabel}<b>•</b>{eqLabel}</strong>
+        <strong><span className="tr-rtaOutputIcon"><PlayerIcon name={outputProfileIconName(outputProfile)} /></span>{profileLabel}<b>•</b>{eqLabel}</strong>
       </div>
       <div className="tr-activityRtaLabels" aria-hidden>
         {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
@@ -1725,7 +1740,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
       </div>
 
-      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} />
+      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} />
 
 
       <div className="tr-playerUtilityRow">
@@ -1746,7 +1761,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </select>
           </label>
           <button type="button" className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
-            <span className="tr-dspStatusIcon"><PlayerIcon name="equalizer" /></span>
+            <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
             <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
             <i className={`tr-dspStatusLed ${player.dspStatus === "active" ? "is-live" : ""}`} aria-hidden />
           </button>
@@ -1760,17 +1775,24 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <div className="tr-outputProfilePanel">
             <div className="tr-outputProfileIntro">
               <small>HIGH-FIDELITY OUTPUT</small>
-              <strong>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</strong>
+              <strong className="tr-outputProfileTitle"><span className="tr-outputProfileIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</strong>
               <p>{MUSIC_OUTPUT_PROFILES[player.outputProfile].description}</p>
             </div>
             <label className="tr-outputProfileSelect">
-              <span>OUTPUT PROFILE</span>
+              <span className="tr-outputProfileSelectLabel"><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i>OUTPUT PROFILE</span>
               <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicOutputProfile(event.target.value as MusicOutputProfile)}>
                 {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
               </select>
             </label>
+            <div className="tr-outputProfileChoices" aria-label="Output profile quick select">
+              {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => (
+                <button key={value} type="button" className={player.outputProfile === value ? "is-active" : ""} onClick={() => setMusicOutputProfile(value)} aria-pressed={player.outputProfile === value}>
+                  <i><PlayerIcon name={outputProfileIconName(value)} /></i><span>{profile.shortLabel}</span>
+                </button>
+              ))}
+            </div>
             <div className="tr-outputProfileTelemetry">
-              <span className={player.outputProfile === "car_hifi" ? "is-car" : ""}>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span>
+              <span className={`tr-outputProfileTelemetryActive ${player.outputProfile === "car_hifi" ? "is-car" : ""}`}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span>
               <span>AUTO HEADROOM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
               <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
               <span>NORMALIZER <b>OFF</b></span>
@@ -1833,9 +1855,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       {savePresetOpen ? (
         <div className="tr-dspSaveBack" onMouseDown={() => setSavePresetOpen(false)}>
-          <section className="tr-dspSaveDialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="tr-dspSaveDialog" role="dialog" aria-modal="true" onMouseDown={(event: { stopPropagation: () => void }) => event.stopPropagation()}>
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
-            <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
+            <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event: ChangeEvent<HTMLInputElement>) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
             <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • 31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
@@ -3651,6 +3673,30 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-playerSourceTools .tr-dspStatusToggle{width:136px!important;min-width:136px!important;max-width:136px!important;height:44px!important;min-height:44px!important;padding:0 7px!important;grid-template-columns:24px minmax(0,1fr) 5px!important;gap:6px!important}
           .tr-dspStatusIcon{width:24px!important;height:24px!important}.tr-dspStatusCopy b{font-size:8.3px!important}.tr-dspStatusCopy small{font-size:5.9px!important}
         }
+
+        /* V13.7 OUTPUT PROFILE IDENTITY */
+        .tr-outputProfileTitle{display:flex!important;align-items:center!important;gap:9px!important}
+        .tr-outputProfileIcon,.tr-rtaOutputIcon,.tr-outputProfileSelectLabel i,.tr-outputProfileTelemetryActive i{display:inline-grid!important;place-items:center!important;flex:0 0 auto!important;color:#94e9ff!important}
+        .tr-outputProfileIcon{width:31px!important;height:31px!important;border:1px solid rgba(89,210,246,.25)!important;border-radius:9px!important;background:linear-gradient(180deg,rgba(11,45,58,.86),rgba(4,18,25,.94))!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 0 18px rgba(53,200,239,.08)!important}
+        .tr-outputProfileIcon svg{width:18px!important;height:18px!important;fill:currentColor!important}
+        .tr-outputProfileSelectLabel{display:flex!important;align-items:center!important;gap:6px!important}
+        .tr-outputProfileSelectLabel i{width:18px!important;height:18px!important;border:1px solid rgba(89,210,246,.16)!important;border-radius:5px!important;background:rgba(4,20,27,.72)!important}
+        .tr-outputProfileSelectLabel i svg{width:11px!important;height:11px!important;fill:currentColor!important}
+        .tr-outputProfileTelemetryActive{display:inline-flex!important;align-items:center!important;gap:6px!important}
+        .tr-outputProfileTelemetryActive i{width:15px!important;height:15px!important;color:#9cecff!important}
+        .tr-outputProfileTelemetryActive i svg{width:11px!important;height:11px!important;fill:currentColor!important}
+        .tr-rtaFidelityHead>strong{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:4px!important}
+        .tr-rtaOutputIcon{width:16px!important;height:16px!important;border:1px solid rgba(98,214,246,.17)!important;border-radius:5px!important;background:rgba(3,17,23,.76)!important;color:#9beaff!important}
+        .tr-rtaOutputIcon svg{width:11px!important;height:11px!important;fill:currentColor!important}
+        @media(max-width:650px){.tr-rtaOutputIcon{width:13px!important;height:13px!important;border-radius:4px!important}.tr-rtaOutputIcon svg{width:9px!important;height:9px!important}.tr-outputProfileIcon{width:28px!important;height:28px!important}.tr-outputProfileIcon svg{width:16px!important;height:16px!important}}
+
+        .tr-outputProfileChoices{grid-column:1/-1!important;display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important;margin-top:2px!important}
+        .tr-outputProfileChoices button{min-height:42px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:7px!important;padding:0 9px!important;border:1px solid rgba(112,192,220,.12)!important;border-radius:10px!important;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(0,0,0,.16))!important;color:#829da8!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.065em!important;cursor:pointer!important}
+        .tr-outputProfileChoices button i{width:22px!important;height:22px!important;display:grid!important;place-items:center!important;border:1px solid rgba(101,190,221,.13)!important;border-radius:6px!important;background:rgba(3,16,22,.7)!important;color:#7da9b8!important}
+        .tr-outputProfileChoices button i svg{width:13px!important;height:13px!important;fill:currentColor!important}
+        .tr-outputProfileChoices button.is-active{border-color:rgba(73,210,249,.42)!important;color:#dff8ff!important;background:linear-gradient(180deg,rgba(12,55,69,.78),rgba(4,23,31,.92))!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 0 18px rgba(58,205,244,.07)!important}
+        .tr-outputProfileChoices button.is-active i{border-color:rgba(76,216,253,.32)!important;color:#9cecff!important;background:rgba(5,45,58,.84)!important}
+        @media(max-width:650px){.tr-outputProfileChoices{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tr-outputProfileChoices button{min-height:40px!important;font-size:6.7px!important}}
 
 
       `}</style>
