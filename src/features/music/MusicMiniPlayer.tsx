@@ -1680,6 +1680,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     : !player.eqEnabled
       ? "FLAT"
       : activeSavedProfile?.name || activeBuiltInEq || "CUSTOM";
+  const activePlaylistLabel = player.activePlaylistId
+    ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
+    : "All Uploaded Songs";
 
   return (
     <section
@@ -1756,6 +1759,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <span>PLAYING FROM</span>
             <span className="tr-audioQueueSelectorField">
               <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="music" /></i>
+              <span className="tr-audioQueueSelectorValue" aria-hidden>{activePlaylistLabel}</span>
               <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
@@ -3937,6 +3941,65 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8px!important}.tr-playerModeStage{gap:5px!important}.tr-playerModeStage .tr-audioModeButton{padding-left:8px!important;padding-right:27px!important;column-gap:5px!important}.tr-playerModeStage .tr-audioModeButton>span{font-size:8.8px!important}.tr-playerModeStage .tr-modeState{right:6px!important;font-size:6.2px!important}.tr-audioQueueSelectorField{grid-template-columns:34px minmax(0,1fr) 34px!important}.tr-audioQueueSelectorField .tr-sourceIcon,.tr-audioQueueSelectorField .tr-sourceChevron{width:34px!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{font-size:11.5px!important;padding:0 6px!important}.tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:30px minmax(0,1fr) 18px!important;column-gap:8px!important;padding-left:8px!important;padding-right:28px!important}.tr-playerSourceTools .tr-dspStatusIcon{width:30px!important;height:30px!important;min-width:30px!important}.tr-playerSourceTools .tr-dspStatusCopy b{font-size:10.5px!important}.tr-playerSourceTools .tr-dspStatusCopy small{font-size:7.6px!important}.tr-audioEqQuickActions{grid-template-columns:1fr!important}.tr-audioEqQuickActions button{height:48px!important;min-height:48px!important}.tr-audioEqQuickActions button>span{font-size:11px!important}.tr-audioEqQuickActions button>i{font-size:6.8px!important}}
         @media(hover:none){.tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled),.tr-playerModeStage .tr-audioModeButton:hover:not(:disabled),.tr-playerSourceTools .tr-dspStatusToggle:hover,.tr-audioEqQuickActions button:hover,.tr-dspProfileSaveActions button.tr-savePresetCommand:hover{transform:none!important}}
         @media(prefers-reduced-motion:reduce){.tr-playerTransportStage .tr-audioTransportButton,.tr-playerModeStage .tr-audioModeButton,.tr-playerSourceTools .tr-dspStatusToggle,.tr-audioEqQuickActions button,.tr-dspProfileSaveActions .tr-savePresetCommand,.tr-dspChevron{animation:none!important;transition:none!important}.tr-playerTransportStage .tr-audioTransportButton:before,.tr-playerModeStage .tr-audioModeButton:before,.tr-playerSourceTools .tr-dspStatusToggle:before,.tr-audioEqQuickActions button:before,.tr-dspProfileSaveActions button.tr-savePresetCommand:before{display:none!important}}
+
+
+
+        /* V13.8.2 PLAYER LAYOUT + READABILITY POLISH */
+        .tr-playerTransportStage{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;justify-content:stretch!important;align-items:start!important}
+        .tr-playerTransportStage .tr-audioTransportUnit{justify-items:stretch!important;align-items:center!important}
+        .tr-playerTransportStage .tr-audioTransportButton{display:grid!important;place-items:center!important;padding:0!important}
+        .tr-playerTransportStage .tr-audioTransportFace{display:grid!important;place-items:center!important;width:100%!important;height:100%!important}
+        .tr-playerTransportStage .tr-audioTransportFace svg{width:30px!important;height:30px!important}
+        .tr-playerTransportStage .tr-audioTransportUnit>span{display:block!important;width:100%!important;text-align:center!important}
+
+        .tr-playerModeStage{display:flex!important;justify-content:center!important;align-items:center!important;flex-wrap:nowrap!important;gap:10px!important}
+        .tr-playerModeStage .tr-audioModeButton{flex:0 1 170px!important;max-width:170px!important}
+
+        .tr-audioQueueSelectorField{position:relative!important}
+        .tr-audioQueueSelectorValue{position:absolute!important;left:35px!important;right:34px!important;top:0!important;bottom:0!important;display:flex!important;align-items:center!important;min-width:0!important;padding:0 10px!important;color:#f1f9fc!important;font-size:12px!important;line-height:1!important;font-weight:850!important;letter-spacing:.01em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;pointer-events:none!important;z-index:0!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{position:absolute!important;inset:0!important;z-index:2!important;opacity:0!important;cursor:pointer!important}
+        .tr-audioQueueSelectorField .tr-sourceIcon,.tr-audioQueueSelectorField .tr-sourceChevron{position:relative!important;z-index:1!important}
+        .tr-audioQueueSelectorField .tr-sourceChevron{justify-self:end!important}
+        .tr-audioQueueSelectorField .tr-sourceChevron svg{margin-top:1px!important}
+
+        .tr-outputProfileTitle,.tr-outputProfileSelectLabel,.tr-outputProfileTelemetryActive{min-width:0!important;align-items:center!important}
+        .tr-outputProfileTitle{column-gap:12px!important}
+        .tr-outputProfileTitle>span:last-child,.tr-outputProfileSelectLabel>b,.tr-outputProfileTelemetryActive>b{line-height:1.05!important}
+        .tr-outputProfileIcon{display:grid!important;place-items:center!important;margin:0!important}
+        .tr-outputProfileSelectLabel i,.tr-outputProfileTelemetryActive i{display:grid!important;place-items:center!important;margin:0!important;vertical-align:middle!important}
+        .tr-outputProfileSelectLabel{column-gap:10px!important}
+        .tr-outputProfileTelemetryActive{column-gap:9px!important}
+
+        @media(max-width:650px){
+          .tr-playerTransportStage{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important}
+          .tr-playerTransportStage .tr-audioTransportButton{height:50px!important;min-height:50px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:24px!important;height:24px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8.7px!important;letter-spacing:.03em!important}
+          .tr-playerModeStage{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;justify-content:stretch!important;gap:8px!important}
+          .tr-playerModeStage .tr-audioModeButton{flex:none!important;max-width:none!important;width:100%!important}
+          .tr-audioQueueSelectorValue{left:38px!important;right:38px!important;font-size:13px!important;padding:0 10px!important}
+          .tr-outputProfileTitle{column-gap:10px!important}
+          .tr-outputProfileSelectLabel{column-gap:9px!important}
+          .tr-outputProfileTelemetryActive{column-gap:8px!important}
+        }
+        @media(max-width:390px){
+          .tr-playerTransportStage .tr-audioTransportButton{height:48px!important;min-height:48px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:23px!important;height:23px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8.2px!important}
+          .tr-playerModeStage{gap:7px!important}
+          .tr-playerModeStage .tr-audioModeButton{height:42px!important;min-height:42px!important;padding:0 28px 0 10px!important;column-gap:6px!important}
+          .tr-playerModeStage .tr-audioModeButton svg{width:16px!important;height:16px!important}
+          .tr-playerModeStage .tr-audioModeButton>span{font-size:9px!important;letter-spacing:.02em!important}
+          .tr-playerModeStage .tr-modeState{right:7px!important}
+          .tr-audioQueueSelectorValue{font-size:12px!important;padding:0 8px!important}
+        }
+        @media(max-width:350px){
+          .tr-playerTransportStage{gap:5px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:22px!important;height:22px!important}
+          .tr-playerModeStage .tr-audioModeButton{padding:0 24px 0 9px!important}
+          .tr-playerModeStage .tr-audioModeButton>span{font-size:8.6px!important}
+          .tr-audioQueueSelectorValue{font-size:11.4px!important;padding:0 6px!important}
+        }
 
       `}</style>
     </section>
