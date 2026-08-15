@@ -2,6 +2,8 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
       { name: "enabled", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
+      { name: "mode", defaultValue: 0, minValue: 0, maxValue: 5, automationRate: "k-rate" },
+      { name: "proof", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
       { name: "width", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
       { name: "depth", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
       { name: "crossfeed", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
@@ -12,10 +14,13 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
-    const maxDelay = Math.max(512, Math.ceil(sampleRate * 0.018));
+    const maxDelay = Math.max(1024, Math.ceil(sampleRate * 0.032));
     this.delayL = new Float32Array(maxDelay);
     this.delayR = new Float32Array(maxDelay);
-    this.delaySide = new Float32Array(maxDelay);
+    this.crossDelayL = new Float32Array(maxDelay);
+    this.crossDelayR = new Float32Array(maxDelay);
+    this.highDelayL = new Float32Array(maxDelay);
+    this.highDelayR = new Float32Array(maxDelay);
     this.writeIndex = 0;
     this.crossLpL = 0;
     this.crossLpR = 0;
@@ -31,6 +36,11 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
     return values.length === 1 ? values[0] : values[index];
   }
 
+  read(buffer, delaySamples) {
+    const readIndex = (this.writeIndex - delaySamples + buffer.length) % buffer.length;
+    return buffer[readIndex];
+  }
+
   process(inputs, outputs, parameters) {
     const input = inputs[0];
     const output = outputs[0];
@@ -42,10 +52,10 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
     const outR = output[1] || output[0];
     if (!inL || !outL) return true;
 
-    const alphaCross = 1 - Math.exp(-2 * Math.PI * 1250 / sampleRate);
-    const alphaBass = 1 - Math.exp(-2 * Math.PI * 135 / sampleRate);
-    const envAttack = 1 - Math.exp(-1 / (sampleRate * 0.010));
-    const envRelease = 1 - Math.exp(-1 / (sampleRate * 0.095));
+    const alphaCross = 1 - Math.exp(-2 * Math.PI * 1350 / sampleRate);
+    const alphaBass = 1 - Math.exp(-2 * Math.PI * 165 / sampleRate);
+    const envAttack = 1 - Math.exp(-1 / (sampleRate * 0.008));
+    const envRelease = 1 - Math.exp(-1 / (sampleRate * 0.082));
     const length = outL.length;
 
     for (let i = 0; i < length; i += 1) {
@@ -59,6 +69,8 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
         continue;
       }
 
+      const mode = Math.round(this.param(parameters, "mode", i));
+      const proof = this.param(parameters, "proof", i) >= 0.5;
       const width = this.param(parameters, "width", i);
       const depth = this.param(parameters, "depth", i);
       const crossfeed = this.param(parameters, "crossfeed", i);
@@ -70,55 +82,103 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
       this.bassLpL += alphaBass * (left - this.bassLpL);
       this.bassLpR += alphaBass * (right - this.bassLpR);
 
+      const highL = left - this.bassLpL;
+      const highR = right - this.bassLpR;
       const absBassL = Math.abs(this.bassLpL);
       const absBassR = Math.abs(this.bassLpR);
       this.bassEnvL += (absBassL > this.bassEnvL ? envAttack : envRelease) * (absBassL - this.bassEnvL);
       this.bassEnvR += (absBassR > this.bassEnvR ? envAttack : envRelease) * (absBassR - this.bassEnvR);
 
-      const delayMs = 0.22 + crossfeed * 0.62;
-      const crossDelaySamples = Math.max(1, Math.min(this.delayL.length - 1, Math.round(sampleRate * delayMs / 1000)));
-      const depthDelayMs = 1.8 + depth * 10.8;
-      const depthDelaySamples = Math.max(1, Math.min(this.delaySide.length - 1, Math.round(sampleRate * depthDelayMs / 1000)));
-      const crossRead = (this.writeIndex - crossDelaySamples + this.delayL.length) % this.delayL.length;
-      const depthRead = (this.writeIndex - depthDelaySamples + this.delaySide.length) % this.delaySide.length;
+      // Read before writing so every tap is a true delay.
+      const proofL = this.read(this.delayL, Math.max(1, Math.round(sampleRate * 0.017)));
+      const proofR = this.read(this.delayR, Math.max(1, Math.round(sampleRate * 0.011)));
 
-      const delayedCrossL = this.delayL[crossRead];
-      const delayedCrossR = this.delayR[crossRead];
-      const delayedSide = this.delaySide[depthRead];
+      let crossDelayMs = 0.28 + crossfeed * 0.95;
+      if (mode === 3) crossDelayMs += 0.18;
+      const crossDelaySamples = Math.max(1, Math.min(this.crossDelayL.length - 1, Math.round(sampleRate * crossDelayMs / 1000)));
+      const delayedCrossL = this.read(this.crossDelayL, crossDelaySamples);
+      const delayedCrossR = this.read(this.crossDelayR, crossDelaySamples);
 
-      this.delayL[this.writeIndex] = this.crossLpL;
-      this.delayR[this.writeIndex] = this.crossLpR;
+      let depthDelayMsL = 3.4 + depth * 7.6;
+      let depthDelayMsR = 6.6 + depth * 10.8;
+      if (mode === 3) {
+        depthDelayMsL += 1.4;
+        depthDelayMsR += 2.8;
+      } else if (mode === 1) {
+        depthDelayMsL *= 0.62;
+        depthDelayMsR *= 0.62;
+      } else if (mode === 4) {
+        depthDelayMsL *= 0.35;
+        depthDelayMsR *= 0.35;
+      }
+      const depthDelaySamplesL = Math.max(1, Math.min(this.highDelayL.length - 1, Math.round(sampleRate * depthDelayMsL / 1000)));
+      const depthDelaySamplesR = Math.max(1, Math.min(this.highDelayR.length - 1, Math.round(sampleRate * depthDelayMsR / 1000)));
+      const delayedHighL = this.read(this.highDelayL, depthDelaySamplesL);
+      const delayedHighR = this.read(this.highDelayR, depthDelaySamplesR);
+
+      this.delayL[this.writeIndex] = left;
+      this.delayR[this.writeIndex] = right;
+      this.crossDelayL[this.writeIndex] = this.crossLpL;
+      this.crossDelayR[this.writeIndex] = this.crossLpR;
+      this.highDelayL[this.writeIndex] = highL;
+      this.highDelayR[this.writeIndex] = highR;
+
+      if (proof) {
+        // Deliberately exaggerated verification signal. This is meant to sound unmistakably
+        // different, not pretty, so a user can prove the headphone worklet is truly audible.
+        const proofOutL = left * 0.56 + proofR * 0.78 - right * 0.14;
+        const proofOutR = right * 0.56 - proofL * 0.78 + left * 0.14;
+        outL[i] = proofOutL * 0.78;
+        outR[i] = proofOutR * 0.78;
+        this.writeIndex += 1;
+        if (this.writeIndex >= this.delayL.length) this.writeIndex = 0;
+        continue;
+      }
 
       const mid = (left + right) * 0.5;
       const side = (left - right) * 0.5;
-      this.delaySide[this.writeIndex] = side;
-
       const sideLow = (this.bassLpL - this.bassLpR) * 0.5;
       const sideHigh = side - sideLow;
-      const widthScale = 0.96 + width * 1.02;
-      const bassWidth = 0.94 + width * 0.06;
-      const widenedSide = sideHigh * widthScale + sideLow * bassWidth;
-      const centerScale = 0.72 + center * 0.66;
-      const depthMix = depth * 0.36;
-      const crossMix = crossfeed * 0.42;
 
-      const transientL = Math.max(0, absBassL - this.bassEnvL * 0.72);
-      const transientR = Math.max(0, absBassR - this.bassEnvR * 0.72);
-      const bassDrive = bassImpact * 0.50;
-      const bassPunchL = this.bassLpL * bassImpact * 0.12 + Math.sign(this.bassLpL) * transientL * bassDrive;
-      const bassPunchR = this.bassLpR * bassImpact * 0.12 + Math.sign(this.bassLpR) * transientR * bassDrive;
+      let sideScale;
+      if (mode === 4) sideScale = 0.38 + width * 0.22;
+      else {
+        const modeLift = mode === 1 ? 0.28 : mode === 2 ? 0.22 : mode === 3 ? 0.08 : 0;
+        sideScale = 1 + width * 1.45 + modeLift;
+      }
+      const bassSideScale = mode === 4 ? 0.62 : 0.88 + width * 0.10;
+      const widenedSide = sideHigh * sideScale + sideLow * bassSideScale;
+
+      let centerScale = 1 + (center - 0.5) * 0.55;
+      if (mode === 4) centerScale += 0.24;
+      if (mode === 3) centerScale += 0.08;
+
+      let depthCharacter = mode === 2 ? 1.15 : mode === 3 ? 1.05 : mode === 1 ? 0.42 : mode === 4 ? 0.16 : 0.34;
+      const depthMix = depth * 0.48 * depthCharacter;
+      let crossCharacter = mode === 3 ? 1.2 : mode === 2 ? 0.82 : mode === 1 ? 0.30 : mode === 4 ? 0.76 : 0.55;
+      const crossMix = crossfeed * 0.38 * crossCharacter;
 
       let processedL = mid * centerScale + widenedSide;
       let processedR = mid * centerScale - widenedSide;
 
+      // Frequency-shaped crossfeed creates speaker-like blending without smearing the bass.
       processedL += delayedCrossR * crossMix;
       processedR += delayedCrossL * crossMix;
-      processedL += delayedSide * depthMix;
-      processedR -= delayedSide * depthMix;
+
+      // Asymmetric high-frequency ambience taps add a real depth cue rather than only scaling M/S.
+      processedL += (delayedHighR * 0.72 - delayedHighL * 0.16) * depthMix;
+      processedR += (delayedHighL * 0.72 - delayedHighR * 0.16) * depthMix;
+
+      const transientL = Math.max(0, absBassL - this.bassEnvL * 0.70);
+      const transientR = Math.max(0, absBassR - this.bassEnvR * 0.70);
+      const bassDrive = bassImpact * (mode === 5 ? 0.72 : 0.54);
+      const bassPunchL = this.bassLpL * bassImpact * 0.10 + Math.sign(this.bassLpL) * transientL * bassDrive;
+      const bassPunchR = this.bassLpR * bassImpact * 0.10 + Math.sign(this.bassLpR) * transientR * bassDrive;
       processedL += bassPunchL;
       processedR += bassPunchR;
 
-      const compensation = 1 / Math.max(1, Math.sqrt((centerScale * centerScale + widthScale * widthScale) * 0.46));
+      const widthCost = Math.max(0, sideScale - 1) * 0.23;
+      const compensation = 1 / Math.max(1, 1 + widthCost + depthMix * 0.28 + crossMix * 0.16 + bassImpact * 0.07);
       outL[i] = processedL * compensation;
       outR[i] = processedR * compensation;
 
