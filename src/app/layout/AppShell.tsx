@@ -1049,38 +1049,47 @@ const APP_HEADER_CSS = `
     min-height:65px;
   }
   .tr-appHeaderWeather{
-    min-height:78px;
-    padding:7px 6px 7px;
+    min-height:82px;
+    padding:7px 6px 8px;
     gap:3px;
     align-content:center;
   }
   .tr-appHeaderWeatherMain{
-    grid-template-columns:24px max-content minmax(0,1fr);
-    column-gap:4px;
+    grid-template-columns:24px max-content max-content;
+    justify-content:center;
+    column-gap:5px;
     align-items:center;
   }
   .tr-appHeaderWeatherIcon{width:24px;height:24px}
   .tr-appHeaderWeatherIcon svg{width:23px;height:23px}
-  .tr-appHeaderWeatherTemp{font-size:18px}
+  .tr-appHeaderWeatherTemp{
+    font-size:18px;
+    line-height:.94;
+  }
   .tr-appHeaderWeatherTime--desktop{display:none}
   .tr-appHeaderWeatherFeelsTop{
     min-width:0;
-    display:flex;
+    display:inline-flex;
     align-items:baseline;
     justify-content:center;
-    gap:3px;
+    gap:2px;
     white-space:nowrap;
-    color:rgba(229,239,245,.88);
-    font-size:6.9px;
+    color:rgba(226,237,243,.86);
+    font-size:5.4px;
     line-height:1;
     font-weight:1000;
-    letter-spacing:.015em;
+    letter-spacing:.01em;
   }
-  .tr-appHeaderWeatherFeelsTop b{font-size:7.8px;line-height:1}
+  .tr-appHeaderWeatherFeelsTop b{
+    font-size:6.6px;
+    line-height:1;
+    font-weight:1100;
+  }
   .tr-appHeaderWeatherDetail{
     display:block;
     width:100%;
     min-width:0;
+    margin-top:1px;
     font-size:7px;
     line-height:1.05;
   }
@@ -1105,14 +1114,19 @@ const APP_HEADER_CSS = `
   .tr-appHeaderWeatherTime--mobile{
     display:block;
     width:100%;
-    color:#fff7dc;
-    font-size:9.8px;
-    line-height:1;
+    margin-top:6px;
+    color:#ffd84d;
+    font-size:11.4px;
+    line-height:.95;
     font-weight:1100;
-    letter-spacing:.02em;
+    letter-spacing:.035em;
     text-align:center;
     white-space:nowrap;
-    text-shadow:0 1px 0 rgba(0,0,0,.92),0 0 12px rgba(255,222,121,.24);
+    -webkit-text-stroke:.18px rgba(255,239,160,.34);
+    text-shadow:
+      0 2px 0 rgba(0,0,0,.96),
+      0 0 8px rgba(255,217,77,.34),
+      0 0 15px rgba(255,188,35,.18);
   }
   .tr-appHeaderBrand{height:58px}
   .tr-appHeaderBrand img{max-width:112px;max-height:58px}
@@ -1125,15 +1139,15 @@ const APP_HEADER_CSS = `
     grid-template-columns:minmax(104px,1fr) minmax(84px,104px) minmax(104px,1fr);
     gap:4px;
   }
-  .tr-appHeaderWeather{min-height:78px;padding-left:5px;padding-right:5px}
-  .tr-appHeaderWeatherMain{grid-template-columns:22px max-content minmax(0,1fr);column-gap:3px}
+  .tr-appHeaderWeather{min-height:82px;padding-left:5px;padding-right:5px}
+  .tr-appHeaderWeatherMain{grid-template-columns:22px max-content max-content;justify-content:center;column-gap:4px}
   .tr-appHeaderWeatherIcon{width:22px;height:22px}
   .tr-appHeaderWeatherIcon svg{width:21px;height:21px}
   .tr-appHeaderWeatherTemp{font-size:17px}
-  .tr-appHeaderWeatherFeelsTop{font-size:6.3px;gap:2px}
-  .tr-appHeaderWeatherFeelsTop b{font-size:7.1px}
+  .tr-appHeaderWeatherFeelsTop{font-size:5px;gap:1.5px}
+  .tr-appHeaderWeatherFeelsTop b{font-size:6.1px}
   .tr-appHeaderWeatherDetail{font-size:6.5px}
-  .tr-appHeaderWeatherTime--mobile{font-size:9.2px}
+  .tr-appHeaderWeatherTime--mobile{margin-top:6px;font-size:10.7px}
   .tr-appHeaderBrand img{max-width:104px}
   .tr-appHeaderWorkout,.tr-appHeaderMenuButton{padding:0 5px;font-size:7px}
 }
