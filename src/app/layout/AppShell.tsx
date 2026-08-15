@@ -911,6 +911,8 @@ const APP_HEADER_CSS = `
   object-position:center;
   overflow:visible;
   filter:drop-shadow(0 4px 12px rgba(0,0,0,.58)) drop-shadow(0 0 12px rgba(34,163,255,.15));
+  position:relative;
+  top:-4px;
 }
 .tr-appHeaderBrandFallback{
   color:#ffe36f;
@@ -1031,7 +1033,7 @@ const APP_HEADER_CSS = `
   }
   .tr-appHeaderWeatherDetailPrimary,.tr-appHeaderWeatherDetailFeels{gap:3px}
   .tr-appHeaderBrand{height:62px;min-width:0}
-  .tr-appHeaderBrand img{width:100%;max-width:118px;max-height:62px}
+  .tr-appHeaderBrand img{width:100%;max-width:118px;max-height:62px;top:0}
   .tr-appHeaderBrandFallback{font-size:14px;white-space:normal;text-align:center;line-height:1.05}
   .tr-appHeaderActions{gap:5px}
   .tr-appHeaderWorkout,.tr-appHeaderMenuButton{min-height:38px;padding:0 7px;font-size:8px;border-radius:9px}
