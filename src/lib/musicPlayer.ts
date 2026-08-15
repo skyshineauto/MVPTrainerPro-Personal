@@ -121,6 +121,9 @@ type OutputTuningDefinition = {
   presenceHz: number;
   presenceDb: number;
   presenceQ: number;
+  clarityHz: number;
+  clarityDb: number;
+  clarityQ: number;
   highShelfHz: number;
   highShelfDb: number;
   makeupDb: number;
@@ -153,29 +156,29 @@ const DSP_EQ_PROOF_PRESET: ProPresetDefinition = {
 
 const MUSIC_PRO_PRESETS: Record<BuiltInMusicEqPreset, ProPresetDefinition> = {
   flat: { ...PRO_PRESET_DEFAULT },
-  power: { highpassHz: 26, lowShelfHz: 100, lowShelfDb: -0.8, peaks: [{ frequency: 285, gain: -3.0, q: 0.95 }, { frequency: 1550, gain: 2.2, q: 0.9 }, { frequency: 3200, gain: 4.5, q: 1.05 }, { frequency: 6200, gain: 2.3, q: 1.1 }], highShelfHz: 9800, highShelfDb: 0.9, makeupDb: 0.9 },
-  rock: { highpassHz: 26, lowShelfHz: 95, lowShelfDb: -1.0, peaks: [{ frequency: 115, gain: 0.7, q: 1.05 }, { frequency: 290, gain: -3.5, q: 0.95 }, { frequency: 1550, gain: 1.6, q: 0.9 }, { frequency: 3150, gain: 4.0, q: 1.05 }, { frequency: 6200, gain: 1.9, q: 1.1 }], highShelfHz: 10500, highShelfDb: 0.8, makeupDb: 0.7 },
-  hard_rock: { highpassHz: 28, lowShelfHz: 92, lowShelfDb: -1.1, peaks: [{ frequency: 120, gain: 0.8, q: 1.1 }, { frequency: 275, gain: -4.0, q: 1.0 }, { frequency: 900, gain: 0.8, q: 0.85 }, { frequency: 1800, gain: 2.1, q: 0.95 }, { frequency: 3000, gain: 4.8, q: 1.1 }, { frequency: 5100, gain: 2.5, q: 1.1 }], highShelfHz: 10000, highShelfDb: 0.9, makeupDb: 0.8 },
-  metal: { highpassHz: 30, lowShelfHz: 86, lowShelfDb: -1.4, peaks: [{ frequency: 95, gain: 0.5, q: 1.1 }, { frequency: 255, gain: -4.2, q: 1.0 }, { frequency: 620, gain: -1.8, q: 0.95 }, { frequency: 1500, gain: 1.5, q: 0.9 }, { frequency: 2450, gain: 4.0, q: 1.1 }, { frequency: 4250, gain: 5.0, q: 1.15 }], highShelfHz: 9000, highShelfDb: 1.0, makeupDb: 0.75 },
-  alternative: { highpassHz: 25, lowShelfHz: 98, lowShelfDb: -0.6, peaks: [{ frequency: 310, gain: -2.5, q: 0.9 }, { frequency: 1150, gain: 1.0, q: 0.85 }, { frequency: 2600, gain: 3.2, q: 1.0 }, { frequency: 5200, gain: 1.6, q: 1.0 }], highShelfHz: 9800, highShelfDb: 0.6, makeupDb: 0.55 },
-  pop: { highpassHz: 24, lowShelfHz: 92, lowShelfDb: 0.2, peaks: [{ frequency: 280, gain: -1.5, q: 0.9 }, { frequency: 1150, gain: 1.1, q: 0.85 }, { frequency: 3000, gain: 3.2, q: 1.0 }, { frequency: 7000, gain: 2.2, q: 1.0 }], highShelfHz: 11500, highShelfDb: 0.9, makeupDb: 0.6 },
-  hip_hop: { highpassHz: 20, lowShelfHz: 70, lowShelfDb: 2.6, peaks: [{ frequency: 125, gain: 1.2, q: 0.95 }, { frequency: 310, gain: -2.0, q: 0.9 }, { frequency: 2200, gain: 0.9, q: 0.9 }, { frequency: 6200, gain: 1.2, q: 0.95 }], highShelfHz: 11000, highShelfDb: 0.35, makeupDb: 0.3 },
-  edm: { highpassHz: 20, lowShelfHz: 62, lowShelfDb: 3.0, peaks: [{ frequency: 105, gain: 1.3, q: 1.0 }, { frequency: 260, gain: -1.8, q: 0.95 }, { frequency: 1700, gain: 1.0, q: 0.9 }, { frequency: 3600, gain: 2.4, q: 1.0 }, { frequency: 7200, gain: 2.6, q: 1.0 }], highShelfHz: 12000, highShelfDb: 1.0, makeupDb: 0.45 },
-  bass_boost: { highpassHz: 18, lowShelfHz: 68, lowShelfDb: 3.4, peaks: [{ frequency: 105, gain: 1.6, q: 0.9 }, { frequency: 220, gain: 0.4, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0.15 },
-  deep_bass: { highpassHz: 16, lowShelfHz: 48, lowShelfDb: 4.2, peaks: [{ frequency: 72, gain: 1.5, q: 0.9 }, { frequency: 140, gain: 0.5, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0 },
-  punch: { highpassHz: 26, lowShelfHz: 92, lowShelfDb: 0.4, peaks: [{ frequency: 105, gain: 2.0, q: 1.05 }, { frequency: 275, gain: -2.2, q: 0.95 }, { frequency: 2800, gain: 3.0, q: 1.0 }, { frequency: 6000, gain: 1.4, q: 1.0 }], highShelfHz: 10000, highShelfDb: 0.35, makeupDb: 0.6 },
-  vocal: { highpassHz: 34, lowShelfHz: 110, lowShelfDb: -1.8, peaks: [{ frequency: 250, gain: -1.2, q: 0.9 }, { frequency: 750, gain: 1.0, q: 0.85 }, { frequency: 1450, gain: 2.4, q: 0.9 }, { frequency: 2600, gain: 4.0, q: 1.0 }, { frequency: 4200, gain: 2.3, q: 1.0 }], highShelfHz: 10500, highShelfDb: 0.3, makeupDb: 0.55 },
-  acoustic: { highpassHz: 30, lowShelfHz: 105, lowShelfDb: -0.8, peaks: [{ frequency: 180, gain: 1.0, q: 0.85 }, { frequency: 700, gain: 0.5, q: 0.85 }, { frequency: 1250, gain: 1.0, q: 0.9 }, { frequency: 2600, gain: 2.5, q: 1.0 }, { frequency: 5200, gain: 1.5, q: 1.0 }], highShelfHz: 10500, highShelfDb: 0.7, makeupDb: 0.4 },
-  warm: { highpassHz: 20, lowShelfHz: 105, lowShelfDb: 1.0, peaks: [{ frequency: 280, gain: 0.8, q: 0.8 }, { frequency: 4200, gain: -1.4, q: 0.9 }], highShelfHz: 9500, highShelfDb: -1.7, makeupDb: 0.2 },
-  bright: { highpassHz: 24, lowShelfHz: 95, lowShelfDb: -0.8, peaks: [{ frequency: 2500, gain: 1.6, q: 0.9 }, { frequency: 6200, gain: 3.2, q: 1.0 }], highShelfHz: 11000, highShelfDb: 2.1, makeupDb: 0.25 },
-  late_night: { highpassHz: 22, lowShelfHz: 95, lowShelfDb: 0.2, peaks: [{ frequency: 2800, gain: -1.3, q: 0.9 }, { frequency: 5200, gain: -2.1, q: 0.95 }], highShelfHz: 9000, highShelfDb: -3.4, makeupDb: -0.4 },
-  headphones: { highpassHz: 24, lowShelfHz: 95, lowShelfDb: -1.0, peaks: [{ frequency: 260, gain: -1.5, q: 0.9 }, { frequency: 1600, gain: 1.3, q: 0.9 }, { frequency: 3900, gain: 2.4, q: 1.0 }, { frequency: 7800, gain: 1.0, q: 1.0 }], highShelfHz: 12000, highShelfDb: 0.5, makeupDb: 0.55 },
+  power: { highpassHz: 28, lowShelfHz: 96, lowShelfDb: -1.4, peaks: [{ frequency: 285, gain: -3.8, q: 0.95 }, { frequency: 1050, gain: 0.8, q: 0.85 }, { frequency: 1750, gain: 2.9, q: 0.92 }, { frequency: 3200, gain: 5.5, q: 1.08 }, { frequency: 6300, gain: 3.0, q: 1.12 }], highShelfHz: 10500, highShelfDb: 1.4, makeupDb: 1.15 },
+  rock: { highpassHz: 27, lowShelfHz: 92, lowShelfDb: -1.2, peaks: [{ frequency: 110, gain: 0.9, q: 1.05 }, { frequency: 285, gain: -3.9, q: 0.95 }, { frequency: 1500, gain: 2.1, q: 0.9 }, { frequency: 3150, gain: 4.7, q: 1.08 }, { frequency: 6200, gain: 2.5, q: 1.12 }], highShelfHz: 10800, highShelfDb: 1.1, makeupDb: 0.95 },
+  hard_rock: { highpassHz: 29, lowShelfHz: 90, lowShelfDb: -1.5, peaks: [{ frequency: 118, gain: 1.0, q: 1.1 }, { frequency: 270, gain: -4.6, q: 1.0 }, { frequency: 900, gain: 1.0, q: 0.85 }, { frequency: 1800, gain: 2.9, q: 0.95 }, { frequency: 3020, gain: 5.6, q: 1.12 }, { frequency: 5200, gain: 3.3, q: 1.12 }], highShelfHz: 10200, highShelfDb: 1.2, makeupDb: 1.05 },
+  metal: { highpassHz: 31, lowShelfHz: 84, lowShelfDb: -1.8, peaks: [{ frequency: 95, gain: 0.6, q: 1.1 }, { frequency: 250, gain: -4.8, q: 1.0 }, { frequency: 620, gain: -2.5, q: 0.95 }, { frequency: 1500, gain: 1.9, q: 0.9 }, { frequency: 2450, gain: 4.8, q: 1.12 }, { frequency: 4300, gain: 5.9, q: 1.18 }], highShelfHz: 9400, highShelfDb: 1.15, makeupDb: 0.95 },
+  alternative: { highpassHz: 26, lowShelfHz: 96, lowShelfDb: -0.8, peaks: [{ frequency: 305, gain: -3.0, q: 0.9 }, { frequency: 1120, gain: 1.3, q: 0.85 }, { frequency: 2650, gain: 3.7, q: 1.02 }, { frequency: 5250, gain: 2.0, q: 1.0 }], highShelfHz: 10200, highShelfDb: 0.85, makeupDb: 0.7 },
+  pop: { highpassHz: 25, lowShelfHz: 90, lowShelfDb: -0.1, peaks: [{ frequency: 285, gain: -1.9, q: 0.9 }, { frequency: 1150, gain: 1.4, q: 0.85 }, { frequency: 3000, gain: 3.7, q: 1.02 }, { frequency: 7100, gain: 2.7, q: 1.0 }], highShelfHz: 11800, highShelfDb: 1.2, makeupDb: 0.75 },
+  hip_hop: { highpassHz: 20, lowShelfHz: 68, lowShelfDb: 2.8, peaks: [{ frequency: 120, gain: 1.1, q: 0.95 }, { frequency: 310, gain: -2.4, q: 0.9 }, { frequency: 2200, gain: 1.2, q: 0.9 }, { frequency: 6300, gain: 1.5, q: 0.95 }], highShelfHz: 11200, highShelfDb: 0.55, makeupDb: 0.35 },
+  edm: { highpassHz: 20, lowShelfHz: 60, lowShelfDb: 3.2, peaks: [{ frequency: 105, gain: 1.2, q: 1.0 }, { frequency: 260, gain: -2.1, q: 0.95 }, { frequency: 1700, gain: 1.2, q: 0.9 }, { frequency: 3600, gain: 2.9, q: 1.0 }, { frequency: 7300, gain: 3.1, q: 1.0 }], highShelfHz: 12200, highShelfDb: 1.2, makeupDb: 0.55 },
+  bass_boost: { highpassHz: 18, lowShelfHz: 66, lowShelfDb: 3.5, peaks: [{ frequency: 105, gain: 1.5, q: 0.9 }, { frequency: 220, gain: 0.2, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0.15 },
+  deep_bass: { highpassHz: 16, lowShelfHz: 46, lowShelfDb: 4.4, peaks: [{ frequency: 72, gain: 1.5, q: 0.9 }, { frequency: 140, gain: 0.3, q: 0.85 }], highShelfHz: 10000, highShelfDb: 0, makeupDb: 0 },
+  punch: { highpassHz: 27, lowShelfHz: 90, lowShelfDb: 0.1, peaks: [{ frequency: 105, gain: 2.3, q: 1.05 }, { frequency: 275, gain: -2.7, q: 0.95 }, { frequency: 2800, gain: 3.5, q: 1.02 }, { frequency: 6100, gain: 1.8, q: 1.0 }], highShelfHz: 10300, highShelfDb: 0.55, makeupDb: 0.75 },
+  vocal: { highpassHz: 35, lowShelfHz: 110, lowShelfDb: -2.0, peaks: [{ frequency: 250, gain: -1.5, q: 0.9 }, { frequency: 750, gain: 1.2, q: 0.85 }, { frequency: 1450, gain: 2.8, q: 0.9 }, { frequency: 2600, gain: 4.5, q: 1.02 }, { frequency: 4200, gain: 2.6, q: 1.0 }], highShelfHz: 10800, highShelfDb: 0.55, makeupDb: 0.65 },
+  acoustic: { highpassHz: 31, lowShelfHz: 105, lowShelfDb: -0.9, peaks: [{ frequency: 180, gain: 1.0, q: 0.85 }, { frequency: 700, gain: 0.6, q: 0.85 }, { frequency: 1250, gain: 1.2, q: 0.9 }, { frequency: 2600, gain: 2.9, q: 1.0 }, { frequency: 5200, gain: 1.8, q: 1.0 }], highShelfHz: 11000, highShelfDb: 0.95, makeupDb: 0.5 },
+  warm: { highpassHz: 20, lowShelfHz: 105, lowShelfDb: 1.0, peaks: [{ frequency: 280, gain: 0.8, q: 0.8 }, { frequency: 4200, gain: -1.6, q: 0.9 }], highShelfHz: 9500, highShelfDb: -1.9, makeupDb: 0.2 },
+  bright: { highpassHz: 24, lowShelfHz: 95, lowShelfDb: -0.9, peaks: [{ frequency: 2500, gain: 1.9, q: 0.9 }, { frequency: 6200, gain: 3.7, q: 1.0 }], highShelfHz: 11200, highShelfDb: 2.4, makeupDb: 0.3 },
+  late_night: { highpassHz: 22, lowShelfHz: 95, lowShelfDb: 0.1, peaks: [{ frequency: 2800, gain: -1.6, q: 0.9 }, { frequency: 5200, gain: -2.5, q: 0.95 }], highShelfHz: 9000, highShelfDb: -3.8, makeupDb: -0.4 },
+  headphones: { highpassHz: 25, lowShelfHz: 94, lowShelfDb: -1.3, peaks: [{ frequency: 265, gain: -1.8, q: 0.9 }, { frequency: 1600, gain: 1.7, q: 0.9 }, { frequency: 3900, gain: 2.9, q: 1.02 }, { frequency: 7900, gain: 1.3, q: 1.0 }], highShelfHz: 12200, highShelfDb: 0.8, makeupDb: 0.7 },
 };
 
 const MUSIC_OUTPUT_TUNINGS: Record<Exclude<MusicOutputProfile, "reference">, OutputTuningDefinition> = {
-  car_hifi: { highpassHz: 18, lowShelfHz: 90, lowShelfDb: -0.3, presenceHz: 1850, presenceDb: 0.35, presenceQ: 0.8, highShelfHz: 10500, highShelfDb: 0.2, makeupDb: 0.65 },
-  headphones: { highpassHz: 24, lowShelfHz: 105, lowShelfDb: -1.8, presenceHz: 255, presenceDb: -0.9, presenceQ: 0.82, highShelfHz: 10500, highShelfDb: 0.7, makeupDb: 1.55 },
-  speaker: { highpassHz: 52, lowShelfHz: 100, lowShelfDb: -2.6, presenceHz: 2100, presenceDb: 1.8, presenceQ: 0.85, highShelfHz: 9000, highShelfDb: 0.8, makeupDb: 1.1 },
+  car_hifi: { highpassHz: 18, lowShelfHz: 92, lowShelfDb: -0.5, presenceHz: 330, presenceDb: -0.7, presenceQ: 0.82, clarityHz: 2850, clarityDb: 0.85, clarityQ: 0.9, highShelfHz: 10800, highShelfDb: 0.45, makeupDb: 0.8 },
+  headphones: { highpassHz: 24, lowShelfHz: 102, lowShelfDb: -2.1, presenceHz: 315, presenceDb: -1.25, presenceQ: 0.82, clarityHz: 3000, clarityDb: 1.35, clarityQ: 0.92, highShelfHz: 11000, highShelfDb: 1.15, makeupDb: 1.8 },
+  speaker: { highpassHz: 54, lowShelfHz: 100, lowShelfDb: -3.0, presenceHz: 300, presenceDb: -1.2, presenceQ: 0.85, clarityHz: 2550, clarityDb: 2.0, clarityQ: 0.88, highShelfHz: 9200, highShelfDb: 1.05, makeupDb: 1.25 },
 };
 
 export const MUSIC_HEADPHONE_MODES: Record<
@@ -183,11 +186,11 @@ export const MUSIC_HEADPHONE_MODES: Record<
   { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }
 > = {
   off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 92, depth: 10, crossfeed: 3, center: 50, bass: 0 },
-  spatial: { label: "Spatial", width: 86, depth: 72, crossfeed: 24, center: 54, bass: 0 },
-  stage: { label: "Stage", width: 70, depth: 62, crossfeed: 34, center: 68, bass: 0 },
-  focus: { label: "Focus", width: 12, depth: 5, crossfeed: 20, center: 95, bass: 0 },
-  bass_impact: { label: "Bass Impact", width: 48, depth: 18, crossfeed: 10, center: 60, bass: 55 },
+  wide: { label: "Wide", width: 88, depth: 18, crossfeed: 5, center: 50, bass: 0 },
+  spatial: { label: "Spatial", width: 82, depth: 78, crossfeed: 22, center: 54, bass: 0 },
+  stage: { label: "Stage", width: 66, depth: 72, crossfeed: 38, center: 68, bass: 0 },
+  focus: { label: "Focus", width: 8, depth: 4, crossfeed: 18, center: 98, bass: 0 },
+  bass_impact: { label: "Bass Impact", width: 42, depth: 16, crossfeed: 8, center: 60, bass: 64 },
 };
 
 export const MUSIC_OUTPUT_PROFILES: Record<
@@ -202,17 +205,17 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   car_hifi: {
     label: "Car / Hi-Fi",
     shortLabel: "CAR / HI-FI",
-    description: "Wide-band, low-coloration processing for a tuned vehicle or full-range hi-fi system.",
+    description: "Wide-band hi-fi processing with controlled low mids, added articulation and clean top-end detail for a tuned vehicle or full-range system.",
   },
   headphones: {
     label: "Headphones",
     shortLabel: "HEADPHONES",
-    description: "Precision headphone gain staging with optional real-time width, stage, crossfeed and impact processing.",
+    description: "High-definition headphone voicing with tighter bass, clearer separation, added air and optional real-time immersion processing.",
   },
   speaker: {
     label: "Bluetooth Speaker",
     shortLabel: "BLUETOOTH",
-    description: "Speaker-safe low-end management with presence and loudness tuning for compact Bluetooth playback.",
+    description: "Speaker-safe bass management with extra articulation, presence and clean perceived detail for compact Bluetooth playback.",
   },
 };
 
@@ -486,6 +489,7 @@ let equalizerFilters: BiquadFilterNode[] = [];
 let outputHighpass: BiquadFilterNode | null = null;
 let outputLowShelf: BiquadFilterNode | null = null;
 let outputPresence: BiquadFilterNode | null = null;
+let outputClarity: BiquadFilterNode | null = null;
 let outputHighShelf: BiquadFilterNode | null = null;
 let standardRouteGain: GainNode | null = null;
 let headphoneProcessorNode: AudioWorkletNode | null = null;
@@ -630,9 +634,12 @@ function configureOutputFilters(now: number) {
   const highpass = tuning?.highpassHz ?? 10;
   const lowShelfHz = tuning?.lowShelfHz ?? 100;
   const lowShelfDb = tuning?.lowShelfDb ?? 0;
-  const presenceHz = tuning?.presenceHz ?? 1800;
+  const presenceHz = tuning?.presenceHz ?? 320;
   const presenceDb = tuning?.presenceDb ?? 0;
   const presenceQ = tuning?.presenceQ ?? 0.8;
+  const clarityHz = tuning?.clarityHz ?? 2800;
+  const clarityDb = tuning?.clarityDb ?? 0;
+  const clarityQ = tuning?.clarityQ ?? 0.9;
   const highShelfHz = tuning?.highShelfHz ?? 10000;
   const highShelfDb = tuning?.highShelfDb ?? 0;
   if (outputHighpass) {
@@ -647,6 +654,11 @@ function configureOutputFilters(now: number) {
     setAudioParam(outputPresence.frequency, clampFilterFrequency(audioContext, presenceHz), now, 0.035);
     setAudioParam(outputPresence.Q, presenceQ, now, 0.035);
     setAudioParam(outputPresence.gain, presenceDb, now, 0.035);
+  }
+  if (outputClarity) {
+    setAudioParam(outputClarity.frequency, clampFilterFrequency(audioContext, clarityHz), now, 0.035);
+    setAudioParam(outputClarity.Q, clarityQ, now, 0.035);
+    setAudioParam(outputClarity.gain, clarityDb, now, 0.035);
   }
   if (outputHighShelf) {
     setAudioParam(outputHighShelf.frequency, clampFilterFrequency(audioContext, highShelfHz), now, 0.035);
@@ -666,6 +678,7 @@ function activeResponseFilters() {
   if (outputHighpass) filters.push(outputHighpass);
   if (outputLowShelf) filters.push(outputLowShelf);
   if (outputPresence) filters.push(outputPresence);
+  if (outputClarity) filters.push(outputClarity);
   if (outputHighShelf) filters.push(outputHighShelf);
   return filters;
 }
@@ -721,12 +734,12 @@ function calculateProcessingGain() {
   const safetyDb = 0.35 + headphonePeakSafetyDb();
   // Let the transparent lookahead limiter catch short musical peaks instead of throwing away
   // the full static EQ boost as permanent attenuation. This keeps headphone output energetic.
-  const headroomPeakContribution = state.limiterEnabled ? response.peakDb * 0.68 : response.peakDb;
+  const headroomPeakContribution = state.limiterEnabled ? response.peakDb * 0.58 : response.peakDb;
   const requiredReduction = Math.max(0, requested + headroomPeakContribution + safetyDb);
   const effectivePreampDb = requested - requiredReduction;
   const presetMakeup = builtInPresetProcessingRequested() ? currentProPreset().makeupDb : 0;
   const outputMakeup = currentOutputTuning()?.makeupDb ?? 0;
-  const makeupDb = Math.max(-1, Math.min(2.8, presetMakeup + outputMakeup));
+  const makeupDb = Math.max(-1, Math.min(3.2, presetMakeup + outputMakeup));
   const referenceMatchDb = Math.max(-9, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
   return {
     effectivePreampDb,
@@ -761,6 +774,14 @@ function setDspTelemetry(status: MusicDspStatus, effectivePreampDb: number, auto
 function workletParam(node: AudioWorkletNode | null, name: string) {
   return node?.parameters.get(name) ?? null;
 }
+function headphoneModeCode(mode: MusicHeadphoneMode) {
+  if (mode === "wide") return 1;
+  if (mode === "spatial") return 2;
+  if (mode === "stage") return 3;
+  if (mode === "focus") return 4;
+  if (mode === "bass_impact") return 5;
+  return 0;
+}
 function nativeImmersionAvailable() {
   return Boolean(nativeHeadphoneSplitter && nativeHeadphoneMerger);
 }
@@ -772,16 +793,16 @@ function applyNativeHeadphoneSettings(now: number, enabled: boolean) {
   const center = enabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5;
   const bass = enabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0;
 
-  const widthScale = enabled ? 1 + width * 0.88 : 1;
-  const compensation = 1 / Math.sqrt(1 + Math.pow(widthScale - 1, 2) * 0.7);
+  const widthScale = enabled ? (proof ? 2.65 : 1 + width * 1.35) : 1;
+  const compensation = 1 / Math.max(1, 1 + Math.max(0, widthScale - 1) * 0.28 + depth * 0.16);
   const direct = ((1 + widthScale) / 2) * compensation;
   const widthCross = ((1 - widthScale) / 2) * compensation;
-  const crossMix = enabled ? crossfeed * 0.42 : 0;
-  const crossDelay = enabled ? 0.00022 + crossfeed * 0.00062 : 0.00022;
-  const depthMix = enabled ? depth * 0.28 : 0;
-  const depthDelay = enabled ? 0.0018 + depth * 0.0105 : 0.0018;
-  const centerGain = enabled ? Math.max(-0.08, Math.min(0.36, (center - 0.5) * 0.72)) : 0;
-  const bassDb = enabled ? bass * 4.0 : 0;
+  const crossMix = enabled ? (proof ? 0.62 : crossfeed * 0.50) : 0;
+  const crossDelay = enabled ? (proof ? 0.0014 : 0.00028 + crossfeed * 0.00095) : 0.00022;
+  const depthMix = enabled ? (proof ? 0.58 : depth * 0.42) : 0;
+  const depthDelay = enabled ? (proof ? 0.016 : 0.003 + depth * 0.0135) : 0.0018;
+  const centerGain = enabled ? Math.max(-0.14, Math.min(0.52, (center - 0.5) * 0.96)) : 0;
+  const bassDb = enabled ? bass * 4.5 : 0;
 
   if (nativeHeadphoneLeftDirect) setAudioParam(nativeHeadphoneLeftDirect.gain, direct, now);
   if (nativeHeadphoneRightDirect) setAudioParam(nativeHeadphoneRightDirect.gain, direct, now);
@@ -807,9 +828,11 @@ function applyHeadphoneSettings(now: number) {
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
   const values: Array<[string, number]> = [
     ["enabled", enabled ? 1 : 0],
+    ["mode", enabled ? headphoneModeCode(state.headphoneMode) : 0],
+    ["proof", proof ? 1 : 0],
     ["width", enabled ? (proof ? 1 : state.headphoneWidth / 100) : 0],
     ["depth", enabled ? (proof ? 1 : state.headphoneDepth / 100) : 0],
-    ["crossfeed", enabled ? (proof ? 0.58 : state.headphoneCrossfeed / 100) : 0],
+    ["crossfeed", enabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0],
     ["center", enabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5],
     ["bassImpact", enabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0],
   ];
@@ -900,6 +923,7 @@ function releaseGraph() {
     outputHighpass,
     outputLowShelf,
     outputPresence,
+    outputClarity,
     outputHighShelf,
     standardRouteGain,
     headphoneProcessorNode,
@@ -945,6 +969,7 @@ function releaseGraph() {
   outputHighpass = null;
   outputLowShelf = null;
   outputPresence = null;
+  outputClarity = null;
   outputHighShelf = null;
   standardRouteGain = null;
   headphoneProcessorNode = null;
@@ -1025,6 +1050,8 @@ function createOutputFilterBank(context: AudioContext) {
   outputLowShelf.type = "lowshelf";
   outputPresence = context.createBiquadFilter();
   outputPresence.type = "peaking";
+  outputClarity = context.createBiquadFilter();
+  outputClarity.type = "peaking";
   outputHighShelf = context.createBiquadFilter();
   outputHighShelf.type = "highshelf";
 }
@@ -1200,7 +1227,7 @@ async function connectMusicGraph() {
         processedTail.connect(filter);
         processedTail = filter;
       });
-      const outputNodes = [outputHighpass, outputLowShelf, outputPresence, outputHighShelf].filter(
+      const outputNodes = [outputHighpass, outputLowShelf, outputPresence, outputClarity, outputHighShelf].filter(
         (node): node is BiquadFilterNode => Boolean(node),
       );
       outputNodes.forEach((node) => {
