@@ -912,7 +912,7 @@ const APP_HEADER_CSS = `
   overflow:visible;
   filter:drop-shadow(0 4px 12px rgba(0,0,0,.58)) drop-shadow(0 0 12px rgba(34,163,255,.15));
   position:relative;
-  top:-4px;
+  top:-12px;
 }
 .tr-appHeaderBrandFallback{
   color:#ffe36f;
