@@ -57,16 +57,6 @@ import {
   type MusicOutputProfile,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
-import {
-  APP_BRANDING_CHANGED_EVENT,
-  fetchCurrentWeather,
-  formatWeatherLocalTime,
-  getAppBrandingWeatherSettings,
-  getHeaderLogoSignedUrl,
-  type AppBrandingWeatherSettings,
-  type CurrentWeatherSnapshot,
-  type WeatherIconKind,
-} from "../../lib/appBrandingWeather";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
@@ -96,17 +86,6 @@ function outputProfileIconName(profile: MusicOutputProfile): IconName {
   if (profile === "car_hifi") return "car";
   if (profile === "speaker") return "speaker";
   return "equalizer";
-}
-
-function headerWeatherGlyph(kind: WeatherIconKind, isDay: boolean) {
-  if (kind === "clear") return isDay ? "☀️" : "🌙";
-  if (kind === "partly_cloudy") return isDay ? "🌤️" : "☁️";
-  if (kind === "fog") return "🌫️";
-  if (kind === "drizzle") return "🌦️";
-  if (kind === "rain") return "🌧️";
-  if (kind === "snow") return "❄️";
-  if (kind === "storm") return "⛈️";
-  return "☁️";
 }
 
 type SavedDspProfile = {
@@ -1312,12 +1291,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
-  const [headerWorkoutState, setHeaderWorkoutState] = useState("");
-  const [headerUiSettings, setHeaderUiSettings] = useState<AppBrandingWeatherSettings | null>(null);
-  const [headerLogoUrl, setHeaderLogoUrl] = useState<string | null>(null);
-  const [headerWeather, setHeaderWeather] = useState<CurrentWeatherSnapshot | null>(null);
-  const [headerWeatherLoading, setHeaderWeatherLoading] = useState(false);
-  const [headerClock, setHeaderClock] = useState(() => Date.now());
   const [presetSaveFlash, setPresetSaveFlash] = useState(false);
   const [sourcePulse, setSourcePulse] = useState(false);
   const restoredProfileRef = useRef<string>("");
@@ -1327,365 +1300,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const heroTitleRef = useRef<HTMLElement | null>(null);
   const heroArtistRef = useRef<HTMLElement | null>(null);
   const heroActionsRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const readHeaderWorkoutState = () => {
-      const stamp = [
-        window.localStorage.getItem("mvp_active_session_id") || "",
-        window.localStorage.getItem("mvp_active_workout_id") || "",
-        window.localStorage.getItem("mvp_is_paused") || "false",
-        window.location.pathname,
-      ].join("|");
-
-      setHeaderWorkoutState((current) => (current === stamp ? current : stamp));
-    };
-
-    readHeaderWorkoutState();
-    const timer = window.setInterval(readHeaderWorkoutState, 750);
-    window.addEventListener("focus", readHeaderWorkoutState);
-    window.addEventListener("popstate", readHeaderWorkoutState);
-
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", readHeaderWorkoutState);
-      window.removeEventListener("popstate", readHeaderWorkoutState);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const refreshHeaderUi = async () => {
-      try {
-        const settings = await getAppBrandingWeatherSettings();
-        if (cancelled) return;
-        setHeaderUiSettings(settings);
-
-        if (settings.headerLogoPath) {
-          try {
-            const signedUrl = await getHeaderLogoSignedUrl(settings.headerLogoPath);
-            if (!cancelled) setHeaderLogoUrl(signedUrl);
-          } catch {
-            if (!cancelled) setHeaderLogoUrl(null);
-          }
-        } else {
-          setHeaderLogoUrl(null);
-        }
-
-        if (settings.weatherLocation) {
-          setHeaderWeatherLoading(true);
-          try {
-            const weather = await fetchCurrentWeather(settings.weatherLocation);
-            if (!cancelled) setHeaderWeather(weather);
-          } catch {
-            if (!cancelled) setHeaderWeather(null);
-          } finally {
-            if (!cancelled) setHeaderWeatherLoading(false);
-          }
-        } else {
-          setHeaderWeather(null);
-          setHeaderWeatherLoading(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setHeaderUiSettings(null);
-          setHeaderLogoUrl(null);
-          setHeaderWeather(null);
-          setHeaderWeatherLoading(false);
-        }
-      }
-    };
-
-    const handleSettingsChanged = () => {
-      void refreshHeaderUi();
-    };
-
-    void refreshHeaderUi();
-    const weatherRefreshTimer = window.setInterval(refreshHeaderUi, 15 * 60 * 1000);
-    const clockTimer = window.setInterval(() => setHeaderClock(Date.now()), 30 * 1000);
-    window.addEventListener(APP_BRANDING_CHANGED_EVENT, handleSettingsChanged);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(weatherRefreshTimer);
-      window.clearInterval(clockTimer);
-      window.removeEventListener(APP_BRANDING_CHANGED_EVENT, handleSettingsChanged);
-    };
-  }, []);
-
-  useEffect(() => {
-    const title = document.querySelector<HTMLElement>(".tr-topTitle");
-    const header = title?.parentElement;
-    if (!header || !title) return;
-    const originalActions = Array.from(header.children).find((node) => node !== title && node instanceof HTMLElement && !node.classList.contains("tr-proHeaderWeather") && !node.classList.contains("tr-proHeaderBrand") && !node.classList.contains("tr-proGlobalActions")) as HTMLElement | undefined;
-    if (!originalActions) return;
-
-    const oldActionDisplay = originalActions.style.display;
-    const oldTitleDisplay = title.style.display;
-    originalActions.style.display = "none";
-    title.style.display = "none";
-    header.classList.add("tr-proHeaderHost");
-
-    let weatherMount = header.querySelector<HTMLButtonElement>(".tr-proHeaderWeather");
-    if (!weatherMount) {
-      weatherMount = document.createElement("button");
-      weatherMount.type = "button";
-      weatherMount.className = "tr-proHeaderWeather";
-      weatherMount.setAttribute("aria-label", "Open weather and branding settings");
-      weatherMount.addEventListener("click", () => navigate("/sound-alerts"));
-      header.appendChild(weatherMount);
-    }
-
-    let brandMount = header.querySelector<HTMLElement>(".tr-proHeaderBrand");
-    if (!brandMount) {
-      brandMount = document.createElement("div");
-      brandMount.className = "tr-proHeaderBrand";
-      header.appendChild(brandMount);
-    }
-    brandMount.innerHTML = "";
-    if (headerLogoUrl) {
-      const logo = document.createElement("img");
-      logo.src = headerLogoUrl;
-      logo.alt = "MVP Trainer Pro";
-      logo.className = "tr-proHeaderLogoImage";
-      brandMount.appendChild(logo);
-    } else {
-      const fallback = document.createElement("span");
-      fallback.className = "tr-proHeaderLogoFallback";
-      fallback.textContent = "MVP TRAINER PRO";
-      brandMount.appendChild(fallback);
-    }
-
-    let mount = header.querySelector<HTMLElement>(".tr-proGlobalActions");
-    if (!mount) {
-      mount = document.createElement("div");
-      mount.className = "tr-proGlobalActions";
-      header.appendChild(mount);
-    }
-    mount.innerHTML = "";
-
-    const makeButton = (label: string, action: () => void, className = "") => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `tr-proHeaderButton ${className}`.trim();
-      button.textContent = label;
-      button.title = label;
-      button.addEventListener("click", action);
-      mount?.appendChild(button);
-      return button;
-    };
-
-    const activeSessionId = window.localStorage.getItem("mvp_active_session_id");
-    const activeWorkoutId = window.localStorage.getItem("mvp_active_workout_id");
-    const hasActiveWorkout = Boolean(activeSessionId || activeWorkoutId);
-    const workoutPaused = window.localStorage.getItem("mvp_is_paused") === "true";
-    const onWorkoutPage = window.location.pathname.startsWith("/workout/");
-    const workoutTarget = activeSessionId ? `/workout/${activeSessionId}` : "/";
-
-    if (hasActiveWorkout && (workoutPaused || !onWorkoutPage)) {
-      const resumeActiveWorkout = () => {
-        /*
-         * Do not merely navigate when the workout is paused. The real
-         * AppShell Resume button owns the pause bookkeeping, including
-         * paused-at time and accumulated paused seconds. Trigger that exact
-         * control first so the session actually resumes, then return to it.
-         */
-        const shellResumeButton =
-          document.querySelector<HTMLButtonElement>(
-            ".tr-sessionChronographPrimary.is-resume, .tr-commandButton.is-resume, .tr-seg--resumeGreen"
-          ) ??
-          Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-            (button) =>
-              !button.classList.contains("tr-proHeaderButton") &&
-              button.textContent?.trim().toUpperCase() === "RESUME WORKOUT" &&
-              !button.disabled
-          );
-
-        if (shellResumeButton) {
-          shellResumeButton.click();
-          window.setTimeout(() => navigate(workoutTarget), 0);
-          return;
-        }
-
-        const pausedAtISO = window.localStorage.getItem("mvp_paused_at_iso");
-        const pausedTotal =
-          Number(window.localStorage.getItem("mvp_paused_total_seconds") ?? "0") || 0;
-
-        if (pausedAtISO) {
-          const pausedAtMs = new Date(pausedAtISO).getTime();
-          if (Number.isFinite(pausedAtMs)) {
-            const addedSeconds = Math.max(
-              0,
-              Math.floor((Date.now() - pausedAtMs) / 1000)
-            );
-            window.localStorage.setItem(
-              "mvp_paused_total_seconds",
-              String(pausedTotal + addedSeconds)
-            );
-          }
-        }
-
-        window.localStorage.setItem("mvp_is_paused", "false");
-        window.localStorage.removeItem("mvp_paused_at_iso");
-        window.dispatchEvent(new Event("focus"));
-        navigate(workoutTarget);
-      };
-
-      makeButton(
-        workoutPaused ? "RESUME" : "RETURN TO WORKOUT",
-        workoutPaused ? resumeActiveWorkout : () => navigate(workoutTarget),
-        workoutPaused ? "is-resume" : "is-resume is-return"
-      );
-    }
-
-    const soundButton = makeButton("SOUND & ALERTS", () => navigate("/sound-alerts"), "is-sound is-desktopHeaderAction");
-    soundButton.setAttribute("aria-label", "Sound and alerts");
-
-    const accountWrap = document.createElement("div");
-    accountWrap.className = "tr-proAccountWrap tr-proDesktopAccountWrap";
-    const accountButton = document.createElement("button");
-    accountButton.type = "button";
-    accountButton.className = "tr-proHeaderButton tr-proHeaderButton--account";
-    accountButton.textContent = "ACCOUNT ▾";
-    accountButton.title = "Account";
-    const menu = document.createElement("div");
-    menu.className = "tr-proAccountMenu";
-    menu.hidden = true;
-    const signOut = document.createElement("button");
-    signOut.type = "button";
-    signOut.textContent = "SIGN OUT";
-    const triggerOriginalSignOut = () => {
-      const oldSignOut = Array.from(originalActions.querySelectorAll("button")).find((button) => button.textContent?.trim().toUpperCase() === "SIGN OUT") as HTMLButtonElement | undefined;
-      oldSignOut?.click();
-    };
-    signOut.addEventListener("click", triggerOriginalSignOut);
-    menu.appendChild(signOut);
-    accountButton.addEventListener("click", () => { menu.hidden = !menu.hidden; });
-    accountWrap.append(accountButton, menu);
-    mount.appendChild(accountWrap);
-
-    const mobileMenuWrap = document.createElement("div");
-    mobileMenuWrap.className = "tr-proMobileMenuWrap";
-    const mobileMenuButton = document.createElement("button");
-    mobileMenuButton.type = "button";
-    mobileMenuButton.className = "tr-proHeaderButton tr-proMobileMenuButton";
-    mobileMenuButton.innerHTML = '<span class="tr-proMobileMenuGlyph" aria-hidden="true">☰</span><span>MENU</span>';
-    mobileMenuButton.setAttribute("aria-label", "Open app menu");
-    mobileMenuButton.setAttribute("aria-expanded", "false");
-
-    const mobileMenu = document.createElement("div");
-    mobileMenu.className = "tr-proMobileMenu";
-    mobileMenu.hidden = true;
-
-    const mobileSound = document.createElement("button");
-    mobileSound.type = "button";
-    mobileSound.textContent = "SOUND & ALERTS";
-    mobileSound.addEventListener("click", () => {
-      mobileMenu.hidden = true;
-      mobileMenuButton.setAttribute("aria-expanded", "false");
-      navigate("/sound-alerts");
-    });
-
-    const mobileAccountLabel = document.createElement("div");
-    mobileAccountLabel.className = "tr-proMobileMenuSection";
-    mobileAccountLabel.textContent = "ACCOUNT";
-
-    const mobileSignOut = document.createElement("button");
-    mobileSignOut.type = "button";
-    mobileSignOut.className = "is-signout";
-    mobileSignOut.textContent = "SIGN OUT";
-    mobileSignOut.addEventListener("click", triggerOriginalSignOut);
-
-    mobileMenu.append(mobileSound, mobileAccountLabel, mobileSignOut);
-    mobileMenuButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const nextOpen = mobileMenu.hidden;
-      mobileMenu.hidden = !nextOpen;
-      mobileMenuButton.setAttribute("aria-expanded", String(nextOpen));
-    });
-    mobileMenuWrap.append(mobileMenuButton, mobileMenu);
-    mount.appendChild(mobileMenuWrap);
-
-    const closeHeaderMenus = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && mobileMenuWrap.contains(target)) return;
-      mobileMenu.hidden = true;
-      mobileMenuButton.setAttribute("aria-expanded", "false");
-      if (target && accountWrap.contains(target)) return;
-      menu.hidden = true;
-    };
-    document.addEventListener("click", closeHeaderMenus);
-
-    return () => {
-      document.removeEventListener("click", closeHeaderMenus);
-      originalActions.style.display = oldActionDisplay;
-      title.style.display = oldTitleDisplay;
-      header.classList.remove("tr-proHeaderHost");
-      weatherMount?.remove();
-      brandMount?.remove();
-      mount?.remove();
-    };
-  }, [navigate, headerWorkoutState, headerLogoUrl]);
-
-  useEffect(() => {
-    const mount = document.querySelector<HTMLButtonElement>(".tr-proHeaderWeather");
-    if (!mount) return;
-
-    mount.innerHTML = "";
-    const location = headerUiSettings?.weatherLocation ?? null;
-
-    const icon = document.createElement("span");
-    icon.className = "tr-proWeatherIcon";
-
-    const copy = document.createElement("span");
-    copy.className = "tr-proWeatherCopy";
-    const primary = document.createElement("span");
-    primary.className = "tr-proWeatherPrimary";
-    const secondary = document.createElement("span");
-    secondary.className = "tr-proWeatherSecondary";
-
-    if (!location) {
-      icon.textContent = "☀";
-      primary.innerHTML = "<b>SET WEATHER</b>";
-      secondary.textContent = "CITY / ZIP";
-      mount.classList.add("is-empty");
-      mount.classList.remove("is-live");
-    } else if (headerWeather) {
-      const localTime = formatWeatherLocalTime(headerWeather.timezone || location.timezone, new Date(headerClock));
-      icon.textContent = headerWeatherGlyph(headerWeather.icon, headerWeather.isDay);
-      icon.setAttribute("title", headerWeather.condition);
-
-      const temperature = document.createElement("b");
-      temperature.className = "tr-proWeatherTemp";
-      temperature.textContent = `${Math.round(headerWeather.temperatureF)}°`;
-      const time = document.createElement("span");
-      time.className = "tr-proWeatherTime";
-      time.textContent = localTime;
-      primary.append(temperature, time);
-
-      const condition = document.createElement("span");
-      condition.className = "tr-proWeatherCondition";
-      condition.textContent = headerWeather.condition.toUpperCase();
-      const city = document.createElement("span");
-      city.className = "tr-proWeatherCity";
-      city.textContent = location.displayName;
-      const feels = document.createElement("strong");
-      feels.className = "tr-proWeatherFeels";
-      feels.textContent = `FEELS ${Math.round(headerWeather.apparentTemperatureF)}°`;
-      secondary.append(condition, city, feels);
-
-      mount.classList.remove("is-empty");
-      mount.classList.add("is-live");
-    } else {
-      icon.textContent = "☁";
-      primary.innerHTML = `<b>${headerWeatherLoading ? "LOADING WEATHER" : "WEATHER OFFLINE"}</b>`;
-      secondary.textContent = location.displayName;
-      mount.classList.remove("is-empty", "is-live");
-    }
-
-    copy.append(primary, secondary);
-    mount.append(icon, copy);
-  }, [headerUiSettings, headerWeather, headerWeatherLoading, headerClock]);
 
   useEffect(() => {
     const refreshPlaylists = () => {
@@ -2034,11 +1648,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-audioModeButton is-shuffle ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`} aria-pressed={player.shuffle}><PlayerIcon name="shuffle" /><span>SHUFFLE</span><i className="tr-modeState">{player.shuffle ? "ON" : "OFF"}</i></button>
       </div>
 
-      <button type="button" data-profile={player.outputProfile} className={`tr-audioEqToggle tr-dspStatusToggle tr-mobileDspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
-        <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
-        <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
-        <span className={`tr-dspChevron ${eqOpen ? "is-open" : ""}`} aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></span>
-        <i className={`tr-dspStatusLed is-${player.dspStatus}`} aria-hidden />
+      <button
+        type="button"
+        data-profile={player.outputProfile}
+        className={`tr-mobileDspStatusToggle ${eqOpen ? "is-active" : ""}`}
+        onClick={() => setEqOpen((current) => !current)}
+        aria-expanded={eqOpen}
+        aria-label="Open DSP and equalizer controls"
+      >
+        <span className="tr-mobileDspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
+        <span className="tr-mobileDspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
+        <span className={`tr-mobileDspChevron ${eqOpen ? "is-open" : ""}`} aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></span>
+        <i className={`tr-mobileDspStatusLed is-${player.dspStatus}`} aria-hidden />
       </button>
 
       <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} />
@@ -2083,7 +1704,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <div className="tr-outputProfilePanel">
             <div className="tr-outputProfileIntro">
               <small>HIGH-FIDELITY OUTPUT</small>
-              <strong className="tr-outputProfileTitle"><span className="tr-outputProfileIcon" data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span><span>{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</span></strong>
+              <div className="tr-outputProfileTitle"><span className="tr-outputProfileIcon" data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span><span className="tr-outputProfileTitleText">{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</span></div>
               <p>{MUSIC_OUTPUT_PROFILES[player.outputProfile].description}</p>
             </div>
             <label className="tr-outputProfileSelect">
@@ -4613,505 +4234,219 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           text-overflow:ellipsis!important;
         }
 
-        /* V13.9 CENTERED BRAND HEADER + COMPACT WEATHER */
-        .tr-proHeaderHost{
-          position:relative!important;
-          display:grid!important;
-          grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important;
-          align-items:center!important;
-          column-gap:12px!important;
-          min-height:66px!important;
-          overflow:visible!important;
-        }
-        .tr-proHeaderWeather{
-          grid-column:1!important;
-          justify-self:start!important;
-          min-width:0!important;
-          max-width:min(100%,410px)!important;
-          min-height:42px!important;
-          padding:5px 10px 5px 7px!important;
-          display:flex!important;
-          align-items:center!important;
-          gap:8px!important;
-          border:1px solid rgba(82,199,236,.18)!important;
-          border-radius:12px!important;
-          background:linear-gradient(180deg,rgba(8,27,37,.90),rgba(4,13,19,.96))!important;
-          color:#eefaff!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 5px 14px rgba(0,0,0,.18)!important;
-          cursor:pointer!important;
-          overflow:hidden!important;
-        }
-        .tr-proHeaderWeather:hover{border-color:rgba(75,213,252,.40)!important;background:linear-gradient(180deg,rgba(10,43,56,.94),rgba(5,23,31,.98))!important}
-        .tr-proWeatherIcon{
-          flex:0 0 30px!important;
-          width:30px!important;
-          height:30px!important;
-          display:grid!important;
-          place-items:center!important;
-          border:1px solid rgba(82,213,252,.22)!important;
-          border-radius:9px!important;
-          background:radial-gradient(circle at 40% 30%,rgba(55,207,250,.19),rgba(3,21,29,.82))!important;
-          color:#71ddff!important;
-          font-size:18px!important;
-          line-height:1!important;
-          text-shadow:0 0 12px rgba(76,210,250,.30)!important;
-        }
-        .tr-proHeaderWeather.is-live .tr-proWeatherIcon{color:#ffd36c!important;border-color:rgba(255,191,71,.28)!important;background:radial-gradient(circle at 40% 30%,rgba(255,173,46,.19),rgba(32,19,3,.80))!important;text-shadow:0 0 12px rgba(255,171,45,.28)!important}
-        .tr-proWeatherCopy{min-width:0!important;display:flex!important;align-items:center!important;gap:9px!important;overflow:hidden!important}.tr-proWeatherPrimary,.tr-proWeatherSecondary{min-width:0!important;display:flex!important;align-items:center!important;gap:6px!important;white-space:nowrap!important}.tr-proWeatherPrimary:after{content:"•";color:rgba(141,181,196,.42)!important;margin-left:2px!important}.tr-proWeatherPrimary b{max-width:150px!important;overflow:hidden!important;text-overflow:ellipsis!important;color:#f5fbfd!important;font-size:8px!important;font-weight:1100!important;letter-spacing:.055em!important;text-transform:uppercase!important}.tr-proWeatherPrimary span{color:#9eb7c1!important;font-size:8px!important;font-weight:900!important;font-variant-numeric:tabular-nums!important}.tr-proWeatherSecondary{color:#b9d0d9!important;font-size:8px!important;font-weight:900!important}.tr-proWeatherCity{max-width:145px!important;overflow:hidden!important;text-overflow:ellipsis!important}.tr-proWeatherSecondary strong{color:#71e0ff!important;font-size:8px!important;font-weight:1100!important;letter-spacing:.035em!important}
-        .tr-proHeaderBrand{
-          grid-column:2!important;
-          justify-self:center!important;
-          align-self:center!important;
-          width:clamp(150px,18vw,218px)!important;
-          height:58px!important;
-          display:grid!important;
-          place-items:center!important;
-          pointer-events:none!important;
-          overflow:visible!important;
-          z-index:2!important;
-        }
-        .tr-proHeaderLogoImage{display:block!important;width:100%!important;height:100%!important;object-fit:contain!important;filter:drop-shadow(0 5px 13px rgba(0,0,0,.34))!important}.tr-proHeaderLogoFallback{color:#ffd45d!important;font-size:16px!important;font-weight:1100!important;letter-spacing:.035em!important;text-shadow:0 0 16px rgba(255,176,42,.14)!important;white-space:nowrap!important}
-        .tr-proHeaderHost>.tr-proGlobalActions{grid-column:3!important;justify-self:end!important;align-self:center!important;margin:0!important;z-index:3!important}.tr-proHeaderHost .tr-proHeaderButton{box-sizing:border-box!important}
-
-        /* V13.9 HIGH-FIDELITY OUTPUT ICON GEOMETRY: ICON -> FIXED SPACE -> TEXT */
-        .tr-outputProfileTitle{
-          display:grid!important;
-          grid-template-columns:32px minmax(0,1fr)!important;
-          align-items:center!important;
-          justify-content:start!important;
-          column-gap:12px!important;
-        }
-        .tr-outputProfileTitle>.tr-outputProfileIcon{grid-column:1!important;width:32px!important;min-width:32px!important;height:32px!important;margin:0!important}.tr-outputProfileTitle>span:last-child{grid-column:2!important;min-width:0!important;margin:0!important;padding:0!important;line-height:1.05!important}
-        .tr-outputProfileSelectLabel{display:grid!important;grid-template-columns:24px minmax(0,1fr)!important;align-items:center!important;justify-content:start!important;column-gap:10px!important}.tr-outputProfileSelectLabel>i{grid-column:1!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important}.tr-outputProfileSelectLabel>b{grid-column:2!important;margin:0!important;padding:0!important}
-        .tr-outputProfileTelemetryActive{display:grid!important;grid-template-columns:18px minmax(0,1fr)!important;align-items:center!important;justify-content:start!important;column-gap:9px!important}.tr-outputProfileTelemetryActive>i{grid-column:1!important;width:18px!important;min-width:18px!important;height:18px!important;margin:0!important}.tr-outputProfileTelemetryActive>b{grid-column:2!important;margin:0!important;padding:0!important}
-        .tr-outputProfileChoices button{display:grid!important;grid-template-columns:24px auto!important;align-items:center!important;justify-content:center!important;column-gap:10px!important}.tr-outputProfileChoices button>i{grid-column:1!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important}.tr-outputProfileChoices button>span{grid-column:2!important;margin:0!important;padding:0!important;white-space:nowrap!important}
-
-        @media(max-width:650px){
-          .tr-proHeaderHost{column-gap:6px!important;min-height:56px!important;grid-template-columns:minmax(0,1fr) 108px minmax(0,1fr)!important}
-          .tr-proHeaderWeather{max-width:118px!important;min-height:39px!important;height:39px!important;padding:3px 5px!important;gap:5px!important;border-radius:9px!important}
-          .tr-proWeatherIcon{flex-basis:25px!important;width:25px!important;height:25px!important;border-radius:7px!important;font-size:15px!important}
-          .tr-proWeatherCopy{display:grid!important;grid-template-columns:1fr!important;gap:2px!important;align-content:center!important}.tr-proWeatherPrimary,.tr-proWeatherSecondary{gap:4px!important}.tr-proWeatherPrimary:after{display:none!important}.tr-proWeatherPrimary b{max-width:68px!important;font-size:6.2px!important;letter-spacing:.02em!important}.tr-proWeatherPrimary span{font-size:6.2px!important}.tr-proWeatherSecondary{font-size:6.1px!important;gap:3px!important}.tr-proWeatherCity{max-width:62px!important}.tr-proWeatherSecondary strong{font-size:6.1px!important;letter-spacing:0!important}
-          .tr-proHeaderBrand{width:108px!important;height:44px!important}.tr-proHeaderLogoFallback{font-size:9px!important;letter-spacing:.015em!important}
-          .tr-proHeaderHost>.tr-proGlobalActions{gap:3px!important;max-width:118px!important}.tr-proHeaderHost .tr-proHeaderButton{height:30px!important;min-height:30px!important;padding:0 5px!important;font-size:7px!important}.tr-proHeaderHost .tr-proHeaderButton.is-return{font-size:0!important;max-width:53px!important}.tr-proHeaderHost .tr-proHeaderButton.is-return:before{content:"RETURN";font-size:6.5px!important}.tr-proHeaderHost .tr-proHeaderButton.is-sound,.tr-proHeaderHost .tr-proHeaderButton--account,.tr-proHeaderHost .tr-proAccountWrap>.tr-proHeaderButton{width:31px!important;min-width:31px!important;height:30px!important;min-height:30px!important}.tr-proHeaderHost .tr-proHeaderButton.is-sound:after{font-size:15px!important}.tr-proHeaderHost .tr-proHeaderButton--account:after{font-size:10px!important}
-          .tr-outputProfileTitle{grid-template-columns:29px minmax(0,1fr)!important;column-gap:10px!important}.tr-outputProfileTitle>.tr-outputProfileIcon{width:29px!important;min-width:29px!important;height:29px!important}.tr-outputProfileChoices button{grid-template-columns:24px auto!important;column-gap:9px!important}
-        }
-        @media(max-width:380px){
-          .tr-proHeaderHost{grid-template-columns:minmax(0,1fr) 96px minmax(0,1fr)!important;column-gap:4px!important}.tr-proHeaderWeather{max-width:110px!important}.tr-proHeaderBrand{width:96px!important;height:41px!important}.tr-proHeaderHost>.tr-proGlobalActions{max-width:110px!important;gap:2px!important}.tr-proHeaderHost .tr-proHeaderButton{padding:0 4px!important}.tr-proHeaderHost .tr-proHeaderButton.is-resume:not(.is-return){max-width:47px!important;font-size:6.4px!important}.tr-proWeatherPrimary b{max-width:61px!important}.tr-proWeatherCity{max-width:56px!important}
-        }
 
 
-
-        /* V13.9.1 RESPONSIVE HEADER + DSP CORRECTION PASS */
-        .tr-proHeaderHost{
-          min-height:74px!important;
-          margin-bottom:18px!important;
-          padding-top:4px!important;
-          padding-bottom:4px!important;
-          overflow:visible!important;
-        }
-        .tr-proHeaderWeather{
-          width:min(100%,360px)!important;
-          max-width:360px!important;
-          min-height:50px!important;
-          height:auto!important;
-          padding:6px 11px 6px 7px!important;
-          gap:9px!important;
-          overflow:visible!important;
-        }
-        .tr-proWeatherIcon{
-          flex:0 0 36px!important;
-          width:36px!important;
-          height:36px!important;
-          font-size:21px!important;
-          border-radius:10px!important;
-        }
-        .tr-proWeatherCopy{
-          min-width:0!important;
-          width:100%!important;
-          display:grid!important;
-          grid-template-columns:minmax(0,1fr)!important;
-          gap:3px!important;
-          overflow:visible!important;
-        }
-        .tr-proWeatherPrimary,
-        .tr-proWeatherSecondary{
-          min-width:0!important;
-          width:100%!important;
-          display:flex!important;
-          align-items:center!important;
-          justify-content:flex-start!important;
-          gap:7px!important;
-          white-space:nowrap!important;
-          overflow:visible!important;
-        }
-        .tr-proWeatherPrimary:after{display:none!important;content:none!important}
-        .tr-proWeatherTemp{
-          flex:0 0 auto!important;
-          color:#fff!important;
-          font-size:15px!important;
-          line-height:1!important;
-          font-weight:1100!important;
-          letter-spacing:-.02em!important;
-          font-variant-numeric:tabular-nums!important;
-        }
-        .tr-proWeatherTime{
-          flex:0 0 auto!important;
-          color:#d9edf4!important;
-          font-size:10px!important;
-          line-height:1!important;
-          font-weight:1000!important;
-          letter-spacing:.025em!important;
-          font-variant-numeric:tabular-nums!important;
-        }
-        .tr-proWeatherPrimary .tr-proWeatherTime:before{
-          content:"•";
-          margin-right:7px;
-          color:rgba(145,187,203,.48);
-        }
-        .tr-proWeatherSecondary{
-          gap:6px!important;
-          color:#b9d0d9!important;
-          font-size:8.4px!important;
-          line-height:1.1!important;
-          font-weight:950!important;
-          letter-spacing:.025em!important;
-          flex-wrap:wrap!important;
-        }
-        .tr-proWeatherCondition{
-          flex:0 0 auto!important;
-          color:#f5fbfd!important;
-          font-size:8.4px!important;
-          font-weight:1100!important;
-          letter-spacing:.045em!important;
-        }
-        .tr-proWeatherCity{
-          flex:0 1 auto!important;
-          max-width:none!important;
-          overflow:visible!important;
-          text-overflow:clip!important;
-          white-space:nowrap!important;
-          color:#a9c0ca!important;
-          font-size:8.4px!important;
-          font-weight:950!important;
-        }
-        .tr-proWeatherCity:before,
-        .tr-proWeatherFeels:before{
-          content:"•";
-          margin-right:6px;
-          color:rgba(145,187,203,.42);
-        }
-        .tr-proWeatherFeels{
-          flex:0 0 auto!important;
-          color:#71e0ff!important;
-          font-size:8.4px!important;
-          line-height:1!important;
-          font-weight:1100!important;
-          letter-spacing:.02em!important;
-        }
-        .tr-proHeaderBrand{
-          width:clamp(174px,19vw,236px)!important;
-          height:64px!important;
-          padding:3px 8px!important;
-          box-sizing:border-box!important;
-          overflow:visible!important;
-        }
-        .tr-proHeaderLogoImage{
-          width:100%!important;
-          height:100%!important;
-          max-width:100%!important;
-          max-height:100%!important;
-          padding:2px 6px!important;
-          box-sizing:border-box!important;
-          object-fit:contain!important;
-          object-position:center center!important;
-          transform:scale(.96)!important;
-          transform-origin:center!important;
-          overflow:visible!important;
-        }
-        .tr-proMobileMenuWrap{display:none!important;position:relative!important}
-        .tr-proMobileMenuButton{display:flex!important;align-items:center!important;justify-content:center!important;gap:5px!important}
-        .tr-proMobileMenuGlyph{font-size:14px!important;line-height:1!important}
-        .tr-proMobileMenu{
-          position:absolute!important;
-          top:calc(100% + 8px)!important;
-          right:0!important;
-          z-index:20000!important;
-          width:190px!important;
-          padding:7px!important;
-          border:1px solid rgba(85,198,235,.30)!important;
-          border-radius:12px!important;
-          background:linear-gradient(180deg,rgba(8,24,32,.99),rgba(3,10,15,.995))!important;
-          box-shadow:0 24px 60px rgba(0,0,0,.62),inset 0 1px 0 rgba(255,255,255,.045)!important;
-          backdrop-filter:blur(14px)!important;
-        }
-        .tr-proMobileMenu[hidden]{display:none!important}
-        .tr-proMobileMenu>button{
-          width:100%!important;
-          min-height:44px!important;
-          padding:0 12px!important;
-          border:1px solid transparent!important;
-          border-radius:8px!important;
-          background:transparent!important;
-          color:#effaff!important;
-          text-align:left!important;
-          font-size:10px!important;
-          font-weight:1000!important;
-          letter-spacing:.055em!important;
-          cursor:pointer!important;
-        }
-        .tr-proMobileMenu>button:hover{border-color:rgba(89,207,244,.22)!important;background:rgba(52,173,211,.08)!important}
-        .tr-proMobileMenu>button.is-signout{color:#ffaaaa!important}
-        .tr-proMobileMenuSection{
-          margin:5px 6px 2px!important;
-          padding-top:7px!important;
-          border-top:1px solid rgba(255,255,255,.08)!important;
-          color:#6f8d99!important;
-          font-size:7px!important;
-          font-weight:1000!important;
-          letter-spacing:.16em!important;
+        /* V13.9.2 STRUCTURAL MOBILE RESTORE + DSP PLACEMENT */
+        .tr-mobileDspStatusToggle{
+          display:none;
         }
 
-        /* High-Fidelity Output: hard-lock every profile to ICON + GAP + TEXT. */
-        .tr-outputProfileTitle{
-          width:100%!important;
-          min-width:0!important;
+        /* Hard-lock High-Fidelity Output icon + text horizontally on every viewport. */
+        .tr-outputProfileIntro > .tr-outputProfileTitle{
           display:flex!important;
           flex-direction:row!important;
           flex-wrap:nowrap!important;
           align-items:center!important;
           justify-content:flex-start!important;
           gap:12px!important;
-        }
-        .tr-outputProfileTitle>.tr-outputProfileIcon{
-          flex:0 0 34px!important;
-          width:34px!important;
-          min-width:34px!important;
-          height:34px!important;
-          margin:0!important;
-        }
-        .tr-outputProfileTitle>span:last-child{
-          flex:0 1 auto!important;
+          width:100%!important;
           min-width:0!important;
           margin:0!important;
           padding:0!important;
+          color:#f4fbfe!important;
+          font-size:16px!important;
+          line-height:1.05!important;
+          font-weight:1000!important;
+        }
+        .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileIcon{
+          flex:0 0 31px!important;
+          width:31px!important;
+          min-width:31px!important;
+          height:31px!important;
+          margin:0!important;
+        }
+        .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileTitleText{
+          display:block!important;
+          flex:1 1 auto!important;
+          min-width:0!important;
+          width:auto!important;
+          margin:0!important;
+          padding:0!important;
           white-space:nowrap!important;
+          overflow:visible!important;
+          text-overflow:clip!important;
           line-height:1.05!important;
         }
-        .tr-outputProfileSelectLabel,
-        .tr-outputProfileTelemetryActive{
-          min-width:0!important;
-          display:flex!important;
-          flex-direction:row!important;
-          flex-wrap:nowrap!important;
-          align-items:center!important;
-          justify-content:flex-start!important;
-        }
-        .tr-outputProfileSelectLabel{gap:10px!important}
-        .tr-outputProfileSelectLabel>i{flex:0 0 24px!important;width:24px!important;min-width:24px!important;height:24px!important;margin:0!important}
-        .tr-outputProfileSelectLabel>b{min-width:0!important;margin:0!important;padding:0!important;white-space:nowrap!important}
-        .tr-outputProfileTelemetryActive{gap:9px!important}
-        .tr-outputProfileTelemetryActive>i{flex:0 0 18px!important;width:18px!important;min-width:18px!important;height:18px!important;margin:0!important}
-        .tr-outputProfileTelemetryActive>b{min-width:0!important;margin:0!important;padding:0!important;white-space:nowrap!important}
-        .tr-outputProfileChoices button{
-          min-width:0!important;
-          display:flex!important;
-          flex-direction:row!important;
-          flex-wrap:nowrap!important;
-          align-items:center!important;
-          justify-content:center!important;
-          gap:10px!important;
-        }
-        .tr-outputProfileChoices button>i{flex:0 0 25px!important;width:25px!important;min-width:25px!important;height:25px!important;margin:0!important}
-        .tr-outputProfileChoices button>span{min-width:0!important;margin:0!important;padding:0!important;white-space:nowrap!important}
-
-        /* Mobile DSP command lives immediately below Repeat / Shuffle. */
-        .tr-mobileDspStatusToggle{display:none!important}
 
         @media(max-width:650px){
-          .tr-proHeaderHost{
-            grid-template-columns:minmax(0,1fr) 104px minmax(0,1fr)!important;
-            column-gap:5px!important;
-            min-height:72px!important;
-            margin-bottom:18px!important;
-            padding-top:4px!important;
-            padding-bottom:5px!important;
-          }
-          .tr-proHeaderWeather{
+          /* Keep the known-good V13.8.5 player as a single vertical stack. */
+          .tr-audioDeck.tr-audioDeck--pro7{
+            display:block!important;
             width:100%!important;
-            max-width:142px!important;
-            min-height:58px!important;
-            padding:5px 6px!important;
-            gap:6px!important;
-            border-radius:10px!important;
-            overflow:visible!important;
-          }
-          .tr-proWeatherIcon{
-            flex:0 0 31px!important;
-            width:31px!important;
-            height:31px!important;
-            font-size:18px!important;
-            border-radius:8px!important;
-          }
-          .tr-proWeatherCopy{gap:2px!important;align-content:center!important}
-          .tr-proWeatherPrimary{
-            display:flex!important;
-            gap:4px!important;
-            flex-wrap:nowrap!important;
-          }
-          .tr-proWeatherTemp{font-size:12.5px!important}
-          .tr-proWeatherTime{font-size:8.1px!important;letter-spacing:0!important}
-          .tr-proWeatherPrimary .tr-proWeatherTime:before{margin-right:4px!important}
-          .tr-proWeatherSecondary{
-            display:grid!important;
-            grid-template-columns:auto minmax(0,1fr)!important;
-            gap:2px 4px!important;
-            align-items:center!important;
-            white-space:normal!important;
-            font-size:7px!important;
-            line-height:1.05!important;
-            overflow:visible!important;
-          }
-          .tr-proWeatherCondition{
-            grid-column:1!important;
-            font-size:7px!important;
-            letter-spacing:.025em!important;
-            white-space:nowrap!important;
-          }
-          .tr-proWeatherCity{
-            grid-column:2!important;
+            max-width:100%!important;
             min-width:0!important;
-            font-size:7px!important;
-            letter-spacing:0!important;
-            white-space:nowrap!important;
-            overflow:visible!important;
-          }
-          .tr-proWeatherCity:before{content:"•"!important;margin-right:4px!important}
-          .tr-proWeatherFeels{
-            grid-column:1/-1!important;
-            font-size:7.1px!important;
-            white-space:nowrap!important;
-          }
-          .tr-proWeatherFeels:before{display:none!important;content:none!important}
-          .tr-proHeaderBrand{
-            width:104px!important;
-            height:52px!important;
-            padding:3px 3px!important;
-          }
-          .tr-proHeaderLogoImage{
-            padding:2px 5px!important;
-            transform:scale(.94)!important;
-          }
-          .tr-proHeaderHost>.tr-proGlobalActions{
-            width:auto!important;
-            max-width:122px!important;
-            min-width:0!important;
-            display:flex!important;
-            align-items:center!important;
-            justify-content:flex-end!important;
-            gap:5px!important;
-            overflow:visible!important;
-          }
-          .tr-proHeaderHost .tr-proHeaderButton.is-sound,
-          .tr-proDesktopAccountWrap{display:none!important}
-          .tr-proMobileMenuWrap{display:block!important;flex:0 0 auto!important}
-          .tr-proHeaderHost .tr-proHeaderButton.is-resume{
-            width:auto!important;
-            min-width:52px!important;
-            max-width:61px!important;
-            height:38px!important;
-            min-height:38px!important;
-            padding:0 7px!important;
-            font-size:8px!important;
-            letter-spacing:.03em!important;
-            border-radius:9px!important;
-          }
-          .tr-proHeaderHost .tr-proHeaderButton.is-return{
-            min-width:58px!important;
-            max-width:64px!important;
-            font-size:0!important;
-          }
-          .tr-proHeaderHost .tr-proHeaderButton.is-return:before{content:"RETURN"!important;font-size:7.1px!important}
-          .tr-proMobileMenuButton{
-            width:50px!important;
-            min-width:50px!important;
-            height:38px!important;
-            min-height:38px!important;
-            padding:0 5px!important;
-            font-size:7.5px!important;
-            letter-spacing:.025em!important;
-            border-radius:9px!important;
-          }
-          .tr-proMobileMenuGlyph{font-size:13px!important}
-
-          .tr-mobileDspStatusToggle{
-            width:calc(100% - 28px)!important;
-            max-width:none!important;
-            min-width:0!important;
-            height:56px!important;
-            min-height:56px!important;
-            margin:10px 14px 12px!important;
-            padding:0 40px 0 9px!important;
-            display:grid!important;
-            grid-template-columns:36px minmax(0,1fr) 20px!important;
-            align-items:center!important;
-            column-gap:10px!important;
-            border-radius:12px!important;
-            box-sizing:border-box!important;
             overflow:hidden!important;
           }
-          .tr-mobileDspStatusToggle .tr-dspStatusIcon{
-            width:36px!important;
-            min-width:36px!important;
-            height:36px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > *{
+            max-width:100%!important;
+            min-width:0!important;
           }
-          .tr-mobileDspStatusToggle .tr-dspStatusCopy{min-width:0!important;text-align:left!important}
-          .tr-mobileDspStatusToggle .tr-dspStatusCopy b{font-size:12px!important;line-height:1.05!important;white-space:nowrap!important}
-          .tr-mobileDspStatusToggle .tr-dspStatusCopy small{font-size:8.4px!important;line-height:1.05!important;white-space:nowrap!important}
-          .tr-mobileDspStatusToggle .tr-dspChevron{width:20px!important;height:20px!important}
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{display:none!important}
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
-            grid-template-columns:minmax(0,1fr)!important;
-          }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector{
-            grid-column:1!important;
-            width:100%!important;
-            max-width:none!important;
+          .tr-playerHero,
+          .tr-playerTransportStage,
+          .tr-playerModeStage,
+          .tr-activityRta,
+          .tr-playerUtilityRow,
+          .tr-audioEqPanel{
+            grid-column:auto!important;
+            grid-row:auto!important;
+            float:none!important;
           }
 
-          .tr-outputProfileTitle{
+          /* DSP/EQ lives directly below Repeat/Shuffle on mobile. */
+          .tr-mobileDspStatusToggle{
+            position:relative!important;
+            isolation:isolate!important;
+            width:calc(100% - 24px)!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:52px!important;
+            min-height:52px!important;
+            margin:0 auto 9px!important;
+            padding:0 38px 0 11px!important;
+            display:grid!important;
+            grid-template-columns:34px minmax(0,1fr) 20px!important;
+            align-items:center!important;
+            column-gap:11px!important;
+            border:1px solid rgba(69,208,249,.42)!important;
+            border-radius:12px!important;
+            background:linear-gradient(180deg,#0b2c39,#061821)!important;
+            color:#effbff!important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 8px 20px rgba(0,0,0,.24)!important;
+            cursor:pointer!important;
+            overflow:hidden!important;
+          }
+          .tr-mobileDspStatusToggle.is-active{
+            border-color:rgba(77,220,255,.72)!important;
+            background:linear-gradient(180deg,#0d4052,#072631)!important;
+            box-shadow:inset 0 -2px rgba(67,213,250,.72),0 0 20px rgba(50,195,239,.13)!important;
+          }
+          .tr-mobileDspStatusIcon{
+            width:34px!important;
+            min-width:34px!important;
+            height:34px!important;
+            display:grid!important;
+            place-items:center!important;
+            border:1px solid rgba(94,208,242,.22)!important;
+            border-radius:9px!important;
+            background:rgba(4,27,36,.78)!important;
+            color:#8be6ff!important;
+          }
+          .tr-mobileDspStatusIcon svg{
+            width:19px!important;
+            height:19px!important;
+            fill:currentColor!important;
+          }
+          .tr-mobileDspStatusCopy{
+            min-width:0!important;
+            display:grid!important;
+            align-content:center!important;
+            justify-items:start!important;
+            gap:3px!important;
+            text-align:left!important;
+          }
+          .tr-mobileDspStatusCopy b{
+            color:#fff!important;
+            font-size:12px!important;
+            line-height:1!important;
+            font-weight:1100!important;
+            letter-spacing:.055em!important;
+            white-space:nowrap!important;
+          }
+          .tr-mobileDspStatusCopy small{
+            display:block!important;
+            max-width:100%!important;
+            color:#8faeba!important;
+            font-size:8.5px!important;
+            line-height:1!important;
+            font-weight:900!important;
+            white-space:nowrap!important;
+            overflow:hidden!important;
+            text-overflow:clip!important;
+          }
+          .tr-mobileDspChevron{
+            width:20px!important;
+            height:20px!important;
+            display:grid!important;
+            place-items:center!important;
+            color:#93dff7!important;
+            transition:transform .18s ease!important;
+          }
+          .tr-mobileDspChevron.is-open{transform:rotate(180deg)!important}
+          .tr-mobileDspChevron svg{width:15px!important;height:15px!important;fill:none!important;stroke:currentColor!important;stroke-width:2!important}
+          .tr-mobileDspStatusLed{
+            position:absolute!important;
+            right:11px!important;
+            top:10px!important;
+            width:7px!important;
+            height:7px!important;
+            border-radius:50%!important;
+            background:#68777d!important;
+          }
+          .tr-mobileDspStatusLed.is-active{background:#5ae4aa!important;box-shadow:0 0 9px rgba(90,228,170,.55)!important}
+          .tr-mobileDspStatusLed.is-recovering{background:#ffbf59!important;box-shadow:0 0 9px rgba(255,191,89,.48)!important}
+          .tr-mobileDspStatusLed.is-unavailable{background:#ff7474!important;box-shadow:0 0 9px rgba(255,116,116,.45)!important}
+
+          /* Hide the old utility-row DSP button on mobile so it is not duplicated below PLAYING FROM. */
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            display:none!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
+            display:block!important;
+            width:100%!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector{
+            display:grid!important;
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+          }
+
+          /* High-Fidelity Output remains icon -> gap -> text, never stacked. */
+          .tr-outputProfileIntro > .tr-outputProfileTitle{
             display:flex!important;
             flex-direction:row!important;
             flex-wrap:nowrap!important;
             align-items:center!important;
-            gap:11px!important;
-            width:100%!important;
+            gap:10px!important;
+            font-size:15px!important;
           }
-          .tr-outputProfileTitle>.tr-outputProfileIcon{flex-basis:36px!important;width:36px!important;min-width:36px!important;height:36px!important}
-          .tr-outputProfileTitle>span:last-child{font-size:22px!important;white-space:nowrap!important}
-          .tr-outputProfileChoices button{gap:9px!important;padding-left:8px!important;padding-right:8px!important}
-          .tr-outputProfileChoices button>i{flex-basis:27px!important;width:27px!important;min-width:27px!important;height:27px!important}
-          .tr-outputProfileChoices button>span{font-size:9.2px!important;letter-spacing:.07em!important}
-          .tr-outputProfileSelectLabel>b{font-size:9px!important}
+          .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileIcon{
+            flex-basis:30px!important;
+            width:30px!important;
+            min-width:30px!important;
+            height:30px!important;
+          }
+          .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileTitleText{
+            min-width:0!important;
+            font-size:15px!important;
+            white-space:nowrap!important;
+          }
         }
 
         @media(max-width:390px){
-          .tr-proHeaderHost{grid-template-columns:minmax(0,1fr) 94px minmax(0,1fr)!important;column-gap:4px!important}
-          .tr-proHeaderWeather{max-width:135px!important;min-height:57px!important;padding:4px 5px!important;gap:5px!important}
-          .tr-proWeatherIcon{flex-basis:29px!important;width:29px!important;height:29px!important;font-size:17px!important}
-          .tr-proWeatherTemp{font-size:11.8px!important}
-          .tr-proWeatherTime{font-size:7.6px!important}
-          .tr-proWeatherCondition,.tr-proWeatherCity{font-size:6.6px!important}
-          .tr-proWeatherFeels{font-size:6.8px!important}
-          .tr-proHeaderBrand{width:94px!important;height:49px!important}
-          .tr-proHeaderHost>.tr-proGlobalActions{max-width:114px!important;gap:4px!important}
-          .tr-proHeaderHost .tr-proHeaderButton.is-resume{min-width:49px!important;max-width:56px!important;padding:0 5px!important;font-size:7.4px!important}
-          .tr-proMobileMenuButton{width:46px!important;min-width:46px!important;font-size:7px!important;gap:3px!important}
-          .tr-proMobileMenuGlyph{font-size:12px!important}
-          .tr-mobileDspStatusToggle{width:calc(100% - 22px)!important;margin-left:11px!important;margin-right:11px!important}
-          .tr-outputProfileTitle>span:last-child{font-size:20px!important}
-          .tr-outputProfileChoices button>span{font-size:8.5px!important;letter-spacing:.045em!important}
+          .tr-mobileDspStatusToggle{
+            width:calc(100% - 20px)!important;
+            grid-template-columns:32px minmax(0,1fr) 18px!important;
+            column-gap:9px!important;
+            padding-left:9px!important;
+            padding-right:34px!important;
+          }
+          .tr-mobileDspStatusIcon{width:32px!important;min-width:32px!important;height:32px!important}
+          .tr-mobileDspStatusCopy b{font-size:11px!important}
+          .tr-mobileDspStatusCopy small{font-size:7.8px!important}
+          .tr-outputProfileIntro > .tr-outputProfileTitle{font-size:14px!important;gap:9px!important}
+          .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileTitleText{font-size:14px!important}
         }
-
       `}</style>
     </section>
   );
