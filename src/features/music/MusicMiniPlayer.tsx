@@ -78,7 +78,8 @@ type IconName =
   | "music"
   | "headphones"
   | "car"
-  | "speaker";
+  | "speaker"
+  | "save";
 
 function outputProfileIconName(profile: MusicOutputProfile): IconName {
   if (profile === "headphones") return "headphones";
@@ -190,6 +191,7 @@ function PlayerIcon({ name }: { name: IconName }) {
   if (name === "headphones") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 3a8 8 0 0 0-8 8v6.2A2.8 2.8 0 0 0 6.8 20H9v-7H6v-2a6 6 0 0 1 12 0v2h-3v7h2.2a2.8 2.8 0 0 0 2.8-2.8V11a8 8 0 0 0-8-8ZM7 15v3h-.2a.8.8 0 0 1-.8-.8V15h1Zm11 2.2a.8.8 0 0 1-.8.8H17v-3h1v2.2Z" /></svg>;
   if (name === "car") return <svg viewBox="0 0 24 24" aria-hidden><path d="m5.2 6.2 1.4-2.8A2.5 2.5 0 0 1 8.8 2h6.4a2.5 2.5 0 0 1 2.2 1.4l1.4 2.8 1.4.5c1.1.4 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2h-1v1.2a.8.8 0 0 1-.8.8h-1.4a.8.8 0 0 1-.8-.8V20H8v1.2a.8.8 0 0 1-.8.8H5.8a.8.8 0 0 1-.8-.8V20H4a2 2 0 0 1-2-2V9.3c0-1.2.7-2.2 1.8-2.6l1.4-.5ZM7.4 6h9.2l-.9-1.8a.6.6 0 0 0-.5-.3H8.8a.6.6 0 0 0-.5.3L7.4 6ZM5.5 10a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm13 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM7 16h10v-2H7v2Z" /></svg>;
   if (name === "speaker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm5 3.2a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Zm0 6.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2Zm0 2a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2Z" /></svg>;
+  if (name === "save") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h11.6L21 7.4V21H3V3h2Zm1 2v5h10V5H6Zm0 8v6h12v-6H6Zm2-7h6v2H8V6Z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
 
@@ -1290,6 +1292,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
   const [headerWorkoutState, setHeaderWorkoutState] = useState("");
+  const [presetSaveFlash, setPresetSaveFlash] = useState(false);
+  const [sourcePulse, setSourcePulse] = useState(false);
   const restoredProfileRef = useRef<string>("");
   const heroIdentityRef = useRef<HTMLDivElement | null>(null);
   const heroTitleRef = useRef<HTMLElement | null>(null);
@@ -1497,6 +1501,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       else activateMusicPlaylistQueue(playlist, tracks);
     } finally {
       setQueueBusy(false);
+      setSourcePulse(true);
+      window.setTimeout(() => setSourcePulse(false), 520);
     }
   }
 
@@ -1593,6 +1599,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     setActiveCustomSlot(slot);
     restoredProfileRef.current = `${slot}:${profile.savedAt}`;
     setProfileMessage(`${profile.name} saved.`);
+    setPresetSaveFlash(true);
+    window.setTimeout(() => setPresetSaveFlash(false), 1500);
     setSavePresetOpen(false);
   }
 
@@ -1720,15 +1728,15 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       </div>
 
       <div className="tr-playerTransportStage" aria-label="Music transport controls">
-        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><span className="tr-audioTransportFace"><PlayerIcon name="back" /></span></button><span>PREVIOUS</span></div>
-        <div className="tr-audioTransportUnit is-primary"><button type="button" className="tr-audioTransportButton tr-audioTransportButton--primary" onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><span className="tr-audioTransportFace"><PlayerIcon name={player.playing ? "pause" : "play"} /></span></button><span>{player.playing ? "PAUSE" : "PLAY"}</span></div>
-        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => stopMusic()} disabled={!track || player.loading || queueBusy} aria-label="Stop music"><span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span></button><span>STOP</span></div>
-        <div className="tr-audioTransportUnit"><button type="button" className="tr-audioTransportButton" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><span className="tr-audioTransportFace"><PlayerIcon name="next" /></span></button><span>NEXT</span></div>
+        <div className="tr-audioTransportUnit is-previous"><button type="button" className="tr-audioTransportButton is-previous" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><span className="tr-audioTransportFace"><PlayerIcon name="back" /></span></button><span>PREVIOUS</span></div>
+        <div className="tr-audioTransportUnit is-primary"><button type="button" className={`tr-audioTransportButton tr-audioTransportButton--primary ${player.playing ? "is-playing" : "is-ready"}`} onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><span className="tr-audioTransportFace"><PlayerIcon name={player.playing ? "pause" : "play"} /></span></button><span>{player.playing ? "PAUSE" : "PLAY"}</span></div>
+        <div className="tr-audioTransportUnit is-stop"><button type="button" className="tr-audioTransportButton is-stop" onClick={() => stopMusic()} disabled={!track || player.loading || queueBusy} aria-label="Stop music"><span className="tr-audioTransportFace"><PlayerIcon name="stop" /></span></button><span>STOP</span></div>
+        <div className="tr-audioTransportUnit is-next"><button type="button" className="tr-audioTransportButton is-next" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><span className="tr-audioTransportFace"><PlayerIcon name="next" /></span></button><span>NEXT</span></div>
       </div>
 
       <div className="tr-playerModeStage" aria-label="Shuffle and repeat controls">
-        <button type="button" className={`tr-audioModeButton ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span></button>
-        <button type="button" className={`tr-audioModeButton ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`}><PlayerIcon name="shuffle" /><span>SHUFFLE</span></button>
+        <button type="button" className={`tr-audioModeButton is-repeat ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`} aria-pressed={player.repeat !== "off"}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span><i className="tr-modeState">{player.repeat === "off" ? "OFF" : "ON"}</i></button>
+        <button type="button" className={`tr-audioModeButton is-shuffle ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`} aria-pressed={player.shuffle}><PlayerIcon name="shuffle" /><span>SHUFFLE</span><i className="tr-modeState">{player.shuffle ? "ON" : "OFF"}</i></button>
       </div>
 
       <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} />
@@ -1744,16 +1752,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <strong>{volumePercent}%</strong>
         </label>
         <div className="tr-playerSourceTools">
-          <label className="tr-audioQueueSelector">
+          <label className={`tr-audioQueueSelector ${sourcePulse ? "is-changed" : ""}`}>
             <span>PLAYING FROM</span>
-            <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
-              <option value="all">All Uploaded Songs</option>
-              {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
-            </select>
+            <span className="tr-audioQueueSelectorField">
+              <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="music" /></i>
+              <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
+                <option value="all">All Uploaded Songs</option>
+                {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+              </select>
+              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></i>
+            </span>
           </label>
           <button type="button" data-profile={player.outputProfile} className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
             <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
             <span className="tr-dspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
+            <span className={`tr-dspChevron ${eqOpen ? "is-open" : ""}`} aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></span>
             <i className={`tr-dspStatusLed is-${player.dspStatus}`} aria-hidden />
           </button>
         </div>
@@ -1790,6 +1803,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
             </div>
           </div>
+
+          <section className="tr-preampTrim" aria-label="Preamp trim">
+            <div className="tr-preampTrimCopy">
+              <span>ADVANCED GAIN</span>
+              <strong>PREAMP TRIM</strong>
+              <small>Auto headroom stays active. Use this only for a small output-level correction.</small>
+            </div>
+            <div className="tr-preampTrimControl">
+              <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
+              <input type="range" min="-6" max="3" step="0.5" value={Math.max(-6, Math.min(3, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
+              <div className="tr-preampTrimScale"><span>-6</span><span>0</span><span>+3 dB</span></div>
+            </div>
+            <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => void runDspMutation(() => setMusicPreamp(0), true)}>RESET TO AUTO</button>
+          </section>
 
           <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status">
             <div className="tr-dspProofStatus">
@@ -1835,14 +1862,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
           <div className="tr-audioEqFooter tr-audioEqFooter--pro7">
             
-            <div className="tr-audioEqQuickActions"><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("flat"), true)}>FLAT</button><button type="button" onClick={() => void runDspMutation(() => applyMusicEqPreset("power"), true)}>POWER TRAINING</button></div>
+            <div className="tr-audioEqQuickActions"><button type="button" className={`is-flat ${player.eqPreset === "flat" ? "is-selected" : ""}`} aria-pressed={player.eqPreset === "flat"} onClick={() => void runDspMutation(() => applyMusicEqPreset("flat"), true)}><span>FLAT</span><i>REFERENCE TONE</i></button><button type="button" className={`is-power ${player.eqPreset === "power" ? "is-selected" : ""}`} aria-pressed={player.eqPreset === "power"} onClick={() => void runDspMutation(() => applyMusicEqPreset("power"), true)}><span>POWER TRAINING</span><i>HIGH ENERGY</i></button></div>
           </div>
 
           <div className="tr-dspProfileSave">
             <div className="tr-dspProfileSaveStatus"><span>DSP PROFILE</span><strong>{presetStatusLabel}</strong>{profileMessage ? <small aria-live="polite">{profileMessage}</small> : null}</div>
             <div className="tr-dspProfileSaveActions">
               {activeCustomSlot && activeSavedProfile ? <button type="button" onClick={() => saveCurrentDspProfile(activeCustomSlot, activeSavedProfile.name)}>UPDATE PRESET</button> : null}
-              <button type="button" className="is-primary" onClick={() => openSavePresetDialog()}>{activeCustomSlot ? "SAVE AS NEW" : "SAVE CUSTOM PRESET"}</button>
+              <button type="button" className={`is-primary tr-savePresetCommand ${presetSaveFlash ? "is-saved" : ""}`} onClick={() => openSavePresetDialog()}><PlayerIcon name="save" /><span>{presetSaveFlash ? "PRESET SAVED" : activeCustomSlot ? "SAVE AS NEW" : "SAVE CUSTOM PRESET"}</span></button>
             </div>
           </div>
 
@@ -3798,7 +3825,118 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-eqArchitectureCopy{display:grid!important;gap:3px!important;min-width:0!important}.tr-eqArchitectureCopy>span{color:#65d8fa!important;font-size:6.5px!important;font-weight:1000!important;letter-spacing:.12em!important}.tr-eqArchitectureCopy>strong{color:#f1f9fc!important;font-size:10px!important}.tr-eqArchitectureCopy>small{color:#7f9aa5!important;font-size:7.5px!important;line-height:1.35!important}
         .tr-eqArchitectureButtons{display:flex!important;gap:7px!important}.tr-eqArchitectureButtons button{min-height:34px!important;padding:0 11px!important;border:1px solid rgba(102,187,216,.16)!important;border-radius:8px!important;background:#07131a!important;color:#8aa7b2!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.06em!important}.tr-eqArchitectureButtons button.is-active{border-color:rgba(77,211,250,.46)!important;background:rgba(6,55,70,.62)!important;color:#b8efff!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 0 14px rgba(70,205,244,.06)!important}.tr-eqArchitectureButtons button:disabled{opacity:.38!important;cursor:not-allowed!important}
         .tr-dspEnginePanel{padding-bottom:10px!important}.tr-dspEnginePanel .tr-dspProofStatus{gap:7px!important;flex-wrap:wrap!important}
+
         @media(max-width:650px){.tr-eqArchitecturePanel{grid-template-columns:1fr!important}.tr-eqArchitectureButtons{display:grid!important;grid-template-columns:1fr 1fr!important}.tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:27px minmax(0,1fr)!important;column-gap:10px!important;padding-left:9px!important;padding-right:25px!important}.tr-playerSourceTools .tr-dspStatusIcon{width:25px!important;height:25px!important;min-width:25px!important}.tr-playerSourceTools .tr-dspStatusLed{right:8px!important}}
+
+        /* V13.8.1 FLAGSHIP CONTROL SYSTEM — UI ONLY */
+        @keyframes trControlSweep{0%{transform:translateX(-140%) skewX(-18deg);opacity:0}28%{opacity:.52}100%{transform:translateX(220%) skewX(-18deg);opacity:0}}
+        @keyframes trControlSettle{0%{transform:scale(.965)}58%{transform:scale(1.018)}100%{transform:scale(1)}}
+        @keyframes trSourceConfirm{0%{box-shadow:0 0 0 0 rgba(75,214,255,.0)}42%{box-shadow:0 0 0 2px rgba(75,214,255,.18),0 0 22px rgba(75,214,255,.16)}100%{box-shadow:0 0 0 0 rgba(75,214,255,0)}}
+        @keyframes trPlayAlive{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.34),inset 0 -1px 0 rgba(89,45,3,.40),0 8px 24px rgba(211,123,15,.19),0 0 0 rgba(255,184,61,0)}50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.38),inset 0 -1px 0 rgba(89,45,3,.40),0 8px 24px rgba(211,123,15,.20),0 0 24px rgba(255,184,61,.10)}}
+
+        .tr-playerTransportStage{gap:9px!important;align-items:start!important}
+        .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:58px 17px!important;gap:7px!important}
+        .tr-playerTransportStage .tr-audioTransportButton{position:relative!important;isolation:isolate!important;overflow:hidden!important;height:58px!important;min-height:58px!important;border-radius:13px!important;border:1px solid rgba(126,188,210,.24)!important;background:linear-gradient(180deg,rgba(19,37,47,.98),rgba(5,13,18,.99))!important;color:#eaf8fc!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.055),inset 0 -1px 0 rgba(0,0,0,.75),0 8px 22px rgba(0,0,0,.25)!important;transition:transform .14s cubic-bezier(.2,.8,.2,1),border-color .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease!important}
+        .tr-playerTransportStage .tr-audioTransportButton:before{content:""!important;display:block!important;position:absolute!important;z-index:-1!important;inset:0!important;background:linear-gradient(115deg,transparent 16%,rgba(255,255,255,.07) 45%,transparent 67%)!important;transform:translateX(-130%)!important;pointer-events:none!important}
+        .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){transform:translateY(-2px)!important;border-color:rgba(87,215,255,.56)!important;background:linear-gradient(180deg,rgba(22,52,65,.99),rgba(6,20,27,.99))!important;box-shadow:inset 0 1px rgba(255,255,255,.075),0 11px 28px rgba(0,0,0,.29),0 0 18px rgba(67,203,244,.08)!important}
+        .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled):before{animation:trControlSweep .72s ease-out 1!important}
+        .tr-playerTransportStage .tr-audioTransportButton:active:not(:disabled){transform:translateY(1px) scale(.975)!important;transition-duration:.06s!important}
+        .tr-playerTransportStage .tr-audioTransportButton:focus-visible{outline:2px solid rgba(103,221,255,.75)!important;outline-offset:2px!important}
+        .tr-playerTransportStage .tr-audioTransportButton--primary{border-color:rgba(255,193,83,.72)!important;background:linear-gradient(180deg,#ffc55d 0%,#f2a125 48%,#d77c0c 100%)!important;color:#171007!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.42),inset 0 -1px 0 rgba(112,58,4,.48),0 9px 24px rgba(211,123,15,.20)!important}
+        .tr-playerTransportStage .tr-audioTransportButton--primary:hover:not(:disabled){border-color:#ffd486!important;background:linear-gradient(180deg,#ffd071,#ffad2f 48%,#e9890e 100%)!important;color:#120b04!important;box-shadow:inset 0 1px rgba(255,255,255,.48),0 12px 30px rgba(211,123,15,.27),0 0 22px rgba(255,184,61,.14)!important}
+        .tr-playerTransportStage .tr-audioTransportButton--primary.is-playing{animation:trPlayAlive 2.8s ease-in-out infinite!important}
+        .tr-playerTransportStage .tr-audioTransportButton.is-stop{border-color:rgba(224,104,111,.26)!important;color:#ffd9db!important;background:linear-gradient(180deg,rgba(49,25,29,.92),rgba(17,10,12,.98))!important}
+        .tr-playerTransportStage .tr-audioTransportButton.is-stop:hover:not(:disabled){border-color:rgba(255,109,119,.55)!important;color:#fff2f3!important;background:linear-gradient(180deg,rgba(67,29,34,.96),rgba(22,10,13,.99))!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 10px 26px rgba(0,0,0,.28),0 0 18px rgba(233,78,89,.08)!important}
+        .tr-playerTransportStage .tr-audioTransportFace svg{width:27px!important;height:27px!important;filter:drop-shadow(0 1px 0 rgba(0,0,0,.35))!important}
+        .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:10px!important;line-height:1!important;letter-spacing:.09em!important;color:#a9c1cb!important;text-shadow:0 1px rgba(0,0,0,.55)!important}
+        .tr-playerTransportStage .tr-audioTransportUnit.is-primary>span{color:#ffc86e!important}
+        .tr-playerTransportStage .tr-audioTransportUnit.is-stop>span{color:#d8a5aa!important}
+
+        .tr-playerModeStage{display:grid!important;grid-template-columns:repeat(2,minmax(0,170px))!important;justify-content:center!important;gap:10px!important;margin-top:3px!important;margin-bottom:9px!important}
+        .tr-playerModeStage .tr-audioModeButton{position:relative!important;isolation:isolate!important;overflow:hidden!important;width:100%!important;min-width:0!important;height:42px!important;min-height:42px!important;padding:0 36px 0 14px!important;display:grid!important;grid-template-columns:18px minmax(0,1fr)!important;align-items:center!important;column-gap:9px!important;border:1px solid rgba(121,179,199,.20)!important;border-radius:11px!important;background:linear-gradient(180deg,#0d1d25,#061016)!important;color:#c7dbe2!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 6px 16px rgba(0,0,0,.18)!important;transition:transform .13s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease!important}
+        .tr-playerModeStage .tr-audioModeButton:before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 20%,rgba(255,255,255,.07) 47%,transparent 68%);transform:translateX(-135%);pointer-events:none}
+        .tr-playerModeStage .tr-audioModeButton:hover:not(:disabled){transform:translateY(-1px)!important;border-color:rgba(78,209,249,.46)!important;color:#eefbff!important;background:linear-gradient(180deg,#11303c,#071820)!important}
+        .tr-playerModeStage .tr-audioModeButton:hover:not(:disabled):before{animation:trControlSweep .7s ease-out 1!important}
+        .tr-playerModeStage .tr-audioModeButton:active:not(:disabled){transform:translateY(1px) scale(.98)!important}
+        .tr-playerModeStage .tr-audioModeButton svg{width:18px!important;height:18px!important}
+        .tr-playerModeStage .tr-audioModeButton>span{min-width:0!important;font-size:10px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.08em!important;text-align:left!important;white-space:nowrap!important}
+        .tr-playerModeStage .tr-modeState{position:absolute!important;right:10px!important;top:50%!important;transform:translateY(-50%)!important;font-style:normal!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.08em!important;color:#5f7781!important}
+        .tr-playerModeStage .tr-audioModeButton.is-active{border-color:rgba(72,215,255,.62)!important;background:linear-gradient(180deg,#0d4152,#092733)!important;color:#b8efff!important;box-shadow:inset 0 1px rgba(255,255,255,.055),inset 0 -2px #45d5fa,0 0 20px rgba(61,205,247,.10)!important;animation:trControlSettle .26s ease-out 1!important}
+        .tr-playerModeStage .tr-audioModeButton.is-active .tr-modeState{color:#66e0ff!important;text-shadow:0 0 9px rgba(86,221,255,.34)!important}
+
+        .tr-playerUtilityRow{align-items:end!important}
+        .tr-playerSourceTools{display:grid!important;grid-template-columns:minmax(230px,1fr) 176px!important;gap:10px!important;align-items:end!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector{display:grid!important;gap:6px!important;min-width:0!important;width:100%!important;max-width:none!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector>span:first-child{font-size:9px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.12em!important;color:#91aab4!important}
+        .tr-audioQueueSelectorField{position:relative!important;display:grid!important;grid-template-columns:35px minmax(0,1fr) 34px!important;align-items:center!important;height:44px!important;min-height:44px!important;border:1px solid rgba(103,182,210,.23)!important;border-radius:11px!important;background:linear-gradient(180deg,rgba(12,29,38,.98),rgba(4,12,17,.99))!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 6px 18px rgba(0,0,0,.18)!important;overflow:hidden!important;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease!important}
+        .tr-audioQueueSelector:hover .tr-audioQueueSelectorField,.tr-audioQueueSelector:focus-within .tr-audioQueueSelectorField{border-color:rgba(76,210,252,.52)!important;background:linear-gradient(180deg,rgba(13,42,54,.99),rgba(5,19,26,.99))!important;box-shadow:inset 0 1px rgba(255,255,255,.055),0 7px 20px rgba(0,0,0,.20),0 0 16px rgba(55,197,240,.07)!important}
+        .tr-audioQueueSelector.is-changed .tr-audioQueueSelectorField{animation:trSourceConfirm .52s ease-out 1!important}
+        .tr-audioQueueSelectorField .tr-sourceIcon,.tr-audioQueueSelectorField .tr-sourceChevron{display:grid!important;place-items:center!important;color:#61d9fb!important;pointer-events:none!important}
+        .tr-audioQueueSelectorField .tr-sourceIcon{width:35px!important;height:100%!important;border-right:1px solid rgba(104,181,207,.10)!important}
+        .tr-audioQueueSelectorField .tr-sourceIcon svg{width:16px!important;height:16px!important;fill:currentColor!important}
+        .tr-audioQueueSelectorField .tr-sourceChevron{width:34px!important;height:100%!important;border-left:1px solid rgba(104,181,207,.10)!important;color:#a5c7d2!important}
+        .tr-audioQueueSelectorField .tr-sourceChevron svg{width:18px!important;height:18px!important;fill:none!important;stroke:currentColor!important;stroke-width:2.2!important;stroke-linecap:round!important;stroke-linejoin:round!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{position:relative!important;z-index:1!important;width:100%!important;height:100%!important;min-width:0!important;margin:0!important;padding:0 8px!important;border:0!important;outline:0!important;background:transparent!important;color:#f1f9fc!important;font-size:12px!important;line-height:1!important;font-weight:850!important;text-overflow:ellipsis!important;white-space:nowrap!important;overflow:hidden!important;appearance:none!important;-webkit-appearance:none!important;background-image:none!important;cursor:pointer!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select::-ms-expand{display:none!important}
+
+        .tr-playerSourceTools .tr-dspStatusToggle{position:relative!important;isolation:isolate!important;overflow:hidden!important;width:176px!important;min-width:176px!important;max-width:176px!important;height:44px!important;min-height:44px!important;display:grid!important;grid-template-columns:30px minmax(0,1fr) 18px!important;column-gap:10px!important;align-items:center!important;padding:0 27px 0 10px!important;border-radius:11px!important;border:1px solid rgba(72,195,237,.34)!important;background:linear-gradient(180deg,#0b2631,#06141c)!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 6px 18px rgba(0,0,0,.20)!important;transition:transform .14s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease!important}
+        .tr-playerSourceTools .tr-dspStatusToggle:before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 20%,rgba(255,255,255,.07) 48%,transparent 70%);transform:translateX(-135%);pointer-events:none}
+        .tr-playerSourceTools .tr-dspStatusToggle:hover{transform:translateY(-1px)!important;border-color:rgba(74,216,255,.62)!important;background:linear-gradient(180deg,#0c3543,#071d26)!important}
+        .tr-playerSourceTools .tr-dspStatusToggle:hover:before{animation:trControlSweep .72s ease-out 1!important}
+        .tr-playerSourceTools .tr-dspStatusToggle:active{transform:translateY(1px) scale(.985)!important}
+        .tr-playerSourceTools .tr-dspStatusToggle.is-active{border-color:#55d9ff!important;background:linear-gradient(180deg,#0a4052,#082633)!important;box-shadow:inset 0 1px rgba(255,255,255,.07),inset 0 -2px rgba(67,213,250,.76),0 0 20px rgba(50,195,239,.15)!important}
+        .tr-playerSourceTools .tr-dspStatusIcon{width:30px!important;height:30px!important;min-width:30px!important;border-radius:8px!important}
+        .tr-playerSourceTools .tr-dspStatusCopy{display:grid!important;gap:3px!important;min-width:0!important;padding:0!important;text-align:left!important}
+        .tr-playerSourceTools .tr-dspStatusCopy b{font-size:11px!important;line-height:1!important;color:#f7fcff!important;letter-spacing:.045em!important;white-space:nowrap!important}
+        .tr-playerSourceTools .tr-dspStatusCopy small{min-width:0!important;max-width:100%!important;font-size:7.5px!important;line-height:1!important;color:#9ebbc5!important;letter-spacing:.025em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        .tr-dspChevron{display:grid!important;place-items:center!important;width:18px!important;height:18px!important;color:#8fb6c3!important;transition:transform .22s cubic-bezier(.2,.8,.2,1),color .18s ease!important;transform:rotate(0deg)!important}
+        .tr-dspChevron.is-open{transform:rotate(180deg)!important;color:#69dcff!important}
+        .tr-dspChevron svg{width:17px!important;height:17px!important;fill:none!important;stroke:currentColor!important;stroke-width:2.2!important;stroke-linecap:round!important;stroke-linejoin:round!important}
+        .tr-playerSourceTools .tr-dspStatusLed{right:9px!important;top:50%!important;transform:translateY(-50%)!important;width:7px!important;height:7px!important;z-index:3!important}
+
+        .tr-audioEqQuickActions{display:grid!important;grid-template-columns:minmax(150px,190px) minmax(190px,235px)!important;gap:9px!important;align-items:stretch!important}
+        .tr-audioEqQuickActions button{position:relative!important;isolation:isolate!important;overflow:hidden!important;height:47px!important;min-height:47px!important;padding:0 16px!important;display:grid!important;align-content:center!important;gap:4px!important;text-align:left!important;border-radius:11px!important;border:1px solid rgba(126,187,208,.20)!important;background:linear-gradient(180deg,#111f27,#071116)!important;color:#dceaf0!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 6px 17px rgba(0,0,0,.18)!important;transition:transform .13s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease!important}
+        .tr-audioEqQuickActions button:before{content:"";position:absolute;inset:0;background:linear-gradient(112deg,transparent 18%,rgba(255,255,255,.09) 46%,transparent 69%);transform:translateX(-135%);pointer-events:none}
+        .tr-audioEqQuickActions button:hover{transform:translateY(-1px)!important}.tr-audioEqQuickActions button:hover:before{animation:trControlSweep .72s ease-out 1!important}.tr-audioEqQuickActions button:active{transform:translateY(1px) scale(.982)!important}
+        .tr-audioEqQuickActions button>span{font-size:11px!important;line-height:1!important;font-weight:1000!important;letter-spacing:.08em!important;color:inherit!important;white-space:nowrap!important}
+        .tr-audioEqQuickActions button>i{font-style:normal!important;font-size:7px!important;line-height:1!important;font-weight:900!important;letter-spacing:.10em!important;color:#718b96!important;white-space:nowrap!important}
+        .tr-audioEqQuickActions .is-flat:hover,.tr-audioEqQuickActions .is-flat.is-selected{border-color:rgba(99,214,248,.53)!important;background:linear-gradient(180deg,#173440,#0a1b23)!important;color:#eafaff!important;box-shadow:inset 0 1px rgba(255,255,255,.055),inset 0 -2px rgba(75,208,246,.58),0 0 18px rgba(61,199,238,.08)!important}
+        .tr-audioEqQuickActions .is-flat.is-selected{animation:trControlSettle .28s ease-out 1!important}.tr-audioEqQuickActions .is-flat.is-selected>i{color:#70d9f7!important}
+        .tr-audioEqQuickActions .is-power{border-color:rgba(224,156,54,.32)!important;background:linear-gradient(180deg,#33210d,#191006)!important;color:#f3d8a5!important}
+        .tr-audioEqQuickActions .is-power:hover,.tr-audioEqQuickActions .is-power.is-selected{border-color:rgba(255,191,79,.68)!important;background:linear-gradient(180deg,#6c430e,#3f2407)!important;color:#fff1d2!important;box-shadow:inset 0 1px rgba(255,255,255,.08),inset 0 -2px rgba(255,177,54,.72),0 0 20px rgba(236,153,35,.11)!important}
+        .tr-audioEqQuickActions .is-power.is-selected{animation:trControlSettle .28s ease-out 1!important}.tr-audioEqQuickActions .is-power.is-selected>i{color:#ffc565!important}
+
+        .tr-dspProfileSaveActions button.tr-savePresetCommand{position:relative!important;isolation:isolate!important;overflow:hidden!important;min-width:190px!important;min-height:43px!important;padding:0 17px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:9px!important;border-radius:11px!important;border:1px solid rgba(255,190,79,.62)!important;background:linear-gradient(180deg,#d99825,#a75f0b)!important;color:#171006!important;font-size:10px!important;font-weight:1000!important;letter-spacing:.055em!important;box-shadow:inset 0 1px rgba(255,255,255,.28),inset 0 -1px rgba(91,47,2,.42),0 7px 19px rgba(151,85,6,.17)!important;transition:transform .13s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease!important}
+        .tr-dspProfileSaveActions button.tr-savePresetCommand:before{content:"";position:absolute;inset:0;background:linear-gradient(112deg,transparent 20%,rgba(255,255,255,.16) 46%,transparent 68%);transform:translateX(-135%);pointer-events:none}.tr-dspProfileSaveActions button.tr-savePresetCommand:hover:before{animation:trControlSweep .72s ease-out 1!important}
+        .tr-dspProfileSaveActions button.tr-savePresetCommand:hover{transform:translateY(-1px)!important;border-color:#ffd17b!important;background:linear-gradient(180deg,#e7aa39,#b66a0e)!important;box-shadow:inset 0 1px rgba(255,255,255,.32),0 9px 23px rgba(151,85,6,.23),0 0 18px rgba(245,170,47,.10)!important}
+        .tr-dspProfileSaveActions button.tr-savePresetCommand:active{transform:translateY(1px) scale(.985)!important}
+        .tr-dspProfileSaveActions button.tr-savePresetCommand svg{width:16px!important;height:16px!important;fill:currentColor!important;flex:0 0 16px!important}
+        .tr-dspProfileSaveActions button.tr-savePresetCommand.is-saved{border-color:rgba(76,228,151,.72)!important;background:linear-gradient(180deg,#2bb877,#128053)!important;color:#06130d!important;box-shadow:inset 0 1px rgba(255,255,255,.25),0 0 22px rgba(55,220,143,.15)!important;animation:trControlSettle .28s ease-out 1!important}
+
+        .tr-preampTrim{display:grid!important;grid-template-columns:minmax(190px,1fr) minmax(260px,1.25fr) auto!important;gap:15px!important;align-items:center!important;margin:10px 0 12px!important;padding:13px 14px!important;border:1px solid rgba(103,188,218,.15)!important;border-radius:12px!important;background:linear-gradient(180deg,rgba(8,24,32,.82),rgba(3,11,16,.90))!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr-preampTrimCopy{display:grid!important;gap:3px!important;min-width:0!important}.tr-preampTrimCopy>span{color:#58d7fb!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.13em!important}.tr-preampTrimCopy>strong{color:#f4fbfe!important;font-size:11px!important}.tr-preampTrimCopy>small{color:#819ca7!important;font-size:8px!important;line-height:1.35!important}
+        .tr-preampTrimControl{display:grid!important;gap:6px!important;min-width:0!important}.tr-preampTrimReadout{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important}.tr-preampTrimReadout>span{color:#6fe0ff!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.11em!important}.tr-preampTrimReadout>b{color:#f3fbfe!important;font-size:10px!important;font-variant-numeric:tabular-nums!important}.tr-preampTrimControl input{width:100%!important;accent-color:#55d8fb!important}.tr-preampTrimScale{display:flex!important;justify-content:space-between!important;color:#69828d!important;font-size:7px!important;font-weight:850!important;font-variant-numeric:tabular-nums!important}
+        .tr-preampAutoButton{height:37px!important;min-height:37px!important;padding:0 12px!important;border:1px solid rgba(85,206,244,.24)!important;border-radius:9px!important;background:#071820!important;color:#9edff3!important;font-size:8px!important;font-weight:1000!important;letter-spacing:.07em!important;white-space:nowrap!important}.tr-preampAutoButton:hover:not(:disabled){border-color:rgba(83,218,255,.52)!important;background:#0b2d39!important;color:#effbff!important}.tr-preampAutoButton:disabled{opacity:.38!important}
+
+        @media(max-width:650px){
+          .tr-playerTransportStage{width:calc(100% - 12px)!important;gap:6px!important}.tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:48px 15px!important;gap:5px!important}.tr-playerTransportStage .tr-audioTransportButton{height:48px!important;min-height:48px!important;border-radius:11px!important}.tr-playerTransportStage .tr-audioTransportFace svg{width:22px!important;height:22px!important}.tr-playerTransportStage .tr-audioTransportUnit>span{font-size:9px!important;letter-spacing:.035em!important}
+          .tr-playerModeStage{width:calc(100% - 12px)!important;grid-template-columns:1fr 1fr!important;gap:7px!important;margin-bottom:8px!important}.tr-playerModeStage .tr-audioModeButton{height:44px!important;min-height:44px!important;padding:0 33px 0 12px!important;grid-template-columns:17px minmax(0,1fr)!important;column-gap:7px!important}.tr-playerModeStage .tr-audioModeButton>span{font-size:10px!important;letter-spacing:.045em!important}.tr-playerModeStage .tr-modeState{right:8px!important;font-size:6.8px!important}
+          .tr-playerUtilityRow{width:calc(100% - 12px)!important;grid-template-columns:1fr!important;gap:8px!important}.tr-playerSourceTools{display:grid!important;grid-template-columns:1fr!important;gap:8px!important;width:100%!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector{width:100%!important;max-width:none!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector>span:first-child{font-size:10px!important}.tr-audioQueueSelectorField{height:48px!important;min-height:48px!important;grid-template-columns:38px minmax(0,1fr) 38px!important}.tr-audioQueueSelectorField .tr-sourceIcon{width:38px!important}.tr-audioQueueSelectorField .tr-sourceChevron{width:38px!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{font-size:13px!important;padding:0 9px!important}
+          .tr-playerSourceTools .tr-dspStatusToggle{width:100%!important;min-width:0!important;max-width:none!important;height:48px!important;min-height:48px!important;grid-template-columns:32px minmax(0,1fr) 20px!important;column-gap:11px!important;padding:0 31px 0 10px!important}.tr-playerSourceTools .tr-dspStatusIcon{width:32px!important;height:32px!important;min-width:32px!important}.tr-playerSourceTools .tr-dspStatusCopy b{font-size:12px!important}.tr-playerSourceTools .tr-dspStatusCopy small{font-size:8.5px!important}.tr-dspChevron{width:20px!important;height:20px!important}.tr-playerSourceTools .tr-dspStatusLed{right:11px!important;width:7px!important;height:7px!important}
+          .tr-audioEqQuickActions{grid-template-columns:1fr 1fr!important;gap:7px!important;width:100%!important}.tr-audioEqQuickActions button{height:50px!important;min-height:50px!important;padding:0 11px!important}.tr-audioEqQuickActions button>span{font-size:11px!important;letter-spacing:.045em!important}.tr-audioEqQuickActions button>i{font-size:6.8px!important;letter-spacing:.055em!important}
+          .tr-dspProfileSave{gap:10px!important}.tr-dspProfileSaveActions{width:100%!important;display:grid!important;grid-template-columns:1fr!important;gap:7px!important}.tr-dspProfileSaveActions button{width:100%!important;min-width:0!important;min-height:46px!important;font-size:10.5px!important}.tr-dspProfileSaveActions button.tr-savePresetCommand{min-width:0!important;min-height:48px!important;font-size:11px!important}
+          .tr-preampTrim{grid-template-columns:1fr!important;gap:11px!important;padding:13px!important}.tr-preampTrimCopy>span{font-size:8px!important}.tr-preampTrimCopy>strong{font-size:12px!important}.tr-preampTrimCopy>small{font-size:9px!important}.tr-preampTrimReadout>span{font-size:8px!important}.tr-preampTrimReadout>b{font-size:11px!important}.tr-preampTrimScale{font-size:8px!important}.tr-preampAutoButton{width:100%!important;height:44px!important;min-height:44px!important;font-size:9px!important}
+        }
+        @media(max-width:390px){
+          .tr-playerTransportStage{gap:4px!important}.tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:46px 14px!important}.tr-playerTransportStage .tr-audioTransportButton{height:46px!important;min-height:46px!important;padding:0!important}.tr-playerTransportStage .tr-audioTransportFace svg{width:20px!important;height:20px!important}.tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8.5px!important;letter-spacing:.01em!important}
+          .tr-playerModeStage .tr-audioModeButton{padding-left:10px!important;padding-right:31px!important}.tr-playerModeStage .tr-audioModeButton>span{font-size:9.5px!important;letter-spacing:.025em!important}
+          .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{font-size:12px!important}.tr-playerSourceTools .tr-dspStatusCopy b{font-size:11px!important}.tr-playerSourceTools .tr-dspStatusCopy small{font-size:8px!important}
+          .tr-audioEqQuickActions button>span{font-size:10px!important}.tr-audioEqQuickActions button>i{font-size:6.4px!important}.tr-dspProfileSaveActions button.tr-savePresetCommand{font-size:10.5px!important}
+        }
+        @media(max-width:350px){
+          .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8px!important}.tr-playerModeStage{gap:5px!important}.tr-playerModeStage .tr-audioModeButton{padding-left:8px!important;padding-right:27px!important;column-gap:5px!important}.tr-playerModeStage .tr-audioModeButton>span{font-size:8.8px!important}.tr-playerModeStage .tr-modeState{right:6px!important;font-size:6.2px!important}.tr-audioQueueSelectorField{grid-template-columns:34px minmax(0,1fr) 34px!important}.tr-audioQueueSelectorField .tr-sourceIcon,.tr-audioQueueSelectorField .tr-sourceChevron{width:34px!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{font-size:11.5px!important;padding:0 6px!important}.tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:30px minmax(0,1fr) 18px!important;column-gap:8px!important;padding-left:8px!important;padding-right:28px!important}.tr-playerSourceTools .tr-dspStatusIcon{width:30px!important;height:30px!important;min-width:30px!important}.tr-playerSourceTools .tr-dspStatusCopy b{font-size:10.5px!important}.tr-playerSourceTools .tr-dspStatusCopy small{font-size:7.6px!important}.tr-audioEqQuickActions{grid-template-columns:1fr!important}.tr-audioEqQuickActions button{height:48px!important;min-height:48px!important}.tr-audioEqQuickActions button>span{font-size:11px!important}.tr-audioEqQuickActions button>i{font-size:6.8px!important}}
+        @media(hover:none){.tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled),.tr-playerModeStage .tr-audioModeButton:hover:not(:disabled),.tr-playerSourceTools .tr-dspStatusToggle:hover,.tr-audioEqQuickActions button:hover,.tr-dspProfileSaveActions button.tr-savePresetCommand:hover{transform:none!important}}
+        @media(prefers-reduced-motion:reduce){.tr-playerTransportStage .tr-audioTransportButton,.tr-playerModeStage .tr-audioModeButton,.tr-playerSourceTools .tr-dspStatusToggle,.tr-audioEqQuickActions button,.tr-dspProfileSaveActions .tr-savePresetCommand,.tr-dspChevron{animation:none!important;transition:none!important}.tr-playerTransportStage .tr-audioTransportButton:before,.tr-playerModeStage .tr-audioModeButton:before,.tr-playerSourceTools .tr-dspStatusToggle:before,.tr-audioEqQuickActions button:before,.tr-dspProfileSaveActions button.tr-savePresetCommand:before{display:none!important}}
 
       `}</style>
     </section>
