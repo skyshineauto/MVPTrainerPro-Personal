@@ -34,9 +34,9 @@ import {
   saveMusicEqCustomPreset,
   seekMusic,
   setMusicDspBypass,
-  setMusicDspVerificationMode,
   setMusicEqBand,
   setMusicEqEnabled,
+  setMusicEqTopology,
   setMusicHeadphoneBassImpact,
   setMusicHeadphoneCenter,
   setMusicHeadphoneCrossfeed,
@@ -52,6 +52,7 @@ import {
   useMusicPlayer,
   type MusicCustomPresetSlot,
   type MusicEqPreset,
+  type MusicEqTopology,
   type MusicHeadphoneMode,
   type MusicOutputProfile,
 } from "../../lib/musicPlayer";
@@ -89,6 +90,8 @@ function outputProfileIconName(profile: MusicOutputProfile): IconName {
 type SavedDspProfile = {
   name: string;
   outputProfile: MusicOutputProfile;
+  tonePreset: MusicEqPreset;
+  eqTopology: MusicEqTopology;
   eqEnabled: boolean;
   eqGains: number[];
   preampDb: number;
@@ -144,13 +147,16 @@ function musicSourceQualityLabel(track: MusicTrack | null) {
   if (!track) return "NO SOURCE";
   const mime = (track.mime_type || "").toLowerCase();
   const name = (track.original_name || "").toLowerCase();
-  const codec = mime.includes("wav") || name.endsWith(".wav")
-    ? "WAV"
-    : mime.includes("mp4") || mime.includes("m4a") || name.endsWith(".m4a")
-      ? "M4A/AAC"
-      : "MP3";
+  const codec = mime.includes("flac") || name.endsWith(".flac")
+    ? "FLAC"
+    : mime.includes("wav") || name.endsWith(".wav")
+      ? "WAV"
+      : mime.includes("mp4") || mime.includes("m4a") || name.endsWith(".m4a")
+        ? "M4A/AAC"
+        : "MP3";
   const bytes = Number(track.file_size_bytes || 0);
   const seconds = Number(track.duration_seconds || 0);
+  if (codec === "FLAC") return "FLAC • LOSSLESS SOURCE";
   if (codec === "WAV") return "WAV • PCM SOURCE";
   if (bytes > 0 && seconds > 0) {
     const kbps = Math.max(1, Math.round((bytes * 8) / seconds / 1000));
@@ -1469,28 +1475,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     }
   };
 
-  useEffect(() => {
-    if (!isCustomSlot(player.eqPreset)) return;
 
-    setActiveCustomSlot(player.eqPreset);
-    const profile = dspProfiles[player.eqPreset];
-    if (!profile) return;
-
-    const restorationKey = `${player.eqPreset}:${profile.savedAt}`;
-    if (restoredProfileRef.current === restorationKey) return;
-    restoredProfileRef.current = restorationKey;
-
-    setMusicOutputProfile(profile.outputProfile ?? "headphones");
-    profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
-    setMusicPreamp(profile.preampDb);
-    setMusicEqEnabled(profile.eqEnabled);
-    setMusicHeadphoneMode(profile.headphoneMode);
-    setMusicHeadphoneWidth(profile.headphoneWidth);
-    setMusicHeadphoneDepth(profile.headphoneDepth);
-    setMusicHeadphoneCrossfeed(profile.headphoneCrossfeed);
-    setMusicHeadphoneCenter(profile.headphoneCenter);
-    setMusicHeadphoneBassImpact(profile.headphoneBassImpact);
-  }, [player.eqPreset, dspProfiles]);
 
   async function selectQueue(value: string) {
     setQueueBusy(true);
@@ -1519,6 +1504,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     return {
       name: name.trim() || "Custom DSP",
       outputProfile: player.outputProfile,
+      tonePreset: player.eqPreset,
+      eqTopology: player.eqTopology,
       eqEnabled: player.eqEnabled,
       eqGains: [...player.eqGains],
       preampDb: player.preampDb,
@@ -1535,6 +1522,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   function profileMatchesCurrent(profile: SavedDspProfile | null) {
     if (!profile) return false;
     if ((profile.outputProfile ?? "headphones") !== player.outputProfile) return false;
+    if ((profile.tonePreset ?? "flat") !== player.eqPreset) return false;
+    if ((profile.eqTopology ?? "minimum_phase") !== player.eqTopology) return false;
     if (profile.eqEnabled !== player.eqEnabled) return false;
     if (profile.headphoneMode !== player.headphoneMode) return false;
     if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
@@ -1569,7 +1558,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     }
     await runDspMutation(() => {
       setMusicOutputProfile(profile.outputProfile ?? "headphones");
-      applyMusicEqPreset(slot);
+      applyMusicEqPreset(profile.tonePreset ?? "flat");
+      setMusicEqTopology(profile.eqTopology ?? "minimum_phase");
       profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
       setMusicPreamp(profile.preampDb);
       setMusicEqEnabled(profile.eqEnabled);
@@ -1671,10 +1661,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile ? !profileMatchesCurrent(activeSavedProfile) : false;
-  const presetSelectValue: MusicEqPreset = activeCustomSlot && activeProfileDirty ? "custom" : player.eqPreset;
+  const presetSelectValue: MusicEqPreset = activeCustomSlot ? (activeProfileDirty ? "custom" : activeCustomSlot) : player.eqPreset;
   const presetStatusLabel = activeSavedProfile
     ? `${activeSavedProfile.name}${activeProfileDirty ? " • Modified" : " • Saved"}`
-    : player.eqPreset === "custom" ? "Unsaved custom DSP" : "Built-in preset";
+    : "Built-in music preset";
   const dspOutputStatus = MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel;
   const activeBuiltInEq = (MUSIC_EQ_PRESETS as Record<string, { label: string }>)[player.eqPreset]?.label;
   const dspEqStatus = player.outputProfile === "reference" || player.dspBypass
@@ -1801,34 +1791,37 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <section className="tr-dspProofPanel" aria-label="DSP engine verification">
+          <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status">
             <div className="tr-dspProofStatus">
               <span>DSP ENGINE <b className={player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "advanced_worklet" ? "ADVANCED WORKLET" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "UNAVAILABLE"}</b></span>
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
+              <span>TRUE-PEAK LIMITER <b className="is-good">4× • -1 dBTP</b></span>
+              <span>TRANSIENT DETAIL <b className="is-good">AUTO</b></span>
             </div>
-            <div className="tr-dspProofActions">
-              <button type="button" className={player.dspVerificationMode === "eq" ? "is-active" : ""} disabled={player.outputProfile === "reference"} onClick={() => setMusicDspVerificationMode(player.dspVerificationMode === "eq" ? "off" : "eq")}>EQ PROOF</button>
-              <button type="button" className={player.dspVerificationMode === "spatial" ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => setMusicDspVerificationMode(player.dspVerificationMode === "spatial" ? "off" : "spatial")}>SPATIAL PROOF</button>
-              {player.dspVerificationMode !== "off" ? <button type="button" className="is-reset" onClick={() => setMusicDspVerificationMode("off")}>RESET</button> : null}
-            </div>
-            <small>Temporary verification only. EQ PROOF should sound radically different. SPATIAL PROOF now uses an intentionally exaggerated asymmetric-delay image, so the spatial change should be unmistakable before final listening levels are judged.</small>
           </section>
 
           <div className="tr-audioEqHead">
-            <div><strong>31-Band Hi-Fi EQ</strong></div>
+            <div><strong>Music Preset + 31-Band User Offset EQ</strong><small className="tr-eqHeadHint">Preset sets the core tone. Sliders below are manual offsets only.</small></div>
             <div className="tr-dspAbControls">
               <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
               <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
             </div>
-            <label className="tr-audioEqPreset"><span>EQ PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
+            <label className="tr-audioEqPreset"><span>MUSIC PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
               {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
               {DSP_SLOTS.map((slot) => <option key={slot} value={slot}>{dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}</option>)}
               <option value="custom">{activeSavedProfile && activeProfileDirty ? `${activeSavedProfile.name} • Modified` : "Unsaved Custom"}</option>
             </select></label>
           </div>
 
+          <div className="tr-eqArchitecturePanel">
+            <div className="tr-eqArchitectureCopy"><span>FILTER TOPOLOGY</span><strong>{player.eqTopology === "linear_phase" ? "LINEAR PHASE FIR" : "MINIMUM PHASE"}</strong><small>{player.eqTopology === "linear_phase" ? "257-tap symmetric FIR for critical listening. Adds a small fixed latency." : "Low-latency 1/3-octave minimum-phase user EQ. Recommended for workouts and normal playback."}</small></div>
+            <div className="tr-eqArchitectureButtons">
+              <button type="button" className={player.eqTopology === "minimum_phase" ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicEqTopology("minimum_phase"), true)}>MINIMUM PHASE</button>
+              <button type="button" className={player.eqTopology === "linear_phase" ? "is-active" : ""} disabled={player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicEqTopology("linear_phase"), true)}>LINEAR PHASE</button>
+            </div>
+          </div>
 
-          <div className="tr-audioEqScroll" aria-label="31 band equalizer">
+          <div className="tr-audioEqScroll" aria-label="31 band user offset equalizer">
             <div className="tr-audioEqBands tr-audioEqBands--31">
               {MUSIC_EQ_FREQUENCIES.map((frequency, index) => (
                 <label key={frequency} className="tr-audioEqBand">
@@ -1873,7 +1866,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
             <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event: ChangeEvent<HTMLInputElement>) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
-            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • 31-band EQ • Volume • DSP active state • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band user offsets • Preamp • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
           </section>
         </div>
@@ -3783,10 +3776,29 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-outputProfileChoices button{gap:8px!important}
         }
         @media(max-width:380px){
-          .tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:24px minmax(0,1fr)!important;gap:8px!important;padding:0 21px 0 7px!important}
+          .tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:26px minmax(0,1fr)!important;gap:10px!important;padding:0 24px 0 8px!important}
           .tr-dspStatusLed{right:7px!important;width:5px!important;height:5px!important}
         }
 
+        /* V13.8 FINAL OUTPUT IDENTITY ALIGNMENT */
+        .tr-playerSourceTools .tr-dspStatusToggle{position:relative!important;grid-template-columns:30px minmax(0,1fr)!important;column-gap:12px!important;padding-left:12px!important;padding-right:30px!important}
+        .tr-playerSourceTools .tr-dspStatusIcon{width:28px!important;height:28px!important;min-width:28px!important;display:grid!important;place-items:center!important;margin:0!important;border-radius:7px!important}
+        .tr-playerSourceTools .tr-dspStatusIcon svg{width:16px!important;height:16px!important}
+        .tr-playerSourceTools .tr-dspStatusCopy{padding-left:1px!important}
+        .tr-playerSourceTools .tr-dspStatusLed{right:11px!important;top:50%!important;transform:translateY(-50%)!important}
+        .tr-rtaFidelityHead>strong{display:inline-flex!important;align-items:center!important;gap:9px!important}
+        .tr-rtaOutputIcon{margin-right:1px!important;flex:0 0 auto!important}
+        .tr-rtaProfileCopy{padding-left:1px!important}
+        .tr-outputProfileTitle,.tr-outputProfileSelectLabel,.tr-outputProfileTelemetryActive{column-gap:10px!important}
+        .tr-outputProfileChoices button{column-gap:10px!important}
+        .tr-outputProfileChoices button i{flex:0 0 24px!important;width:24px!important;height:24px!important;margin:0!important}
+
+        .tr-eqHeadHint{display:block!important;margin-top:4px!important;color:rgba(174,199,210,.54)!important;font-size:7px!important;font-weight:750!important;line-height:1.35!important}
+        .tr-eqArchitecturePanel{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;gap:12px!important;align-items:center!important;margin:9px 0 12px!important;padding:11px 12px!important;border:1px solid rgba(86,190,225,.13)!important;border-radius:10px!important;background:linear-gradient(180deg,rgba(7,23,31,.72),rgba(3,11,16,.82))!important}
+        .tr-eqArchitectureCopy{display:grid!important;gap:3px!important;min-width:0!important}.tr-eqArchitectureCopy>span{color:#65d8fa!important;font-size:6.5px!important;font-weight:1000!important;letter-spacing:.12em!important}.tr-eqArchitectureCopy>strong{color:#f1f9fc!important;font-size:10px!important}.tr-eqArchitectureCopy>small{color:#7f9aa5!important;font-size:7.5px!important;line-height:1.35!important}
+        .tr-eqArchitectureButtons{display:flex!important;gap:7px!important}.tr-eqArchitectureButtons button{min-height:34px!important;padding:0 11px!important;border:1px solid rgba(102,187,216,.16)!important;border-radius:8px!important;background:#07131a!important;color:#8aa7b2!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.06em!important}.tr-eqArchitectureButtons button.is-active{border-color:rgba(77,211,250,.46)!important;background:rgba(6,55,70,.62)!important;color:#b8efff!important;box-shadow:inset 0 1px rgba(255,255,255,.04),0 0 14px rgba(70,205,244,.06)!important}.tr-eqArchitectureButtons button:disabled{opacity:.38!important;cursor:not-allowed!important}
+        .tr-dspEnginePanel{padding-bottom:10px!important}.tr-dspEnginePanel .tr-dspProofStatus{gap:7px!important;flex-wrap:wrap!important}
+        @media(max-width:650px){.tr-eqArchitecturePanel{grid-template-columns:1fr!important}.tr-eqArchitectureButtons{display:grid!important;grid-template-columns:1fr 1fr!important}.tr-playerSourceTools .tr-dspStatusToggle{grid-template-columns:27px minmax(0,1fr)!important;column-gap:10px!important;padding-left:9px!important;padding-right:25px!important}.tr-playerSourceTools .tr-dspStatusIcon{width:25px!important;height:25px!important;min-width:25px!important}.tr-playerSourceTools .tr-dspStatusLed{right:8px!important}}
 
       `}</style>
     </section>
