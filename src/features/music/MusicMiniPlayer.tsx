@@ -1683,7 +1683,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const activePlaylistLabel = player.activePlaylistId
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : "All Uploaded Songs";
-  const activePlaylistMobileLabel = player.activePlaylistId ? activePlaylistLabel : "ALL";
+  const activePlaylistMobileLabel = player.activePlaylistId ? "PLAYLIST" : "ALL SONGS";
 
   return (
     <section
@@ -4157,6 +4157,142 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioQueueSelectorValue{
             font-size:12.4px!important;
             padding:0 7px!important;
+          }
+        }
+
+
+        /* V13.8.4 MOBILE SOURCE SELECTOR — HIGH-SPECIFICITY STRUCTURAL OVERRIDE */
+        @media(max-width:900px){
+          /* Force source + DSP to stack. Older source-tool rules must not be able to put them side-by-side. */
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:stretch!important;
+            justify-content:flex-start!important;
+            grid-template-columns:none!important;
+            grid-auto-flow:row!important;
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            gap:10px!important;
+            overflow:visible!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector,
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            display:block!important;
+            position:relative!important;
+            flex:0 0 auto!important;
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            margin:0!important;
+            grid-column:1/-1!important;
+            grid-row:auto!important;
+            align-self:stretch!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector{
+            display:grid!important;
+            gap:7px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorField{
+            width:100%!important;
+            max-width:none!important;
+            min-width:0!important;
+            height:52px!important;
+            min-height:52px!important;
+            grid-template-columns:44px minmax(0,1fr) 44px!important;
+            border-radius:12px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorField .tr-sourceIcon,
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorField .tr-sourceChevron{
+            width:44px!important;
+            min-width:44px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorValue{
+            left:44px!important;
+            right:44px!important;
+            padding:0 13px!important;
+            font-size:14px!important;
+            line-height:1!important;
+            font-weight:1000!important;
+            letter-spacing:.025em!important;
+            text-transform:uppercase!important;
+            white-space:nowrap!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            display:grid!important;
+            height:52px!important;
+            min-height:52px!important;
+            grid-template-columns:34px minmax(0,1fr) 20px!important;
+            column-gap:11px!important;
+            padding:0 34px 0 11px!important;
+            border-radius:12px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle .tr-dspStatusIcon{
+            width:34px!important;
+            min-width:34px!important;
+            height:34px!important;
+          }
+        }
+
+        @media(max-width:650px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow{
+            width:calc(100% - 24px)!important;
+            margin-left:auto!important;
+            margin-right:auto!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelector > span:first-child{
+            display:block!important;
+            font-size:11px!important;
+            line-height:1!important;
+            letter-spacing:.14em!important;
+            font-weight:1000!important;
+            color:#9db3bd!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
+            gap:9px!important;
+          }
+        }
+
+        @media(max-width:390px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorValue{
+            font-size:13.5px!important;
+            padding:0 11px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            grid-template-columns:32px minmax(0,1fr) 19px!important;
+            column-gap:10px!important;
+            padding-left:10px!important;
+            padding-right:32px!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle .tr-dspStatusIcon{
+            width:32px!important;
+            min-width:32px!important;
+            height:32px!important;
+          }
+        }
+
+        @media(max-width:350px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow{
+            width:calc(100% - 20px)!important;
+          }
+
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorValue{
+            font-size:13px!important;
+            padding:0 9px!important;
           }
         }
 
