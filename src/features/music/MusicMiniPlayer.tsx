@@ -57,6 +57,15 @@ import {
   type MusicOutputProfile,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
+import {
+  analyzeMusicSourceFile,
+  analyzeMusicTrackSource,
+  compareMusicSources,
+  flushDeferredMusicSourceCleanup,
+  replaceMusicTrackSource,
+  type MusicSourceAnalysis,
+  type MusicSourceUpgradeComparison,
+} from "../../lib/musicSourceUpgrade";
 
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
@@ -145,26 +154,8 @@ function sameDspNumber(left: number, right: number) {
 }
 
 function musicSourceQualityLabel(track: MusicTrack | null) {
-  if (!track) return "NO SOURCE";
-  const mime = (track.mime_type || "").toLowerCase();
-  const name = (track.original_name || "").toLowerCase();
-  const codec = mime.includes("flac") || name.endsWith(".flac")
-    ? "FLAC"
-    : mime.includes("wav") || name.endsWith(".wav")
-      ? "WAV"
-      : mime.includes("mp4") || mime.includes("m4a") || name.endsWith(".m4a")
-        ? "M4A/AAC"
-        : "MP3";
-  const bytes = Number(track.file_size_bytes || 0);
-  const seconds = Number(track.duration_seconds || 0);
-  if (codec === "FLAC") return "FLAC • LOSSLESS SOURCE";
-  if (codec === "WAV") return "WAV • PCM SOURCE";
-  if (bytes > 0 && seconds > 0) {
-    const kbps = Math.max(1, Math.round((bytes * 8) / seconds / 1000));
-    const rounded = Math.max(32, Math.round(kbps / 8) * 8);
-    return `${codec} • ~${rounded} kbps`;
-  }
-  return codec;
+  const source = analyzeMusicTrackSource(track);
+  return `${source.codec} • ${source.bitrateLabel}${source.lossless ? " • LOSSLESS" : ""}`;
 }
 
 function formatHz(frequency: number) {
@@ -202,11 +193,13 @@ function MusicActivityRta({
   profileLabel,
   eqLabel,
   outputProfile,
+  sourceQuality,
 }: {
   playing: boolean;
   profileLabel: string;
   eqLabel: string;
   outputProfile: MusicOutputProfile;
+  sourceQuality: MusicSourceAnalysis;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -467,7 +460,15 @@ function MusicActivityRta({
       <canvas ref={canvasRef} />
       <div className="tr-rtaFidelityHead" aria-hidden>
         <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
-        <strong><span className="tr-rtaOutputIcon" data-profile={outputProfile}><PlayerIcon name={outputProfileIconName(outputProfile)} /></span><span className="tr-rtaProfileCopy">{profileLabel}</span><b>•</b>{eqLabel}</strong>
+        <strong>
+          <span className={`tr-rtaSourceQuality is-${sourceQuality.tier}`}>
+            <span>{sourceQuality.codec} · {sourceQuality.bitrateLabel}</span>
+            <em>{sourceQuality.qualityLabel}</em>
+          </span>
+          <span className="tr-rtaHeadDivider">|</span>
+          <span className="tr-rtaOutputIcon" data-profile={outputProfile}><PlayerIcon name={outputProfileIconName(outputProfile)} /></span>
+          <span className="tr-rtaProfileCopy">{profileLabel}</span><b>•</b><span className="tr-rtaEqCopy">{eqLabel}</span>
+        </strong>
       </div>
       <div className="tr-activityRtaLabels" aria-hidden>
         {RTA_LABELS.map((label) => <span key={label}>{label}</span>)}
@@ -1293,6 +1294,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const [savePresetName, setSavePresetName] = useState("");
   const [presetSaveFlash, setPresetSaveFlash] = useState(false);
   const [sourcePulse, setSourcePulse] = useState(false);
+  const [sourceUpgradeOpen, setSourceUpgradeOpen] = useState(false);
+  const [sourceUpgradeFile, setSourceUpgradeFile] = useState<File | null>(null);
+  const [sourceUpgradeCandidate, setSourceUpgradeCandidate] = useState<MusicSourceAnalysis | null>(null);
+  const [sourceUpgradeComparison, setSourceUpgradeComparison] = useState<MusicSourceUpgradeComparison | null>(null);
+  const [sourceUpgradeBusy, setSourceUpgradeBusy] = useState(false);
+  const [sourceUpgradeMessage, setSourceUpgradeMessage] = useState("");
+  const [sourceUpgradePendingRefresh, setSourceUpgradePendingRefresh] = useState(false);
+  const sourceUpgradeInputRef = useRef<HTMLInputElement | null>(null);
   const restoredProfileRef = useRef<string>("");
   const heroIdentityRef = useRef<HTMLDivElement | null>(null);
   const sourceDesktopValueRef = useRef<HTMLSpanElement | null>(null);
@@ -1321,6 +1330,72 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       .catch(() => { if (!cancelled) setArtworkUrl(current.external_artwork_url || null); });
     return () => { cancelled = true; };
   }, [player.currentTrack?.id, player.currentTrack?.artwork_path, player.currentTrack?.external_artwork_url]);
+
+  useEffect(() => {
+    setSourceUpgradeOpen(false);
+    setSourceUpgradeFile(null);
+    setSourceUpgradeCandidate(null);
+    setSourceUpgradeComparison(null);
+    setSourceUpgradeMessage("");
+    if (sourceUpgradeInputRef.current) sourceUpgradeInputRef.current.value = "";
+  }, [player.currentTrack?.id]);
+
+  async function inspectSourceUpgrade(file: File) {
+    const currentTrack = player.currentTrack;
+    if (!currentTrack) return;
+    setSourceUpgradeBusy(true);
+    setSourceUpgradeMessage("");
+    try {
+      const candidate = await analyzeMusicSourceFile(file);
+      const current = analyzeMusicTrackSource(currentTrack);
+      const comparison = compareMusicSources(current, candidate);
+      setSourceUpgradeFile(file);
+      setSourceUpgradeCandidate(candidate);
+      setSourceUpgradeComparison(comparison);
+    } catch (error) {
+      setSourceUpgradeFile(null);
+      setSourceUpgradeCandidate(null);
+      setSourceUpgradeComparison(null);
+      setSourceUpgradeMessage(error instanceof Error ? error.message : "The replacement source could not be analyzed.");
+    } finally {
+      setSourceUpgradeBusy(false);
+    }
+  }
+
+  async function commitSourceUpgrade() {
+    const currentTrack = player.currentTrack;
+    if (!currentTrack || !sourceUpgradeFile || !sourceUpgradeCandidate || !sourceUpgradeComparison?.isUpgrade) return;
+    setSourceUpgradeBusy(true);
+    setSourceUpgradeMessage("");
+    try {
+      const deferOldDelete = player.currentTrack?.id === currentTrack.id && (player.playing || player.currentTime > 0.5);
+      await replaceMusicTrackSource(currentTrack, sourceUpgradeFile, sourceUpgradeCandidate, { deferOldDelete });
+      if (deferOldDelete) {
+        setSourceUpgradePendingRefresh(true);
+        setSourceUpgradeMessage(`SOURCE UPGRADED • ${sourceUpgradeCandidate.codec} • ${sourceUpgradeCandidate.bitrateLabel} • NEW SOURCE STARTS NEXT PLAY`);
+      } else {
+        await loadMusicLibrary(true);
+        await flushDeferredMusicSourceCleanup().catch(() => undefined);
+        setSourceUpgradeMessage(`SOURCE UPGRADED • ${sourceUpgradeCandidate.codec} • ${sourceUpgradeCandidate.bitrateLabel}`);
+      }
+      setSourceUpgradeComparison(null);
+      setSourceUpgradeFile(null);
+      setSourceUpgradeCandidate(null);
+      if (sourceUpgradeInputRef.current) sourceUpgradeInputRef.current.value = "";
+    } catch (error) {
+      setSourceUpgradeMessage(error instanceof Error ? error.message : "The music source could not be upgraded.");
+    } finally {
+      setSourceUpgradeBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (player.playing || player.currentTime > 0.5) return;
+    void flushDeferredMusicSourceCleanup().catch(() => undefined);
+    if (!sourceUpgradePendingRefresh) return;
+    setSourceUpgradePendingRefresh(false);
+    void loadMusicLibrary(true);
+  }, [player.playing, player.currentTime, sourceUpgradePendingRefresh]);
 
   const run = (action: () => void | Promise<void>) => {
     try {
@@ -1458,6 +1533,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
 
   const track = player.currentTrack;
+  const sourceQuality = analyzeMusicTrackSource(track);
 
   useEffect(() => {
     const identity = heroIdentityRef.current;
@@ -1662,7 +1738,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <i className={`tr-mobileDspStatusLed is-${player.dspStatus}`} aria-hidden />
       </button>
 
-      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} />
+      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} sourceQuality={sourceQuality} />
 
 
       <div className="tr-playerUtilityRow">
@@ -1728,6 +1804,25 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
             </div>
           </div>
+
+          <section className={`tr-sourceQualityPanel is-${sourceQuality.tier}`} aria-label="Source quality">
+            <div className="tr-sourceQualityCopy">
+              <span>SOURCE QUALITY</span>
+              <strong>{sourceQuality.codec} · {sourceQuality.bitrateLabel} · {sourceQuality.qualityLabel}</strong>
+              <small>{sourceQuality.lossless ? "Lossless source. No replacement is needed." : sourceQuality.upgradeRecommended ? "A better original source can improve fidelity. The app will verify the replacement before changing anything." : "Source quality is already strong for playback."}</small>
+            </div>
+            {sourceQuality.upgradeRecommended && track ? (
+              <button type="button" className="tr-sourceUpgradeButton" onClick={() => {
+                setSourceUpgradeMessage("");
+                setSourceUpgradeFile(null);
+                setSourceUpgradeCandidate(null);
+                setSourceUpgradeComparison(null);
+                setSourceUpgradeOpen(true);
+              }}>UPGRADE SOURCE</button>
+            ) : (
+              <div className="tr-sourceQualityOk">SOURCE OK</div>
+            )}
+          </section>
 
           <section className="tr-preampTrim" aria-label="Preamp trim">
             <div className="tr-preampTrimCopy">
@@ -1820,6 +1915,68 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
             <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band user offsets • Preamp • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
+          </section>
+        </div>
+      ) : null}
+
+      {sourceUpgradeOpen && track ? (
+        <div className="tr-sourceUpgradeBack" onMouseDown={() => !sourceUpgradeBusy && setSourceUpgradeOpen(false)}>
+          <section className="tr-sourceUpgradeDialog" role="dialog" aria-modal="true" aria-label="Upgrade music source" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div><small>SOURCE QUALITY</small><h3>Upgrade the original audio source</h3></div>
+              <button type="button" disabled={sourceUpgradeBusy} onClick={() => setSourceUpgradeOpen(false)}>×</button>
+            </header>
+
+            <div className="tr-sourceUpgradeCompare">
+              <article>
+                <span>CURRENT SOURCE</span>
+                <strong>{sourceQuality.codec} · {sourceQuality.bitrateLabel}</strong>
+                <small className={`is-${sourceQuality.tier}`}>{sourceQuality.qualityLabel}</small>
+              </article>
+              <div className="tr-sourceUpgradeArrow" aria-hidden>→</div>
+              <article className={sourceUpgradeCandidate ? "has-candidate" : ""}>
+                <span>NEW SOURCE</span>
+                <strong>{sourceUpgradeCandidate ? `${sourceUpgradeCandidate.codec} · ${sourceUpgradeCandidate.bitrateLabel}` : "Choose a better file"}</strong>
+                <small className={sourceUpgradeCandidate ? `is-${sourceUpgradeCandidate.tier}` : ""}>{sourceUpgradeCandidate?.qualityLabel || "WAITING"}</small>
+              </article>
+            </div>
+
+            <input
+              ref={sourceUpgradeInputRef}
+              type="file"
+              accept=".mp3,.m4a,.wav,.flac,audio/mpeg,audio/mp4,audio/wav,audio/flac"
+              className="tr-sourceUpgradeHiddenInput"
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const file = event.target.files?.[0];
+                if (file) void inspectSourceUpgrade(file);
+              }}
+            />
+
+            <button type="button" className="tr-sourceUpgradeChoose" disabled={sourceUpgradeBusy} onClick={() => sourceUpgradeInputRef.current?.click()}>
+              {sourceUpgradeBusy && !sourceUpgradeCandidate ? "ANALYZING…" : sourceUpgradeCandidate ? "CHOOSE DIFFERENT FILE" : "CHOOSE BETTER FILE"}
+            </button>
+
+            {sourceUpgradeComparison ? (
+              <div className={`tr-sourceUpgradeVerdict ${sourceUpgradeComparison.isUpgrade ? "is-upgrade" : "is-no-upgrade"}`}>
+                <strong>{sourceUpgradeComparison.isUpgrade ? "QUALITY UPGRADE ✓" : "NO QUALITY UPGRADE"}</strong>
+                <span>{sourceUpgradeComparison.message}</span>
+                {sourceUpgradeComparison.durationDeltaSeconds != null ? <small>Duration difference: {Math.round(sourceUpgradeComparison.durationDeltaSeconds)} sec</small> : null}
+              </div>
+            ) : null}
+
+            {sourceUpgradeMessage ? <div className={`tr-sourceUpgradeMessage ${sourceUpgradeMessage.startsWith("SOURCE UPGRADED") ? "is-ok" : "is-error"}`} role="status">{sourceUpgradeMessage}</div> : null}
+
+            <div className="tr-sourceUpgradeSafety">
+              <b>SAFE REPLACEMENT</b>
+              <span>The new file uploads to Cloudflare R2 first. Title, artist, artwork, playlists, Like, Play Less and history stay attached to this song. The old source is deleted only after the replacement is active.</span>
+            </div>
+
+            <footer>
+              <button type="button" disabled={sourceUpgradeBusy} onClick={() => setSourceUpgradeOpen(false)}>CANCEL</button>
+              <button type="button" className="is-primary" disabled={sourceUpgradeBusy || !sourceUpgradeComparison?.isUpgrade || !sourceUpgradeFile || !sourceUpgradeCandidate} onClick={() => void commitSourceUpgrade()}>
+                {sourceUpgradeBusy ? "UPGRADING…" : "REPLACE SOURCE"}
+              </button>
+            </footer>
           </section>
         </div>
       ) : null}
@@ -4446,6 +4603,193 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-mobileDspStatusCopy small{font-size:7.8px!important}
           .tr-outputProfileIntro > .tr-outputProfileTitle{font-size:14px!important;gap:9px!important}
           .tr-outputProfileIntro > .tr-outputProfileTitle > .tr-outputProfileTitleText{font-size:14px!important}
+        }
+
+
+        /* V13.9.3 SOURCE QUALITY + UPGRADE SOURCE. The V13.8.5 hero visual engine above is untouched. */
+        .tr-rtaFidelityHead>strong{
+          display:flex!important;
+          align-items:center!important;
+          justify-content:flex-end!important;
+          gap:6px!important;
+          min-width:0!important;
+        }
+        .tr-rtaSourceQuality{
+          display:inline-flex!important;
+          align-items:center!important;
+          gap:5px!important;
+          min-width:0!important;
+          white-space:nowrap!important;
+          font-variant-numeric:tabular-nums!important;
+        }
+        .tr-rtaSourceQuality>span{white-space:nowrap!important}
+        .tr-rtaSourceQuality em{
+          font-style:normal!important;
+          font-size:.86em!important;
+          font-weight:1100!important;
+          letter-spacing:.045em!important;
+        }
+        .tr-rtaSourceQuality.is-lossless{color:#66e9c0!important}
+        .tr-rtaSourceQuality.is-high{color:#68e6a8!important}
+        .tr-rtaSourceQuality.is-good{color:#68dfff!important}
+        .tr-rtaSourceQuality.is-standard{color:#ffd36b!important}
+        .tr-rtaSourceQuality.is-low{color:#ff8b63!important}
+        .tr-rtaSourceQuality.is-unknown{color:#9eb1ba!important}
+        .tr-rtaHeadDivider{color:#506973!important;margin:0 1px!important}
+        .tr-rtaEqCopy{white-space:nowrap!important}
+
+        .tr-sourceQualityPanel{
+          margin:10px 0 12px!important;
+          padding:12px 13px!important;
+          display:grid!important;
+          grid-template-columns:minmax(0,1fr) auto!important;
+          align-items:center!important;
+          gap:12px!important;
+          border:1px solid rgba(103,192,222,.18)!important;
+          border-radius:12px!important;
+          background:linear-gradient(180deg,rgba(8,24,32,.86),rgba(3,11,16,.94))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+        }
+        .tr-sourceQualityPanel.is-low{border-color:rgba(255,120,77,.30)!important;background:linear-gradient(180deg,rgba(45,20,12,.72),rgba(15,8,5,.92))!important}
+        .tr-sourceQualityPanel.is-standard{border-color:rgba(255,201,82,.26)!important}
+        .tr-sourceQualityPanel.is-lossless{border-color:rgba(85,226,183,.28)!important}
+        .tr-sourceQualityCopy{min-width:0!important;display:grid!important;gap:4px!important}
+        .tr-sourceQualityCopy>span{color:#6ddcf8!important;font-size:7px!important;font-weight:1100!important;letter-spacing:.15em!important}
+        .tr-sourceQualityCopy>strong{color:#f5fbfd!important;font-size:13px!important;line-height:1.05!important;font-weight:1100!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;font-variant-numeric:tabular-nums!important}
+        .tr-sourceQualityCopy>small{color:#7f9ca7!important;font-size:8.5px!important;line-height:1.35!important;font-weight:750!important}
+        .tr-sourceUpgradeButton,.tr-sourceQualityOk{
+          min-height:38px!important;
+          padding:0 13px!important;
+          display:inline-flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          border-radius:9px!important;
+          font-size:8px!important;
+          font-weight:1100!important;
+          letter-spacing:.07em!important;
+          white-space:nowrap!important;
+        }
+        .tr-sourceUpgradeButton{
+          border:1px solid rgba(255,170,66,.43)!important;
+          background:linear-gradient(180deg,#5a3208,#241505)!important;
+          color:#ffd28d!important;
+          cursor:pointer!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 0 18px rgba(255,142,27,.08)!important;
+        }
+        .tr-sourceQualityOk{border:1px solid rgba(82,220,168,.23)!important;background:rgba(22,92,67,.16)!important;color:#72e8b5!important}
+
+        .tr-sourceUpgradeBack{
+          position:fixed!important;
+          inset:0!important;
+          z-index:9200!important;
+          display:grid!important;
+          place-items:center!important;
+          padding:16px!important;
+          background:rgba(0,4,7,.88)!important;
+          backdrop-filter:blur(10px)!important;
+          -webkit-backdrop-filter:blur(10px)!important;
+        }
+        .tr-sourceUpgradeDialog{
+          width:min(620px,100%)!important;
+          max-height:calc(100dvh - 32px)!important;
+          overflow:auto!important;
+          border:1px solid rgba(71,201,241,.34)!important;
+          border-radius:17px!important;
+          background:linear-gradient(180deg,#0a1d26,#040a0e)!important;
+          box-shadow:0 32px 90px rgba(0,0,0,.70),inset 0 1px 0 rgba(255,255,255,.045)!important;
+        }
+        .tr-sourceUpgradeDialog>header{
+          padding:15px 17px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:space-between!important;
+          gap:12px!important;
+          border-bottom:1px solid rgba(89,180,211,.12)!important;
+        }
+        .tr-sourceUpgradeDialog>header>div{min-width:0!important;display:grid!important;gap:4px!important}
+        .tr-sourceUpgradeDialog>header small{color:#5ed9fb!important;font-size:7px!important;font-weight:1100!important;letter-spacing:.15em!important}
+        .tr-sourceUpgradeDialog h3{margin:0!important;color:#f6fbfd!important;font-size:18px!important;line-height:1.1!important}
+        .tr-sourceUpgradeDialog>header>button{
+          width:34px!important;height:34px!important;border:1px solid rgba(120,190,215,.17)!important;border-radius:9px!important;background:#07131a!important;color:#eef9fc!important;font-size:20px!important;cursor:pointer!important;
+        }
+        .tr-sourceUpgradeCompare{
+          padding:15px 17px 10px!important;
+          display:grid!important;
+          grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr)!important;
+          align-items:stretch!important;
+          gap:8px!important;
+        }
+        .tr-sourceUpgradeCompare article{
+          min-width:0!important;
+          padding:12px!important;
+          display:grid!important;
+          align-content:center!important;
+          gap:5px!important;
+          border:1px solid rgba(255,255,255,.07)!important;
+          border-radius:11px!important;
+          background:rgba(0,0,0,.18)!important;
+        }
+        .tr-sourceUpgradeCompare article.has-candidate{border-color:rgba(79,206,242,.24)!important}
+        .tr-sourceUpgradeCompare article>span{color:#7795a1!important;font-size:7px!important;font-weight:1100!important;letter-spacing:.11em!important}
+        .tr-sourceUpgradeCompare article>strong{min-width:0!important;color:#f5fafc!important;font-size:12px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;font-variant-numeric:tabular-nums!important}
+        .tr-sourceUpgradeCompare article>small{color:#8da2ab!important;font-size:8px!important;font-weight:1100!important;letter-spacing:.06em!important}
+        .tr-sourceUpgradeCompare article>small.is-lossless{color:#68e6bd!important}.tr-sourceUpgradeCompare article>small.is-high{color:#68e6a8!important}.tr-sourceUpgradeCompare article>small.is-good{color:#68dfff!important}.tr-sourceUpgradeCompare article>small.is-standard{color:#ffd36b!important}.tr-sourceUpgradeCompare article>small.is-low{color:#ff8b63!important}
+        .tr-sourceUpgradeArrow{display:grid!important;place-items:center!important;color:#60dafa!important;font-size:20px!important;font-weight:900!important}
+        .tr-sourceUpgradeHiddenInput{display:none!important}
+        .tr-sourceUpgradeChoose{
+          width:calc(100% - 34px)!important;
+          min-height:42px!important;
+          margin:2px 17px 10px!important;
+          border:1px solid rgba(86,205,240,.31)!important;
+          border-radius:10px!important;
+          background:linear-gradient(180deg,#0c2f3d,#061821)!important;
+          color:#eafaff!important;
+          font-size:9px!important;
+          font-weight:1100!important;
+          letter-spacing:.07em!important;
+          cursor:pointer!important;
+        }
+        .tr-sourceUpgradeVerdict,.tr-sourceUpgradeMessage,.tr-sourceUpgradeSafety{
+          margin:0 17px 10px!important;
+          padding:10px 12px!important;
+          display:grid!important;
+          gap:4px!important;
+          border-radius:10px!important;
+          font-size:9px!important;
+          line-height:1.35!important;
+        }
+        .tr-sourceUpgradeVerdict{border:1px solid rgba(255,255,255,.08)!important;background:rgba(0,0,0,.18)!important;color:#afc3cc!important}
+        .tr-sourceUpgradeVerdict.is-upgrade{border-color:rgba(73,221,158,.30)!important;background:rgba(18,95,61,.16)!important}.tr-sourceUpgradeVerdict.is-upgrade strong{color:#79e9b4!important}
+        .tr-sourceUpgradeVerdict.is-no-upgrade{border-color:rgba(255,151,71,.27)!important;background:rgba(86,41,11,.16)!important}.tr-sourceUpgradeVerdict.is-no-upgrade strong{color:#ffc070!important}
+        .tr-sourceUpgradeVerdict small{color:#738d98!important}
+        .tr-sourceUpgradeMessage.is-ok{border:1px solid rgba(70,222,158,.30)!important;background:rgba(16,92,60,.18)!important;color:#78e8b3!important;font-weight:1000!important}
+        .tr-sourceUpgradeMessage.is-error{border:1px solid rgba(255,105,105,.26)!important;background:rgba(94,24,24,.18)!important;color:#ffabab!important;font-weight:900!important}
+        .tr-sourceUpgradeSafety{border:1px solid rgba(255,255,255,.06)!important;background:rgba(0,0,0,.13)!important;color:#7f98a3!important}.tr-sourceUpgradeSafety b{color:#dcecf2!important;font-size:7px!important;letter-spacing:.11em!important}
+        .tr-sourceUpgradeDialog>footer{padding:7px 17px 17px!important;display:flex!important;justify-content:flex-end!important;gap:8px!important}
+        .tr-sourceUpgradeDialog>footer button{min-height:39px!important;padding:0 15px!important;border:1px solid rgba(112,190,217,.15)!important;border-radius:9px!important;background:#0a151b!important;color:#dcecf2!important;font-size:8px!important;font-weight:1100!important;cursor:pointer!important}
+        .tr-sourceUpgradeDialog>footer button.is-primary{border-color:rgba(255,180,72,.40)!important;background:linear-gradient(180deg,#ffc45c,#ef9717)!important;color:#191007!important}
+        .tr-sourceUpgradeDialog button:disabled{opacity:.42!important;cursor:not-allowed!important}
+
+        @media(max-width:650px){
+          .tr-rtaFidelityHead>strong{gap:4px!important}
+          .tr-rtaSourceQuality{font-size:6.2px!important;gap:2px!important;letter-spacing:-.01em!important}
+          .tr-rtaSourceQuality em{display:none!important}
+          .tr-rtaHeadDivider{margin:0!important}
+          .tr-sourceQualityPanel{grid-template-columns:1fr!important;gap:9px!important;padding:11px!important}
+          .tr-sourceQualityCopy>strong{font-size:11px!important}
+          .tr-sourceUpgradeButton,.tr-sourceQualityOk{width:100%!important;min-height:40px!important}
+          .tr-sourceUpgradeBack{padding:8px!important}
+          .tr-sourceUpgradeDialog{max-height:calc(100dvh - 16px)!important;border-radius:14px!important}
+          .tr-sourceUpgradeCompare{grid-template-columns:1fr!important;gap:7px!important;padding:12px!important}
+          .tr-sourceUpgradeArrow{transform:rotate(90deg)!important;height:20px!important}
+          .tr-sourceUpgradeChoose{width:calc(100% - 24px)!important;margin:2px 12px 9px!important}
+          .tr-sourceUpgradeVerdict,.tr-sourceUpgradeMessage,.tr-sourceUpgradeSafety{margin-left:12px!important;margin-right:12px!important}
+          .tr-sourceUpgradeDialog>footer{padding:7px 12px 13px!important}.tr-sourceUpgradeDialog>footer button{flex:1!important;min-width:0!important}
+        }
+        @media(max-width:430px){
+          .tr-rtaEqCopy,.tr-rtaFidelityHead>strong>b{display:none!important}
+          .tr-rtaSourceQuality{font-size:5.9px!important}
+          .tr-rtaFidelityHead>strong{gap:3px!important}
         }
       `}</style>
     </section>
