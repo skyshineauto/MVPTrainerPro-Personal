@@ -37,7 +37,6 @@ export type AppBrandingWeatherSettings = {
 };
 
 export type CurrentWeatherSnapshot = {
-  temperatureF: number;
   apparentTemperatureF: number;
   weatherCode: number;
   condition: string;
@@ -67,7 +66,6 @@ type OpenMeteoGeocodingResponse = {
 type OpenMeteoWeatherResponse = {
   timezone?: string;
   current?: {
-    temperature_2m?: number;
     apparent_temperature?: number;
     weather_code?: number;
     is_day?: number;
@@ -335,7 +333,7 @@ export async function fetchCurrentWeather(
   const params = new URLSearchParams({
     latitude: String(location.latitude),
     longitude: String(location.longitude),
-    current: "temperature_2m,apparent_temperature,weather_code,is_day",
+    current: "apparent_temperature,weather_code,is_day",
     temperature_unit: "fahrenheit",
     timezone: "auto",
     forecast_days: "1",
@@ -347,17 +345,15 @@ export async function fetchCurrentWeather(
     throw new Error(body.reason || "Current weather could not be loaded.");
   }
 
-  const temperatureF = Number(body.current?.temperature_2m);
   const apparentTemperatureF = Number(body.current?.apparent_temperature);
   const weatherCode = Number(body.current?.weather_code);
   const isDay = Number(body.current?.is_day ?? 1) === 1;
-  if (!Number.isFinite(temperatureF) || !Number.isFinite(apparentTemperatureF) || !Number.isFinite(weatherCode)) {
+  if (!Number.isFinite(apparentTemperatureF) || !Number.isFinite(weatherCode)) {
     throw new Error("Current weather data was incomplete.");
   }
 
   const condition = weatherCondition(weatherCode, isDay);
   return {
-    temperatureF,
     apparentTemperatureF,
     weatherCode,
     condition: condition.condition,
