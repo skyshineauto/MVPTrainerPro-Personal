@@ -42,7 +42,7 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
     const outR = output[1] || output[0];
     if (!inL || !outL) return true;
 
-    const alphaCross = 1 - Math.exp(-2 * Math.PI * 1050 / sampleRate);
+    const alphaCross = 1 - Math.exp(-2 * Math.PI * 1250 / sampleRate);
     const alphaBass = 1 - Math.exp(-2 * Math.PI * 135 / sampleRate);
     const envAttack = 1 - Math.exp(-1 / (sampleRate * 0.010));
     const envRelease = 1 - Math.exp(-1 / (sampleRate * 0.095));
@@ -75,9 +75,9 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
       this.bassEnvL += (absBassL > this.bassEnvL ? envAttack : envRelease) * (absBassL - this.bassEnvL);
       this.bassEnvR += (absBassR > this.bassEnvR ? envAttack : envRelease) * (absBassR - this.bassEnvR);
 
-      const delayMs = 0.20 + crossfeed * 0.36;
+      const delayMs = 0.22 + crossfeed * 0.62;
       const crossDelaySamples = Math.max(1, Math.min(this.delayL.length - 1, Math.round(sampleRate * delayMs / 1000)));
-      const depthDelayMs = 1.1 + depth * 8.6;
+      const depthDelayMs = 1.8 + depth * 10.8;
       const depthDelaySamples = Math.max(1, Math.min(this.delaySide.length - 1, Math.round(sampleRate * depthDelayMs / 1000)));
       const crossRead = (this.writeIndex - crossDelaySamples + this.delayL.length) % this.delayL.length;
       const depthRead = (this.writeIndex - depthDelaySamples + this.delaySide.length) % this.delaySide.length;
@@ -95,18 +95,18 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
 
       const sideLow = (this.bassLpL - this.bassLpR) * 0.5;
       const sideHigh = side - sideLow;
-      const widthScale = 0.84 + width * 0.78;
-      const bassWidth = 0.88 + width * 0.12;
+      const widthScale = 0.96 + width * 1.02;
+      const bassWidth = 0.94 + width * 0.06;
       const widenedSide = sideHigh * widthScale + sideLow * bassWidth;
-      const centerScale = 0.86 + center * 0.30;
-      const depthMix = depth * 0.18;
-      const crossMix = crossfeed * 0.24;
+      const centerScale = 0.72 + center * 0.66;
+      const depthMix = depth * 0.36;
+      const crossMix = crossfeed * 0.42;
 
       const transientL = Math.max(0, absBassL - this.bassEnvL * 0.72);
       const transientR = Math.max(0, absBassR - this.bassEnvR * 0.72);
-      const bassDrive = bassImpact * 0.34;
-      const bassPunchL = this.bassLpL * bassImpact * 0.085 + Math.sign(this.bassLpL) * transientL * bassDrive;
-      const bassPunchR = this.bassLpR * bassImpact * 0.085 + Math.sign(this.bassLpR) * transientR * bassDrive;
+      const bassDrive = bassImpact * 0.50;
+      const bassPunchL = this.bassLpL * bassImpact * 0.12 + Math.sign(this.bassLpL) * transientL * bassDrive;
+      const bassPunchR = this.bassLpR * bassImpact * 0.12 + Math.sign(this.bassLpR) * transientR * bassDrive;
 
       let processedL = mid * centerScale + widenedSide;
       let processedR = mid * centerScale - widenedSide;
@@ -118,7 +118,7 @@ class MvpHeadphoneProcessor extends AudioWorkletProcessor {
       processedL += bassPunchL;
       processedR += bassPunchR;
 
-      const compensation = 1 / Math.max(1, Math.sqrt((centerScale * centerScale + widthScale * widthScale) * 0.52));
+      const compensation = 1 / Math.max(1, Math.sqrt((centerScale * centerScale + widthScale * widthScale) * 0.46));
       outL[i] = processedL * compensation;
       outR[i] = processedR * compensation;
 
