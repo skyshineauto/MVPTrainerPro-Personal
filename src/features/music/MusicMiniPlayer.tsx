@@ -37,6 +37,8 @@ import {
   setMusicEqBand,
   setMusicEqEnabled,
   setMusicEqTopology,
+  setMusicMultibandEnabled,
+  setMusicNormalizationEnabled,
   setMusicHeadphoneBassImpact,
   setMusicHeadphoneCenter,
   setMusicHeadphoneCrossfeed,
@@ -105,6 +107,8 @@ type SavedDspProfile = {
   eqEnabled: boolean;
   eqGains: number[];
   preampDb: number;
+  normalizationEnabled: boolean;
+  multibandEnabled: boolean;
   headphoneMode: MusicHeadphoneMode;
   headphoneWidth: number;
   headphoneDepth: number;
@@ -1523,6 +1527,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       eqEnabled: player.eqEnabled,
       eqGains: [...player.eqGains],
       preampDb: player.preampDb,
+      normalizationEnabled: player.normalizationEnabled,
+      multibandEnabled: player.multibandEnabled,
       headphoneMode: player.headphoneMode,
       headphoneWidth: player.headphoneWidth,
       headphoneDepth: player.headphoneDepth,
@@ -1541,6 +1547,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     if (profile.eqEnabled !== player.eqEnabled) return false;
     if (profile.headphoneMode !== player.headphoneMode) return false;
     if (!sameDspNumber(profile.preampDb, player.preampDb)) return false;
+    if ((profile.normalizationEnabled ?? true) !== player.normalizationEnabled) return false;
+    if ((profile.multibandEnabled ?? true) !== player.multibandEnabled) return false;
     if (!sameDspNumber(profile.headphoneWidth, player.headphoneWidth)) return false;
     if (!sameDspNumber(profile.headphoneDepth, player.headphoneDepth)) return false;
     if (!sameDspNumber(profile.headphoneCrossfeed, player.headphoneCrossfeed)) return false;
@@ -1582,6 +1590,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       profile.eqGains.forEach((gain, index) => setMusicEqBand(index, gain));
       setMusicPreamp(profile.preampDb);
       setMusicEqEnabled(profile.eqEnabled);
+      setMusicNormalizationEnabled(profile.normalizationEnabled ?? true);
+      setMusicMultibandEnabled(profile.multibandEnabled ?? true);
       setMusicHeadphoneMode(profile.headphoneMode);
       setMusicHeadphoneWidth(profile.headphoneWidth);
       setMusicHeadphoneDepth(profile.headphoneDepth);
@@ -1871,13 +1881,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <label className="tr-outputProfileSelect">
               <span className="tr-outputProfileSelectLabel"><i data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>OUTPUT PROFILE</b></span>
-              <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicOutputProfile(event.target.value as MusicOutputProfile)}>
+              <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicOutputProfile(event.target.value as MusicOutputProfile))}>
                 {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
               </select>
             </label>
             <div className="tr-outputProfileChoices" aria-label="Output profile quick select">
               {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => (
-                <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => setMusicOutputProfile(value)} aria-pressed={player.outputProfile === value}>
+                <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicOutputProfile(value))} aria-pressed={player.outputProfile === value}>
                   <i><PlayerIcon name={outputProfileIconName(value)} /></i><span>{profile.shortLabel}</span>
                 </button>
               ))}
@@ -1886,7 +1896,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span className="tr-outputProfileTelemetryActive" data-profile={player.outputProfile}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</b></span>
               <span>AUTO HEADROOM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
               <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
-              <span>NORMALIZER <b>OFF</b></span>
+              <span>MULTIBAND <b>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "ON" : "OFF"}</b></span>
+              <span>NORMALIZER <b>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? `${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB` : "OFF"}</b></span>
               <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
             </div>
           </div>
@@ -1918,26 +1929,37 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
-              <input type="range" min="-6" max="3" step="0.5" value={Math.max(-6, Math.min(3, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicPreamp(Number(event.target.value))} aria-label="Preamp trim in decibels" />
+              <input type="range" min="-6" max="3" step="0.5" value={Math.max(-6, Math.min(3, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
               <div className="tr-preampTrimScale"><span>-6</span><span>0</span><span>+3 dB</span></div>
             </div>
-            <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => setMusicPreamp(0)}>RESET TO AUTO</button>
+            <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => void runDspMutation(() => setMusicPreamp(0), true)}>RESET TO AUTO</button>
           </section>
 
           <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status">
             <div className="tr-dspProofStatus">
-              <span>DSP ENGINE <b className={player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "advanced_worklet" ? "ADVANCED WORKLET" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "UNAVAILABLE"}</b></span>
+              <span>DSP ENGINE <b className={player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "advanced_worklet" ? "MVP STUDIO WORKLET" : player.dspEngineMode === "native_fallback" ? "NATIVE BACKUP" : "UNAVAILABLE"}</b></span>
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
               <span>TRUE-PEAK LIMITER <b className="is-good">4× • -1 dBTP</b></span>
+              <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
+              <span>LOUDNESS NORMALIZATION <b className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "ADAPTIVE • -14 LUFS" : "BYPASSED"}</b></span>
               <span>TRANSIENT DETAIL <b className="is-good">AUTO</b></span>
             </div>
           </section>
 
+          <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing">
+            <button type="button" className={player.multibandEnabled ? "is-active" : ""} aria-pressed={player.multibandEnabled} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
+              <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? "ON" : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz crossovers</small>
+            </button>
+            <button type="button" className={player.normalizationEnabled ? "is-active" : ""} aria-pressed={player.normalizationEnabled} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicNormalizationEnabled(!player.normalizationEnabled))}>
+              <span>LOUDNESS NORMALIZATION</span><strong>{player.normalizationEnabled ? "ON • -14 LUFS" : "OFF"}</strong><small>{player.normalizationEnabled ? `Adaptive gain ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Keeps song-to-song loudness consistent without changing the EQ curve"}</small>
+            </button>
+          </section>
+
           <div className="tr-audioEqHead">
-            <div><strong>Music Preset + 31-Band User Offset EQ</strong><small className="tr-eqHeadHint">Preset sets the core tone. Sliders below are manual offsets only.</small></div>
+            <div><strong>Music Preset + 31-Band Studio EQ</strong><small className="tr-eqHeadHint">Preset loads the exact live 31-band curve. The sliders and orange dB values are the DSP values you hear.</small></div>
             <div className="tr-dspAbControls">
-              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
-              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
+              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqEnabled(event.target.checked))} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
+              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => void runDspMutation(() => setMusicDspBypass(!player.dspBypass))}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
             </div>
             <label className="tr-audioEqPreset"><span>MUSIC PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
               {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
@@ -1985,14 +2007,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           </div>
 
           <section className={`tr-headphoneProcessor ${player.outputProfile !== "headphones" ? "is-disabled" : ""}`}>
-            <header><div><strong>Headphone Immersion</strong><small>{player.outputProfile === "headphones" ? `Headphone-only processing path • ${player.immersionStatus === "active" ? "ADVANCED" : player.immersionStatus === "native_fallback" ? "NATIVE FALLBACK" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}` : "Disabled outside Headphones profile to preserve stereo fidelity"}</small></div><label><span>MODE</span><select disabled={player.outputProfile !== "headphones"} value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode)}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
-            <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => setMusicHeadphoneMode(value)}>{mode.label}</button>)}</div>
+            <header><div><strong>Headphone Immersion</strong><small>{player.outputProfile === "headphones" ? `Headphone-only processing path • ${player.immersionStatus === "active" ? "ADVANCED" : player.immersionStatus === "native_fallback" ? "NATIVE FALLBACK" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}` : "Disabled outside Headphones profile to preserve stereo fidelity"}</small></div><label><span>MODE</span><select disabled={player.outputProfile !== "headphones"} value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
+            <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
             <div className="tr-headphoneControls">
-              <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneWidth(Number(event.target.value))} /></label>
-              <label><span>DEPTH <b>{player.headphoneDepth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneDepth} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneDepth(Number(event.target.value))} /></label>
-              <label><span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCrossfeed} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCrossfeed(Number(event.target.value))} /></label>
-              <label><span>CENTER <b>{player.headphoneCenter}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCenter} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneCenter(Number(event.target.value))} /></label>
-              <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicHeadphoneBassImpact(Number(event.target.value))} /></label>
+              <label><span>WIDTH <b>{player.headphoneWidth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneWidth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneWidth(Number(event.target.value)))} /></label>
+              <label><span>DEPTH <b>{player.headphoneDepth}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneDepth} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneDepth(Number(event.target.value)))} /></label>
+              <label><span>CROSSFEED <b>{player.headphoneCrossfeed}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCrossfeed} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCrossfeed(Number(event.target.value)))} /></label>
+              <label><span>CENTER <b>{player.headphoneCenter}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneCenter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneCenter(Number(event.target.value)))} /></label>
+              <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneBassImpact(Number(event.target.value)))} /></label>
             </div>
           </section>
         </section>
@@ -2004,7 +2026,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
             <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event: ChangeEvent<HTMLInputElement>) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
-            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band user offsets • Preamp • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band EQ • Preamp • Multiband • Loudness normalization • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
           </section>
         </div>
@@ -4985,6 +5007,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioEqBands--31{grid-template-columns:repeat(31,48px)!important;grid-auto-columns:48px!important;min-width:max-content!important;width:max-content!important}
           .tr-audioEqBands--31 .tr-audioEqBand{width:48px!important;min-width:48px!important;max-width:48px!important}
         }
+
+        .tr-studioProcessingPanel{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;margin:10px 0 12px!important}
+        .tr-studioProcessingPanel button{min-width:0!important;min-height:72px!important;padding:11px 12px!important;display:grid!important;grid-template-columns:1fr auto!important;grid-template-rows:auto auto!important;gap:5px 10px!important;align-items:center!important;text-align:left!important;border:1px solid rgba(99,181,211,.18)!important;border-radius:11px!important;background:linear-gradient(180deg,rgba(7,25,34,.92),rgba(3,12,17,.96))!important;color:#eefaff!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr-studioProcessingPanel button>span{font-size:8px!important;font-weight:1000!important;letter-spacing:.09em!important;color:#8bb8c8!important}.tr-studioProcessingPanel button>strong{font-size:9px!important;font-weight:1000!important;color:#819ba5!important;white-space:nowrap!important}.tr-studioProcessingPanel button>small{grid-column:1/-1!important;font-size:7.5px!important;line-height:1.35!important;color:#78919b!important;font-weight:750!important}
+        .tr-studioProcessingPanel button.is-active{border-color:rgba(79,214,251,.42)!important;background:linear-gradient(180deg,rgba(8,47,61,.92),rgba(4,24,33,.97))!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 0 18px rgba(55,201,241,.07)!important}.tr-studioProcessingPanel button.is-active>span{color:#63dcff!important}.tr-studioProcessingPanel button.is-active>strong{color:#8ef0c0!important}.tr-studioProcessingPanel button:disabled{opacity:.46!important;cursor:not-allowed!important}
+        @media(max-width:700px){.tr-studioProcessingPanel{grid-template-columns:1fr!important}.tr-studioProcessingPanel button{min-height:76px!important;padding:12px!important}.tr-studioProcessingPanel button>span{font-size:8.5px!important}.tr-studioProcessingPanel button>strong{font-size:9.5px!important}.tr-studioProcessingPanel button>small{font-size:8px!important}}
+
       `}</style>
     </section>
   );
