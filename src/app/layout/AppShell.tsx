@@ -1786,7 +1786,10 @@ export function AppShell({
 
     if (pollRef.current) window.clearInterval(pollRef.current);
 
-    const pollMs = hud.mode === "active" ? 10000 : 45000;
+    // Keep the command center fresh without repeatedly competing with page/data loads.
+    // Route changes, focus and visibility still refresh immediately; this is only the
+    // background safety poll. The workout timer itself remains local and updates every second.
+    const pollMs = hud.mode === "active" ? 30000 : 120000;
     pollRef.current = window.setInterval(() => void run(), pollMs);
 
     document.addEventListener("visibilitychange", refreshWhenVisible);
