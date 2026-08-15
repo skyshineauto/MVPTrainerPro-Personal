@@ -1552,11 +1552,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   async function runDspMutation(action: () => void, ensureEq = false) {
     try {
+      // Always wake/reconnect the audio graph before a DSP mutation. The browser
+      // can suspend Web Audio after backgrounding/navigation while the UI state
+      // still looks active. Recovery is silent and does not interrupt playback.
+      await recoverMusicDsp();
       if (player.dspBypass) setMusicDspBypass(false);
-      if (player.dspStatus !== "active") await recoverMusicDsp();
       if (ensureEq && !player.eqEnabled) setMusicEqEnabled(true);
       action();
-      if (player.dspStatus !== "active") await recoverMusicDsp();
+      // Re-apply the complete current state after the mutation so the live graph
+      // can never drift away from what the controls show.
+      await recoverMusicDsp();
     } catch {
       // The player engine owns the useful error state.
     }
@@ -1866,13 +1871,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <label className="tr-outputProfileSelect">
               <span className="tr-outputProfileSelectLabel"><i data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>OUTPUT PROFILE</b></span>
-              <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMusicOutputProfile(event.target.value as MusicOutputProfile)}>
+              <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicOutputProfile(event.target.value as MusicOutputProfile))}>
                 {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
               </select>
             </label>
             <div className="tr-outputProfileChoices" aria-label="Output profile quick select">
               {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => (
-                <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => setMusicOutputProfile(value)} aria-pressed={player.outputProfile === value}>
+                <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicOutputProfile(value))} aria-pressed={player.outputProfile === value}>
                   <i><PlayerIcon name={outputProfileIconName(value)} /></i><span>{profile.shortLabel}</span>
                 </button>
               ))}
@@ -1931,8 +1936,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <div className="tr-audioEqHead">
             <div><strong>Music Preset + 31-Band User Offset EQ</strong><small className="tr-eqHeadHint">Preset sets the core tone. Sliders below are manual offsets only.</small></div>
             <div className="tr-dspAbControls">
-              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqEnabled(event.target.checked)} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
-              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => setMusicDspBypass(!player.dspBypass)}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
+              <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqEnabled(event.target.checked))} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
+              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => void runDspMutation(() => setMusicDspBypass(!player.dspBypass))}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
             </div>
             <label className="tr-audioEqPreset"><span>MUSIC PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
               {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
