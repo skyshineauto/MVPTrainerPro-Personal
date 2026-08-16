@@ -5186,6 +5186,37 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             margin:0!important;
           }
         }
+
+        /* MVP_STUDIO_V4_2_SOURCE_DSP_EXACT_ALIGNMENT
+           Root-cause fix: an older broad >span rule gives the visible
+           Playing From field a 5px bottom margin. That margin makes the
+           field look 5px higher than DSP/EQ even when the grid items align.
+           Keep spacing on the PLAYING FROM label, but remove it from the field. */
+        @media(min-width:901px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
+            align-items:end!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector > span:first-child{
+            margin:0 0 5px 2px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector > .tr-audioQueueSelectorField{
+            margin:0!important;
+            box-sizing:border-box!important;
+            height:44px!important;
+            min-height:44px!important;
+            max-height:44px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            position:relative!important;
+            top:0!important;
+            margin:0!important;
+            align-self:end!important;
+            box-sizing:border-box!important;
+            height:44px!important;
+            min-height:44px!important;
+            max-height:44px!important;
+          }
+        }
       `}</style>
     </section>
   );
