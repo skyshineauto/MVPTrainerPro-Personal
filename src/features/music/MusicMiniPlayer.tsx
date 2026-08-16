@@ -1956,6 +1956,56 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </section>
 
+          <section className="tr-studioMeterPanel" aria-label="Live Studio DSP metering">
+            <header>
+              <div><span>LIVE DSP METERING</span><strong>REAL-TIME ENGINE TELEMETRY</strong></div>
+              <small>{player.dspEngineMode === "studio_wasm" ? "DIRECT FROM WASM CORE" : "AVAILABLE IN MVP STUDIO"}</small>
+            </header>
+            <div className="tr-studioMeterGrid">
+              <article data-meter="peak">
+                <span>TRUE PEAK</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.truePeakDbtp > -119 ? `${player.truePeakDbtp.toFixed(1)} dBTP` : "—"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" && player.truePeakDbtp > -119 ? Math.max(0, Math.min(100, ((player.truePeakDbtp + 18) / 18) * 100)) : 0}%` }} /></i>
+                <small>BS.1770 reconstructed peak</small>
+              </article>
+              <article data-meter="limiter">
+                <span>LIMITER GR</span>
+                <strong>{player.dspEngineMode === "studio_wasm" ? `${player.limiterGainReductionDb.toFixed(1)} dB` : "—"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" ? Math.max(0, Math.min(100, (player.limiterGainReductionDb / 6) * 100)) : 0}%` }} /></i>
+                <small>True-peak gain reduction</small>
+              </article>
+              <article data-meter="multiband">
+                <span>MULTIBAND GR</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.multibandEnabled ? `${player.multibandGainReductionDb.toFixed(1)} dB` : "OFF"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" && player.multibandEnabled ? Math.max(0, Math.min(100, (player.multibandGainReductionDb / 6) * 100)) : 0}%` }} /></i>
+                <small>Maximum 4-band reduction</small>
+              </article>
+              <article data-meter="dynamic">
+                <span>DYNAMIC EQ</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.dynamicEqEnabled ? `${player.dynamicEqGainReductionDb.toFixed(1)} dB` : "OFF"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" && player.dynamicEqEnabled ? Math.max(0, Math.min(100, (player.dynamicEqGainReductionDb / 3) * 100)) : 0}%` }} /></i>
+                <small>Maximum adaptive cut</small>
+              </article>
+              <article data-meter="output">
+                <span>OUTPUT CORR</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" ? `${player.outputCorrectionReductionDb.toFixed(1)} dB` : "OFF"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" ? Math.max(0, Math.min(100, (player.outputCorrectionReductionDb / 3) * 100)) : 0}%` }} /></i>
+                <small>{player.outputProfile === "speaker" ? "Bluetooth correction" : player.outputProfile === "headphones" ? "Headphone correction" : player.outputProfile === "car_hifi" ? "Car / Hi-Fi correction" : "Reference path"}</small>
+              </article>
+              <article data-meter="transient">
+                <span>TRANSIENT</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? `+${player.transientBoostDb.toFixed(1)} dB` : "OFF"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" ? Math.max(0, Math.min(100, (player.transientBoostDb / 2.5) * 100)) : 0}%` }} /></i>
+                <small>Adaptive attack enhancement</small>
+              </article>
+              <article data-meter="level">
+                <span>TRACK LEVEL</span>
+                <strong>{player.normalizationEnabled && player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : player.normalizationEnabled ? "ANALYZING" : "RAW"}</strong>
+                <i><b style={{ width: `${player.normalizationEnabled ? Math.max(0, Math.min(100, (Math.abs(player.loudnessGainDb) / 3) * 100)) : 0}%` }} /></i>
+                <small>{player.normalizationEnabled ? `Volume Match trim ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB` : "Volume Match off"}</small>
+              </article>
+            </div>
+          </section>
           <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing">
             <button type="button" className={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? "is-active" : ""} aria-pressed={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet")} disabled={player.outputProfile === "reference" || (player.dspEngineMode !== "studio_wasm" && player.dspEngineMode !== "advanced_worklet")} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
               <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON") : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz LR4 crossovers</small>
@@ -5040,6 +5090,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioEqBands--31 .tr-audioEqBand{width:48px!important;min-width:48px!important;max-width:48px!important}
         }
 
+        .tr-studioMeterPanel{margin:10px 0 12px;padding:12px;border:1px solid rgba(102,190,219,.16);border-radius:12px;background:linear-gradient(180deg,rgba(7,22,30,.91),rgba(2,10,14,.96));box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.tr-studioMeterPanel>header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:9px}.tr-studioMeterPanel>header>div{display:grid;gap:2px}.tr-studioMeterPanel>header span{color:#6fbdd7;font-size:6.5px;font-weight:1000;letter-spacing:.13em}.tr-studioMeterPanel>header strong{color:#edf7fa;font-size:10px;letter-spacing:.035em}.tr-studioMeterPanel>header small{color:#72919d;font-size:6.5px;font-weight:900;letter-spacing:.08em}.tr-studioMeterGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.tr-studioMeterGrid article{min-width:0;padding:9px 9px 8px;border:1px solid rgba(112,182,205,.10);border-radius:9px;background:linear-gradient(180deg,rgba(13,31,40,.72),rgba(2,9,13,.78));box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}.tr-studioMeterGrid article>span{display:block;color:#718d98;font-size:6px;font-weight:1000;letter-spacing:.09em;white-space:nowrap}.tr-studioMeterGrid article>strong{display:block;margin-top:4px;color:#f2f8fa;font-size:12px;line-height:1;font-variant-numeric:tabular-nums}.tr-studioMeterGrid article>i{display:block;height:3px;margin:8px 0 6px;border-radius:999px;background:rgba(121,165,179,.12);overflow:hidden}.tr-studioMeterGrid article>i>b{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#29c7e8,#83e5d0);transition:width .16s linear}.tr-studioMeterGrid article[data-meter="peak"]>i>b,.tr-studioMeterGrid article[data-meter="limiter"]>i>b{background:linear-gradient(90deg,#f1cf55,#ff914d)}.tr-studioMeterGrid article>small{display:block;min-height:18px;color:#63808b;font-size:6.3px;line-height:1.35;font-weight:750}.tr-studioMeterGrid article[data-meter="peak"]>strong{color:#ffd36a}.tr-studioMeterGrid article[data-meter="limiter"]>strong{color:#ffb57d}
+        @media(max-width:700px){.tr-studioMeterPanel>header{align-items:flex-start;flex-direction:column;gap:4px}.tr-studioMeterGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
         .tr-studioProcessingPanel{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important;margin:10px 0 12px!important}
         .tr-studioProcessingPanel button{min-width:0!important;min-height:72px!important;padding:11px 12px!important;display:grid!important;grid-template-columns:1fr auto!important;grid-template-rows:auto auto!important;gap:5px 10px!important;align-items:center!important;text-align:left!important;border:1px solid rgba(99,181,211,.18)!important;border-radius:11px!important;background:linear-gradient(180deg,rgba(7,25,34,.92),rgba(3,12,17,.96))!important;color:#eefaff!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
         .tr-studioProcessingPanel button>span{font-size:8px!important;font-weight:1000!important;letter-spacing:.09em!important;color:#8bb8c8!important}.tr-studioProcessingPanel button>strong{font-size:9px!important;font-weight:1000!important;color:#819ba5!important;white-space:nowrap!important}.tr-studioProcessingPanel button>small{grid-column:1/-1!important;font-size:7.5px!important;line-height:1.35!important;color:#78919b!important;font-weight:750!important}

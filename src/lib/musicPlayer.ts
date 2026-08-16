@@ -258,6 +258,11 @@ export type MusicPlayerState = {
   outputCorrectionReductionDb: number;
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
+  // MVP_STUDIO_WASM_V3_PHASE5_LIVE_METERING
+  truePeakDbtp: number;
+  limiterGainReductionDb: number;
+  transientBoostDb: number;
+  multibandGainReductionDb: number;
   limiterEnabled: boolean;
   duckingStrength: MusicDuckingStrength;
   headphoneMode: MusicHeadphoneMode;
@@ -499,6 +504,10 @@ let state: MusicPlayerState = {
   outputCorrectionReductionDb: 0,
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
+  truePeakDbtp: -120,
+  limiterGainReductionDb: 0,
+  transientBoostDb: 0,
+  multibandGainReductionDb: 0,
   limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true),
   duckingStrength: readDuckingStrength(),
   headphoneMode: readHeadphoneMode(),
@@ -1335,6 +1344,10 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
       dspEngineMode: "studio_wasm",
       loudnessGainDb: 0,
       loudnessMomentaryLufs: -70,
+      truePeakDbtp: -120,
+      limiterGainReductionDb: 0,
+      transientBoostDb: 0,
+      multibandGainReductionDb: 0,
     });
     applyProcessingSettings();
     return true;
@@ -1708,8 +1721,36 @@ function startLevelMeter() {
         ? Math.round(telemetry.outputCorrectionReductionDb * 10) / 10
         : 0;
       const outputCorrectionChanged = outputCorrectionReductionDb !== state.outputCorrectionReductionDb;
-      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged || outputCorrectionChanged) {
-        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs, dynamicEqGainReductionDb, dynamicEqBandReductionDb, outputCorrectionReductionDb });
+      const truePeakDbtp = Number.isFinite(telemetry.truePeakDbtp)
+        ? Math.round(telemetry.truePeakDbtp * 10) / 10
+        : -120;
+      const limiterGainReductionDb = state.limiterEnabled && Number.isFinite(telemetry.gainReductionDb)
+        ? Math.round(Math.max(0, telemetry.gainReductionDb) * 10) / 10
+        : 0;
+      const transientActive = state.outputProfile !== "reference" && state.eqEnabled && !state.dspBypass;
+      const transientBoostDb = transientActive && Number.isFinite(telemetry.transientBoostDb)
+        ? Math.round(Math.max(0, telemetry.transientBoostDb) * 10) / 10
+        : 0;
+      const multibandActive = state.multibandEnabled && state.outputProfile !== "reference" && !state.dspBypass;
+      const multibandGainReductionDb = multibandActive && Number.isFinite(telemetry.multibandGainReductionDb)
+        ? Math.round(Math.max(0, telemetry.multibandGainReductionDb) * 10) / 10
+        : 0;
+      const coreMeterChanged = truePeakDbtp !== state.truePeakDbtp
+        || limiterGainReductionDb !== state.limiterGainReductionDb
+        || transientBoostDb !== state.transientBoostDb
+        || multibandGainReductionDb !== state.multibandGainReductionDb;
+      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged || outputCorrectionChanged || coreMeterChanged) {
+        emit({
+          loudnessGainDb: gainDb,
+          loudnessMomentaryLufs: programLufs,
+          dynamicEqGainReductionDb,
+          dynamicEqBandReductionDb,
+          outputCorrectionReductionDb,
+          truePeakDbtp,
+          limiterGainReductionDb,
+          transientBoostDb,
+          multibandGainReductionDb,
+        });
       }
     }
     const referenceDb = rmsDbFromAnalyser(referenceLevelAnalyser);
@@ -1722,7 +1763,7 @@ function startLevelMeter() {
         lastProcessedRmsDb = Number.isFinite(lastProcessedRmsDb) ? lastProcessedRmsDb * 0.86 + processedDb * 0.14 : processedDb;
       }
     }
-  }, 350);
+  }, 200);
 }
 
 async function unlockMusicAudio() {
