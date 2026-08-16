@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V3 Phase 1 Dynamic EQ
+// MVP Trainer Pro - MVP Studio Engine V3 Phase 2 Intelligent Output Correction
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -406,6 +406,16 @@ DynamicEqBand dynamicEqBands[4];
 float meterDynamicEqMaxReductionDb = 0.0f;
 float meterDynamicEqBandReductionDb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
+// Studio V3 Phase 2 intelligent output correction. The musical preset remains
+// unchanged; this stage only applies device-path compensation and a conservative
+// cut-only low-frequency guard whose threshold/strength follows the selected
+// output profile. It never adds adaptive gain.
+int outputCorrectionEnabled = 1;
+float outputCorrectionAmount = 1.0f;
+float outputCorrectionProfileScale = 0.65f;
+DynamicEqBand outputGuard;
+float meterOutputCorrectionReductionDb = 0.0f;
+
 // Studio V2 Phase 3.1 optional Volume Match utility.
 // The detector is K-weighted (BS.1770-style shelf + RLB high-pass), with an exact
 // 400 ms energy window and slow gated program accumulation. Gain movement is
@@ -467,6 +477,8 @@ void resetBuffers() {
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
   meterDynamicEqMaxReductionDb = 0.0f;
+  meterOutputCorrectionReductionDb = 0.0f;
+  outputGuard.reset();
   for (int band = 0; band < 4; ++band) {
     meterMultibandBandReductionDb[band] = 0.0f;
     multibandCompressor[band].reset();
@@ -485,24 +497,46 @@ void resetBuffers() {
 }
 
 void configureOutputProfile() {
+  // Static correction remains intentionally tiny. The adaptive guard below is
+  // profile-aware and cut-only, so the same music preset can travel between
+  // car/hi-fi, headphones and Bluetooth without becoming a second musical EQ.
   for (int ch = 0; ch < 2; ++ch) {
     if (outputProfile == 2) {
+      // Bluetooth / compact speaker: preserve weight, restore a touch of detail.
       outputHp[ch].setHighpass(sampleRateHz, 42.0);
       outputLow[ch].setLowShelf(sampleRateHz, 105.0, 0.7);
       outputPresence[ch].setPeaking(sampleRateHz, 2800.0, 0.85, 0.65);
       outputHigh[ch].setHighShelf(sampleRateHz, 8200.0, 0.55);
     } else if (outputProfile == 1) {
+      // Headphones: near-neutral technical path; immersion remains separate.
       outputHp[ch].setHighpass(sampleRateHz, 16.0);
       outputLow[ch].setLowShelf(sampleRateHz, 90.0, 0.0);
       outputPresence[ch].setPeaking(sampleRateHz, 3000.0, 0.9, 0.0);
       outputHigh[ch].setHighShelf(sampleRateHz, 10000.0, 0.0);
     } else {
+      // Car / Hi-Fi: full-range, almost neutral, with only tiny system polish.
       outputHp[ch].setHighpass(sampleRateHz, 18.0);
       outputLow[ch].setLowShelf(sampleRateHz, 82.0, 0.25);
       outputPresence[ch].setPeaking(sampleRateHz, 2900.0, 0.95, 0.2);
       outputHigh[ch].setHighShelf(sampleRateHz, 10500.0, 0.15);
     }
   }
+
+  // Adaptive low-frequency guard. It acts only when the selected output path is
+  // being over-driven in its vulnerable low-frequency region. Normal material
+  // remains untouched; no makeup gain is applied.
+  if (outputProfile == 2) {
+    outputGuard.configure(sampleRateHz, 82.0f, 0.82f, -14.5f, 2.2f, 2.0f, 12.0f, 220.0f);
+    outputCorrectionProfileScale = 1.0f;
+  } else if (outputProfile == 1) {
+    outputGuard.configure(sampleRateHz, 55.0f, 0.78f, -8.0f, 0.5f, 1.6f, 18.0f, 260.0f);
+    outputCorrectionProfileScale = 0.35f;
+  } else {
+    outputGuard.configure(sampleRateHz, 58.0f, 0.80f, -10.5f, 1.2f, 1.8f, 15.0f, 240.0f);
+    outputCorrectionProfileScale = 0.65f;
+  }
+  outputGuard.reset();
+  meterOutputCorrectionReductionDb = 0.0f;
 }
 
 void configureHeadphoneBass() {
@@ -551,6 +585,20 @@ void refreshDynamicEqForBlock(int frames) {
 inline void processDynamicEq(float &left, float &right) {
   if (!dynamicEqEnabled && meterDynamicEqMaxReductionDb <= 0.001f) return;
   for (int band = 0; band < 4; ++band) dynamicEqBands[band].process(left, right);
+}
+
+void refreshOutputCorrectionForBlock(int frames) {
+  const float seconds = static_cast<float>(frames) / sampleRateHz;
+  const float amount = outputCorrectionEnabled
+    ? clampf(outputCorrectionAmount * outputCorrectionProfileScale, 0.0f, 1.0f)
+    : 0.0f;
+  outputGuard.update(sampleRateHz, amount, seconds);
+  meterOutputCorrectionReductionDb = outputGuard.reductionDb;
+}
+
+inline void processOutputCorrection(float &left, float &right) {
+  if (!outputCorrectionEnabled && meterOutputCorrectionReductionDb <= 0.001f) return;
+  outputGuard.process(left, right);
 }
 
 void configureLoudness() {
@@ -956,6 +1004,13 @@ __attribute__((visibility("default"))) void mvp_set_output_profile(int profile) 
   outputProfile = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
   configureOutputProfile();
 }
+__attribute__((visibility("default"))) void mvp_set_output_correction(int enabled, float amount) {
+  const int nextEnabled = enabled ? 1 : 0;
+  if (nextEnabled && !outputCorrectionEnabled) outputGuard.reset();
+  outputCorrectionEnabled = nextEnabled;
+  outputCorrectionAmount = clampf(amount, 0.0f, 1.0f);
+  if (!outputCorrectionEnabled) meterOutputCorrectionReductionDb = 0.0f;
+}
 __attribute__((visibility("default"))) void mvp_set_headphone(
   int enabled, float width, float depth, float crossfeed, float center, float bassImpact
 ) {
@@ -973,6 +1028,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   if (frames <= 0 || frames > kMaxFrames) return 0;
   refreshEqForBlock(frames);
   refreshDynamicEqForBlock(frames);
+  refreshOutputCorrectionForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
@@ -1008,6 +1064,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     processDynamicEq(left, right);
     left = processOutput(0, left);
     right = processOutput(1, right);
+    processOutputCorrection(left, right);
     processHeadphone(left, right);
     processLoudness(left, right);
 
@@ -1045,6 +1102,7 @@ __attribute__((visibility("default"))) float mvp_meter_dynamic_eq_band_reduction
   if (band < 0 || band >= 4) return 0.0f;
   return meterDynamicEqBandReductionDb[band];
 }
+__attribute__((visibility("default"))) float mvp_meter_output_correction_reduction_db() { return meterOutputCorrectionReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }

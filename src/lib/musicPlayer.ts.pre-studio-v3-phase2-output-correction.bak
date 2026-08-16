@@ -255,7 +255,6 @@ export type MusicPlayerState = {
   dynamicEqEnabled: boolean;
   dynamicEqGainReductionDb: number;
   dynamicEqBandReductionDb: [number, number, number, number];
-  outputCorrectionReductionDb: number;
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   limiterEnabled: boolean;
@@ -496,7 +495,6 @@ let state: MusicPlayerState = {
   dynamicEqEnabled: readBoolean(STORAGE_KEYS.dynamicEqEnabled, true),
   dynamicEqGainReductionDb: 0,
   dynamicEqBandReductionDb: [0, 0, 0, 0],
-  outputCorrectionReductionDb: 0,
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true),
@@ -1248,11 +1246,6 @@ function applyStudioProcessingSettings(now: number) {
     // cannot reintroduce the old EQ-slider/global-volume bug.
     dynamicEqEnabled: processed && state.dynamicEqEnabled,
     dynamicEqAmount: 0.72,
-    // MVP_STUDIO_WASM_V3_PHASE2_OUTPUT_CORRECTION
-    // Device-path intelligence stays separate from the musical preset. The WASM
-    // core chooses the correct adaptive guard behavior from outputProfileCode.
-    outputCorrectionEnabled: processed,
-    outputCorrectionAmount: 1,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
     normalizationEnabled: processed && state.normalizationEnabled,
@@ -1697,13 +1690,8 @@ function startLevelMeter() {
         : [0, 0, 0, 0]) as [number, number, number, number];
       const dynamicEqChanged = dynamicEqGainReductionDb !== state.dynamicEqGainReductionDb
         || dynamicEqBandReductionDb.some((value, index) => value !== state.dynamicEqBandReductionDb[index]);
-      const outputCorrectionActive = state.outputProfile !== "reference" && !state.dspBypass;
-      const outputCorrectionReductionDb = outputCorrectionActive && Number.isFinite(telemetry.outputCorrectionReductionDb)
-        ? Math.round(telemetry.outputCorrectionReductionDb * 10) / 10
-        : 0;
-      const outputCorrectionChanged = outputCorrectionReductionDb !== state.outputCorrectionReductionDb;
-      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged || outputCorrectionChanged) {
-        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs, dynamicEqGainReductionDb, dynamicEqBandReductionDb, outputCorrectionReductionDb });
+      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged) {
+        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs, dynamicEqGainReductionDb, dynamicEqBandReductionDb });
       }
     }
     const referenceDb = rmsDbFromAnalyser(referenceLevelAnalyser);

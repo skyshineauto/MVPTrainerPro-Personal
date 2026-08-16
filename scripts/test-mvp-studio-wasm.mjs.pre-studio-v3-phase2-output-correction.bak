@@ -33,7 +33,6 @@ for (const name of [
   "mvp_set_transient",
   "mvp_set_multiband",
   "mvp_set_dynamic_eq",
-  "mvp_set_output_correction",
   "mvp_set_loudness",
   "mvp_reset_loudness",
   "mvp_meter_loudness_gain_db",
@@ -44,7 +43,6 @@ for (const name of [
   "mvp_meter_multiband_band_reduction_db",
   "mvp_meter_dynamic_eq_gain_reduction_db",
   "mvp_meter_dynamic_eq_band_reduction_db",
-  "mvp_meter_output_correction_reduction_db",
 ]) {
   if (typeof dsp[name] !== "function") throw new Error(`Missing ${name} export`);
 }
@@ -62,7 +60,6 @@ function baseState() {
   dsp.mvp_set_transient(0, 0);
   dsp.mvp_set_multiband(0, 1);
   dsp.mvp_set_dynamic_eq(0, 0.72);
-  dsp.mvp_set_output_correction(0, 1);
   dsp.mvp_set_loudness(0, -10);
   dsp.mvp_set_limiter(0, -1.0);
   dsp.mvp_set_output_profile(1); // Headphone profile is neutral in the V2 core.
@@ -138,8 +135,6 @@ baseState();
 dsp.mvp_set_transient(1, 0.72);
 dsp.mvp_set_multiband(1, 1);
 dsp.mvp_set_dynamic_eq(1, 0.72);
-dsp.mvp_set_output_profile(2);
-dsp.mvp_set_output_correction(1, 1);
 dsp.mvp_set_limiter(1, -1.0);
 let phase = 0;
 let combinedPeak = 0;
@@ -212,58 +207,7 @@ if (!(dynamicHotDeltaDb < -0.1 && dynamicHotDeltaDb > -3.0)) {
   throw new Error(`Dynamic EQ hot-band level change is implausible: ${dynamicHotDeltaDb.toFixed(3)} dB`);
 }
 
-
-// 5) Intelligent output correction should be transparent on quiet material and
-// apply a bounded cut-only low-frequency guard when the Bluetooth path is stressed.
-function renderOutputCorrection({ profile, frequency, amplitude, enabled, seconds = 5 }) {
-  dsp.mvp_reset();
-  baseState();
-  dsp.mvp_set_output_profile(profile);
-  dsp.mvp_set_output_correction(enabled ? 1 : 0, 1);
-  dsp.mvp_set_limiter(0, -1.0);
-  let phase = 0;
-  let sumSq = 0;
-  let count = 0;
-  let maxGr = 0;
-  const blocks = Math.ceil((seconds * 48000) / 128);
-  for (let block = 0; block < blocks; block += 1) {
-    for (let i = 0; i < 128; i += 1) {
-      const sample = amplitude * Math.sin(phase);
-      phase += (2 * Math.PI * frequency) / 48000;
-      inL[i] = sample;
-      inR[i] = sample;
-    }
-    if (dsp.mvp_process(128) !== 1) throw new Error("mvp_process failed in output correction test");
-    if (block > Math.floor(blocks * 0.55)) {
-      for (let i = 0; i < 128; i += 1) {
-        if (!Number.isFinite(outL[i]) || !Number.isFinite(outR[i])) throw new Error("Non-finite output correction output");
-        sumSq += 0.5 * (outL[i] * outL[i] + outR[i] * outR[i]);
-        count += 1;
-      }
-      maxGr = Math.max(maxGr, Number(dsp.mvp_meter_output_correction_reduction_db()));
-    }
-  }
-  return { rms: Math.sqrt(sumSq / Math.max(1, count)), maxGr };
-}
-
-const speakerQuietDry = renderOutputCorrection({ profile: 2, frequency: 82, amplitude: 0.015, enabled: false });
-const speakerQuietWet = renderOutputCorrection({ profile: 2, frequency: 82, amplitude: 0.015, enabled: true });
-const speakerQuietDeltaDb = 20 * Math.log10(Math.max(1e-9, speakerQuietWet.rms) / Math.max(1e-9, speakerQuietDry.rms));
-if (Math.abs(speakerQuietDeltaDb) > 0.2 || speakerQuietWet.maxGr > 0.15) {
-  throw new Error(`Output correction altered quiet Bluetooth material too much: ${JSON.stringify({ speakerQuietDeltaDb, speakerQuietWet })}`);
-}
-
-const speakerHotDry = renderOutputCorrection({ profile: 2, frequency: 82, amplitude: 0.62, enabled: false });
-const speakerHotWet = renderOutputCorrection({ profile: 2, frequency: 82, amplitude: 0.62, enabled: true });
-const speakerHotDeltaDb = 20 * Math.log10(Math.max(1e-9, speakerHotWet.rms) / Math.max(1e-9, speakerHotDry.rms));
-if (!(speakerHotWet.maxGr > 0.25 && speakerHotWet.maxGr <= 2.25)) {
-  throw new Error(`Bluetooth output guard GR out of range: ${JSON.stringify(speakerHotWet)}`);
-}
-if (!(speakerHotDeltaDb < -0.1 && speakerHotDeltaDb > -2.7)) {
-  throw new Error(`Bluetooth output correction change is implausible: ${speakerHotDeltaDb.toFixed(3)} dB`);
-}
-
-// 6) Volume Match should move program gain slowly toward -10 LUFS,
+// 5) Volume Match should move program gain slowly toward -10 LUFS,
 // without becoming a short-term compressor. A loud steady program attenuates;
 // a quiet one receives a bounded boost.
 function renderLoudness(amplitude, enabled, seconds = 14) {
@@ -320,14 +264,12 @@ if (Math.abs(normalizationOff.gainDb) > 0.1) {
   throw new Error(`Disabled Volume Match changed gain: ${normalizationOff.gainDb}`);
 }
 
-// 7) Deliberate overload: final limiter still owns the ceiling after the Dynamic EQ chain.
+// 6) Deliberate overload: final limiter still owns the ceiling after the Dynamic EQ chain.
 dsp.mvp_reset();
 baseState();
 dsp.mvp_set_preamp_db(9);
 dsp.mvp_set_transient(1, 1);
 dsp.mvp_set_multiband(1, 1);
-dsp.mvp_set_output_profile(2);
-dsp.mvp_set_output_correction(1, 1);
 dsp.mvp_set_limiter(1, -1.0);
 let overloadPeak = 0;
 phase = 0;
@@ -344,7 +286,7 @@ for (let block = 0; block < 320; block += 1) {
 const ceiling = 10 ** (-1 / 20);
 if (overloadPeak > ceiling + 0.0001) throw new Error(`Limiter exceeded ceiling: ${overloadPeak}`);
 
-console.log("MVP Studio WASM V3 Phase 2 Intelligent Output Correction: PASS");
+console.log("MVP Studio WASM V3 Phase 1 Dynamic EQ: PASS");
 console.log({
   wasmBytes: bytes.length,
   maxFrames,
@@ -357,12 +299,6 @@ console.log({
     hotDeltaDb: dynamicHotDeltaDb,
     hotMaxGrDb: dynamicHotWet.maxGr,
     hotBandMaxDb: dynamicHotWet.bandMax,
-  },
-  outputCorrection: {
-    speakerQuietDeltaDb,
-    speakerQuietMaxGrDb: speakerQuietWet.maxGr,
-    speakerHotDeltaDb,
-    speakerHotMaxGrDb: speakerHotWet.maxGr,
   },
   loudProgram,
   quietProgram,
