@@ -1185,19 +1185,19 @@ function studioOutputProfileCode(): 0 | 1 | 2 {
   return 0;
 }
 function calculateStudioGain() {
+  // MVP_STUDIO_WASM_V1_1_GAIN_STAGING_FIX
+  // EQ bands are tonal controls, not a global-volume control. Studio V1 previously
+  // derived auto headroom from the largest positive band and then subtracted that
+  // value from the entire signal. V1.1 keeps user/preset preamp independent from
+  // EQ-band movement and lets the WASM output limiter handle real peak events.
   if (state.outputProfile === "reference") {
     return { effectivePreampDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
   }
-  const requested = state.eqEnabled ? Math.max(-12, Math.min(12, Number(state.preampDb) || 0)) : 0;
-  const maxBoost = state.eqEnabled
-    ? Math.max(0, ...state.eqGains.map((value) => Math.max(0, Number(value) || 0)))
+  const requested = state.eqEnabled
+    ? Math.max(-12, Math.min(12, Number(state.preampDb) || 0))
     : 0;
-  const presetCredit = Math.max(0, -requested);
-  const profileSafety = state.outputProfile === "speaker" ? 0.45 : state.outputProfile === "headphones" ? 0.28 : 0.20;
-  const headphoneSafety = headphonePeakSafetyDb() * 0.28;
-  const limiterCredit = state.limiterEnabled ? 1.5 : 0.5;
-  const autoHeadroomDb = Math.max(0, maxBoost + profileSafety + headphoneSafety - presetCredit - limiterCredit);
-  const effectivePreampDb = Math.max(-18, requested - autoHeadroomDb);
+  const autoHeadroomDb = 0;
+  const effectivePreampDb = requested;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb));

@@ -1894,7 +1894,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <div className="tr-outputProfileTelemetry">
               <span className="tr-outputProfileTelemetryActive" data-profile={player.outputProfile}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</b></span>
-              <span>AUTO HEADROOM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
+              <span>SAFETY TRIM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
               <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
               <span>MULTIBAND <b>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "ON" : "OFF"}</b></span>
               <span>NORMALIZER <b>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? `${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB` : "OFF"}</b></span>
@@ -1925,7 +1925,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-preampTrimCopy">
               <span>ADVANCED GAIN</span>
               <strong>PREAMP TRIM</strong>
-              <small>Auto headroom stays active. Use this only for a small output-level correction.</small>
+              <small>Independent preamp. EQ bands change only their frequencies; the WASM output limiter catches real peaks.</small>
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
