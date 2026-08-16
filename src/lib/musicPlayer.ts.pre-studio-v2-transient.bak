@@ -1216,21 +1216,12 @@ function applyStudioProcessingSettings(now: number) {
   if (standardRouteGain) setAudioParam(standardRouteGain.gain, processed ? 1 : 0, now, 0.008);
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
   const headphoneEnabled = processed && state.outputProfile === "headphones" && (state.headphoneMode !== "off" || proof);
-  // MVP_STUDIO_WASM_V2_TRANSIENT
-  // The same preset/source-aware transient amount used by the Compatibility engine
-  // now drives a stereo-linked shaper inside the WASM core. It never changes EQ
-  // headroom or preamp, so the V1.1 gain-staging fix remains intact.
-  const studioTransientAmount = processed && state.eqEnabled
-    ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale()))
-    : 0;
   setMvpStudioState(studioProcessorNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
     eqGains: [...state.eqGains],
     preampDb: state.eqEnabled ? state.preampDb : 0,
     headroomDb: autoHeadroomDb,
-    transientEnabled: studioTransientAmount > 0.001,
-    transientAmount: studioTransientAmount,
     limiterEnabled: processed && state.limiterEnabled,
     limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
     outputProfileCode: studioOutputProfileCode(),

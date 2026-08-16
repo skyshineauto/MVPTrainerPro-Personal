@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V1
+// MVP Trainer Pro - MVP Studio Engine V2 Transient
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -181,12 +181,30 @@ float meterInputRms = 0.0f;
 float meterOutputRms = 0.0f;
 float meterGainReductionDb = 0.0f;
 
+// Studio V2 transient shaper. Stereo-linked detector keeps the image stable.
+int transientEnabled = 0;
+float transientAmount = 0.0f;
+float transientFastEnvelope = 0.0f;
+float transientSlowEnvelope = 0.0f;
+float transientGain = 1.0f;
+float transientFastAttackCoeff = 0.02f;
+float transientFastReleaseCoeff = 0.001f;
+float transientSlowAttackCoeff = 0.002f;
+float transientSlowReleaseCoeff = 0.0002f;
+float transientGainAttackCoeff = 0.03f;
+float transientGainReleaseCoeff = 0.001f;
+float meterTransientBoostDb = 0.0f;
+
 void resetBuffers() {
   for (int i = 0; i < kMaxLookahead; ++i) { limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f; }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
   limiterWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
   prevDetectorL = prevDetectorR = 0.0f;
   crossfeedStateL = crossfeedStateR = 0.0;
+  transientFastEnvelope = 0.0f;
+  transientSlowEnvelope = 0.0f;
+  transientGain = 1.0f;
+  meterTransientBoostDb = 0.0f;
   for (int ch = 0; ch < 2; ++ch) {
     for (int band = 0; band < kEqBands; ++band) eq[ch][band].reset();
     outputHp[ch].reset(); outputLow[ch].reset(); outputPresence[ch].reset(); outputHigh[ch].reset(); headphoneBass[ch].reset();
@@ -297,6 +315,48 @@ void processHeadphone(float &left, float &right) {
   right = widenedR * compensation;
 }
 
+inline float envelopeStep(float current, float detector, float attackCoeff, float releaseCoeff) {
+  const float coeff = detector > current ? attackCoeff : releaseCoeff;
+  return current + (detector - current) * coeff;
+}
+
+void processTransient(float &left, float &right) {
+  if (!transientEnabled || transientAmount <= 0.0001f) {
+    transientGain += (1.0f - transientGain) * transientGainReleaseCoeff;
+    return;
+  }
+
+  // One detector for both channels prevents image shifts on asymmetric attacks.
+  const float absL = absf(left);
+  const float absR = absf(right);
+  const float detector = absL > absR ? absL : absR;
+  transientFastEnvelope = envelopeStep(
+    transientFastEnvelope, detector, transientFastAttackCoeff, transientFastReleaseCoeff
+  );
+  transientSlowEnvelope = envelopeStep(
+    transientSlowEnvelope, detector, transientSlowAttackCoeff, transientSlowReleaseCoeff
+  );
+
+  // Positive fast-vs-slow separation identifies onsets. Normalize by the program
+  // envelope so quiet passages do not receive absurd gain. Maximum boost is 2.2 dB.
+  const float floor = 0.025f;
+  const float separation = transientFastEnvelope - transientSlowEnvelope;
+  const float normalized = separation > 0.0f
+    ? clampf(separation / (transientSlowEnvelope + floor), 0.0f, 1.0f)
+    : 0.0f;
+  const float boostDb = transientAmount * normalized * 2.2f;
+  const float targetGain = static_cast<float>(dbToGain(boostDb));
+  const float coeff = targetGain > transientGain ? transientGainAttackCoeff : transientGainReleaseCoeff;
+  transientGain += (targetGain - transientGain) * coeff;
+
+  left *= transientGain;
+  right *= transientGain;
+  const float actualBoostDb = transientGain > 1.000001f
+    ? static_cast<float>(20.0 * log10(transientGain))
+    : 0.0f;
+  if (actualBoostDb > meterTransientBoostDb) meterTransientBoostDb = actualBoostDb;
+}
+
 inline float intersamplePeak(float previous, float current) {
   float peak = absf(previous) > absf(current) ? absf(previous) : absf(current);
   const float step = (current - previous) * 0.25f;
@@ -348,6 +408,13 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   if (limiterLookahead < 1) limiterLookahead = 1;
   if (limiterLookahead >= kMaxLookahead) limiterLookahead = kMaxLookahead - 1;
   limiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
+  // Envelope constants are intentionally conservative for mastered rock/pop material.
+  transientFastAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0012)));
+  transientFastReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.028)));
+  transientSlowAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.020)));
+  transientSlowReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.180)));
+  transientGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0008)));
+  transientGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.026)));
   for (int band = 0; band < kEqBands; ++band) {
     eqTarget[band] = 0.0f;
     eqCurrent[band] = 0.0f;
@@ -376,6 +443,10 @@ __attribute__((visibility("default"))) void mvp_set_eq_band(int index, float gai
 }
 __attribute__((visibility("default"))) void mvp_set_preamp_db(float value) { targetPreampDb = clampf(value, -18.0f, 12.0f); }
 __attribute__((visibility("default"))) void mvp_set_headroom_db(float value) { headroomDb = clampf(value, 0.0f, 18.0f); }
+__attribute__((visibility("default"))) void mvp_set_transient(int enabled, float amount) {
+  transientEnabled = enabled ? 1 : 0;
+  transientAmount = clampf(amount, 0.0f, 1.0f);
+}
 __attribute__((visibility("default"))) void mvp_set_limiter(int enabled, float ceilingDb) {
   limiterEnabled = enabled ? 1 : 0;
   limiterCeilingDb = clampf(ceilingDb, -6.0f, -0.1f);
@@ -402,6 +473,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   if (frames <= 0 || frames > kMaxFrames) return 0;
   refreshEqForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
+  meterTransientBoostDb = 0.0f;
   double inputEnergy = 0.0;
   double outputEnergy = 0.0;
   const float targetGain = static_cast<float>(dbToGain(targetPreampDb - headroomDb));
@@ -428,6 +500,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     float right = rawR * currentPreampGain;
     left = processEq(0, left);
     right = processEq(1, right);
+    processTransient(left, right);
     left = processOutput(0, left);
     right = processOutput(1, right);
     processHeadphone(left, right);
@@ -455,4 +528,5 @@ __attribute__((visibility("default"))) float mvp_meter_input_rms() { return mete
 __attribute__((visibility("default"))) float mvp_meter_output_rms() { return meterOutputRms; }
 __attribute__((visibility("default"))) float mvp_meter_gain_reduction_db() { return meterGainReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_limiter_gain() { return limiterGain; }
+__attribute__((visibility("default"))) float mvp_meter_transient_boost_db() { return meterTransientBoostDb; }
 }

@@ -24,6 +24,7 @@ CLANGXX="${CLANGXX:-clang++}"
   -Wl,--export=mvp_set_eq_band \
   -Wl,--export=mvp_set_preamp_db \
   -Wl,--export=mvp_set_headroom_db \
+  -Wl,--export=mvp_set_transient \
   -Wl,--export=mvp_set_limiter \
   -Wl,--export=mvp_set_output_profile \
   -Wl,--export=mvp_set_headphone \
@@ -35,6 +36,7 @@ CLANGXX="${CLANGXX:-clang++}"
   -Wl,--export=mvp_meter_output_rms \
   -Wl,--export=mvp_meter_gain_reduction_db \
   -Wl,--export=mvp_meter_limiter_gain \
+  -Wl,--export=mvp_meter_transient_boost_db \
   -Wl,--allow-undefined \
   -o "$OUT"
 

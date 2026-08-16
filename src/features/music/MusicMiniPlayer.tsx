@@ -1942,7 +1942,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>OUTPUT LIMITER <b className="is-good">{player.dspEngineMode === "studio_wasm" ? "WASM • 4× PEAK GUARD" : "4× • -1 dBTP"}</b></span>
               <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
               <span>LOUDNESS NORMALIZATION <b className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "ADAPTIVE • -14 LUFS" : "BYPASSED"}</b></span>
-              <span>TRANSIENT DETAIL <b className={player.dspEngineMode === "studio_wasm" ? "is-fallback" : "is-good"}>{player.dspEngineMode === "studio_wasm" ? "V2" : "AUTO"}</b></span>
+              <span>TRANSIENT DETAIL <b className={player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "is-good" : "is-fallback"}>{player.dspEngineMode === "studio_wasm" ? (player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "WASM • AUTO" : "BYPASSED") : "AUTO"}</b></span>
             </div>
           </section>
 

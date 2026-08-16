@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V1
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Transient
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -95,7 +95,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v1",
+        version: "studio-wasm-v2-transient",
       });
     } catch (error) {
       this.failed = true;
@@ -127,6 +127,12 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     }
     api.mvp_set_preamp_db(Number.isFinite(Number(state.preampDb)) ? Number(state.preampDb) : 0);
     api.mvp_set_headroom_db(Number.isFinite(Number(state.headroomDb)) ? Number(state.headroomDb) : 0);
+    if (typeof api.mvp_set_transient === "function") {
+      api.mvp_set_transient(
+        state.transientEnabled ? 1 : 0,
+        Number.isFinite(Number(state.transientAmount)) ? Number(state.transientAmount) : 0,
+      );
+    }
     api.mvp_set_limiter(state.limiterEnabled ? 1 : 0, Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1);
     api.mvp_set_output_profile(Number.isFinite(Number(state.outputProfileCode)) ? Number(state.outputProfileCode) : 0);
     api.mvp_set_headphone(
@@ -208,6 +214,9 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         outputRms: this.exports.mvp_meter_output_rms(),
         gainReductionDb: this.exports.mvp_meter_gain_reduction_db(),
         limiterGain: this.exports.mvp_meter_limiter_gain(),
+        transientBoostDb: typeof this.exports.mvp_meter_transient_boost_db === "function"
+          ? this.exports.mvp_meter_transient_boost_db()
+          : 0,
       });
     }
     return true;
