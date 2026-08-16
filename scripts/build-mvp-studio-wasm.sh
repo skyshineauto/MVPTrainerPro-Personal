@@ -55,6 +55,7 @@ CLANGXX="${CLANGXX:-clang++}"
   -Wl,--export=mvp_meter_stereo_correlation \
   -Wl,--export=mvp_meter_stereo_width_percent \
   -Wl,--export=mvp_meter_stereo_guard_reduction_db \
+  -Wl,--export=mvp_meter_headphone_output_drive_db \
   -Wl,--export=mvp_meter_loudness_gain_db \
   -Wl,--export=mvp_meter_loudness_momentary_lufs \
   -Wl,--export=mvp_meter_loudness_program_lufs \

@@ -411,6 +411,11 @@ float headphoneDepth = 0.0f;
 float headphoneCrossfeed = 0.0f;
 float headphoneCenter = 0.5f;
 float headphoneBassImpact = 0.0f;
+// V4.5 headphone-only final drive. This is deliberately separate from the
+// upstream preamp so max phone/headphone playback can recover usable loudness
+// without changing Car/Hi-Fi or Bluetooth output profiles.
+float headphoneOutputDriveGain = 1.0f;
+float meterHeadphoneOutputDriveDb = 0.0f;
 // Studio Stereo Integrity is automatic for every processed non-reference path.
 int stereoIntegrityEnabled = 1;
 float stereoIntegrityAmount = 1.0f;
@@ -542,6 +547,8 @@ void resetBuffers() {
     truePeakHistoryR[tap] = 0.0f;
   }
   crossfeedStateL = crossfeedStateR = 0.0;
+  headphoneOutputDriveGain = 1.0f;
+  meterHeadphoneOutputDriveDb = 0.0f;
   stereoSideLowpass.reset();
   stereoCorrelationEnergy = 0.0f;
   stereoCorrelationCross = 0.0f;
@@ -853,7 +860,7 @@ void configureStereoIntegrity() {
 }
 
 void configureHeadphoneBass() {
-  const double boost = headphoneEnabled ? clampd(headphoneBassImpact, 0.0, 1.0) * 3.0 : 0.0;
+  const double boost = headphoneEnabled ? clampd(headphoneBassImpact, 0.0, 1.0) * 4.8 : 0.0;
   headphoneBass[0].setLowShelf(sampleRateHz, 92.0, boost);
   headphoneBass[1].setLowShelf(sampleRateHz, 92.0, boost);
 }
@@ -1020,23 +1027,27 @@ void processHeadphone(float &left, float &right) {
   left = headphoneBass[0].process(left);
   right = headphoneBass[1].process(right);
 
+  // V4.5: make immersion controls unmistakably audible while keeping the
+  // output stable and bounded. Width changes the side channel, Center changes
+  // the mid channel, Crossfeed creates a low-passed speaker-like blend, and
+  // Depth adds a short opposite-channel ambience cue.
   const float width = clampf(headphoneWidth, 0.0f, 1.0f);
   const float center = clampf(headphoneCenter, 0.0f, 1.0f);
   const float mid = 0.5f * (left + right);
   const float side = 0.5f * (left - right);
-  const float sideScale = 1.0f + width * 0.55f;
-  const float midScale = 0.92f + center * 0.16f;
+  const float sideScale = 1.0f + width * 0.82f;
+  const float midScale = 0.84f + center * 0.32f;
   float widenedL = mid * midScale + side * sideScale;
   float widenedR = mid * midScale - side * sideScale;
 
   const float cf = clampf(headphoneCrossfeed, 0.0f, 1.0f);
   if (cf > 0.0001f) {
-    const double cutoff = 1100.0;
+    const double cutoff = 1250.0;
     const double alpha = 1.0 - exp(-2.0 * kPi * cutoff / sampleRateHz);
     crossfeedStateL += alpha * (widenedL - crossfeedStateL);
     crossfeedStateR += alpha * (widenedR - crossfeedStateR);
-    const float mix = cf * 0.18f;
-    const float direct = 1.0f - mix * 0.42f;
+    const float mix = cf * 0.30f;
+    const float direct = 1.0f - mix * 0.24f;
     const float cfL = static_cast<float>(crossfeedStateR) * mix;
     const float cfR = static_cast<float>(crossfeedStateL) * mix;
     widenedL = widenedL * direct + cfL;
@@ -1045,7 +1056,7 @@ void processHeadphone(float &left, float &right) {
 
   const float depth = clampf(headphoneDepth, 0.0f, 1.0f);
   if (depth > 0.0001f) {
-    int delaySamples = static_cast<int>(sampleRateHz * (0.00035f + 0.00105f * depth));
+    int delaySamples = static_cast<int>(sampleRateHz * (0.00055f + 0.00220f * depth));
     if (delaySamples < 1) delaySamples = 1;
     if (delaySamples >= kSpatialDelayMax) delaySamples = kSpatialDelayMax - 1;
     const int read = (spatialWrite - delaySamples + kSpatialDelayMax) % kSpatialDelayMax;
@@ -1054,14 +1065,41 @@ void processHeadphone(float &left, float &right) {
     spatialDelayL[spatialWrite] = widenedL;
     spatialDelayR[spatialWrite] = widenedR;
     spatialWrite = (spatialWrite + 1) % kSpatialDelayMax;
-    const float mix = depth * 0.10f;
-    widenedL = widenedL * (1.0f - mix) + delayedR * mix;
-    widenedR = widenedR * (1.0f - mix) + delayedL * mix;
+    const float mix = depth * 0.24f;
+    widenedL = widenedL * (1.0f - mix * 0.46f) + delayedR * mix;
+    widenedR = widenedR * (1.0f - mix * 0.46f) + delayedL * mix;
   }
 
-  const float compensation = 1.0f / (1.0f + width * 0.10f + depth * 0.06f);
+  // Previous versions compensated so aggressively that the modes could sound
+  // nearly identical. Keep only a small energy correction so Wide/Spatial/
+  // Stage/Focus are obvious without turning into a gimmick.
+  const float compensation = 1.0f / (1.0f + width * 0.035f + depth * 0.025f);
   left = widenedL * compensation;
   right = widenedR * compensation;
+}
+
+void processHeadphoneOutputDrive(float &left, float &right) {
+  // The drive is automatic for the Headphones output profile, even when
+  // Immersion itself is Off. It lives immediately before the true-peak
+  // limiter and backs off if the limiter is already doing significant work.
+  float targetDb = (outputProfile == 1 && limiterEnabled) ? 3.8f : 0.0f;
+  if (outputProfile == 1 && limiterEnabled) {
+    const float limiterGrDb = limiterGain < 0.999999f
+      ? static_cast<float>(-20.0 * log10(limiterGain))
+      : 0.0f;
+    if (limiterGrDb > 0.75f) targetDb -= (limiterGrDb - 0.75f) * 1.15f;
+    targetDb = clampf(targetDb, 0.0f, 3.8f);
+  }
+
+  const float target = static_cast<float>(dbToGain(targetDb));
+  const float tau = target < headphoneOutputDriveGain ? 0.10f : 0.70f;
+  const float coeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * tau)));
+  headphoneOutputDriveGain += (target - headphoneOutputDriveGain) * coeff;
+  left *= headphoneOutputDriveGain;
+  right *= headphoneOutputDriveGain;
+  meterHeadphoneOutputDriveDb = headphoneOutputDriveGain > 0.000001f
+    ? static_cast<float>(20.0 * log10(headphoneOutputDriveGain))
+    : 0.0f;
 }
 
 inline float envelopeStep(float current, float detector, float attackCoeff, float releaseCoeff) {
@@ -1472,6 +1510,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     processStereoIntegrity(left, right);
     processHeadphone(left, right);
     processLoudness(left, right);
+    processHeadphoneOutputDrive(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;
@@ -1539,6 +1578,7 @@ __attribute__((visibility("default"))) float mvp_meter_output_correction_reducti
 __attribute__((visibility("default"))) float mvp_meter_stereo_correlation() { return meterStereoCorrelation; }
 __attribute__((visibility("default"))) float mvp_meter_stereo_width_percent() { return meterStereoWidthPercent; }
 __attribute__((visibility("default"))) float mvp_meter_stereo_guard_reduction_db() { return meterStereoGuardReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_headphone_output_drive_db() { return meterHeadphoneOutputDriveDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }

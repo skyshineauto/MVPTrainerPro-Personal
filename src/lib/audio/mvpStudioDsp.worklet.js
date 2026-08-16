@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.3 Real-Time Hardening
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.5 Headphone Power + Continuity
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -105,7 +105,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v4.3-real-time-hardening",
+        version: "studio-wasm-v4.5-headphone-continuity",
       });
     } catch (error) {
       this.failed = true;
@@ -427,6 +427,9 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
           : 100,
         stereoGuardReductionDb: typeof this.exports.mvp_meter_stereo_guard_reduction_db === "function"
           ? this.exports.mvp_meter_stereo_guard_reduction_db()
+          : 0,
+        headphoneOutputDriveDb: typeof this.exports.mvp_meter_headphone_output_drive_db === "function"
+          ? this.exports.mvp_meter_headphone_output_drive_db()
           : 0,
         loudnessGainDb: typeof this.exports.mvp_meter_loudness_gain_db === "function"
           ? this.exports.mvp_meter_loudness_gain_db()

@@ -15,6 +15,7 @@ export type MvpStudioTelemetry = {
   stereoCorrelation: number;
   stereoWidthPercent: number;
   stereoGuardReductionDb: number;
+  headphoneOutputDriveDb: number;
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   loudnessProgramLufs: number;
@@ -68,6 +69,7 @@ let latestTelemetry: MvpStudioTelemetry = {
   stereoCorrelation: 1,
   stereoWidthPercent: 100,
   stereoGuardReductionDb: 0,
+  headphoneOutputDriveDb: 0,
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   loudnessProgramLufs: -70,
@@ -76,7 +78,7 @@ let latestTelemetry: MvpStudioTelemetry = {
 function loadStudioWasmBytes() {
   if (!wasmBytesPromise) {
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "4.3.0");
+    url.searchParams.set("v", "4.5.0");
     wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
       return response.arrayBuffer();
@@ -91,7 +93,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   }
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "4.3.0");
+  workletUrl.searchParams.set("v", "4.5.0");
   const [wasmBytes] = await Promise.all([
     loadStudioWasmBytes(),
     context.audioWorklet.addModule(workletUrl.href),
@@ -155,6 +157,7 @@ export async function createMvpStudioNode(context: AudioContext) {
           stereoCorrelation: Number.isFinite(Number(data.stereoCorrelation)) ? Number(data.stereoCorrelation) : 1,
           stereoWidthPercent: Number.isFinite(Number(data.stereoWidthPercent)) ? Number(data.stereoWidthPercent) : 100,
           stereoGuardReductionDb: Number(data.stereoGuardReductionDb) || 0,
+          headphoneOutputDriveDb: Number(data.headphoneOutputDriveDb) || 0,
           loudnessGainDb: Number(data.loudnessGainDb) || 0,
           loudnessMomentaryLufs: Number.isFinite(Number(data.loudnessMomentaryLufs)) ? Number(data.loudnessMomentaryLufs) : -70,
           loudnessProgramLufs: Number.isFinite(Number(data.loudnessProgramLufs)) ? Number(data.loudnessProgramLufs) : -70,

@@ -3403,6 +3403,13 @@ export function WorkoutPlayerPage({ params }: any) {
 
       localStorage.setItem("mvp_active_exercise_name", String(name));
       localStorage.setItem("mvp_active_exercise_pos", pos ? `(${pos})` : "");
+      if (sessionId && workoutId && current) {
+        localStorage.setItem("mvp_active_cursor_session_id", String(sessionId));
+        localStorage.setItem("mvp_active_cursor_workout_id", String(workoutId));
+        localStorage.setItem("mvp_active_exercise_index", String(activeIdx));
+        if (current.id) localStorage.setItem("mvp_active_workout_exercise_row_id", String(current.id));
+        if (current.exercise_id) localStorage.setItem("mvp_active_exercise_id", String(current.exercise_id));
+      }
     } catch {}
   }, [sessionId, workoutId, current?.exercise?.name, current?.exercise_id, activeIdx, items.length]);
 
@@ -3628,8 +3635,23 @@ export function WorkoutPlayerPage({ params }: any) {
       loaded = await loadWorkoutExercisesWithExercises(wId);
     }
 
+    let restoredActiveIdx = 0;
+    try {
+      const cursorSession = localStorage.getItem("mvp_active_cursor_session_id");
+      const cursorWorkout = localStorage.getItem("mvp_active_cursor_workout_id");
+      if (cursorSession === String(sessionId) && cursorWorkout === String(wId)) {
+        const rowId = localStorage.getItem("mvp_active_workout_exercise_row_id");
+        const exerciseId = localStorage.getItem("mvp_active_exercise_id");
+        const savedIndex = Number(localStorage.getItem("mvp_active_exercise_index"));
+        const rowIndex = rowId ? loaded.findIndex((row) => String(row.id) === rowId) : -1;
+        const exerciseIndex = exerciseId ? loaded.findIndex((row) => String(row.exercise_id) === exerciseId) : -1;
+        if (rowIndex >= 0) restoredActiveIdx = rowIndex;
+        else if (exerciseIndex >= 0) restoredActiveIdx = exerciseIndex;
+        else if (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < loaded.length) restoredActiveIdx = savedIndex;
+      }
+    } catch { /* local cursor is optional */ }
     setItems(loaded);
-    setActiveIdx(0);
+    setActiveIdx(restoredActiveIdx);
 
     const exIds = Array.from(new Set(loaded.map((r) => r.exercise_id).filter(Boolean)));
     const upMap = await buildUserUploadMediaMap(exIds);

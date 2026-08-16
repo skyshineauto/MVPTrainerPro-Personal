@@ -231,13 +231,13 @@ export const MUSIC_HEADPHONE_MODES: Record<
   { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }
 > = {
   off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 88, depth: 18, crossfeed: 5, center: 50, bass: 0 },
-  spatial: { label: "Spatial", width: 82, depth: 78, crossfeed: 22, center: 54, bass: 0 },
-  stage: { label: "Stage", width: 66, depth: 72, crossfeed: 38, center: 68, bass: 0 },
-  focus: { label: "Focus", width: 8, depth: 4, crossfeed: 18, center: 98, bass: 0 },
-  bass_impact: { label: "Bass Impact", width: 42, depth: 16, crossfeed: 8, center: 60, bass: 64 },
+  wide: { label: "Wide", width: 100, depth: 8, crossfeed: 2, center: 48, bass: 4 },
+  spatial: { label: "Spatial", width: 92, depth: 95, crossfeed: 18, center: 54, bass: 6 },
+  stage: { label: "Stage", width: 58, depth: 82, crossfeed: 62, center: 72, bass: 8 },
+  focus: { label: "Focus", width: 0, depth: 0, crossfeed: 30, center: 100, bass: 0 },
+  bass_impact: { label: "Bass Impact", width: 46, depth: 16, crossfeed: 8, center: 60, bass: 90 },
 };
-
+// MVP_STUDIO_V4_5_HEADPHONE_CONTINUITY
 export const MUSIC_OUTPUT_PROFILES: Record<
   MusicOutputProfile,
   { label: string; shortLabel: string; description: string }
@@ -327,6 +327,7 @@ const STORAGE_KEYS = {
   repeat: "mvp_music_repeat",
   activePlaylistId: "mvp_music_active_playlist_id",
   activePlaylistName: "mvp_music_active_playlist_name",
+  activeQueueTrackIds: "mvp_music_active_queue_track_ids_v1",
   volume: "mvp_music_volume_v2",
   eqEnabled: "mvp_music_eq_enabled",
   eqPreset: "mvp_music_eq_preset",
@@ -2048,35 +2049,36 @@ async function handleTrackEnded() {
 async function resolveSavedQueue(libraryTracks: MusicTrack[]) {
   const savedPlaylistId = readStored(STORAGE_KEYS.activePlaylistId);
   if (!savedPlaylistId) {
-    return {
-      tracks: libraryTracks,
-      playlistId: null as string | null,
-      playlistName: null as string | null,
-    };
+    const savedQueueName = readStored(STORAGE_KEYS.activePlaylistName);
+    const savedQueueIdsRaw = readStored(STORAGE_KEYS.activeQueueTrackIds);
+    if (savedQueueName && savedQueueIdsRaw) {
+      try {
+        const ids = JSON.parse(savedQueueIdsRaw);
+        if (Array.isArray(ids) && ids.length) {
+          const byId = new Map(libraryTracks.map((track) => [track.id, track]));
+          const tracks = ids.map((id) => byId.get(String(id))).filter((track): track is MusicTrack => Boolean(track));
+          if (tracks.length) return { tracks, playlistId: null as string | null, playlistName: savedQueueName };
+        }
+      } catch { /* fall through */ }
+    }
+    removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+    removePlayerSetting(STORAGE_KEYS.activeQueueTrackIds);
+    return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
   }
   try {
-    const [playlist, links] = await Promise.all([
-      getMusicPlaylist(savedPlaylistId),
-      listMusicPlaylistTrackLinks(savedPlaylistId),
-    ]);
+    const [playlist, links] = await Promise.all([getMusicPlaylist(savedPlaylistId), listMusicPlaylistTrackLinks(savedPlaylistId)]);
     if (!playlist) throw new Error("Playlist no longer exists.");
     const byId = new Map(libraryTracks.map((track) => [track.id, track]));
-    const tracks = links
-      .map((link) => byId.get(link.track_id))
-      .filter((track): track is MusicTrack => Boolean(track));
+    const tracks = links.map((link) => byId.get(link.track_id)).filter((track): track is MusicTrack => Boolean(track));
     if (!tracks.length) throw new Error("Playlist is empty.");
     return { tracks, playlistId: playlist.id, playlistName: playlist.name };
   } catch {
     removePlayerSetting(STORAGE_KEYS.activePlaylistId);
     removePlayerSetting(STORAGE_KEYS.activePlaylistName);
-    return {
-      tracks: libraryTracks,
-      playlistId: null as string | null,
-      playlistName: null as string | null,
-    };
+    removePlayerSetting(STORAGE_KEYS.activeQueueTrackIds);
+    return { tracks: libraryTracks, playlistId: null as string | null, playlistName: null as string | null };
   }
 }
-
 export async function loadMusicLibrary(force = false) {
   if (state.loading) return state.libraryTracks;
   if (state.libraryLoaded && !force) return state.libraryTracks;
@@ -2110,21 +2112,21 @@ export async function loadMusicLibrary(force = false) {
 }
 
 export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {
-  const activeIds = new Set(state.tracks.map((track) => track.id));
-  const tracks = state.activePlaylistId
-    ? libraryTracks.filter((track) => activeIds.has(track.id))
+  const byId = new Map(libraryTracks.map((track) => [track.id, track]));
+  const hasScopedQueue = Boolean(state.activePlaylistId || state.activePlaylistName);
+  const tracks = hasScopedQueue
+    ? state.tracks.map((track) => byId.get(track.id) ?? track)
     : libraryTracks;
   const currentTrack = state.currentTrack
-    ? tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null
+    ? tracks.find((track) => track.id === state.currentTrack?.id) ?? byId.get(state.currentTrack.id) ?? state.currentTrack
     : tracks[0] ?? null;
-  if (state.currentTrack && !currentTrack) stopMusic();
   emit({ libraryTracks, tracks, currentTrack, libraryLoaded: true });
   configureMediaSession();
 }
-
 export function activateAllMusicTracks() {
   removePlayerSetting(STORAGE_KEYS.activePlaylistId);
   removePlayerSetting(STORAGE_KEYS.activePlaylistName);
+  removePlayerSetting(STORAGE_KEYS.activeQueueTrackIds);
   const currentTrack =
     state.libraryTracks.find((track) => track.id === state.currentTrack?.id) ??
     state.libraryTracks[0] ??
@@ -2142,17 +2144,11 @@ export function activateAllMusicTracks() {
 export function activateMusicAdHocQueue(name: string, tracks: MusicTrack[]) {
   removePlayerSetting(STORAGE_KEYS.activePlaylistId);
   savePlayerSetting(STORAGE_KEYS.activePlaylistName, name);
+  savePlayerSetting(STORAGE_KEYS.activeQueueTrackIds, JSON.stringify(tracks.map((track) => track.id)));
   const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
-  emit({
-    tracks: [...tracks],
-    currentTrack,
-    activePlaylistId: null,
-    activePlaylistName: name,
-    error: tracks.length ? null : "This collection has no songs.",
-  });
+  emit({ tracks: [...tracks], currentTrack, activePlaylistId: null, activePlaylistName: name, error: tracks.length ? null : "This collection has no songs." });
   configureMediaSession();
 }
-
 export async function playMusicAdHocQueue(name: string, tracks: MusicTrack[], startTrackId?: string) {
   activateMusicAdHocQueue(name, tracks);
   const start = tracks.find((track) => track.id === startTrackId) ?? tracks[0];
@@ -2165,17 +2161,11 @@ export function activateMusicPlaylistQueue(
 ) {
   savePlayerSetting(STORAGE_KEYS.activePlaylistId, playlist.id);
   savePlayerSetting(STORAGE_KEYS.activePlaylistName, playlist.name);
+  removePlayerSetting(STORAGE_KEYS.activeQueueTrackIds);
   const currentTrack = tracks.find((track) => track.id === state.currentTrack?.id) ?? tracks[0] ?? null;
-  emit({
-    tracks: [...tracks],
-    currentTrack,
-    activePlaylistId: playlist.id,
-    activePlaylistName: playlist.name,
-    error: tracks.length ? null : "This playlist has no songs.",
-  });
+  emit({ tracks: [...tracks], currentTrack, activePlaylistId: playlist.id, activePlaylistName: playlist.name, error: tracks.length ? null : "This playlist has no songs." });
   configureMediaSession();
 }
-
 export async function playMusicPlaylist(
   playlist: Pick<MusicPlaylist, "id" | "name">,
   tracks: MusicTrack[],

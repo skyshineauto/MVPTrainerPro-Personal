@@ -643,7 +643,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setSelectedPlaylistId((current) => preferredId && regularRows.some((p) => p.id === preferredId) ? preferredId : current && regularRows.some((p) => p.id === current) ? current : regularRows[0]?.id || null);
   }
   useEffect(() => {
-    void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary(true)]).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your music library.")).finally(() => setLoading(false));
+    void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary()]).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your music library.")).finally(() => setLoading(false));
   }, []);
   useEffect(() => {
     const refreshDiscovery = () => {
