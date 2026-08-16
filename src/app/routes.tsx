@@ -14,8 +14,16 @@ import { MusicPage } from "../features/music/MusicPage";
 
 export type Route = { path: string; el: ReactElement };
 
+/* MVP_STUDIO_V4_5_1_NAVIGATION_CONTINUITY
+ * Route wrappers must stay inside the existing React app instance.
+ * A full location assignment destroys the singleton HTMLAudioElement / Web Audio graph.
+ * pushState + popstate lets App.tsx update its existing route state without reloading.
+ */
 const goTo = (to: string) => {
-  window.location.pathname = to;
+  const next = to.length > 1 && to.endsWith("/") ? to.slice(0, -1) : to;
+  if (window.location.pathname === next) return;
+  window.history.pushState({}, "", next);
+  window.dispatchEvent(new Event("popstate"));
 };
 
 function LoginPageRoute() {
