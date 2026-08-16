@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { createMvpStudioNode, getMvpStudioTelemetry, setMvpStudioState } from "./audio/mvpStudioEngine";
 import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
@@ -41,7 +42,7 @@ export type MusicEqPreset =
   | "custom";
 export type MusicDuckingStrength = "off" | "light" | "standard" | "strong";
 export type MusicDspStatus = "active" | "bypassed" | "recovering" | "unavailable";
-export type MusicDspEngineMode = "advanced_worklet" | "native_fallback" | "unavailable";
+export type MusicDspEngineMode = "studio_wasm" | "advanced_worklet" | "native_fallback" | "unavailable";
 export type MusicImmersionStatus = "active" | "native_fallback" | "bypassed" | "unavailable";
 export type MusicDspVerificationMode = "off" | "eq" | "spatial";
 export type MusicEqTopology = "minimum_phase" | "linear_phase";
@@ -301,7 +302,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v13-9-studio-dsp";
+const AUDIO_ENGINE_VERSION = "v14-0-studio-wasm-v1";
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -511,6 +512,7 @@ let mediaSource: MediaElementAudioSourceNode | null = null;
 let masterVolumeGain: GainNode | null = null;
 let referenceRouteGain: GainNode | null = null;
 let preampGain: GainNode | null = null;
+let studioProcessorNode: AudioWorkletNode | null = null;
 let transientProcessorNode: AudioWorkletNode | null = null;
 let loudnessNormalizerNode: AudioWorkletNode | null = null;
 let multibandProcessorNode: AudioWorkletNode | null = null;
@@ -941,6 +943,7 @@ function currentImmersionStatus(): MusicImmersionStatus {
   if (state.outputProfile !== "headphones" || state.dspBypass) return "bypassed";
   const requested = state.headphoneMode !== "off" || state.dspVerificationMode === "spatial";
   if (!requested) return "bypassed";
+  if (studioProcessorNode && state.dspEngineMode === "studio_wasm") return "active";
   if (headphoneProcessorNode) return "active";
   if (nativeImmersionAvailable()) return "native_fallback";
   return "unavailable";
@@ -1015,6 +1018,10 @@ function applyLimiterSettings(now: number, limiterActive: boolean) {
 function applyProcessingSettings() {
   if (!audioContext || !mediaSourceConnected) return;
   const now = audioContext.currentTime;
+  if (studioProcessorNode && state.dspEngineMode === "studio_wasm") {
+    applyStudioProcessingSettings(now);
+    return;
+  }
   configureProfessionalFilters(now);
   configureGraphicEq(now);
   configureOutputFilters(now);
@@ -1061,6 +1068,7 @@ function releaseGraph() {
     masterVolumeGain,
     referenceRouteGain,
     preampGain,
+    studioProcessorNode,
     transientProcessorNode,
     loudnessNormalizerNode,
     multibandProcessorNode,
@@ -1111,6 +1119,8 @@ function releaseGraph() {
   masterVolumeGain = null;
   referenceRouteGain = null;
   preampGain = null;
+  try { studioProcessorNode?.port.close(); } catch { /* already closed */ }
+  studioProcessorNode = null;
   transientProcessorNode = null;
   loudnessNormalizerNode = null;
   multibandProcessorNode = null;
@@ -1166,6 +1176,132 @@ function releaseGraph() {
   graphBuildPromise = null;
   if (state.dspEngineMode !== "unavailable" || state.immersionStatus !== "bypassed") {
     emit({ dspEngineMode: "unavailable", immersionStatus: "bypassed" });
+  }
+}
+
+function studioOutputProfileCode(): 0 | 1 | 2 {
+  if (state.outputProfile === "headphones") return 1;
+  if (state.outputProfile === "speaker") return 2;
+  return 0;
+}
+function calculateStudioGain() {
+  if (state.outputProfile === "reference") {
+    return { effectivePreampDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
+  }
+  const requested = state.eqEnabled ? Math.max(-12, Math.min(12, Number(state.preampDb) || 0)) : 0;
+  const maxBoost = state.eqEnabled
+    ? Math.max(0, ...state.eqGains.map((value) => Math.max(0, Number(value) || 0)))
+    : 0;
+  const presetCredit = Math.max(0, -requested);
+  const profileSafety = state.outputProfile === "speaker" ? 0.45 : state.outputProfile === "headphones" ? 0.28 : 0.20;
+  const headphoneSafety = headphonePeakSafetyDb() * 0.28;
+  const limiterCredit = state.limiterEnabled ? 1.5 : 0.5;
+  const autoHeadroomDb = Math.max(0, maxBoost + profileSafety + headphoneSafety - presetCredit - limiterCredit);
+  const effectivePreampDb = Math.max(-18, requested - autoHeadroomDb);
+  const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
+    ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
+    : Math.max(-6, Math.min(3, effectivePreampDb));
+  return { effectivePreampDb, autoHeadroomDb, referenceMatchDb: measuredMatch };
+}
+function applyStudioProcessingSettings(now: number) {
+  if (!audioContext || !studioProcessorNode) return;
+  const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
+  const pureReference = state.outputProfile === "reference";
+  const abBypass = !pureReference && state.dspBypass;
+  const processed = !pureReference && !abBypass;
+  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
+  if (referenceRouteGain) {
+    setAudioParam(referenceRouteGain.gain, pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0, now, 0.008);
+  }
+  if (standardRouteGain) setAudioParam(standardRouteGain.gain, processed ? 1 : 0, now, 0.008);
+  const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
+  const headphoneEnabled = processed && state.outputProfile === "headphones" && (state.headphoneMode !== "off" || proof);
+  setMvpStudioState(studioProcessorNode, {
+    bypass: !processed,
+    eqEnabled: processed && state.eqEnabled,
+    eqGains: [...state.eqGains],
+    preampDb: state.eqEnabled ? state.preampDb : 0,
+    headroomDb: autoHeadroomDb,
+    limiterEnabled: processed && state.limiterEnabled,
+    limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
+    outputProfileCode: studioOutputProfileCode(),
+    headphoneEnabled,
+    headphoneWidth: headphoneEnabled ? (proof ? 1 : state.headphoneWidth / 100) : 0,
+    headphoneDepth: headphoneEnabled ? (proof ? 1 : state.headphoneDepth / 100) : 0,
+    headphoneCrossfeed: headphoneEnabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0,
+    headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
+    headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
+  });
+  const status: MusicDspStatus = audioContext.state === "running"
+    ? (pureReference || abBypass ? "bypassed" : "active")
+    : "recovering";
+  setDspTelemetry(status, effectivePreampDb, autoHeadroomDb);
+  const immersionStatus = currentImmersionStatus();
+  if (state.immersionStatus !== immersionStatus) emit({ immersionStatus });
+}
+async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElement) {
+  if (!context.audioWorklet || state.eqTopology !== "minimum_phase") return false;
+  let sourceCreated = false;
+  try {
+    studioProcessorNode = await createMvpStudioNode(context);
+  } catch (error) {
+    studioProcessorNode = null;
+    console.warn("MVP Studio WASM unavailable; trying Compatibility Engine.", error);
+    return false;
+  }
+  try {
+    mediaSource = context.createMediaElementSource(audio);
+    sourceCreated = true;
+    masterVolumeGain = context.createGain();
+    referenceRouteGain = context.createGain();
+    referenceRouteGain.gain.value = 0;
+    standardRouteGain = context.createGain();
+    standardRouteGain.gain.value = 0;
+    mixBus = context.createGain();
+    analyserNode = context.createAnalyser();
+    analyserNode.fftSize = 4096;
+    analyserNode.smoothingTimeConstant = 0.38;
+    analyserNode.minDecibels = -92;
+    analyserNode.maxDecibels = -10;
+    musicGain = context.createGain();
+    musicGain.gain.value = 1;
+    referenceLevelAnalyser = context.createAnalyser();
+    processedLevelAnalyser = context.createAnalyser();
+    referenceLevelAnalyser.fftSize = 2048;
+    processedLevelAnalyser.fftSize = 2048;
+    levelMeterSink = context.createGain();
+    levelMeterSink.gain.value = 0;
+
+    mediaSource.connect(masterVolumeGain);
+    masterVolumeGain.connect(referenceRouteGain);
+    referenceRouteGain.connect(mixBus);
+    masterVolumeGain.connect(studioProcessorNode);
+    studioProcessorNode.connect(standardRouteGain);
+    standardRouteGain.connect(mixBus);
+    mixBus.connect(analyserNode);
+    analyserNode.connect(musicGain);
+    musicGain.connect(context.destination);
+
+    masterVolumeGain.connect(referenceLevelAnalyser);
+    referenceLevelAnalyser.connect(levelMeterSink);
+    studioProcessorNode.connect(processedLevelAnalyser);
+    processedLevelAnalyser.connect(levelMeterSink);
+    levelMeterSink.connect(context.destination);
+
+    mediaSourceConnected = true;
+    audio.volume = 1;
+    emit({
+      dspEngineMode: "studio_wasm",
+      loudnessGainDb: 0,
+      loudnessMomentaryLufs: -70,
+    });
+    applyProcessingSettings();
+    return true;
+  } catch (error) {
+    if (sourceCreated) throw error;
+    try { studioProcessorNode?.disconnect(); } catch { /* no-op */ }
+    studioProcessorNode = null;
+    return false;
   }
 }
 async function loadAdvancedDspModule(context: AudioContext) {
@@ -1316,6 +1452,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     if (!context || mediaSourceConnected) return;
     try {
+      if (await tryConnectStudioGraph(context, audio)) return;
       const advancedDsp = await loadAdvancedDspModule(context);
       mediaSource = context.createMediaElementSource(audio);
       masterVolumeGain = context.createGain();
@@ -2106,8 +2243,14 @@ export function setMusicPreamp(preampDb: number) {
 
 export function setMusicEqTopology(topology: MusicEqTopology) {
   const next: MusicEqTopology = topology === "linear_phase" ? "linear_phase" : "minimum_phase";
+  const previous = state.eqTopology;
   savePlayerSetting(STORAGE_KEYS.eqTopology, next);
   emit({ eqTopology: next });
+  const engineSwitch = previous !== next && (state.dspEngineMode === "studio_wasm" || (next === "minimum_phase" && state.dspEngineMode === "advanced_worklet"));
+  if (engineSwitch) {
+    void rebuildMusicAudioEngine();
+    return;
+  }
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -2321,6 +2464,9 @@ export function getMusicVisualizerLevels(barCount = 10) {
 
 export function getMusicRtaLevels() {
   return getMusicVisualizerLevels(10);
+}
+export function getMusicStudioTelemetry() {
+  return getMvpStudioTelemetry();
 }
 
 function duckTargetForStrength(strength: MusicDuckingStrength) {

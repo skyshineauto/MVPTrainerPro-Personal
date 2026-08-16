@@ -1,0 +1,129 @@
+export type MvpStudioTelemetry = {
+  inputPeak: number;
+  outputPeak: number;
+  inputRms: number;
+  outputRms: number;
+  gainReductionDb: number;
+  limiterGain: number;
+};
+
+export type MvpStudioState = {
+  bypass: boolean;
+  eqEnabled: boolean;
+  eqGains: number[];
+  preampDb: number;
+  headroomDb: number;
+  limiterEnabled: boolean;
+  limiterCeilingDb: number;
+  outputProfileCode: 0 | 1 | 2;
+  headphoneEnabled: boolean;
+  headphoneWidth: number;
+  headphoneDepth: number;
+  headphoneCrossfeed: number;
+  headphoneCenter: number;
+  headphoneBassImpact: number;
+};
+
+let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
+let latestTelemetry: MvpStudioTelemetry = {
+  inputPeak: 0,
+  outputPeak: 0,
+  inputRms: 0,
+  outputRms: 0,
+  gainReductionDb: 0,
+  limiterGain: 1,
+};
+
+function loadStudioWasmBytes() {
+  if (!wasmBytesPromise) {
+    const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
+    url.searchParams.set("v", "1.0.0");
+    wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
+      if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
+      return response.arrayBuffer();
+    });
+  }
+  return wasmBytesPromise;
+}
+
+export async function createMvpStudioNode(context: AudioContext) {
+  if (!context.audioWorklet || typeof AudioWorkletNode === "undefined") {
+    throw new Error("AudioWorklet is unavailable.");
+  }
+
+  const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
+  workletUrl.searchParams.set("v", "1.0.0");
+  const [wasmBytes] = await Promise.all([
+    loadStudioWasmBytes(),
+    context.audioWorklet.addModule(workletUrl.href),
+  ]);
+
+  const node = new AudioWorkletNode(context, "mvp-studio-wasm", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    channelCount: 2,
+    channelCountMode: "max",
+  });
+
+  return await new Promise<AudioWorkletNode>((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { node.disconnect(); } catch { /* already disconnected */ }
+      reject(new Error("MVP Studio WASM initialization timed out."));
+    }, 5000);
+
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      try { node.disconnect(); } catch { /* already disconnected */ }
+      reject(new Error(message));
+    };
+
+    node.addEventListener("processorerror", () => fail("MVP Studio AudioWorklet processor failed."), { once: true });
+    node.port.onmessage = (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (data.type === "ready") {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(node);
+        return;
+      }
+      if (data.type === "error") {
+        fail(String(data.message || "MVP Studio WASM initialization failed."));
+        return;
+      }
+      if (data.type === "telemetry") {
+        latestTelemetry = {
+          inputPeak: Number(data.inputPeak) || 0,
+          outputPeak: Number(data.outputPeak) || 0,
+          inputRms: Number(data.inputRms) || 0,
+          outputRms: Number(data.outputRms) || 0,
+          gainReductionDb: Number(data.gainReductionDb) || 0,
+          limiterGain: Number.isFinite(Number(data.limiterGain)) ? Number(data.limiterGain) : 1,
+        };
+      }
+    };
+
+    const transferable = wasmBytes.slice(0);
+    node.port.postMessage({ type: "init", wasmBytes: transferable }, [transferable]);
+  });
+}
+
+export function setMvpStudioState(node: AudioWorkletNode | null, state: MvpStudioState) {
+  if (!node) return;
+  node.port.postMessage({ type: "state", state });
+}
+
+export function resetMvpStudioNode(node: AudioWorkletNode | null) {
+  node?.port.postMessage({ type: "reset" });
+}
+
+export function getMvpStudioTelemetry() {
+  return { ...latestTelemetry };
+}

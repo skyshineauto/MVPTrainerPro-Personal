@@ -1937,21 +1937,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
           <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status">
             <div className="tr-dspProofStatus">
-              <span>DSP ENGINE <b className={player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "advanced_worklet" ? "MVP STUDIO WORKLET" : player.dspEngineMode === "native_fallback" ? "NATIVE BACKUP" : "UNAVAILABLE"}</b></span>
+              <span>DSP ENGINE <b className={player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "studio_wasm" ? "MVP STUDIO • WASM" : player.dspEngineMode === "advanced_worklet" ? "COMPATIBILITY • WORKLET" : player.dspEngineMode === "native_fallback" ? "COMPATIBILITY • NATIVE" : "UNAVAILABLE"}</b></span>
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
-              <span>TRUE-PEAK LIMITER <b className="is-good">4× • -1 dBTP</b></span>
+              <span>OUTPUT LIMITER <b className="is-good">{player.dspEngineMode === "studio_wasm" ? "WASM • 4× PEAK GUARD" : "4× • -1 dBTP"}</b></span>
               <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
               <span>LOUDNESS NORMALIZATION <b className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "ADAPTIVE • -14 LUFS" : "BYPASSED"}</b></span>
-              <span>TRANSIENT DETAIL <b className="is-good">AUTO</b></span>
+              <span>TRANSIENT DETAIL <b className={player.dspEngineMode === "studio_wasm" ? "is-fallback" : "is-good"}>{player.dspEngineMode === "studio_wasm" ? "V2" : "AUTO"}</b></span>
             </div>
           </section>
 
           <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing">
-            <button type="button" className={player.multibandEnabled ? "is-active" : ""} aria-pressed={player.multibandEnabled} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
-              <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? "ON" : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz crossovers</small>
+            <button type="button" className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-active" : ""} aria-pressed={player.multibandEnabled && player.dspEngineMode === "advanced_worklet"} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
+              <span>MULTIBAND DYNAMICS</span><strong>{player.dspEngineMode === "studio_wasm" ? "V2" : player.multibandEnabled ? "ON" : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz crossovers</small>
             </button>
-            <button type="button" className={player.normalizationEnabled ? "is-active" : ""} aria-pressed={player.normalizationEnabled} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicNormalizationEnabled(!player.normalizationEnabled))}>
-              <span>LOUDNESS NORMALIZATION</span><strong>{player.normalizationEnabled ? "ON • -14 LUFS" : "OFF"}</strong><small>{player.normalizationEnabled ? `Adaptive gain ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Keeps song-to-song loudness consistent without changing the EQ curve"}</small>
+            <button type="button" className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-active" : ""} aria-pressed={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet"} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicNormalizationEnabled(!player.normalizationEnabled))}>
+              <span>LOUDNESS NORMALIZATION</span><strong>{player.dspEngineMode === "studio_wasm" ? "V2" : player.normalizationEnabled ? "ON • -14 LUFS" : "OFF"}</strong><small>{player.normalizationEnabled ? `Adaptive gain ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Keeps song-to-song loudness consistent without changing the EQ curve"}</small>
             </button>
           </section>
 
@@ -1972,7 +1972,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-eqArchitectureCopy"><span>FILTER TOPOLOGY</span><strong>{player.eqTopology === "linear_phase" ? "LINEAR PHASE FIR" : "MINIMUM PHASE"}</strong><small>{player.eqTopology === "linear_phase" ? "257-tap symmetric FIR for critical listening. Adds a small fixed latency." : "Low-latency 1/3-octave minimum-phase user EQ. Recommended for workouts and normal playback."}</small></div>
             <div className="tr-eqArchitectureButtons">
               <button type="button" className={player.eqTopology === "minimum_phase" ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicEqTopology("minimum_phase"), true)}>MINIMUM PHASE</button>
-              <button type="button" className={player.eqTopology === "linear_phase" ? "is-active" : ""} disabled={player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicEqTopology("linear_phase"), true)}>LINEAR PHASE</button>
+              <button type="button" className={player.eqTopology === "linear_phase" ? "is-active" : ""} disabled={player.dspEngineMode === "native_fallback" || player.dspEngineMode === "unavailable"} onClick={() => void runDspMutation(() => setMusicEqTopology("linear_phase"), true)}>LINEAR PHASE</button>
             </div>
           </div>
 
