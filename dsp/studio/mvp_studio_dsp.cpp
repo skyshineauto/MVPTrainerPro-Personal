@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V3 Phase 3 Linear Phase FIR
+// MVP Trainer Pro - MVP Studio Engine V3 Phase 4 BS.1770 True-Peak Limiter
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -363,8 +363,31 @@ float limiterDelayR[kMaxLookahead];
 int limiterWrite = 0;
 int limiterLookahead = 240;
 float limiterGain = 1.0f;
-float prevDetectorL = 0.0f;
-float prevDetectorR = 0.0f;
+
+// V3 Phase 4 true-peak detector. ITU-R BS.1770 Annex 2 provides a
+// 48th-order, 4-phase FIR interpolator for estimating inter-sample peaks.
+// The detector runs at an effective 4x rate while the audio path stays at
+// the native sample rate. Limiter lookahead is much longer than the FIR
+// group delay, so the gain envelope can react before the delayed audio exits.
+constexpr int kTruePeakTapsPerPhase = 12;
+constexpr int kTruePeakPhases = 4;
+const float kTruePeakCoeffs[kTruePeakTapsPerPhase][kTruePeakPhases] = {
+  { 0.0017089843750f, -0.0291748046875f, -0.0189208984375f, -0.0083007812500f },
+  { 0.0109863281250f,  0.0292968750000f,  0.0330810546875f,  0.0148925781250f },
+  {-0.0196533203125f, -0.0517578125000f, -0.0582275390625f, -0.0266113281250f },
+  { 0.0332031250000f,  0.0891113281250f,  0.1015625000000f,  0.0476074218750f },
+  {-0.0594482421875f, -0.1665039062500f, -0.2003173828125f, -0.1022949218750f },
+  { 0.1373291015625f,  0.4650878906250f,  0.7797851562500f,  0.9721679687500f },
+  { 0.9721679687500f,  0.7797851562500f,  0.4650878906250f,  0.1373291015625f },
+  {-0.1022949218750f, -0.2003173828125f, -0.1665039062500f, -0.0594482421875f },
+  { 0.0476074218750f,  0.1015625000000f,  0.0891113281250f,  0.0332031250000f },
+  {-0.0266113281250f, -0.0582275390625f, -0.0517578125000f, -0.0196533203125f },
+  { 0.0148925781250f,  0.0330810546875f,  0.0292968750000f,  0.0109863281250f },
+  {-0.0083007812500f, -0.0189208984375f, -0.0291748046875f,  0.0017089843750f },
+};
+float truePeakHistoryL[kTruePeakTapsPerPhase] = {};
+float truePeakHistoryR[kTruePeakTapsPerPhase] = {};
+float meterTruePeakLinear = 0.0f;
 
 float spatialDelayL[kSpatialDelayMax];
 float spatialDelayR[kSpatialDelayMax];
@@ -388,6 +411,8 @@ float headroomDb = 0.0f;
 float currentPreampGain = 1.0f;
 float limiterCeilingDb = -1.0f;
 float limiterCeilingGain = 0.89125094f;
+float limiterDetectorCeilingGain = 0.88104887f; // -1.1 dB internal guard for a displayed -1.0 dBTP ceiling.
+constexpr float kTruePeakSafetyDb = 0.10f;
 float limiterReleaseCoeff = 0.001f;
 
 float meterInputPeak = 0.0f;
@@ -497,7 +522,11 @@ void resetBuffers() {
   for (int i = 0; i < kMaxLookahead; ++i) { limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f; }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
   limiterWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
-  prevDetectorL = prevDetectorR = 0.0f;
+  meterTruePeakLinear = 0.0f;
+  for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
+    truePeakHistoryL[tap] = 0.0f;
+    truePeakHistoryR[tap] = 0.0f;
+  }
   crossfeedStateL = crossfeedStateR = 0.0;
   resetLoudnessState();
   resetLinearFir(false);
@@ -1113,24 +1142,26 @@ void processLoudness(float &left, float &right) {
   loudnessGainDb = loudnessGain > 0.000001f ? static_cast<float>(20.0 * log10(loudnessGain)) : 0.0f;
 }
 
-inline float intersamplePeak(float previous, float current) {
-  float peak = absf(previous) > absf(current) ? absf(previous) : absf(current);
-  const float step = (current - previous) * 0.25f;
-  float value = previous + step;
-  for (int i = 0; i < 3; ++i) {
-    const float magnitude = absf(value);
+inline float updateTruePeakDetector(float *history, float sample) {
+  for (int tap = kTruePeakTapsPerPhase - 1; tap > 0; --tap) history[tap] = history[tap - 1];
+  history[0] = sample;
+  float peak = absf(sample);
+  for (int phase = 0; phase < kTruePeakPhases; ++phase) {
+    float interpolated = 0.0f;
+    for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
+      interpolated += history[tap] * kTruePeakCoeffs[tap][phase];
+    }
+    const float magnitude = absf(interpolated);
     if (magnitude > peak) peak = magnitude;
-    value += step;
   }
   return peak;
 }
 
 void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight) {
-  const float detector = intersamplePeak(prevDetectorL, inLeft) > intersamplePeak(prevDetectorR, inRight)
-    ? intersamplePeak(prevDetectorL, inLeft)
-    : intersamplePeak(prevDetectorR, inRight);
-  prevDetectorL = inLeft;
-  prevDetectorR = inRight;
+  const float peakL = updateTruePeakDetector(truePeakHistoryL, inLeft);
+  const float peakR = updateTruePeakDetector(truePeakHistoryR, inRight);
+  const float detector = peakL > peakR ? peakL : peakR;
+  if (detector > meterTruePeakLinear) meterTruePeakLinear = detector;
 
   limiterDelayL[limiterWrite] = inLeft;
   limiterDelayR[limiterWrite] = inRight;
@@ -1141,8 +1172,8 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
   limiterWrite = (limiterWrite + 1) % kMaxLookahead;
 
   float required = 1.0f;
-  if (limiterEnabled && detector > limiterCeilingGain && detector > 0.0000001f) {
-    required = limiterCeilingGain / detector;
+  if (limiterEnabled && detector > limiterDetectorCeilingGain && detector > 0.0000001f) {
+    required = limiterDetectorCeilingGain / detector;
   }
   if (required < limiterGain) limiterGain = required;
   else limiterGain += (1.0f - limiterGain) * limiterReleaseCoeff;
@@ -1150,6 +1181,8 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
 
   outLeft = delayedL * limiterGain;
   outRight = delayedR * limiterGain;
+  // Sample-domain clamp remains a last-resort guard. With normal operation the
+  // BS.1770 detector and lookahead envelope prevent this path from engaging.
   if (limiterEnabled) {
     outLeft = clampf(outLeft, -limiterCeilingGain, limiterCeilingGain);
     outRight = clampf(outRight, -limiterCeilingGain, limiterCeilingGain);
@@ -1247,6 +1280,7 @@ __attribute__((visibility("default"))) void mvp_set_limiter(int enabled, float c
   limiterEnabled = enabled ? 1 : 0;
   limiterCeilingDb = clampf(ceilingDb, -6.0f, -0.1f);
   limiterCeilingGain = static_cast<float>(dbToGain(limiterCeilingDb));
+  limiterDetectorCeilingGain = static_cast<float>(dbToGain(limiterCeilingDb - kTruePeakSafetyDb));
 }
 __attribute__((visibility("default"))) void mvp_set_output_profile(int profile) {
   outputProfile = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
@@ -1278,6 +1312,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   refreshDynamicEqForBlock(frames);
   refreshOutputCorrectionForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
+  meterTruePeakLinear = 0.0f;
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
   for (int band = 0; band < 4; ++band) meterMultibandBandReductionDb[band] = multibandCompressor[band].reductionDb;
@@ -1338,6 +1373,10 @@ __attribute__((visibility("default"))) float mvp_meter_input_rms() { return mete
 __attribute__((visibility("default"))) float mvp_meter_output_rms() { return meterOutputRms; }
 __attribute__((visibility("default"))) float mvp_meter_gain_reduction_db() { return meterGainReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_limiter_gain() { return limiterGain; }
+__attribute__((visibility("default"))) float mvp_meter_true_peak_linear() { return meterTruePeakLinear; }
+__attribute__((visibility("default"))) float mvp_meter_true_peak_dbtp() {
+  return meterTruePeakLinear > 0.000000001f ? static_cast<float>(20.0 * log10(meterTruePeakLinear)) : -120.0f;
+}
 __attribute__((visibility("default"))) float mvp_meter_transient_boost_db() { return meterTransientBoostDb; }
 __attribute__((visibility("default"))) float mvp_meter_multiband_gain_reduction_db() { return meterMultibandGainReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_multiband_band_reduction_db(int band) {

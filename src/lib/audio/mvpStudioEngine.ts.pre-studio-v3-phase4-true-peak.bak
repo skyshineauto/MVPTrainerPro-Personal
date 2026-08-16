@@ -5,7 +5,6 @@ export type MvpStudioTelemetry = {
   outputRms: number;
   gainReductionDb: number;
   limiterGain: number;
-  truePeakDbtp: number;
   transientBoostDb: number;
   multibandGainReductionDb: number;
   multibandBandReductionDb: [number, number, number, number];
@@ -53,7 +52,6 @@ let latestTelemetry: MvpStudioTelemetry = {
   outputRms: 0,
   gainReductionDb: 0,
   limiterGain: 1,
-  truePeakDbtp: -120,
   transientBoostDb: 0,
   multibandGainReductionDb: 0,
   multibandBandReductionDb: [0, 0, 0, 0],
@@ -68,7 +66,7 @@ let latestTelemetry: MvpStudioTelemetry = {
 function loadStudioWasmBytes() {
   if (!wasmBytesPromise) {
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "3.4.0");
+    url.searchParams.set("v", "3.3.0");
     wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
       return response.arrayBuffer();
@@ -83,7 +81,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   }
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "3.4.0");
+  workletUrl.searchParams.set("v", "3.3.0");
   const [wasmBytes] = await Promise.all([
     loadStudioWasmBytes(),
     context.audioWorklet.addModule(workletUrl.href),
@@ -137,7 +135,6 @@ export async function createMvpStudioNode(context: AudioContext) {
           outputRms: Number(data.outputRms) || 0,
           gainReductionDb: Number(data.gainReductionDb) || 0,
           limiterGain: Number.isFinite(Number(data.limiterGain)) ? Number(data.limiterGain) : 1,
-          truePeakDbtp: Number.isFinite(Number(data.truePeakDbtp)) ? Number(data.truePeakDbtp) : -120,
           transientBoostDb: Number(data.transientBoostDb) || 0,
           multibandGainReductionDb: Number(data.multibandGainReductionDb) || 0,
           multibandBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.multibandBandReductionDb?.[index]) || 0) as [number, number, number, number],

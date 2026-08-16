@@ -1260,8 +1260,6 @@ function applyStudioProcessingSettings(now: number) {
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
     normalizationEnabled: processed && state.normalizationEnabled,
     normalizationTargetLufs: -10,
-    // MVP_STUDIO_WASM_V3_PHASE4_TRUE_PEAK_LIMITER
-    // BS.1770-style 4x FIR true-peak detection drives the Studio limiter.
     limiterEnabled: processed && state.limiterEnabled,
     limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
     outputProfileCode: studioOutputProfileCode(),

@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 4 BS.1770 True-Peak Limiter
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 3 Linear Phase FIR
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -246,7 +246,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         outputRms: this.exports.mvp_meter_output_rms(),
         gainReductionDb: this.exports.mvp_meter_gain_reduction_db(),
         limiterGain: this.exports.mvp_meter_limiter_gain(),
-        truePeakDbtp: this.exports.mvp_meter_true_peak_dbtp ? this.exports.mvp_meter_true_peak_dbtp() : -120,
         transientBoostDb: typeof this.exports.mvp_meter_transient_boost_db === "function"
           ? this.exports.mvp_meter_transient_boost_db()
           : 0,
