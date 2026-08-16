@@ -56,7 +56,7 @@ function baseState() {
   dsp.mvp_set_headroom_db(0);
   dsp.mvp_set_transient(0, 0);
   dsp.mvp_set_multiband(0, 1);
-  dsp.mvp_set_loudness(0, -10);
+  dsp.mvp_set_loudness(0, -14);
   dsp.mvp_set_limiter(0, -1.0);
   dsp.mvp_set_output_profile(1); // Headphone profile is neutral in the V2 core.
   dsp.mvp_set_headphone(0, 0, 0, 0, 0.5, 0);
@@ -149,14 +149,14 @@ for (let block = 0; block < 420; block += 1) {
   }
 }
 
-// 4) Volume Match should move program gain slowly toward -10 LUFS,
+// 4) Loudness normalization should move program gain slowly toward -14 LUFS,
 // without becoming a short-term compressor. A loud steady program attenuates;
 // a quiet one receives a bounded boost.
 function renderLoudness(amplitude, enabled, seconds = 14) {
   dsp.mvp_reset();
   baseState();
   dsp.mvp_set_limiter(1, -1.0);
-  dsp.mvp_set_loudness(enabled ? 1 : 0, -10.0);
+  dsp.mvp_set_loudness(enabled ? 1 : 0, -14.0);
   let phase = 0;
   let peak = 0;
   const blocks = Math.ceil((seconds * 48000) / 128);
@@ -184,26 +184,21 @@ function renderLoudness(amplitude, enabled, seconds = 14) {
 }
 
 const loudProgram = renderLoudness(0.4, true);
-if (!(loudProgram.gainDb < -1.0 && loudProgram.gainDb >= -2.2)) {
-  throw new Error(`Volume Match did not apply the expected bounded trim: ${JSON.stringify(loudProgram)}`);
+if (!(loudProgram.gainDb < -2.0 && loudProgram.gainDb >= -9.1)) {
+  throw new Error(`Loudness normalizer did not attenuate loud program correctly: ${JSON.stringify(loudProgram)}`);
 }
 if (!(loudProgram.programLufs > -16 && loudProgram.programLufs < -5)) {
   throw new Error(`Loud program meter is implausible: ${loudProgram.programLufs}`);
 }
 
 const quietProgram = renderLoudness(0.04, true);
-if (!(quietProgram.gainDb > 2.0 && quietProgram.gainDb <= 3.1)) {
-  throw new Error(`Volume Match did not apply bounded quiet-program gain: ${JSON.stringify(quietProgram)}`);
-}
-
-const matchedProgram = renderLoudness(0.31, true, 10);
-if (Math.abs(matchedProgram.gainDb) > 0.15) {
-  throw new Error(`Volume Match dead zone altered an already-matched program: ${JSON.stringify(matchedProgram)}`);
+if (!(quietProgram.gainDb > 2.0 && quietProgram.gainDb <= 5.1)) {
+  throw new Error(`Loudness normalizer did not apply bounded quiet-program gain: ${JSON.stringify(quietProgram)}`);
 }
 
 const normalizationOff = renderLoudness(0.4, false, 6);
 if (Math.abs(normalizationOff.gainDb) > 0.1) {
-  throw new Error(`Disabled Volume Match changed gain: ${normalizationOff.gainDb}`);
+  throw new Error(`Disabled loudness normalizer changed gain: ${normalizationOff.gainDb}`);
 }
 
 // 5) Deliberate overload: final limiter still owns the ceiling after the Phase 3 chain.
@@ -228,7 +223,7 @@ for (let block = 0; block < 320; block += 1) {
 const ceiling = 10 ** (-1 / 20);
 if (overloadPeak > ceiling + 0.0001) throw new Error(`Limiter exceeded ceiling: ${overloadPeak}`);
 
-console.log("MVP Studio WASM V2 Phase 3.1 Volume Match: PASS");
+console.log("MVP Studio WASM V2 Phase 3 Loudness: PASS");
 console.log({
   wasmBytes: bytes.length,
   maxFrames,
@@ -237,7 +232,6 @@ console.log({
   combinedPeak,
   loudProgram,
   quietProgram,
-  matchedProgram,
   normalizationOff,
   overloadPeak,
   ceiling,

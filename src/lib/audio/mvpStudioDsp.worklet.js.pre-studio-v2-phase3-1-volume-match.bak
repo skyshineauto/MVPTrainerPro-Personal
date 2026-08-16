@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Phase 3.1 Volume Match
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Phase 3 Loudness
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -99,7 +99,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v2-phase3-1-volume-match",
+        version: "studio-wasm-v2-phase3-loudness",
       });
     } catch (error) {
       this.failed = true;
@@ -146,7 +146,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     if (typeof api.mvp_set_loudness === "function") {
       api.mvp_set_loudness(
         state.normalizationEnabled ? 1 : 0,
-        Number.isFinite(Number(state.normalizationTargetLufs)) ? Number(state.normalizationTargetLufs) : -10,
+        Number.isFinite(Number(state.normalizationTargetLufs)) ? Number(state.normalizationTargetLufs) : -14,
       );
     }
     api.mvp_set_limiter(state.limiterEnabled ? 1 : 0, Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1);

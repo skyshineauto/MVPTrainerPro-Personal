@@ -1946,7 +1946,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
               <span>OUTPUT LIMITER <b className="is-good">{player.dspEngineMode === "studio_wasm" ? "WASM • 4× PEAK GUARD" : "4× • -1 dBTP"}</b></span>
               <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && (player.dspEngineMode === "advanced_worklet" || (player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass)) ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "WASM • 4-BAND ACTIVE" : player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
-              <span>VOLUME MATCH <b className={player.normalizationEnabled && (player.dspEngineMode === "advanced_worklet" || (player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass)) ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "WASM • SMART LEVELING" : player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "COMPAT • LEVELING" : "BYPASSED"}</b></span>
+              <span>LOUDNESS NORMALIZATION <b className={player.normalizationEnabled && (player.dspEngineMode === "advanced_worklet" || (player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass)) ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "WASM • -14 LUFS ACTIVE" : player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "ADAPTIVE • -14 LUFS" : "BYPASSED"}</b></span>
               <span>TRANSIENT DETAIL <b className={player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "is-good" : "is-fallback"}>{player.dspEngineMode === "studio_wasm" ? (player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "WASM • AUTO" : "BYPASSED") : "AUTO"}</b></span>
             </div>
           </section>
@@ -1956,7 +1956,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON") : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz LR4 crossovers</small>
             </button>
             <button type="button" className={player.normalizationEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? "is-active" : ""} aria-pressed={player.normalizationEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet")} disabled={player.outputProfile === "reference" || (player.dspEngineMode !== "studio_wasm" && player.dspEngineMode !== "advanced_worklet")} onClick={() => void runDspMutation(() => setMusicNormalizationEnabled(!player.normalizationEnabled))}>
-              <span>VOLUME MATCH</span><strong>{player.normalizationEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON • COMPAT") : "OFF"}</strong><small>{player.normalizationEnabled ? `Track trim ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Optional track-to-track leveling • leaves well-matched songs alone"}</small>
+              <span>LOUDNESS NORMALIZATION</span><strong>{player.normalizationEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON • -14 LUFS") : "OFF"}</strong><small>{player.normalizationEnabled ? `Adaptive gain ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Keeps song-to-song loudness consistent without changing the EQ curve"}</small>
             </button>
           </section>
 
@@ -2031,7 +2031,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <header><div><small>SAVE DSP PROFILE</small><h3>Store this complete sound setup</h3></div><button type="button" onClick={() => setSavePresetOpen(false)}>×</button></header>
             <label className="tr-dspSaveName"><span>PROFILE NAME</span><input value={savePresetName} onChange={(event: ChangeEvent<HTMLInputElement>) => setSavePresetName(event.target.value)} placeholder="Example: Gym Headphones" maxLength={32} /></label>
             <div className="tr-dspSaveSlots"><span>SAVE TO</span><div>{DSP_SLOTS.map((slot, index) => <button key={slot} type="button" className={savePresetSlot === slot ? "is-active" : ""} onClick={() => { setSavePresetSlot(slot); setSavePresetName(dspProfiles[slot]?.name ?? ""); }}><b>CUSTOM {index + 1}</b><small>{dspProfiles[slot]?.name ?? "Empty slot"}</small></button>)}</div></div>
-            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band EQ • Preamp • Multiband • Volume Match • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
+            <div className="tr-dspSaveIncludes"><span>SAVES</span><p>Output profile • Music preset • Filter topology • 31-band EQ • Preamp • Multiband • Loudness normalization • Headphone mode • Width • Depth • Crossfeed • Center focus • Bass impact</p></div>
             <footer><button type="button" onClick={() => setSavePresetOpen(false)}>CANCEL</button><button type="button" className="is-primary" onClick={() => saveCurrentDspProfile(savePresetSlot, savePresetName.trim() || slotFallbackLabel(savePresetSlot))}>SAVE PRESET</button></footer>
           </section>
         </div>
@@ -4911,7 +4911,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
         /* MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS CRISP ENGINE LABEL */
-        /* MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH */
         .tr-rtaEngineBadge{
           display:inline-flex!important;align-items:center!important;gap:4px!important;margin-left:7px!important;padding:0!important;
           border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;

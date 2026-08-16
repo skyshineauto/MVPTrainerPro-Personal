@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Phase 3.1 Volume Match
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Phase 2 Multiband
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -35,10 +35,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       }
       if (data.type === "reset" && this.ready && this.exports?.mvp_reset) {
         this.exports.mvp_reset();
-        return;
-      }
-      if (data.type === "reset-loudness" && this.ready && this.exports?.mvp_reset_loudness) {
-        this.exports.mvp_reset_loudness();
       }
     };
   }
@@ -99,7 +95,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v2-phase3-1-volume-match",
+        version: "studio-wasm-v2-phase2-multiband",
       });
     } catch (error) {
       this.failed = true;
@@ -141,12 +137,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       api.mvp_set_multiband(
         state.multibandEnabled ? 1 : 0,
         Number.isFinite(Number(state.multibandAmount)) ? Number(state.multibandAmount) : 1,
-      );
-    }
-    if (typeof api.mvp_set_loudness === "function") {
-      api.mvp_set_loudness(
-        state.normalizationEnabled ? 1 : 0,
-        Number.isFinite(Number(state.normalizationTargetLufs)) ? Number(state.normalizationTargetLufs) : -10,
       );
     }
     api.mvp_set_limiter(state.limiterEnabled ? 1 : 0, Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1);
@@ -239,15 +229,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         multibandBandReductionDb: typeof this.exports.mvp_meter_multiband_band_reduction_db === "function"
           ? [0, 1, 2, 3].map((band) => this.exports.mvp_meter_multiband_band_reduction_db(band))
           : [0, 0, 0, 0],
-        loudnessGainDb: typeof this.exports.mvp_meter_loudness_gain_db === "function"
-          ? this.exports.mvp_meter_loudness_gain_db()
-          : 0,
-        loudnessMomentaryLufs: typeof this.exports.mvp_meter_loudness_momentary_lufs === "function"
-          ? this.exports.mvp_meter_loudness_momentary_lufs()
-          : -70,
-        loudnessProgramLufs: typeof this.exports.mvp_meter_loudness_program_lufs === "function"
-          ? this.exports.mvp_meter_loudness_program_lufs()
-          : -70,
       });
     }
     return true;

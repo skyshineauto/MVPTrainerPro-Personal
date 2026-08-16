@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { createMvpStudioNode, getMvpStudioTelemetry, resetMvpStudioLoudness, setMvpStudioState } from "./audio/mvpStudioEngine";
+import { createMvpStudioNode, getMvpStudioTelemetry, setMvpStudioState } from "./audio/mvpStudioEngine";
 import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
@@ -284,7 +284,7 @@ const STORAGE_KEYS = {
   eqTopology: "mvp_music_eq_topology_v13_8",
   preampDb: "mvp_music_eq_preamp_db",
   crossfadeSeconds: "mvp_music_crossfade_seconds",
-  normalizationEnabled: "mvp_music_volume_match_enabled_v1",
+  normalizationEnabled: "mvp_music_normalization_enabled",
   multibandEnabled: "mvp_music_multiband_enabled_v13_9",
   limiterEnabled: "mvp_music_limiter_enabled",
   duckingStrength: "mvp_music_ducking_strength",
@@ -450,10 +450,10 @@ function migrateAudioFidelitySettings() {
     }
   }
   if (!readStored(STORAGE_KEYS.eqTopology)) savePlayerSetting(STORAGE_KEYS.eqTopology, "minimum_phase");
-  // Core Studio processing starts active, but Volume Match is an optional utility.
-  // It stays OFF unless the user explicitly enables track-to-track leveling.
+  // V13.9 Studio migration intentionally starts the full processing chain active.
+  // Previous versions stored normalization OFF even though the feature was disabled.
   savePlayerSetting(STORAGE_KEYS.eqEnabled, "true");
-  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "false");
+  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.multibandEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.limiterEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
@@ -486,7 +486,7 @@ let state: MusicPlayerState = {
   effectivePreampDb: 0,
   autoHeadroomDb: 0,
   crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8),
-  normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, false),
+  normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, true),
   multibandEnabled: readBoolean(STORAGE_KEYS.multibandEnabled, true),
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
@@ -991,7 +991,7 @@ function applyLoudnessNormalizationSettings(now: number, active: boolean) {
   const enabled = workletParam(loudnessNormalizerNode, "enabled");
   const target = workletParam(loudnessNormalizerNode, "targetLufs");
   if (enabled) setAudioParam(enabled, active && state.normalizationEnabled ? 1 : 0, now, 0.03);
-  if (target) setAudioParam(target, -10, now, 0.12);
+  if (target) setAudioParam(target, -14, now, 0.12);
 }
 
 function applyLimiterSettings(now: number, limiterActive: boolean) {
@@ -1234,10 +1234,6 @@ function applyStudioProcessingSettings(now: number) {
     // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
     multibandEnabled: processed && state.multibandEnabled,
     multibandAmount: 1,
-    // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
-    // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
-    normalizationEnabled: processed && state.normalizationEnabled,
-    normalizationTargetLufs: -10,
     limiterEnabled: processed && state.limiterEnabled,
     limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
     outputProfileCode: studioOutputProfileCode(),
@@ -1660,19 +1656,6 @@ function startLevelMeter() {
   if (typeof window === "undefined" || levelMeterTimer) return;
   levelMeterTimer = window.setInterval(() => {
     if (!state.playing || !referenceLevelAnalyser || !processedLevelAnalyser) return;
-    if (state.dspEngineMode === "studio_wasm") {
-      const telemetry = getMvpStudioTelemetry();
-      const loudnessActive = state.normalizationEnabled && state.outputProfile !== "reference" && !state.dspBypass;
-      const gainDb = loudnessActive && Number.isFinite(telemetry.loudnessGainDb)
-        ? Math.round(telemetry.loudnessGainDb * 10) / 10
-        : 0;
-      const programLufs = loudnessActive && Number.isFinite(telemetry.loudnessProgramLufs) && telemetry.loudnessProgramLufs > -69.5
-        ? Math.round(telemetry.loudnessProgramLufs * 10) / 10
-        : -70;
-      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs) {
-        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs });
-      }
-    }
     const referenceDb = rmsDbFromAnalyser(referenceLevelAnalyser);
     if (Number.isFinite(referenceDb) && referenceDb > -80) {
       lastReferenceRmsDb = Number.isFinite(lastReferenceRmsDb) ? lastReferenceRmsDb * 0.86 + referenceDb * 0.14 : referenceDb;
@@ -1820,7 +1803,6 @@ async function assignTrackSource(track: MusicTrack, startAt: number, force: bool
     audio.src = url;
     audio.dataset.trackId = track.id;
     loudnessNormalizerNode?.port.postMessage({ type: "reset" });
-    resetMvpStudioLoudness(studioProcessorNode);
     emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
     audio.load();
   }
@@ -1843,7 +1825,6 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
   const shouldResetLoudness = state.currentTrack?.id !== track.id || startAt < 0.5;
   if (shouldResetLoudness) {
     loudnessNormalizerNode?.port.postMessage({ type: "reset" });
-    resetMvpStudioLoudness(studioProcessorNode);
     emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
   }
   loadingTrackId = track.id;
@@ -2300,7 +2281,6 @@ export function setMusicNormalizationEnabled(enabled: boolean) {
     emit({ loudnessGainDb: 0, loudnessMomentaryLufs: -70 });
   } else {
     loudnessNormalizerNode?.port.postMessage({ type: "reset" });
-    resetMvpStudioLoudness(studioProcessorNode);
   }
 }
 

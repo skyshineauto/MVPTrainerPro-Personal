@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V2 Phase 2 Multiband
+// MVP Trainer Pro - MVP Studio Engine V2 Phase 3.1 Volume Match
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -318,12 +318,61 @@ MultibandCompressor multibandCompressor[4];
 float meterMultibandGainReductionDb = 0.0f;
 float meterMultibandBandReductionDb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
+// Studio V2 Phase 3.1 optional Volume Match utility.
+// The detector is K-weighted (BS.1770-style shelf + RLB high-pass), with an exact
+// 400 ms energy window and slow gated program accumulation. Gain movement is
+// intentionally slow so this behaves as song-to-song matching,
+// not a short-term compressor. The final peak-guard limiter remains last.
+constexpr int kLoudnessWindowMax = 76800; // 400 ms at 192 kHz.
+int loudnessEnabled = 0;
+float loudnessTargetLufs = -10.0f;
+float loudnessGain = 1.0f;
+float loudnessTargetGain = 1.0f;
+float loudnessMomentaryLufs = -70.0f;
+float loudnessProgramLufs = -70.0f;
+float loudnessGainDb = 0.0f;
+float loudnessGainDownCoeff = 0.00001f;
+float loudnessGainUpCoeff = 0.000004f;
+float loudnessBypassReturnCoeff = 0.00008f;
+Biquad loudnessHighShelf[2];
+Biquad loudnessHighpass[2];
+float loudnessEnergyWindow[kLoudnessWindowMax];
+int loudnessWindowFrames = 19200;
+int loudnessWindowWrite = 0;
+int loudnessWindowCount = 0;
+double loudnessWindowEnergySum = 0.0;
+int loudnessBlockFrames = 4800;
+int loudnessBlockCount = 0;
+double loudnessBlockEnergySum = 0.0;
+double loudnessProgramEnergySum = 0.0;
+int loudnessProgramBlockCount = 0;
+
+void resetLoudnessState() {
+  loudnessWindowWrite = 0;
+  loudnessWindowCount = 0;
+  loudnessWindowEnergySum = 0.0;
+  loudnessBlockCount = 0;
+  loudnessBlockEnergySum = 0.0;
+  loudnessProgramEnergySum = 0.0;
+  loudnessProgramBlockCount = 0;
+  loudnessGain = 1.0f;
+  loudnessTargetGain = 1.0f;
+  loudnessGainDb = 0.0f;
+  loudnessMomentaryLufs = -70.0f;
+  loudnessProgramLufs = -70.0f;
+  for (int ch = 0; ch < 2; ++ch) {
+    loudnessHighShelf[ch].reset();
+    loudnessHighpass[ch].reset();
+  }
+}
+
 void resetBuffers() {
   for (int i = 0; i < kMaxLookahead; ++i) { limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f; }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
   limiterWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
   prevDetectorL = prevDetectorR = 0.0f;
   crossfeedStateL = crossfeedStateR = 0.0;
+  resetLoudnessState();
   transientFastEnvelope = 0.0f;
   transientSlowEnvelope = 0.0f;
   transientGain = 1.0f;
@@ -386,6 +435,27 @@ void configureMultiband() {
   multibandCompressor[1].configure(sampleRateHz, -17.0f, 1.28f, 2.6f, 22.0f, 165.0f, 18.0f, 145.0f);
   multibandCompressor[2].configure(sampleRateHz, -18.5f, 1.24f, 2.4f, 12.0f, 125.0f, 10.0f, 110.0f);
   multibandCompressor[3].configure(sampleRateHz, -20.0f, 1.20f, 2.0f, 7.0f, 95.0f, 6.0f, 85.0f);
+}
+
+void configureLoudness() {
+  loudnessWindowFrames = static_cast<int>(sampleRateHz * 0.400f + 0.5f);
+  if (loudnessWindowFrames < 1) loudnessWindowFrames = 1;
+  if (loudnessWindowFrames > kLoudnessWindowMax) loudnessWindowFrames = kLoudnessWindowMax;
+  loudnessBlockFrames = static_cast<int>(sampleRateHz * 0.100f + 0.5f);
+  if (loudnessBlockFrames < 1) loudnessBlockFrames = 1;
+
+  // BS.1770 K-weighting approximation using the standardized corner frequencies.
+  // The existing RBJ biquads keep coefficients sample-rate independent.
+  for (int ch = 0; ch < 2; ++ch) {
+    loudnessHighShelf[ch].setHighShelf(sampleRateHz, 1681.974450955533, 3.999843853973347);
+    loudnessHighpass[ch].setHighpass(sampleRateHz, 38.13547087602444, 0.5003270373238773);
+  }
+
+  // ~1.5 s for attenuation, ~4.0 s for upward gain. This is deliberately too slow
+  // to chase drums or phrases, but fast enough to settle early in a track.
+  loudnessGainDownCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 3.0)));
+  loudnessGainUpCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 5.0)));
+  loudnessBypassReturnCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.25)));
 }
 
 void refreshEqForBlock(int frames) {
@@ -560,6 +630,82 @@ void processMultiband(float &left, float &right) {
   }
 }
 
+inline float energyToLufs(double energy) {
+  if (!(energy > 1.0e-12)) return -70.0f;
+  const float value = static_cast<float>(-0.691 + 10.0 * log10(energy));
+  return clampf(value, -70.0f, 12.0f);
+}
+
+void updateLoudnessTargetFromBlock() {
+  if (loudnessBlockCount <= 0) return;
+  const double blockMeanEnergy = loudnessBlockEnergySum / loudnessBlockCount;
+  const float blockLufs = energyToLufs(blockMeanEnergy);
+
+  // Absolute gate, then a causal approximation of the BS.1770 relative gate.
+  // The first few blocks establish the program reference; later blocks must sit
+  // within 10 LU of the accumulated program level to affect normalization.
+  const bool aboveAbsoluteGate = blockLufs > -70.0f;
+  const bool aboveRelativeGate = loudnessProgramBlockCount < 4 || blockLufs > loudnessProgramLufs - 10.0f;
+  if (aboveAbsoluteGate && aboveRelativeGate) {
+    loudnessProgramEnergySum += blockMeanEnergy;
+    loudnessProgramBlockCount += 1;
+    loudnessProgramLufs = energyToLufs(loudnessProgramEnergySum / loudnessProgramBlockCount);
+  }
+
+  // Volume Match is an optional utility, not an always-on mastering stage.
+  // Wait for about two seconds of accepted program so quiet intros do not cause
+  // a sudden correction. Tracks already within +/-1 LU of the target are left
+  // completely untouched, and total correction is capped to +/-3 dB.
+  float desiredDb = 0.0f;
+  if (loudnessEnabled && loudnessProgramBlockCount >= 20 && loudnessProgramLufs > -60.0f) {
+    const float differenceDb = loudnessTargetLufs - loudnessProgramLufs;
+    if (absf(differenceDb) > 1.0f) {
+      desiredDb = clampf(differenceDb, -3.0f, 3.0f);
+    }
+  }
+  loudnessTargetGain = static_cast<float>(dbToGain(desiredDb));
+  loudnessBlockCount = 0;
+  loudnessBlockEnergySum = 0.0;
+}
+
+void processLoudness(float &left, float &right) {
+  if (!loudnessEnabled) {
+    loudnessTargetGain = 1.0f;
+    loudnessGain += (1.0f - loudnessGain) * loudnessBypassReturnCoeff;
+    loudnessGainDb = loudnessGain > 0.000001f ? static_cast<float>(20.0 * log10(loudnessGain)) : 0.0f;
+    return;
+  }
+
+  const float weightedL = loudnessHighpass[0].process(loudnessHighShelf[0].process(left));
+  const float weightedR = loudnessHighpass[1].process(loudnessHighShelf[1].process(right));
+  const float energy = weightedL * weightedL + weightedR * weightedR;
+
+  const float oldEnergy = loudnessEnergyWindow[loudnessWindowWrite];
+  loudnessEnergyWindow[loudnessWindowWrite] = energy;
+  loudnessWindowWrite += 1;
+  if (loudnessWindowWrite >= loudnessWindowFrames) loudnessWindowWrite = 0;
+  if (loudnessWindowCount < loudnessWindowFrames) {
+    loudnessWindowCount += 1;
+    loudnessWindowEnergySum += energy;
+  } else {
+    loudnessWindowEnergySum += static_cast<double>(energy) - oldEnergy;
+  }
+
+  loudnessBlockEnergySum += energy;
+  loudnessBlockCount += 1;
+  if (loudnessBlockCount >= loudnessBlockFrames) updateLoudnessTargetFromBlock();
+
+  if (loudnessWindowCount > 0) {
+    loudnessMomentaryLufs = energyToLufs(loudnessWindowEnergySum / loudnessWindowCount);
+  }
+
+  const float coeff = loudnessTargetGain < loudnessGain ? loudnessGainDownCoeff : loudnessGainUpCoeff;
+  loudnessGain += (loudnessTargetGain - loudnessGain) * coeff;
+  left *= loudnessGain;
+  right *= loudnessGain;
+  loudnessGainDb = loudnessGain > 0.000001f ? static_cast<float>(20.0 * log10(loudnessGain)) : 0.0f;
+}
+
 inline float intersamplePeak(float previous, float current) {
   float peak = absf(previous) > absf(current) ? absf(previous) : absf(current);
   const float step = (current - previous) * 0.25f;
@@ -629,6 +775,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   configureOutputProfile();
   configureHeadphoneBass();
   configureMultiband();
+  configureLoudness();
   resetBuffers();
   return 1;
 }
@@ -666,6 +813,14 @@ __attribute__((visibility("default"))) void mvp_set_multiband(int enabled, float
   multibandEnabled = nextEnabled;
   multibandAmount = clampf(amount, 0.0f, 1.0f);
 }
+__attribute__((visibility("default"))) void mvp_set_loudness(int enabled, float targetLufs) {
+  const int nextEnabled = enabled ? 1 : 0;
+  loudnessTargetLufs = clampf(targetLufs, -24.0f, -8.0f);
+  if (nextEnabled && !loudnessEnabled) resetLoudnessState();
+  loudnessEnabled = nextEnabled;
+  if (!loudnessEnabled) loudnessTargetGain = 1.0f;
+}
+__attribute__((visibility("default"))) void mvp_reset_loudness() { resetLoudnessState(); }
 __attribute__((visibility("default"))) void mvp_set_limiter(int enabled, float ceilingDb) {
   limiterEnabled = enabled ? 1 : 0;
   limiterCeilingDb = clampf(ceilingDb, -6.0f, -0.1f);
@@ -726,6 +881,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     left = processOutput(0, left);
     right = processOutput(1, right);
     processHeadphone(left, right);
+    processLoudness(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;
@@ -756,4 +912,7 @@ __attribute__((visibility("default"))) float mvp_meter_multiband_band_reduction_
   if (band < 0 || band >= 4) return 0.0f;
   return meterMultibandBandReductionDb[band];
 }
+__attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
+__attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
+__attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }
 }

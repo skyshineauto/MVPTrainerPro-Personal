@@ -578,8 +578,8 @@ class MvpMultibandProcessor extends AudioWorkletProcessor {
 class MvpLoudnessNormalizerProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
-      { name: "enabled", defaultValue: 0, minValue: 0, maxValue: 1, automationRate: "k-rate" },
-      { name: "targetLufs", defaultValue: -10, minValue: -20, maxValue: -8, automationRate: "k-rate" },
+      { name: "enabled", defaultValue: 1, minValue: 0, maxValue: 1, automationRate: "k-rate" },
+      { name: "targetLufs", defaultValue: -14, minValue: -20, maxValue: -9, automationRate: "k-rate" },
     ];
   }
 
@@ -654,12 +654,11 @@ class MvpLoudnessNormalizerProcessor extends AudioWorkletProcessor {
       const lufs = -0.691 + 10 * Math.log10(Math.max(1e-12, this.meanSquare));
       this.lastLufs = lufs;
       let targetGainDb = 0;
-      if (this.samplesSeen > sampleRate * 2.0 && lufs > -55) {
-        const differenceDb = targetLufs - lufs;
-        if (Math.abs(differenceDb) > 1.0) targetGainDb = Math.max(-3, Math.min(3, differenceDb));
+      if (this.samplesSeen > sampleRate * 0.75 && lufs > -55) {
+        targetGainDb = Math.max(-8, Math.min(6, targetLufs - lufs));
       }
       const targetGain = Math.pow(10, targetGainDb / 20);
-      const tau = targetGain < this.gain ? 3.0 : 5.0;
+      const tau = targetGain < this.gain ? 1.8 : 7.5;
       const gainCoeff = 1 - Math.exp(-1 / (sampleRate * tau));
       this.gain += gainCoeff * (targetGain - this.gain);
 
