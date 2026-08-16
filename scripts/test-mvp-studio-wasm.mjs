@@ -39,6 +39,7 @@ for (const name of [
   "mvp_set_multiband",
   "mvp_set_dynamic_eq",
   "mvp_set_output_correction",
+  "mvp_set_stereo_integrity",
   "mvp_set_loudness",
   "mvp_reset_loudness",
   "mvp_meter_loudness_gain_db",
@@ -50,6 +51,9 @@ for (const name of [
   "mvp_meter_dynamic_eq_gain_reduction_db",
   "mvp_meter_dynamic_eq_band_reduction_db",
   "mvp_meter_output_correction_reduction_db",
+  "mvp_meter_stereo_correlation",
+  "mvp_meter_stereo_width_percent",
+  "mvp_meter_stereo_guard_reduction_db",
   "mvp_meter_true_peak_linear",
   "mvp_meter_true_peak_dbtp",
 ]) {
@@ -73,6 +77,7 @@ function baseState() {
   dsp.mvp_set_multiband(0, 1);
   dsp.mvp_set_dynamic_eq(0, 0.72);
   dsp.mvp_set_output_correction(0, 1);
+  dsp.mvp_set_stereo_integrity(0, 1);
   dsp.mvp_set_loudness(0, -10);
   dsp.mvp_set_limiter(0, -1.0);
   dsp.mvp_set_output_profile(1); // Headphone profile is neutral in the V2 core.
@@ -561,3 +566,51 @@ if (!(truePeakLimited.gainReductionDb > 0.3 && truePeakLimited.gainReductionDb <
   throw new Error(`True-peak limiter GR is implausible: ${JSON.stringify(truePeakLimited)}`);
 }
 console.log(JSON.stringify({ truePeak: { unlim: truePeakUnlim, limited: truePeakLimited } }, null, 2));
+
+
+// V3 Phase 6 Stereo Integrity regression.
+function renderStereoIntegrity({ mode, frequency = 1000, profile = 2, enabled = true, blocks = 900 }) {
+  dsp.mvp_reset();
+  baseState();
+  dsp.mvp_set_output_profile(profile);
+  dsp.mvp_set_stereo_integrity(enabled ? 1 : 0, 1);
+  dsp.mvp_set_limiter(0, -1.0);
+  let phase = 0;
+  let sumSq = 0;
+  let count = 0;
+  let maxGuard = 0;
+  let corr = 1;
+  let width = 100;
+  for (let block = 0; block < blocks; block += 1) {
+    for (let i = 0; i < 128; i += 1) {
+      const left = 0.25 * Math.sin(phase);
+      const rightIndependent = 0.22 * Math.sin(phase * 1.173 + 0.4);
+      phase += (2 * Math.PI * frequency) / 48000;
+      inL[i] = left;
+      inR[i] = mode === "mono" ? left : mode === "antiphase" ? -left : rightIndependent;
+    }
+    if (dsp.mvp_process(128) !== 1) throw new Error("mvp_process failed in Stereo Integrity test");
+    if (block > 620) {
+      for (let i = 0; i < 128; i += 1) {
+        if (!Number.isFinite(outL[i]) || !Number.isFinite(outR[i])) throw new Error("Non-finite Stereo Integrity output");
+        sumSq += 0.5 * (outL[i] * outL[i] + outR[i] * outR[i]);
+        count += 1;
+      }
+      maxGuard = Math.max(maxGuard, Number(dsp.mvp_meter_stereo_guard_reduction_db()));
+      corr = Number(dsp.mvp_meter_stereo_correlation());
+      width = Number(dsp.mvp_meter_stereo_width_percent());
+    }
+  }
+  return { rms: Math.sqrt(sumSq / Math.max(1, count)), maxGuard, corr, width };
+}
+const stereoMono = renderStereoIntegrity({ mode: "mono", profile: 2 });
+if (stereoMono.corr < 0.95 || stereoMono.maxGuard > 0.05) throw new Error(`Stereo Integrity altered mono stability: ${JSON.stringify(stereoMono)}`);
+const stereoNormal = renderStereoIntegrity({ mode: "normal", profile: 0 });
+if (stereoNormal.maxGuard > 0.15) throw new Error(`Stereo Integrity guard overreacted to normal stereo: ${JSON.stringify(stereoNormal)}`);
+const stereoAnti = renderStereoIntegrity({ mode: "antiphase", profile: 2 });
+if (!(stereoAnti.corr < -0.9 && stereoAnti.maxGuard > 2.5 && stereoAnti.maxGuard <= 3.1)) throw new Error(`Stereo anti-phase guard failed: ${JSON.stringify(stereoAnti)}`);
+const stereoLowDry = renderStereoIntegrity({ mode: "antiphase", frequency: 80, profile: 2, enabled: false });
+const stereoLowWet = renderStereoIntegrity({ mode: "antiphase", frequency: 80, profile: 2, enabled: true });
+const stereoLowDeltaDb = 20 * Math.log10(Math.max(1e-9, stereoLowWet.rms) / Math.max(1e-9, stereoLowDry.rms));
+if (!(stereoLowDeltaDb < -3.5 && stereoLowDeltaDb > -8.0)) throw new Error(`Stereo low-bass anchor out of range: ${stereoLowDeltaDb.toFixed(3)} dB`);
+console.log("Stereo Integrity:", { stereoMono, stereoNormal, stereoAnti, stereoLowDeltaDb });

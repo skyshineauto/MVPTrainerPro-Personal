@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V3 Phase 4 BS.1770 True-Peak Limiter
+// MVP Trainer Pro - MVP Studio Engine V3 Phase 6 Stereo Integrity
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -357,6 +357,8 @@ Biquad outputLow[2];
 Biquad outputPresence[2];
 Biquad outputHigh[2];
 Biquad headphoneBass[2];
+// V3 Phase 6 Stereo Integrity: mono-compatible low bass + adaptive anti-phase guard.
+Biquad stereoSideLowpass;
 
 float limiterDelayL[kMaxLookahead];
 float limiterDelayR[kMaxLookahead];
@@ -406,6 +408,15 @@ float headphoneDepth = 0.0f;
 float headphoneCrossfeed = 0.0f;
 float headphoneCenter = 0.5f;
 float headphoneBassImpact = 0.0f;
+// Studio Stereo Integrity is automatic for every processed non-reference path.
+int stereoIntegrityEnabled = 1;
+float stereoIntegrityAmount = 1.0f;
+float stereoCorrelationEnergy = 0.0f;
+float stereoCorrelationCross = 0.0f;
+float stereoGuardGain = 1.0f;
+float meterStereoCorrelation = 1.0f;
+float meterStereoWidthPercent = 100.0f;
+float meterStereoGuardReductionDb = 0.0f;
 float targetPreampDb = 0.0f;
 float headroomDb = 0.0f;
 float currentPreampGain = 1.0f;
@@ -528,6 +539,13 @@ void resetBuffers() {
     truePeakHistoryR[tap] = 0.0f;
   }
   crossfeedStateL = crossfeedStateR = 0.0;
+  stereoSideLowpass.reset();
+  stereoCorrelationEnergy = 0.0f;
+  stereoCorrelationCross = 0.0f;
+  stereoGuardGain = 1.0f;
+  meterStereoCorrelation = 1.0f;
+  meterStereoWidthPercent = 100.0f;
+  meterStereoGuardReductionDb = 0.0f;
   resetLoudnessState();
   resetLinearFir(false);
   transientFastEnvelope = 0.0f;
@@ -817,6 +835,20 @@ void configureOutputProfile() {
   meterOutputCorrectionReductionDb = 0.0f;
 }
 
+void configureStereoIntegrity() {
+  // Side-channel low-pass isolates bass width so the low end can be centered
+  // without narrowing the entire mix. 120 Hz is deliberately below the body
+  // region of guitars and vocals.
+  stereoSideLowpass.setLowpass(sampleRateHz, 120.0, 0.7071067811865476);
+  stereoSideLowpass.reset();
+  stereoCorrelationEnergy = 0.0f;
+  stereoCorrelationCross = 0.0f;
+  stereoGuardGain = 1.0f;
+  meterStereoCorrelation = 1.0f;
+  meterStereoWidthPercent = 100.0f;
+  meterStereoGuardReductionDb = 0.0f;
+}
+
 void configureHeadphoneBass() {
   const double boost = headphoneEnabled ? clampd(headphoneBassImpact, 0.0, 1.0) * 3.0 : 0.0;
   headphoneBass[0].setLowShelf(sampleRateHz, 92.0, boost);
@@ -920,6 +952,64 @@ inline float processOutput(int ch, float sample) {
   sample = outputPresence[ch].process(sample);
   sample = outputHigh[ch].process(sample);
   return sample;
+}
+
+void processStereoIntegrity(float &left, float &right) {
+  if (!stereoIntegrityEnabled || stereoIntegrityAmount <= 0.0001f) {
+    meterStereoCorrelation = 1.0f;
+    meterStereoWidthPercent = 100.0f;
+    meterStereoGuardReductionDb = 0.0f;
+    return;
+  }
+
+  const float amount = clampf(stereoIntegrityAmount, 0.0f, 1.0f);
+  const float mid = 0.5f * (left + right);
+  const float side = 0.5f * (left - right);
+
+  // Smooth stereo correlation over roughly 70 ms. A negative correlation means
+  // excessive anti-phase energy and is where the safety guard begins to narrow.
+  const float energy = left * left + right * right;
+  const float cross = 2.0f * left * right;
+  const float corrCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.070)));
+  stereoCorrelationEnergy += (energy - stereoCorrelationEnergy) * corrCoeff;
+  stereoCorrelationCross += (cross - stereoCorrelationCross) * corrCoeff;
+  float correlation = stereoCorrelationEnergy > 1.0e-8f
+    ? stereoCorrelationCross / stereoCorrelationEnergy
+    : 1.0f;
+  correlation = clampf(correlation, -1.0f, 1.0f);
+
+  // The guard is transparent above -0.18 correlation. At strongly anti-phase
+  // moments it can reduce the high-frequency side channel by at most 3 dB.
+  float guardTarget = 1.0f;
+  if (correlation < -0.18f) {
+    const float severity = clampf((-0.18f - correlation) / 0.62f, 0.0f, 1.0f);
+    guardTarget = 1.0f - severity * (1.0f - static_cast<float>(dbToGain(-3.0))) * amount;
+  }
+  const float guardAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.020)));
+  const float guardRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
+  const float guardCoeff = guardTarget < stereoGuardGain ? guardAttack : guardRelease;
+  stereoGuardGain += (guardTarget - stereoGuardGain) * guardCoeff;
+
+  // Profile-specific base width is intentionally tiny. This is an integrity stage,
+  // not a wow-effect widener. Headphone immersion remains a separate later stage.
+  const float baseHighWidth = outputProfile == 0 ? 1.03f : (outputProfile == 2 ? 0.99f : 1.0f);
+  const float lowSideScale = outputProfile == 0 ? 0.55f : (outputProfile == 2 ? 0.45f : 0.78f);
+
+  const float lowSide = stereoSideLowpass.process(side);
+  const float highSide = side - lowSide;
+  const float finalHighScale = 1.0f + (baseHighWidth - 1.0f) * amount;
+  const float guardedHigh = highSide * finalHighScale * stereoGuardGain;
+  const float centeredLow = lowSide * (1.0f + (lowSideScale - 1.0f) * amount);
+  const float finalSide = centeredLow + guardedHigh;
+
+  left = mid + finalSide;
+  right = mid - finalSide;
+
+  meterStereoCorrelation = correlation;
+  meterStereoWidthPercent = clampf(finalHighScale * stereoGuardGain * 100.0f, 0.0f, 140.0f);
+  meterStereoGuardReductionDb = stereoGuardGain < 0.99999f
+    ? static_cast<float>(-20.0 * log10(stereoGuardGain))
+    : 0.0f;
 }
 
 void processHeadphone(float &left, float &right) {
@@ -1216,6 +1306,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   headroomDb = 0.0f;
   currentPreampGain = 1.0f;
   configureOutputProfile();
+  configureStereoIntegrity();
   configureHeadphoneBass();
   configureMultiband();
   configureDynamicEq();
@@ -1293,6 +1384,18 @@ __attribute__((visibility("default"))) void mvp_set_output_correction(int enable
   outputCorrectionAmount = clampf(amount, 0.0f, 1.0f);
   if (!outputCorrectionEnabled) meterOutputCorrectionReductionDb = 0.0f;
 }
+__attribute__((visibility("default"))) void mvp_set_stereo_integrity(int enabled, float amount) {
+  const int nextEnabled = enabled ? 1 : 0;
+  if (nextEnabled && !stereoIntegrityEnabled) configureStereoIntegrity();
+  stereoIntegrityEnabled = nextEnabled;
+  stereoIntegrityAmount = clampf(amount, 0.0f, 1.0f);
+  if (!stereoIntegrityEnabled) {
+    stereoGuardGain = 1.0f;
+    meterStereoCorrelation = 1.0f;
+    meterStereoWidthPercent = 100.0f;
+    meterStereoGuardReductionDb = 0.0f;
+  }
+}
 __attribute__((visibility("default"))) void mvp_set_headphone(
   int enabled, float width, float depth, float crossfeed, float center, float bassImpact
 ) {
@@ -1347,6 +1450,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     left = processOutput(0, left);
     right = processOutput(1, right);
     processOutputCorrection(left, right);
+    processStereoIntegrity(left, right);
     processHeadphone(left, right);
     processLoudness(left, right);
 
@@ -1389,6 +1493,9 @@ __attribute__((visibility("default"))) float mvp_meter_dynamic_eq_band_reduction
   return meterDynamicEqBandReductionDb[band];
 }
 __attribute__((visibility("default"))) float mvp_meter_output_correction_reduction_db() { return meterOutputCorrectionReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_stereo_correlation() { return meterStereoCorrelation; }
+__attribute__((visibility("default"))) float mvp_meter_stereo_width_percent() { return meterStereoWidthPercent; }
+__attribute__((visibility("default"))) float mvp_meter_stereo_guard_reduction_db() { return meterStereoGuardReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }

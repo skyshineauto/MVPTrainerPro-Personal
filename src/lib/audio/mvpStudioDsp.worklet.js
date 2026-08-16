@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 4 BS.1770 True-Peak Limiter
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 6 Stereo Integrity
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -99,7 +99,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v3-phase3-linear-phase",
+        version: "studio-wasm-v3-phase6-stereo-integrity",
       });
     } catch (error) {
       this.failed = true;
@@ -157,6 +157,12 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       api.mvp_set_output_correction(
         state.outputCorrectionEnabled ? 1 : 0,
         Number.isFinite(Number(state.outputCorrectionAmount)) ? Number(state.outputCorrectionAmount) : 1,
+      );
+    }
+    if (typeof api.mvp_set_stereo_integrity === "function") {
+      api.mvp_set_stereo_integrity(
+        state.stereoIntegrityEnabled ? 1 : 0,
+        Number.isFinite(Number(state.stereoIntegrityAmount)) ? Number(state.stereoIntegrityAmount) : 1,
       );
     }
     if (typeof api.mvp_set_loudness === "function") {
@@ -264,6 +270,15 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
           : [0, 0, 0, 0],
         outputCorrectionReductionDb: typeof this.exports.mvp_meter_output_correction_reduction_db === "function"
           ? this.exports.mvp_meter_output_correction_reduction_db()
+          : 0,
+        stereoCorrelation: typeof this.exports.mvp_meter_stereo_correlation === "function"
+          ? this.exports.mvp_meter_stereo_correlation()
+          : 1,
+        stereoWidthPercent: typeof this.exports.mvp_meter_stereo_width_percent === "function"
+          ? this.exports.mvp_meter_stereo_width_percent()
+          : 100,
+        stereoGuardReductionDb: typeof this.exports.mvp_meter_stereo_guard_reduction_db === "function"
+          ? this.exports.mvp_meter_stereo_guard_reduction_db()
           : 0,
         loudnessGainDb: typeof this.exports.mvp_meter_loudness_gain_db === "function"
           ? this.exports.mvp_meter_loudness_gain_db()

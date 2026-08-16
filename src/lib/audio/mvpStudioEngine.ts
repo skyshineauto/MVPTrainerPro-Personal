@@ -12,6 +12,9 @@ export type MvpStudioTelemetry = {
   dynamicEqGainReductionDb: number;
   dynamicEqBandReductionDb: [number, number, number, number];
   outputCorrectionReductionDb: number;
+  stereoCorrelation: number;
+  stereoWidthPercent: number;
+  stereoGuardReductionDb: number;
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   loudnessProgramLufs: number;
@@ -32,6 +35,8 @@ export type MvpStudioState = {
   dynamicEqAmount: number;
   outputCorrectionEnabled: boolean;
   outputCorrectionAmount: number;
+  stereoIntegrityEnabled: boolean;
+  stereoIntegrityAmount: number;
   normalizationEnabled: boolean;
   normalizationTargetLufs: number;
   limiterEnabled: boolean;
@@ -60,6 +65,9 @@ let latestTelemetry: MvpStudioTelemetry = {
   dynamicEqGainReductionDb: 0,
   dynamicEqBandReductionDb: [0, 0, 0, 0],
   outputCorrectionReductionDb: 0,
+  stereoCorrelation: 1,
+  stereoWidthPercent: 100,
+  stereoGuardReductionDb: 0,
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   loudnessProgramLufs: -70,
@@ -68,7 +76,7 @@ let latestTelemetry: MvpStudioTelemetry = {
 function loadStudioWasmBytes() {
   if (!wasmBytesPromise) {
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "3.4.0");
+    url.searchParams.set("v", "3.6.0");
     wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
       return response.arrayBuffer();
@@ -83,7 +91,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   }
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "3.4.0");
+  workletUrl.searchParams.set("v", "3.6.0");
   const [wasmBytes] = await Promise.all([
     loadStudioWasmBytes(),
     context.audioWorklet.addModule(workletUrl.href),
@@ -144,6 +152,9 @@ export async function createMvpStudioNode(context: AudioContext) {
           dynamicEqGainReductionDb: Number(data.dynamicEqGainReductionDb) || 0,
           dynamicEqBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.dynamicEqBandReductionDb?.[index]) || 0) as [number, number, number, number],
           outputCorrectionReductionDb: Number(data.outputCorrectionReductionDb) || 0,
+          stereoCorrelation: Number.isFinite(Number(data.stereoCorrelation)) ? Number(data.stereoCorrelation) : 1,
+          stereoWidthPercent: Number.isFinite(Number(data.stereoWidthPercent)) ? Number(data.stereoWidthPercent) : 100,
+          stereoGuardReductionDb: Number(data.stereoGuardReductionDb) || 0,
           loudnessGainDb: Number(data.loudnessGainDb) || 0,
           loudnessMomentaryLufs: Number.isFinite(Number(data.loudnessMomentaryLufs)) ? Number(data.loudnessMomentaryLufs) : -70,
           loudnessProgramLufs: Number.isFinite(Number(data.loudnessProgramLufs)) ? Number(data.loudnessProgramLufs) : -70,

@@ -1948,6 +1948,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>OUTPUT LIMITER <b className="is-good">{player.dspEngineMode === "studio_wasm" ? "WASM • BS.1770 TRUE PEAK" : "4× • -1 dBTP"}</b></span>
               {/* MVP_STUDIO_WASM_V3_PHASE2_OUTPUT_CORRECTION */}
               <span>OUTPUT CORRECTION <b className={player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "is-good" : "is-fallback"}>{player.outputProfile === "reference" || player.dspBypass ? "BYPASSED" : player.dspEngineMode === "studio_wasm" ? `WASM • ${player.outputProfile === "speaker" ? "BLUETOOTH" : player.outputProfile === "headphones" ? "HEADPHONES" : "CAR / HI-FI"} AUTO${player.outputCorrectionReductionDb > 0.05 ? ` • -${player.outputCorrectionReductionDb.toFixed(1)} dB` : ""}` : "COMPAT • STATIC"}</b></span>
+              <span>STEREO INTEGRITY <b className={player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "is-good" : "is-fallback"}>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? `WASM • PHASE SAFE${player.stereoGuardReductionDb > 0.05 ? ` • -${player.stereoGuardReductionDb.toFixed(1)} dB` : ""}` : "BYPASSED"}</b></span>
               <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && (player.dspEngineMode === "advanced_worklet" || (player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass)) ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "WASM • 4-BAND ACTIVE" : player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
               {/* MVP_STUDIO_WASM_V3_PHASE1_DYNAMIC_EQ */}
               <span>DYNAMIC EQ <b className={player.dynamicEqEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "is-good" : "is-fallback"}>{player.dspEngineMode !== "studio_wasm" ? "STUDIO ONLY" : player.dynamicEqEnabled && player.outputProfile !== "reference" && !player.dspBypass ? `WASM • 4-BAND AUTO${player.dynamicEqGainReductionDb > 0.05 ? ` • -${player.dynamicEqGainReductionDb.toFixed(1)} dB` : ""}` : "BYPASSED"}</b></span>
@@ -1997,6 +1998,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 <strong>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? `+${player.transientBoostDb.toFixed(1)} dB` : "OFF"}</strong>
                 <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" ? Math.max(0, Math.min(100, (player.transientBoostDb / 2.5) * 100)) : 0}%` }} /></i>
                 <small>Adaptive attack enhancement</small>
+              </article>
+              <article data-meter="stereo">
+                <span>STEREO FIELD</span>
+                <strong>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" ? `CORR ${player.stereoCorrelation >= 0 ? "+" : ""}${player.stereoCorrelation.toFixed(2)}` : "OFF"}</strong>
+                <i><b style={{ width: `${player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" ? Math.max(0, Math.min(100, ((player.stereoCorrelation + 1) / 2) * 100)) : 0}%` }} /></i>
+                <small>{player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" ? `Width ${player.stereoWidthPercent}% • Guard ${player.stereoGuardReductionDb.toFixed(1)} dB` : "Stereo Integrity bypassed"}</small>
               </article>
               <article data-meter="level">
                 <span>TRACK LEVEL</span>

@@ -256,6 +256,10 @@ export type MusicPlayerState = {
   dynamicEqGainReductionDb: number;
   dynamicEqBandReductionDb: [number, number, number, number];
   outputCorrectionReductionDb: number;
+  // MVP_STUDIO_WASM_V3_PHASE6_STEREO_INTEGRITY
+  stereoCorrelation: number;
+  stereoWidthPercent: number;
+  stereoGuardReductionDb: number;
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   // MVP_STUDIO_WASM_V3_PHASE5_LIVE_METERING
@@ -502,6 +506,9 @@ let state: MusicPlayerState = {
   dynamicEqGainReductionDb: 0,
   dynamicEqBandReductionDb: [0, 0, 0, 0],
   outputCorrectionReductionDb: 0,
+  stereoCorrelation: 1,
+  stereoWidthPercent: 100,
+  stereoGuardReductionDb: 0,
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   truePeakDbtp: -120,
@@ -1265,6 +1272,10 @@ function applyStudioProcessingSettings(now: number) {
     // core chooses the correct adaptive guard behavior from outputProfileCode.
     outputCorrectionEnabled: processed,
     outputCorrectionAmount: 1,
+    // MVP_STUDIO_WASM_V3_PHASE6_STEREO_INTEGRITY
+    // Automatic mono-compatible low bass and anti-phase image protection.
+    stereoIntegrityEnabled: processed,
+    stereoIntegrityAmount: 1,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
     normalizationEnabled: processed && state.normalizationEnabled,
@@ -1348,6 +1359,9 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
       limiterGainReductionDb: 0,
       transientBoostDb: 0,
       multibandGainReductionDb: 0,
+      stereoCorrelation: 1,
+      stereoWidthPercent: 100,
+      stereoGuardReductionDb: 0,
     });
     applyProcessingSettings();
     return true;
@@ -1721,6 +1735,19 @@ function startLevelMeter() {
         ? Math.round(telemetry.outputCorrectionReductionDb * 10) / 10
         : 0;
       const outputCorrectionChanged = outputCorrectionReductionDb !== state.outputCorrectionReductionDb;
+      const stereoIntegrityActive = state.outputProfile !== "reference" && !state.dspBypass;
+      const stereoCorrelation = stereoIntegrityActive && Number.isFinite(telemetry.stereoCorrelation)
+        ? Math.round(Math.max(-1, Math.min(1, telemetry.stereoCorrelation)) * 100) / 100
+        : 1;
+      const stereoWidthPercent = stereoIntegrityActive && Number.isFinite(telemetry.stereoWidthPercent)
+        ? Math.round(Math.max(0, Math.min(140, telemetry.stereoWidthPercent)))
+        : 100;
+      const stereoGuardReductionDb = stereoIntegrityActive && Number.isFinite(telemetry.stereoGuardReductionDb)
+        ? Math.round(Math.max(0, telemetry.stereoGuardReductionDb) * 10) / 10
+        : 0;
+      const stereoIntegrityChanged = stereoCorrelation !== state.stereoCorrelation
+        || stereoWidthPercent !== state.stereoWidthPercent
+        || stereoGuardReductionDb !== state.stereoGuardReductionDb;
       const truePeakDbtp = Number.isFinite(telemetry.truePeakDbtp)
         ? Math.round(telemetry.truePeakDbtp * 10) / 10
         : -120;
@@ -1739,13 +1766,16 @@ function startLevelMeter() {
         || limiterGainReductionDb !== state.limiterGainReductionDb
         || transientBoostDb !== state.transientBoostDb
         || multibandGainReductionDb !== state.multibandGainReductionDb;
-      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged || outputCorrectionChanged || coreMeterChanged) {
+      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged || outputCorrectionChanged || stereoIntegrityChanged || coreMeterChanged) {
         emit({
           loudnessGainDb: gainDb,
           loudnessMomentaryLufs: programLufs,
           dynamicEqGainReductionDb,
           dynamicEqBandReductionDb,
           outputCorrectionReductionDb,
+          stereoCorrelation,
+          stereoWidthPercent,
+          stereoGuardReductionDb,
           truePeakDbtp,
           limiterGainReductionDb,
           transientBoostDb,
