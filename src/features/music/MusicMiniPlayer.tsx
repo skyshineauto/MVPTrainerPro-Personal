@@ -5166,6 +5166,26 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-outputProfileChoices button{min-height:48px!important;font-size:9px!important}
           .tr-sourceQualityCopy>strong{white-space:normal!important;line-height:1.2!important}
         }
+
+        /* MVP_STUDIO_V4_1_DSP_EQ_DESKTOP_ALIGNMENT
+           Desktop only: hard-lock DSP/EQ to the exact geometry of the
+           All Uploaded Songs field. Mobile uses the separate mobile DSP button. */
+        @media(min-width:901px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{
+            align-items:end!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector .tr-audioQueueSelectorField,
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            box-sizing:border-box!important;
+            height:44px!important;
+            min-height:44px!important;
+            max-height:44px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{
+            align-self:end!important;
+            margin:0!important;
+          }
+        }
       `}</style>
     </section>
   );
