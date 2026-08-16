@@ -32,7 +32,6 @@ const dsp = instance.exports;
 for (const name of [
   "mvp_set_transient",
   "mvp_set_multiband",
-  "mvp_set_dynamic_eq",
   "mvp_set_loudness",
   "mvp_reset_loudness",
   "mvp_meter_loudness_gain_db",
@@ -41,8 +40,6 @@ for (const name of [
   "mvp_meter_transient_boost_db",
   "mvp_meter_multiband_gain_reduction_db",
   "mvp_meter_multiband_band_reduction_db",
-  "mvp_meter_dynamic_eq_gain_reduction_db",
-  "mvp_meter_dynamic_eq_band_reduction_db",
 ]) {
   if (typeof dsp[name] !== "function") throw new Error(`Missing ${name} export`);
 }
@@ -59,7 +56,6 @@ function baseState() {
   dsp.mvp_set_headroom_db(0);
   dsp.mvp_set_transient(0, 0);
   dsp.mvp_set_multiband(0, 1);
-  dsp.mvp_set_dynamic_eq(0, 0.72);
   dsp.mvp_set_loudness(0, -10);
   dsp.mvp_set_limiter(0, -1.0);
   dsp.mvp_set_output_profile(1); // Headphone profile is neutral in the V2 core.
@@ -134,7 +130,6 @@ dsp.mvp_reset();
 baseState();
 dsp.mvp_set_transient(1, 0.72);
 dsp.mvp_set_multiband(1, 1);
-dsp.mvp_set_dynamic_eq(1, 0.72);
 dsp.mvp_set_limiter(1, -1.0);
 let phase = 0;
 let combinedPeak = 0;
@@ -154,60 +149,7 @@ for (let block = 0; block < 420; block += 1) {
   }
 }
 
-// 4) Dynamic EQ should be essentially transparent below threshold and apply
-// bounded cut-only correction to hot resonant material.
-function renderDynamicEq({ frequency, amplitude, enabled, seconds = 4 }) {
-  dsp.mvp_reset();
-  baseState();
-  dsp.mvp_set_dynamic_eq(enabled ? 1 : 0, 0.72);
-  dsp.mvp_set_limiter(0, -1.0);
-  let phase = 0;
-  let sumSq = 0;
-  let count = 0;
-  let maxGr = 0;
-  const bandMax = [0, 0, 0, 0];
-  const blocks = Math.ceil((seconds * 48000) / 128);
-  for (let block = 0; block < blocks; block += 1) {
-    for (let i = 0; i < 128; i += 1) {
-      const sample = amplitude * Math.sin(phase);
-      phase += (2 * Math.PI * frequency) / 48000;
-      inL[i] = sample;
-      inR[i] = sample;
-    }
-    if (dsp.mvp_process(128) !== 1) throw new Error("mvp_process failed in dynamic EQ test");
-    if (block > Math.floor(blocks * 0.55)) {
-      for (let i = 0; i < 128; i += 1) {
-        if (!Number.isFinite(outL[i]) || !Number.isFinite(outR[i])) throw new Error("Non-finite dynamic EQ output");
-        sumSq += 0.5 * (outL[i] * outL[i] + outR[i] * outR[i]);
-        count += 1;
-      }
-      maxGr = Math.max(maxGr, Number(dsp.mvp_meter_dynamic_eq_gain_reduction_db()));
-      for (let band = 0; band < 4; band += 1) {
-        bandMax[band] = Math.max(bandMax[band], Number(dsp.mvp_meter_dynamic_eq_band_reduction_db(band)));
-      }
-    }
-  }
-  return { rms: Math.sqrt(sumSq / Math.max(1, count)), maxGr, bandMax };
-}
-
-const dynamicQuietDry = renderDynamicEq({ frequency: 3200, amplitude: 0.015, enabled: false });
-const dynamicQuietWet = renderDynamicEq({ frequency: 3200, amplitude: 0.015, enabled: true });
-const dynamicQuietDeltaDb = 20 * Math.log10(Math.max(1e-9, dynamicQuietWet.rms) / Math.max(1e-9, dynamicQuietDry.rms));
-if (Math.abs(dynamicQuietDeltaDb) > 0.25 || dynamicQuietWet.maxGr > 0.2) {
-  throw new Error(`Dynamic EQ altered quiet program too much: ${JSON.stringify({ dynamicQuietDeltaDb, dynamicQuietWet })}`);
-}
-
-const dynamicHotDry = renderDynamicEq({ frequency: 3200, amplitude: 0.62, enabled: false });
-const dynamicHotWet = renderDynamicEq({ frequency: 3200, amplitude: 0.62, enabled: true });
-const dynamicHotDeltaDb = 20 * Math.log10(Math.max(1e-9, dynamicHotWet.rms) / Math.max(1e-9, dynamicHotDry.rms));
-if (!(dynamicHotWet.maxGr > 0.2 && dynamicHotWet.maxGr <= 2.6)) {
-  throw new Error(`Dynamic EQ GR out of range: ${JSON.stringify(dynamicHotWet)}`);
-}
-if (!(dynamicHotDeltaDb < -0.1 && dynamicHotDeltaDb > -3.0)) {
-  throw new Error(`Dynamic EQ hot-band level change is implausible: ${dynamicHotDeltaDb.toFixed(3)} dB`);
-}
-
-// 5) Volume Match should move program gain slowly toward -10 LUFS,
+// 4) Volume Match should move program gain slowly toward -10 LUFS,
 // without becoming a short-term compressor. A loud steady program attenuates;
 // a quiet one receives a bounded boost.
 function renderLoudness(amplitude, enabled, seconds = 14) {
@@ -264,7 +206,7 @@ if (Math.abs(normalizationOff.gainDb) > 0.1) {
   throw new Error(`Disabled Volume Match changed gain: ${normalizationOff.gainDb}`);
 }
 
-// 6) Deliberate overload: final limiter still owns the ceiling after the Dynamic EQ chain.
+// 5) Deliberate overload: final limiter still owns the ceiling after the Phase 3 chain.
 dsp.mvp_reset();
 baseState();
 dsp.mvp_set_preamp_db(9);
@@ -286,20 +228,13 @@ for (let block = 0; block < 320; block += 1) {
 const ceiling = 10 ** (-1 / 20);
 if (overloadPeak > ceiling + 0.0001) throw new Error(`Limiter exceeded ceiling: ${overloadPeak}`);
 
-console.log("MVP Studio WASM V3 Phase 1 Dynamic EQ: PASS");
+console.log("MVP Studio WASM V2 Phase 3.1 Volume Match: PASS");
 console.log({
   wasmBytes: bytes.length,
   maxFrames,
   responseChecks,
   compressionChecks,
   combinedPeak,
-  dynamicEq: {
-    quietDeltaDb: dynamicQuietDeltaDb,
-    quietMaxGrDb: dynamicQuietWet.maxGr,
-    hotDeltaDb: dynamicHotDeltaDb,
-    hotMaxGrDb: dynamicHotWet.maxGr,
-    hotBandMaxDb: dynamicHotWet.bandMax,
-  },
   loudProgram,
   quietProgram,
   matchedProgram,

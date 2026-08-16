@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V2 Phase 3.1 Volume Match
+// MVP Trainer Pro - MVP Studio Engine V3 Phase 1 Dynamic EQ
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -141,6 +141,21 @@ struct Biquad {
     a1 = (-2.0 * cw) / a0n;
     a2 = (1.0 - alpha) / a0n;
   }
+
+  void setBandpass(double sampleRate, double frequency, double q = 1.0) {
+    const double f = clampd(frequency, 10.0, sampleRate * 0.475);
+    const double safeQ = clampd(q, 0.15, 12.0);
+    const double w0 = 2.0 * kPi * f / sampleRate;
+    const double cw = cos(w0);
+    const double sw = sin(w0);
+    const double alpha = sw / (2.0 * safeQ);
+    const double a0n = 1.0 + alpha;
+    b0 = alpha / a0n;
+    b1 = 0.0;
+    b2 = -alpha / a0n;
+    a1 = (-2.0 * cw) / a0n;
+    a2 = (1.0 - alpha) / a0n;
+  }
 };
 
 struct LR4Split {
@@ -238,6 +253,70 @@ struct MultibandCompressor {
   }
 };
 
+struct DynamicEqBand {
+  Biquad detector[2];
+  Biquad audio[2];
+  float frequency = 1000.0f;
+  float q = 1.0f;
+  float thresholdDb = -18.0f;
+  float maxReductionDb = 2.0f;
+  float ratio = 2.0f;
+  float envelope = 0.0f;
+  float reductionDb = 0.0f;
+  float attackCoeff = 0.02f;
+  float releaseCoeff = 0.002f;
+
+  void configure(float sampleRate, float freq, float qValue, float threshold, float maxReduction, float ratioValue, float attackMs, float releaseMs) {
+    frequency = freq;
+    q = qValue;
+    thresholdDb = threshold;
+    maxReductionDb = maxReduction;
+    ratio = ratioValue;
+    attackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * attackMs * 0.001)));
+    releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * releaseMs * 0.001)));
+    detector[0].setBandpass(sampleRate, frequency, q);
+    detector[1].setBandpass(sampleRate, frequency, q);
+    audio[0].setIdentity();
+    audio[1].setIdentity();
+  }
+
+  void reset() {
+    envelope = 0.0f;
+    reductionDb = 0.0f;
+    for (int ch = 0; ch < 2; ++ch) { detector[ch].reset(); audio[ch].reset(); }
+  }
+
+  inline void detect(float left, float right) {
+    const float dl = absf(detector[0].process(left));
+    const float dr = absf(detector[1].process(right));
+    const float value = dl > dr ? dl : dr;
+    const float coeff = value > envelope ? attackCoeff : releaseCoeff;
+    envelope += (value - envelope) * coeff;
+  }
+
+  void update(float sampleRate, float amount, float seconds) {
+    float targetDb = 0.0f;
+    if (amount > 0.0001f && envelope > 0.000001f) {
+      const float levelDb = static_cast<float>(20.0 * log10(envelope));
+      if (levelDb > thresholdDb) {
+        const float over = levelDb - thresholdDb;
+        targetDb = clampf(over * (1.0f - 1.0f / ratio) * amount, 0.0f, maxReductionDb * amount);
+      }
+    }
+    const float timeConstant = targetDb > reductionDb ? 0.045f : 0.220f;
+    const float alpha = static_cast<float>(1.0 - exp(-seconds / timeConstant));
+    reductionDb += (targetDb - reductionDb) * alpha;
+    if (reductionDb < 0.001f) reductionDb = 0.0f;
+    for (int ch = 0; ch < 2; ++ch) audio[ch].setPeaking(sampleRate, frequency, q, -reductionDb);
+  }
+
+  inline void process(float &left, float &right) {
+    detect(left, right);
+    left = audio[0].process(left);
+    right = audio[1].process(right);
+  }
+};
+
 float inputL[kMaxFrames];
 float inputR[kMaxFrames];
 float outputL[kMaxFrames];
@@ -318,6 +397,15 @@ MultibandCompressor multibandCompressor[4];
 float meterMultibandGainReductionDb = 0.0f;
 float meterMultibandBandReductionDb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
+// Studio V3 Phase 1 adaptive Dynamic EQ. Four cut-only resonance controllers
+// reduce boom, low-mid buildup, upper-mid harshness and brittle edge only when
+// those regions actually cross their thresholds. Static 31-band EQ remains truthful.
+int dynamicEqEnabled = 1;
+float dynamicEqAmount = 0.72f;
+DynamicEqBand dynamicEqBands[4];
+float meterDynamicEqMaxReductionDb = 0.0f;
+float meterDynamicEqBandReductionDb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
 // Studio V2 Phase 3.1 optional Volume Match utility.
 // The detector is K-weighted (BS.1770-style shelf + RLB high-pass), with an exact
 // 400 ms energy window and slow gated program accumulation. Gain movement is
@@ -378,9 +466,12 @@ void resetBuffers() {
   transientGain = 1.0f;
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
+  meterDynamicEqMaxReductionDb = 0.0f;
   for (int band = 0; band < 4; ++band) {
     meterMultibandBandReductionDb[band] = 0.0f;
     multibandCompressor[band].reset();
+    meterDynamicEqBandReductionDb[band] = 0.0f;
+    dynamicEqBands[band].reset();
   }
   for (int ch = 0; ch < 2; ++ch) {
     for (int band = 0; band < kEqBands; ++band) eq[ch][band].reset();
@@ -435,6 +526,31 @@ void configureMultiband() {
   multibandCompressor[1].configure(sampleRateHz, -17.0f, 1.28f, 2.6f, 22.0f, 165.0f, 18.0f, 145.0f);
   multibandCompressor[2].configure(sampleRateHz, -18.5f, 1.24f, 2.4f, 12.0f, 125.0f, 10.0f, 110.0f);
   multibandCompressor[3].configure(sampleRateHz, -20.0f, 1.20f, 2.0f, 7.0f, 95.0f, 6.0f, 85.0f);
+}
+
+void configureDynamicEq() {
+  // Broad, mastering-style bands with conservative maximum cuts.
+  dynamicEqBands[0].configure(sampleRateHz, 90.0f, 0.85f, -17.0f, 1.8f, 2.0f, 18.0f, 180.0f);
+  dynamicEqBands[1].configure(sampleRateHz, 280.0f, 1.00f, -20.0f, 2.2f, 2.2f, 22.0f, 220.0f);
+  dynamicEqBands[2].configure(sampleRateHz, 3200.0f, 1.10f, -22.0f, 2.5f, 2.4f, 10.0f, 150.0f);
+  dynamicEqBands[3].configure(sampleRateHz, 7600.0f, 1.00f, -24.0f, 1.8f, 2.0f, 7.0f, 125.0f);
+}
+
+void refreshDynamicEqForBlock(int frames) {
+  const float seconds = static_cast<float>(frames) / sampleRateHz;
+  meterDynamicEqMaxReductionDb = 0.0f;
+  for (int band = 0; band < 4; ++band) {
+    dynamicEqBands[band].update(sampleRateHz, dynamicEqEnabled ? dynamicEqAmount : 0.0f, seconds);
+    meterDynamicEqBandReductionDb[band] = dynamicEqBands[band].reductionDb;
+    if (meterDynamicEqBandReductionDb[band] > meterDynamicEqMaxReductionDb) {
+      meterDynamicEqMaxReductionDb = meterDynamicEqBandReductionDb[band];
+    }
+  }
+}
+
+inline void processDynamicEq(float &left, float &right) {
+  if (!dynamicEqEnabled && meterDynamicEqMaxReductionDb <= 0.001f) return;
+  for (int band = 0; band < 4; ++band) dynamicEqBands[band].process(left, right);
 }
 
 void configureLoudness() {
@@ -775,6 +891,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   configureOutputProfile();
   configureHeadphoneBass();
   configureMultiband();
+  configureDynamicEq();
   configureLoudness();
   resetBuffers();
   return 1;
@@ -813,6 +930,15 @@ __attribute__((visibility("default"))) void mvp_set_multiband(int enabled, float
   multibandEnabled = nextEnabled;
   multibandAmount = clampf(amount, 0.0f, 1.0f);
 }
+__attribute__((visibility("default"))) void mvp_set_dynamic_eq(int enabled, float amount) {
+  const int nextEnabled = enabled ? 1 : 0;
+  if (nextEnabled && !dynamicEqEnabled) {
+    for (int band = 0; band < 4; ++band) dynamicEqBands[band].reset();
+  }
+  dynamicEqEnabled = nextEnabled;
+  dynamicEqAmount = clampf(amount, 0.0f, 1.0f);
+}
+
 __attribute__((visibility("default"))) void mvp_set_loudness(int enabled, float targetLufs) {
   const int nextEnabled = enabled ? 1 : 0;
   loudnessTargetLufs = clampf(targetLufs, -24.0f, -8.0f);
@@ -846,6 +972,7 @@ __attribute__((visibility("default"))) void mvp_reset() { resetBuffers(); }
 __attribute__((visibility("default"))) int mvp_process(int frames) {
   if (frames <= 0 || frames > kMaxFrames) return 0;
   refreshEqForBlock(frames);
+  refreshDynamicEqForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
@@ -878,6 +1005,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     right = processEq(1, right);
     processTransient(left, right);
     processMultiband(left, right);
+    processDynamicEq(left, right);
     left = processOutput(0, left);
     right = processOutput(1, right);
     processHeadphone(left, right);
@@ -911,6 +1039,11 @@ __attribute__((visibility("default"))) float mvp_meter_multiband_gain_reduction_
 __attribute__((visibility("default"))) float mvp_meter_multiband_band_reduction_db(int band) {
   if (band < 0 || band >= 4) return 0.0f;
   return meterMultibandBandReductionDb[band];
+}
+__attribute__((visibility("default"))) float mvp_meter_dynamic_eq_gain_reduction_db() { return meterDynamicEqMaxReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_dynamic_eq_band_reduction_db(int band) {
+  if (band < 0 || band >= 4) return 0.0f;
+  return meterDynamicEqBandReductionDb[band];
 }
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }

@@ -8,8 +8,6 @@ export type MvpStudioTelemetry = {
   transientBoostDb: number;
   multibandGainReductionDb: number;
   multibandBandReductionDb: [number, number, number, number];
-  dynamicEqGainReductionDb: number;
-  dynamicEqBandReductionDb: [number, number, number, number];
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   loudnessProgramLufs: number;
@@ -25,8 +23,6 @@ export type MvpStudioState = {
   transientAmount: number;
   multibandEnabled: boolean;
   multibandAmount: number;
-  dynamicEqEnabled: boolean;
-  dynamicEqAmount: number;
   normalizationEnabled: boolean;
   normalizationTargetLufs: number;
   limiterEnabled: boolean;
@@ -51,8 +47,6 @@ let latestTelemetry: MvpStudioTelemetry = {
   transientBoostDb: 0,
   multibandGainReductionDb: 0,
   multibandBandReductionDb: [0, 0, 0, 0],
-  dynamicEqGainReductionDb: 0,
-  dynamicEqBandReductionDb: [0, 0, 0, 0],
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   loudnessProgramLufs: -70,
@@ -61,7 +55,7 @@ let latestTelemetry: MvpStudioTelemetry = {
 function loadStudioWasmBytes() {
   if (!wasmBytesPromise) {
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "3.1.0");
+    url.searchParams.set("v", "2.3.1");
     wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
       return response.arrayBuffer();
@@ -76,7 +70,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   }
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "3.1.0");
+  workletUrl.searchParams.set("v", "2.3.1");
   const [wasmBytes] = await Promise.all([
     loadStudioWasmBytes(),
     context.audioWorklet.addModule(workletUrl.href),
@@ -133,8 +127,6 @@ export async function createMvpStudioNode(context: AudioContext) {
           transientBoostDb: Number(data.transientBoostDb) || 0,
           multibandGainReductionDb: Number(data.multibandGainReductionDb) || 0,
           multibandBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.multibandBandReductionDb?.[index]) || 0) as [number, number, number, number],
-          dynamicEqGainReductionDb: Number(data.dynamicEqGainReductionDb) || 0,
-          dynamicEqBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.dynamicEqBandReductionDb?.[index]) || 0) as [number, number, number, number],
           loudnessGainDb: Number(data.loudnessGainDb) || 0,
           loudnessMomentaryLufs: Number.isFinite(Number(data.loudnessMomentaryLufs)) ? Number(data.loudnessMomentaryLufs) : -70,
           loudnessProgramLufs: Number.isFinite(Number(data.loudnessProgramLufs)) ? Number(data.loudnessProgramLufs) : -70,

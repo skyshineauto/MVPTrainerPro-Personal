@@ -252,9 +252,6 @@ export type MusicPlayerState = {
   crossfadeSeconds: number;
   normalizationEnabled: boolean;
   multibandEnabled: boolean;
-  dynamicEqEnabled: boolean;
-  dynamicEqGainReductionDb: number;
-  dynamicEqBandReductionDb: [number, number, number, number];
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   limiterEnabled: boolean;
@@ -289,7 +286,6 @@ const STORAGE_KEYS = {
   crossfadeSeconds: "mvp_music_crossfade_seconds",
   normalizationEnabled: "mvp_music_volume_match_enabled_v1",
   multibandEnabled: "mvp_music_multiband_enabled_v13_9",
-  dynamicEqEnabled: "mvp_music_dynamic_eq_enabled_v1",
   limiterEnabled: "mvp_music_limiter_enabled",
   duckingStrength: "mvp_music_ducking_strength",
   headphoneMode: "mvp_music_headphone_mode",
@@ -492,9 +488,6 @@ let state: MusicPlayerState = {
   crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8),
   normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, false),
   multibandEnabled: readBoolean(STORAGE_KEYS.multibandEnabled, true),
-  dynamicEqEnabled: readBoolean(STORAGE_KEYS.dynamicEqEnabled, true),
-  dynamicEqGainReductionDb: 0,
-  dynamicEqBandReductionDb: [0, 0, 0, 0],
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   limiterEnabled: readBoolean(STORAGE_KEYS.limiterEnabled, true),
@@ -1241,11 +1234,6 @@ function applyStudioProcessingSettings(now: number) {
     // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
     multibandEnabled: processed && state.multibandEnabled,
     multibandAmount: 1,
-    // MVP_STUDIO_WASM_V3_PHASE1_DYNAMIC_EQ
-    // Cut-only adaptive resonance control. It never adds makeup gain and therefore
-    // cannot reintroduce the old EQ-slider/global-volume bug.
-    dynamicEqEnabled: processed && state.dynamicEqEnabled,
-    dynamicEqAmount: 0.72,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
     normalizationEnabled: processed && state.normalizationEnabled,
@@ -1681,17 +1669,8 @@ function startLevelMeter() {
       const programLufs = loudnessActive && Number.isFinite(telemetry.loudnessProgramLufs) && telemetry.loudnessProgramLufs > -69.5
         ? Math.round(telemetry.loudnessProgramLufs * 10) / 10
         : -70;
-      const dynamicEqActive = state.dynamicEqEnabled && state.outputProfile !== "reference" && !state.dspBypass;
-      const dynamicEqGainReductionDb = dynamicEqActive && Number.isFinite(telemetry.dynamicEqGainReductionDb)
-        ? Math.round(telemetry.dynamicEqGainReductionDb * 10) / 10
-        : 0;
-      const dynamicEqBandReductionDb = (dynamicEqActive
-        ? [0, 1, 2, 3].map((index) => Math.round((Number(telemetry.dynamicEqBandReductionDb?.[index]) || 0) * 10) / 10)
-        : [0, 0, 0, 0]) as [number, number, number, number];
-      const dynamicEqChanged = dynamicEqGainReductionDb !== state.dynamicEqGainReductionDb
-        || dynamicEqBandReductionDb.some((value, index) => value !== state.dynamicEqBandReductionDb[index]);
-      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs || dynamicEqChanged) {
-        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs, dynamicEqGainReductionDb, dynamicEqBandReductionDb });
+      if (gainDb !== state.loudnessGainDb || programLufs !== state.loudnessMomentaryLufs) {
+        emit({ loudnessGainDb: gainDb, loudnessMomentaryLufs: programLufs });
       }
     }
     const referenceDb = rmsDbFromAnalyser(referenceLevelAnalyser);
@@ -2328,12 +2307,6 @@ export function setMusicNormalizationEnabled(enabled: boolean) {
 export function setMusicMultibandEnabled(enabled: boolean) {
   savePlayerSetting(STORAGE_KEYS.multibandEnabled, String(enabled));
   emit({ multibandEnabled: enabled });
-  applyProcessingSettings();
-}
-export function setMusicDynamicEqEnabled(enabled: boolean) {
-  savePlayerSetting(STORAGE_KEYS.dynamicEqEnabled, String(enabled));
-  if (enabled) emit({ dynamicEqEnabled: true });
-  else emit({ dynamicEqEnabled: false, dynamicEqGainReductionDb: 0, dynamicEqBandReductionDb: [0, 0, 0, 0] });
   applyProcessingSettings();
 }
 
