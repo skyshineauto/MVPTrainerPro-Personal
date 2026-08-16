@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 3 Linear Phase FIR
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 2 Intelligent Output Correction
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -99,7 +99,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v3-phase3-linear-phase",
+        version: "studio-wasm-v3-phase2-output-correction",
       });
     } catch (error) {
       this.failed = true;
@@ -125,14 +125,10 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     const api = this.exports;
     api.mvp_set_bypass(state.bypass ? 1 : 0);
     api.mvp_set_eq_enabled(state.eqEnabled ? 1 : 0);
-    if (typeof api.mvp_set_eq_topology === "function") {
-      api.mvp_set_eq_topology(Number(state.eqTopologyCode) === 1 ? 1 : 0);
-    }
     const gains = Array.isArray(state.eqGains) ? state.eqGains : [];
     for (let index = 0; index < 31; index += 1) {
       api.mvp_set_eq_band(index, Number.isFinite(Number(gains[index])) ? Number(gains[index]) : 0);
     }
-    if (typeof api.mvp_commit_eq === "function") api.mvp_commit_eq();
     api.mvp_set_preamp_db(Number.isFinite(Number(state.preampDb)) ? Number(state.preampDb) : 0);
     api.mvp_set_headroom_db(Number.isFinite(Number(state.headroomDb)) ? Number(state.headroomDb) : 0);
     if (typeof api.mvp_set_transient === "function") {

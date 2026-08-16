@@ -11,8 +11,8 @@ CLANGXX="${CLANGXX:-clang++}"
   "$SRC" \
   -Wl,--no-entry \
   -Wl,--export-memory \
-  -Wl,--initial-memory=4194304 \
-  -Wl,--max-memory=4194304 \
+  -Wl,--initial-memory=1048576 \
+  -Wl,--max-memory=1048576 \
   -Wl,--export=mvp_init \
   -Wl,--export=mvp_max_frames \
   -Wl,--export=mvp_input_l \
@@ -21,9 +21,7 @@ CLANGXX="${CLANGXX:-clang++}"
   -Wl,--export=mvp_output_r \
   -Wl,--export=mvp_set_bypass \
   -Wl,--export=mvp_set_eq_enabled \
-  -Wl,--export=mvp_set_eq_topology \
   -Wl,--export=mvp_set_eq_band \
-  -Wl,--export=mvp_commit_eq \
   -Wl,--export=mvp_set_preamp_db \
   -Wl,--export=mvp_set_headroom_db \
   -Wl,--export=mvp_set_transient \
@@ -52,9 +50,6 @@ CLANGXX="${CLANGXX:-clang++}"
   -Wl,--export=mvp_meter_loudness_gain_db \
   -Wl,--export=mvp_meter_loudness_momentary_lufs \
   -Wl,--export=mvp_meter_loudness_program_lufs \
-  -Wl,--export=mvp_eq_topology \
-  -Wl,--export=mvp_linear_phase_taps \
-  -Wl,--export=mvp_linear_phase_latency_samples \
   -Wl,--allow-undefined \
   -o "$OUT"
 

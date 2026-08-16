@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V3 Phase 2 Intelligent Output Correction
+// MVP Trainer Pro - MVP Studio Engine V3 Phase 3 Linear Phase FIR
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -13,6 +13,12 @@ constexpr int kEqBands = 31;
 constexpr int kMaxFrames = 2048;
 constexpr int kMaxLookahead = 2048;
 constexpr int kSpatialDelayMax = 512;
+constexpr int kLinearFirTaps = 4097;
+constexpr int kLinearFirHalf = 2048;
+constexpr int kLinearFirBlock = 128;
+constexpr int kLinearFirFft = 256;
+constexpr int kLinearFirPartitions = 33;
+constexpr int kLinearFirDesignFft = 8192;
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kGraphicEqQ = 4.318473046963146; // ~1/3-octave graphic EQ bandwidth.
 
@@ -325,6 +331,27 @@ float outputR[kMaxFrames];
 Biquad eq[2][kEqBands];
 float eqTarget[kEqBands];
 float eqCurrent[kEqBands];
+
+// Studio linear-phase EQ. A 4097-tap symmetric FIR is rendered with
+// 128-sample uniform partitioned convolution (256-point FFT). This keeps the
+// AudioWorklet real-time cost bounded while providing real low-frequency
+// resolution that a tiny FIR cannot.
+int eqTopology = 0; // 0 minimum-phase IIR, 1 linear-phase FIR
+float linearFirTaps[kLinearFirTaps];
+float linearFilterReal[kLinearFirPartitions][kLinearFirFft];
+float linearFilterImag[kLinearFirPartitions][kLinearFirFft];
+float linearTargetReal[kLinearFirPartitions][kLinearFirFft];
+float linearTargetImag[kLinearFirPartitions][kLinearFirFft];
+float linearInputSpectrumReal[2][kLinearFirPartitions][kLinearFirFft];
+float linearInputSpectrumImag[2][kLinearFirPartitions][kLinearFirFft];
+float linearInputBlock[2][kLinearFirBlock];
+float linearOutputBlock[2][kLinearFirBlock];
+float linearOverlap[2][kLinearFirBlock];
+float linearFftReal[kLinearFirDesignFft];
+float linearFftImag[kLinearFirDesignFft];
+int linearBlockPos = 0;
+int linearSpectrumWrite = 0;
+
 Biquad outputHp[2];
 Biquad outputLow[2];
 Biquad outputPresence[2];
@@ -445,6 +472,8 @@ double loudnessBlockEnergySum = 0.0;
 double loudnessProgramEnergySum = 0.0;
 int loudnessProgramBlockCount = 0;
 
+void resetLinearFir(bool copyTarget);
+
 void resetLoudnessState() {
   loudnessWindowWrite = 0;
   loudnessWindowCount = 0;
@@ -471,6 +500,7 @@ void resetBuffers() {
   prevDetectorL = prevDetectorR = 0.0f;
   crossfeedStateL = crossfeedStateR = 0.0;
   resetLoudnessState();
+  resetLinearFir(false);
   transientFastEnvelope = 0.0f;
   transientSlowEnvelope = 0.0f;
   transientGain = 1.0f;
@@ -493,6 +523,225 @@ void resetBuffers() {
     multibandSplit4000[ch].reset();
     multibandLowComp4000[ch].reset();
     multibandHighComp120[ch].reset();
+  }
+}
+
+
+inline void swapf(float &a, float &b) { const float t = a; a = b; b = t; }
+
+void fftInPlace(float *real, float *imag, int size, bool inverse) {
+  for (int i = 1, j = 0; i < size; ++i) {
+    int bit = size >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { swapf(real[i], real[j]); swapf(imag[i], imag[j]); }
+  }
+  for (int length = 2; length <= size; length <<= 1) {
+    const double angle = (inverse ? 2.0 : -2.0) * kPi / static_cast<double>(length);
+    const float wlenR = static_cast<float>(cos(angle));
+    const float wlenI = static_cast<float>(sin(angle));
+    const int half = length >> 1;
+    for (int i = 0; i < size; i += length) {
+      float wr = 1.0f;
+      float wi = 0.0f;
+      for (int j = 0; j < half; ++j) {
+        const int a = i + j;
+        const int b = a + half;
+        const float vr = real[b] * wr - imag[b] * wi;
+        const float vi = real[b] * wi + imag[b] * wr;
+        const float ur = real[a];
+        const float ui = imag[a];
+        real[a] = ur + vr;
+        imag[a] = ui + vi;
+        real[b] = ur - vr;
+        imag[b] = ui - vi;
+        const float nwr = wr * wlenR - wi * wlenI;
+        wi = wr * wlenI + wi * wlenR;
+        wr = nwr;
+      }
+    }
+  }
+  if (inverse) {
+    const float scale = 1.0f / static_cast<float>(size);
+    for (int i = 0; i < size; ++i) { real[i] *= scale; imag[i] *= scale; }
+  }
+}
+
+float linearGainAt(const float *gains, float frequency) {
+  if (frequency <= static_cast<float>(kEqFrequencies[0])) return gains[0];
+  if (frequency >= static_cast<float>(kEqFrequencies[kEqBands - 1])) return gains[kEqBands - 1];
+  const double lf = log10(frequency > 1.0f ? frequency : 1.0f);
+  for (int band = 0; band < kEqBands - 1; ++band) {
+    const double leftHz = kEqFrequencies[band];
+    const double rightHz = kEqFrequencies[band + 1];
+    if (frequency < leftHz || frequency > rightHz) continue;
+    const double denom = log10(rightHz) - log10(leftHz);
+    const double amount = denom > 1.0e-12 ? (lf - log10(leftHz)) / denom : 0.0;
+    return static_cast<float>(gains[band] + (gains[band + 1] - gains[band]) * amount);
+  }
+  return 0.0f;
+}
+
+void buildLinearFirTarget() {
+  bool flat = true;
+  for (int band = 0; band < kEqBands; ++band) {
+    if (absf(eqTarget[band]) > 0.00001f) { flat = false; break; }
+  }
+  for (int i = 0; i < kLinearFirTaps; ++i) linearFirTaps[i] = 0.0f;
+  if (flat) {
+    linearFirTaps[kLinearFirHalf] = 1.0f;
+  } else {
+    float designGains[kEqBands];
+    for (int band = 0; band < kEqBands; ++band) designGains[band] = eqTarget[band];
+    const int nyquistBin = kLinearFirDesignFft / 2;
+    const double nyquist = sampleRateHz * 0.5;
+    for (int iteration = 0; iteration < 2; ++iteration) {
+      for (int i = 0; i < kLinearFirDesignFft; ++i) { linearFftReal[i] = 0.0f; linearFftImag[i] = 0.0f; }
+      for (int bin = 0; bin <= nyquistBin; ++bin) {
+        const float frequency = static_cast<float>((static_cast<double>(bin) / nyquistBin) * nyquist);
+        const float gainDb = linearGainAt(designGains, frequency < 10.0f ? 10.0f : frequency);
+        const float amplitude = static_cast<float>(dbToGain(gainDb));
+        const double omega = 2.0 * kPi * static_cast<double>(bin) / kLinearFirDesignFft;
+        const double phase = -omega * kLinearFirHalf;
+        const float re = amplitude * static_cast<float>(cos(phase));
+        const float im = amplitude * static_cast<float>(sin(phase));
+        linearFftReal[bin] = re;
+        linearFftImag[bin] = im;
+        if (bin > 0 && bin < nyquistBin) {
+          const int mirror = kLinearFirDesignFft - bin;
+          linearFftReal[mirror] = re;
+          linearFftImag[mirror] = -im;
+        }
+      }
+      fftInPlace(linearFftReal, linearFftImag, kLinearFirDesignFft, true);
+      for (int tap = 0; tap < kLinearFirTaps; ++tap) linearFirTaps[tap] = linearFftReal[tap];
+      if (iteration < 1) {
+        for (int i = 0; i < kLinearFirDesignFft; ++i) { linearFftReal[i] = i < kLinearFirTaps ? linearFirTaps[i] : 0.0f; linearFftImag[i] = 0.0f; }
+        fftInPlace(linearFftReal, linearFftImag, kLinearFirDesignFft, false);
+        for (int band = 0; band < kEqBands; ++band) {
+          const double normalized = kEqFrequencies[band] / sampleRateHz;
+          int bin = static_cast<int>(normalized * kLinearFirDesignFft + 0.5);
+          if (bin < 0) bin = 0;
+          if (bin > nyquistBin) bin = nyquistBin;
+          const double re = linearFftReal[bin];
+          const double im = linearFftImag[bin];
+          const double magnitude = pow(re * re + im * im, 0.5);
+          const float actualDb = magnitude > 1.0e-9 ? static_cast<float>(20.0 * log10(magnitude)) : -120.0f;
+          const float error = clampf(eqTarget[band] - actualDb, -3.0f, 3.0f);
+          designGains[band] = clampf(designGains[band] + error * 0.45f, -15.0f, 15.0f);
+        }
+      }
+    }
+  }
+
+  for (int partition = 0; partition < kLinearFirPartitions; ++partition) {
+    for (int i = 0; i < kLinearFirFft; ++i) { linearFftReal[i] = 0.0f; linearFftImag[i] = 0.0f; }
+    for (int i = 0; i < kLinearFirBlock; ++i) {
+      const int tap = partition * kLinearFirBlock + i;
+      if (tap < kLinearFirTaps) linearFftReal[i] = linearFirTaps[tap];
+    }
+    fftInPlace(linearFftReal, linearFftImag, kLinearFirFft, false);
+    for (int bin = 0; bin < kLinearFirFft; ++bin) {
+      linearTargetReal[partition][bin] = linearFftReal[bin];
+      linearTargetImag[partition][bin] = linearFftImag[bin];
+    }
+  }
+}
+
+void resetLinearFir(bool copyTarget) {
+  linearBlockPos = 0;
+  linearSpectrumWrite = 0;
+  for (int ch = 0; ch < 2; ++ch) {
+    for (int i = 0; i < kLinearFirBlock; ++i) {
+      linearInputBlock[ch][i] = 0.0f;
+      linearOutputBlock[ch][i] = 0.0f;
+      linearOverlap[ch][i] = 0.0f;
+    }
+    for (int partition = 0; partition < kLinearFirPartitions; ++partition) {
+      for (int bin = 0; bin < kLinearFirFft; ++bin) {
+        linearInputSpectrumReal[ch][partition][bin] = 0.0f;
+        linearInputSpectrumImag[ch][partition][bin] = 0.0f;
+      }
+    }
+  }
+  if (copyTarget) {
+    for (int partition = 0; partition < kLinearFirPartitions; ++partition) {
+      for (int bin = 0; bin < kLinearFirFft; ++bin) {
+        linearFilterReal[partition][bin] = linearTargetReal[partition][bin];
+        linearFilterImag[partition][bin] = linearTargetImag[partition][bin];
+      }
+    }
+  }
+}
+
+void renderLinearFirBlock() {
+  const float smoothing = clampf(static_cast<float>(1.0 - exp(-(kLinearFirBlock / sampleRateHz) / 0.030)), 0.01f, 1.0f);
+  for (int partition = 0; partition < kLinearFirPartitions; ++partition) {
+    for (int bin = 0; bin < kLinearFirFft; ++bin) {
+      linearFilterReal[partition][bin] += (linearTargetReal[partition][bin] - linearFilterReal[partition][bin]) * smoothing;
+      linearFilterImag[partition][bin] += (linearTargetImag[partition][bin] - linearFilterImag[partition][bin]) * smoothing;
+    }
+  }
+
+  for (int ch = 0; ch < 2; ++ch) {
+    for (int i = 0; i < kLinearFirFft; ++i) { linearFftReal[i] = 0.0f; linearFftImag[i] = 0.0f; }
+    for (int i = 0; i < kLinearFirBlock; ++i) linearFftReal[i] = linearInputBlock[ch][i];
+    fftInPlace(linearFftReal, linearFftImag, kLinearFirFft, false);
+    for (int bin = 0; bin < kLinearFirFft; ++bin) {
+      linearInputSpectrumReal[ch][linearSpectrumWrite][bin] = linearFftReal[bin];
+      linearInputSpectrumImag[ch][linearSpectrumWrite][bin] = linearFftImag[bin];
+      linearFftReal[bin] = 0.0f;
+      linearFftImag[bin] = 0.0f;
+    }
+    for (int partition = 0; partition < kLinearFirPartitions; ++partition) {
+      int history = linearSpectrumWrite - partition;
+      while (history < 0) history += kLinearFirPartitions;
+      const float *xr = linearInputSpectrumReal[ch][history];
+      const float *xi = linearInputSpectrumImag[ch][history];
+      const float *hr = linearFilterReal[partition];
+      const float *hi = linearFilterImag[partition];
+      for (int bin = 0; bin < kLinearFirFft; ++bin) {
+        linearFftReal[bin] += xr[bin] * hr[bin] - xi[bin] * hi[bin];
+        linearFftImag[bin] += xr[bin] * hi[bin] + xi[bin] * hr[bin];
+      }
+    }
+    fftInPlace(linearFftReal, linearFftImag, kLinearFirFft, true);
+    for (int i = 0; i < kLinearFirBlock; ++i) {
+      linearOutputBlock[ch][i] = linearFftReal[i] + linearOverlap[ch][i];
+      linearOverlap[ch][i] = linearFftReal[i + kLinearFirBlock];
+    }
+  }
+  linearSpectrumWrite = (linearSpectrumWrite + 1) % kLinearFirPartitions;
+}
+
+inline void processEqStereo(float &left, float &right) {
+  // Keep both paths warm so changing topology does not force a graph rebuild.
+  float minimumL = left;
+  float minimumR = right;
+  if (eqEnabled) {
+    for (int band = 0; band < kEqBands; ++band) {
+      minimumL = eq[0][band].process(minimumL);
+      minimumR = eq[1][band].process(minimumR);
+    }
+  }
+
+  const float linearL = linearOutputBlock[0][linearBlockPos];
+  const float linearR = linearOutputBlock[1][linearBlockPos];
+  linearInputBlock[0][linearBlockPos] = left;
+  linearInputBlock[1][linearBlockPos] = right;
+  linearBlockPos += 1;
+  if (linearBlockPos >= kLinearFirBlock) {
+    linearBlockPos = 0;
+    renderLinearFirBlock();
+  }
+
+  if (!eqEnabled) return;
+  if (eqTopology == 1) {
+    left = linearL;
+    right = linearR;
+  } else {
+    left = minimumL;
+    right = minimumR;
   }
 }
 
@@ -634,12 +883,6 @@ void refreshEqForBlock(int frames) {
       }
     }
   }
-}
-
-inline float processEq(int ch, float sample) {
-  if (!eqEnabled) return sample;
-  for (int band = 0; band < kEqBands; ++band) sample = eq[ch][band].process(sample);
-  return sample;
 }
 
 inline float processOutput(int ch, float sample) {
@@ -933,6 +1176,9 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
     eqCurrent[band] = 0.0f;
     for (int ch = 0; ch < 2; ++ch) eq[ch][band].setIdentity();
   }
+  eqTopology = 0;
+  buildLinearFirTarget();
+  resetLinearFir(true);
   targetPreampDb = 0.0f;
   headroomDb = 0.0f;
   currentPreampGain = 1.0f;
@@ -953,10 +1199,12 @@ __attribute__((visibility("default"))) float* mvp_output_r() { return outputR; }
 
 __attribute__((visibility("default"))) void mvp_set_bypass(int value) { bypassed = value ? 1 : 0; }
 __attribute__((visibility("default"))) void mvp_set_eq_enabled(int value) { eqEnabled = value ? 1 : 0; }
+__attribute__((visibility("default"))) void mvp_set_eq_topology(int value) { eqTopology = value == 1 ? 1 : 0; }
 __attribute__((visibility("default"))) void mvp_set_eq_band(int index, float gainDb) {
   if (index < 0 || index >= kEqBands) return;
   eqTarget[index] = clampf(gainDb, -12.0f, 12.0f);
 }
+__attribute__((visibility("default"))) void mvp_commit_eq() { buildLinearFirTarget(); }
 __attribute__((visibility("default"))) void mvp_set_preamp_db(float value) { targetPreampDb = clampf(value, -18.0f, 12.0f); }
 __attribute__((visibility("default"))) void mvp_set_headroom_db(float value) { headroomDb = clampf(value, 0.0f, 18.0f); }
 __attribute__((visibility("default"))) void mvp_set_transient(int enabled, float amount) {
@@ -1057,8 +1305,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     currentPreampGain += (targetGain - currentPreampGain) * preampCoeff;
     float left = rawL * currentPreampGain;
     float right = rawR * currentPreampGain;
-    left = processEq(0, left);
-    right = processEq(1, right);
+    processEqStereo(left, right);
     processTransient(left, right);
     processMultiband(left, right);
     processDynamicEq(left, right);
@@ -1106,4 +1353,7 @@ __attribute__((visibility("default"))) float mvp_meter_output_correction_reducti
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }
+__attribute__((visibility("default"))) int mvp_eq_topology() { return eqTopology; }
+__attribute__((visibility("default"))) int mvp_linear_phase_taps() { return kLinearFirTaps; }
+__attribute__((visibility("default"))) int mvp_linear_phase_latency_samples() { return kLinearFirHalf + kLinearFirBlock; }
 }

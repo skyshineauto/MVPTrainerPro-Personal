@@ -1235,9 +1235,6 @@ function applyStudioProcessingSettings(now: number) {
   setMvpStudioState(studioProcessorNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
-    // MVP_STUDIO_WASM_V3_PHASE3_LINEAR_PHASE
-    // Both EQ topologies now run inside the same Studio WASM processor.
-    eqTopologyCode: state.eqTopology === "linear_phase" ? 1 : 0,
     eqGains: [...state.eqGains],
     preampDb: state.eqEnabled ? state.preampDb : 0,
     headroomDb: autoHeadroomDb,
@@ -1278,8 +1275,7 @@ function applyStudioProcessingSettings(now: number) {
   if (state.immersionStatus !== immersionStatus) emit({ immersionStatus });
 }
 async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElement) {
-  // V3 Phase 3: Minimum Phase and Linear Phase are both flagship Studio WASM modes.
-  if (!context.audioWorklet) return false;
+  if (!context.audioWorklet || state.eqTopology !== "minimum_phase") return false;
   let sourceCreated = false;
   try {
     studioProcessorNode = await createMvpStudioNode(context);
@@ -2314,9 +2310,7 @@ export function setMusicEqTopology(topology: MusicEqTopology) {
   const previous = state.eqTopology;
   savePlayerSetting(STORAGE_KEYS.eqTopology, next);
   emit({ eqTopology: next });
-  // Studio can change topology in-place. Compatibility paths still rebuild so
-  // they can retry the flagship Studio engine after a topology change.
-  const engineSwitch = previous !== next && state.dspEngineMode !== "studio_wasm";
+  const engineSwitch = previous !== next && (state.dspEngineMode === "studio_wasm" || (next === "minimum_phase" && state.dspEngineMode === "advanced_worklet"));
   if (engineSwitch) {
     void rebuildMusicAudioEngine();
     return;
