@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V3 Phase 6 Stereo Integrity
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4 Mastering Refinement
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -99,7 +99,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v3-phase6-stereo-integrity",
+        version: "studio-wasm-v4-mastering-refinement",
       });
     } catch (error) {
       this.failed = true;

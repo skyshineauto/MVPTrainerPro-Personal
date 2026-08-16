@@ -86,25 +86,24 @@ function preset(label: string, preamp: number, points: Array<[number, number]>):
 
 export const MUSIC_EQ_PRESETS: Record<BuiltInMusicEqPreset, EqDefinition> = {
   flat: preset("Flat", 0, [[20, 0], [20000, 0]]),
-  power: preset("Power Training", -2.5, [[20, 3], [50, 5], [100, 4], [250, 1], [500, -1], [1000, 0], [2500, 2], [5000, 4], [10000, 3], [20000, 1]]),
-  rock: preset("Rock", -2.5, [[20, 2], [63, 4], [160, 3], [500, -1], [1000, 0], [2500, 2], [5000, 4.5], [10000, 4], [20000, 2]]),
-  hard_rock: preset("Hard Rock", -3, [[20, 2], [63, 4.5], [125, 3.5], [400, -1.5], [1000, 0], [2500, 3], [5000, 5], [10000, 4], [20000, 1.5]]),
-  metal: preset("Metal", -3.5, [[20, 2.5], [63, 4], [160, 2.5], [400, -2], [800, -1], [2000, 2.5], [4000, 5], [8000, 5.5], [16000, 3], [20000, 1]]),
-  alternative: preset("Alternative", -2, [[20, 1], [80, 3], [200, 2], [500, -1], [1250, 0.5], [3150, 3], [6300, 3.5], [12500, 2], [20000, 0]]),
-  pop: preset("Pop", -2, [[20, 1], [80, 2.5], [250, 0.5], [630, -0.5], [1600, 1.5], [4000, 3], [8000, 3], [16000, 1.5], [20000, 0]]),
-  hip_hop: preset("Hip-Hop", -3.5, [[20, 4], [40, 6], [80, 5], [160, 3], [400, -1], [1000, 0], [2500, 1], [6300, 2], [12500, 1], [20000, 0]]),
-  edm: preset("EDM", -4, [[20, 5], [40, 7], [80, 5], [200, 1], [500, -1], [1250, 0], [3150, 2], [6300, 4], [10000, 5], [16000, 3], [20000, 1]]),
-  bass_boost: preset("Bass Boost", -3.5, [[20, 5], [40, 6], [63, 6], [100, 5], [160, 3], [250, 1], [500, 0], [20000, 0]]),
-  deep_bass: preset("Deep Bass", -4.5, [[20, 7], [31.5, 8], [50, 7], [80, 5], [125, 3], [250, 1], [500, 0], [20000, 0]]),
-  punch: preset("Punch", -3, [[20, 1], [50, 3], [80, 5], [125, 4], [200, 2], [500, -1], [1000, 0], [3150, 2.5], [6300, 2], [20000, 0]]),
-  vocal: preset("Vocal Clarity", -1.5, [[20, -3], [100, -2], [250, -0.5], [630, 1], [1250, 2.5], [2500, 4.5], [4000, 4], [8000, 1.5], [16000, 0], [20000, -1]]),
-  acoustic: preset("Acoustic", -1.5, [[20, -2], [80, 0], [200, 1], [500, 0.5], [1000, 1], [2500, 2.5], [5000, 3], [10000, 2], [20000, 0]]),
-  warm: preset("Warm", -1.5, [[20, 1], [80, 2.5], [250, 2], [630, 1], [1600, 0], [4000, -1], [10000, -2], [20000, -2.5]]),
-  bright: preset("Bright", -2.5, [[20, -1], [100, 0], [500, 0], [1250, 1], [3150, 2.5], [6300, 4], [12500, 4], [20000, 2.5]]),
-  late_night: preset("Late Night", -4, [[20, 1], [63, 2], [160, 1], [630, 0], [2500, -1], [5000, -2], [10000, -4], [20000, -6]]),
-  headphones: preset("Headphones", -2, [[20, 1], [63, 2], [200, 0.5], [630, -0.5], [1600, 1], [4000, 2], [8000, 1.5], [16000, 0], [20000, -1]]),
+  power: preset("Power Training", -1.8, [[20, 1.5], [50, 3.3], [100, 2.8], [250, 0.8], [500, -0.5], [1000, 0], [2500, 1.5], [5000, 2.7], [10000, 2.1], [20000, 0.7]]),
+  rock: preset("Rock", -1.6, [[20, 1.0], [63, 2.8], [160, 2.0], [500, -0.7], [1000, 0], [2500, 1.5], [5000, 2.5], [10000, 2.0], [20000, 0.7]]),
+  hard_rock: preset("Hard Rock", -2.0, [[20, 1.2], [63, 3.2], [125, 2.5], [400, -1.0], [1000, 0], [2500, 2.0], [5000, 3.0], [10000, 2.3], [20000, 0.8]]),
+  metal: preset("Metal", -2.1, [[20, 1.3], [63, 2.9], [160, 1.6], [400, -1.3], [800, -0.6], [2000, 1.8], [4000, 2.9], [8000, 2.8], [16000, 1.4], [20000, 0.5]]),
+  alternative: preset("Alternative", -1.5, [[20, 0.6], [80, 2.2], [200, 1.4], [500, -0.7], [1250, 0.4], [3150, 1.9], [6300, 2.1], [12500, 1.2], [20000, 0]]),
+  pop: preset("Pop", -1.4, [[20, 0.5], [80, 1.8], [250, 0.4], [630, -0.3], [1600, 1.0], [4000, 2.0], [8000, 1.9], [16000, 0.9], [20000, 0]]),
+  hip_hop: preset("Hip-Hop", -2.4, [[20, 2.6], [40, 4.2], [80, 3.8], [160, 2.1], [400, -0.7], [1000, 0], [2500, 0.7], [6300, 1.2], [12500, 0.7], [20000, 0]]),
+  edm: preset("EDM", -2.8, [[20, 3.0], [40, 4.7], [80, 3.8], [200, 0.8], [500, -0.7], [1250, 0], [3150, 1.3], [6300, 2.5], [10000, 2.7], [16000, 1.5], [20000, 0.5]]),
+  bass_boost: preset("Bass Boost", -2.5, [[20, 3.4], [40, 4.4], [63, 4.5], [100, 3.8], [160, 2.2], [250, 0.8], [500, 0], [20000, 0]]),
+  deep_bass: preset("Deep Bass", -3.0, [[20, 4.5], [31.5, 5.5], [50, 4.8], [80, 3.6], [125, 2.1], [250, 0.8], [500, 0], [20000, 0]]),
+  punch: preset("Punch", -2.0, [[20, 0.7], [50, 2.2], [80, 3.4], [125, 2.8], [200, 1.3], [500, -0.7], [1000, 0], [3150, 1.8], [6300, 1.3], [20000, 0]]),
+  vocal: preset("Vocal Clarity", -1.2, [[20, -2.2], [100, -1.4], [250, -0.4], [630, 0.7], [1250, 1.6], [2500, 2.7], [4000, 2.3], [8000, 0.8], [16000, 0], [20000, -0.5]]),
+  acoustic: preset("Acoustic", -1.1, [[20, -1.4], [80, 0], [200, 0.7], [500, 0.4], [1000, 0.7], [2500, 1.5], [5000, 1.8], [10000, 1.1], [20000, 0]]),
+  warm: preset("Warm", -1.1, [[20, 0.7], [80, 1.7], [250, 1.3], [630, 0.6], [1600, 0], [4000, -0.7], [10000, -1.3], [20000, -1.6]]),
+  bright: preset("Bright", -1.7, [[20, -0.7], [100, 0], [500, 0], [1250, 0.7], [3150, 1.6], [6300, 2.5], [12500, 2.4], [20000, 1.4]]),
+  late_night: preset("Late Night", -2.0, [[20, 0.6], [63, 1.2], [160, 0.6], [630, 0], [2500, -0.7], [5000, -1.3], [10000, -2.4], [20000, -3.2]]),
+  headphones: preset("Headphones", -1.3, [[20, 0.5], [63, 1.3], [200, 0.3], [630, -0.3], [1600, 0.7], [4000, 1.3], [8000, 0.9], [16000, 0], [20000, -0.5]]),
 };
-
 type ProPeak = { frequency: number; gain: number; q: number };
 type ProPresetDefinition = {
   highpassHz: number;
@@ -163,25 +162,63 @@ const DSP_EQ_PROOF_PRESET: ProPresetDefinition = {
 // The 120–350 Hz body region is preserved; output profiles no longer carry a second heavy EQ curve.
 const MUSIC_PRO_PRESETS: Record<BuiltInMusicEqPreset, ProPresetDefinition> = {
   flat: { ...PRO_PRESET_DEFAULT },
-  power: { highpassHz: 22, lowShelfHz: 90, lowShelfDb: 1.2, peaks: [{ frequency: 285, gain: -0.8, q: 0.9 }, { frequency: 1250, gain: 0.7, q: 0.85 }, { frequency: 2100, gain: 1.2, q: 0.95 }, { frequency: 3400, gain: 2.2, q: 1.05 }, { frequency: 6200, gain: 1.2, q: 1.0 }], highShelfHz: 12000, highShelfDb: 0.7, makeupDb: 0.15, transientAmount: 0.72 },
-  rock: { highpassHz: 20, lowShelfHz: 88, lowShelfDb: 0.7, peaks: [{ frequency: 290, gain: -0.8, q: 0.86 }, { frequency: 1250, gain: 0.5, q: 0.82 }, { frequency: 1900, gain: 0.9, q: 0.9 }, { frequency: 3300, gain: 1.8, q: 1.0 }, { frequency: 6200, gain: 0.8, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.55, makeupDb: 0.10, transientAmount: 0.46 },
-  hard_rock: { highpassHz: 20, lowShelfHz: 86, lowShelfDb: 1.0, peaks: [{ frequency: 285, gain: -1.0, q: 0.9 }, { frequency: 900, gain: 0.35, q: 0.8 }, { frequency: 1800, gain: 1.15, q: 0.9 }, { frequency: 3200, gain: 2.25, q: 1.03 }, { frequency: 5400, gain: 1.05, q: 1.0 }], highShelfHz: 12000, highShelfDb: 0.65, makeupDb: 0.10, transientAmount: 0.68 },
-  metal: { highpassHz: 22, lowShelfHz: 82, lowShelfDb: 0.6, peaks: [{ frequency: 330, gain: -1.15, q: 0.9 }, { frequency: 650, gain: -0.45, q: 0.88 }, { frequency: 1500, gain: 0.65, q: 0.88 }, { frequency: 2450, gain: 1.45, q: 1.0 }, { frequency: 4200, gain: 2.25, q: 1.08 }], highShelfHz: 12000, highShelfDb: 0.45, makeupDb: 0.05, transientAmount: 0.76 },
-  alternative: { highpassHz: 20, lowShelfHz: 90, lowShelfDb: 0.45, peaks: [{ frequency: 310, gain: -0.7, q: 0.85 }, { frequency: 1200, gain: 0.55, q: 0.82 }, { frequency: 2700, gain: 1.35, q: 0.96 }, { frequency: 5200, gain: 0.65, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.4, makeupDb: 0.10, transientAmount: 0.38 },
-  pop: { highpassHz: 20, lowShelfHz: 90, lowShelfDb: 0.6, peaks: [{ frequency: 300, gain: -0.55, q: 0.85 }, { frequency: 1200, gain: 0.55, q: 0.82 }, { frequency: 3000, gain: 1.35, q: 0.96 }, { frequency: 7000, gain: 0.95, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.7, makeupDb: 0.10, transientAmount: 0.34 },
-  hip_hop: { highpassHz: 18, lowShelfHz: 68, lowShelfDb: 2.0, peaks: [{ frequency: 120, gain: 0.65, q: 0.9 }, { frequency: 320, gain: -0.65, q: 0.82 }, { frequency: 2200, gain: 0.65, q: 0.86 }, { frequency: 6500, gain: 0.7, q: 0.9 }], highShelfHz: 12000, highShelfDb: 0.25, makeupDb: 0, transientAmount: 0.28 },
-  edm: { highpassHz: 18, lowShelfHz: 62, lowShelfDb: 2.2, peaks: [{ frequency: 110, gain: 0.7, q: 0.92 }, { frequency: 300, gain: -0.65, q: 0.88 }, { frequency: 1800, gain: 0.6, q: 0.86 }, { frequency: 3600, gain: 1.15, q: 0.95 }, { frequency: 7600, gain: 1.15, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.65, makeupDb: 0, transientAmount: 0.50 },
-  bass_boost: { highpassHz: 18, lowShelfHz: 72, lowShelfDb: 2.8, peaks: [{ frequency: 110, gain: 0.9, q: 0.86 }, { frequency: 250, gain: 0.15, q: 0.8 }], highShelfHz: 12000, highShelfDb: 0, makeupDb: -0.05, transientAmount: 0.16 },
-  deep_bass: { highpassHz: 16, lowShelfHz: 48, lowShelfDb: 3.6, peaks: [{ frequency: 75, gain: 1.0, q: 0.86 }, { frequency: 145, gain: 0.25, q: 0.8 }], highShelfHz: 12000, highShelfDb: 0, makeupDb: -0.10, transientAmount: 0.12 },
-  punch: { highpassHz: 20, lowShelfHz: 92, lowShelfDb: 1.35, peaks: [{ frequency: 115, gain: 1.2, q: 1.0 }, { frequency: 300, gain: -0.85, q: 0.9 }, { frequency: 2850, gain: 1.45, q: 0.98 }, { frequency: 6200, gain: 0.75, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.35, makeupDb: 0.05, transientAmount: 0.82 },
-  vocal: { highpassHz: 24, lowShelfHz: 105, lowShelfDb: -0.6, peaks: [{ frequency: 300, gain: -0.7, q: 0.82 }, { frequency: 850, gain: 0.7, q: 0.82 }, { frequency: 1550, gain: 1.15, q: 0.88 }, { frequency: 2800, gain: 1.55, q: 0.96 }, { frequency: 4300, gain: 0.7, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.35, makeupDb: 0.05, transientAmount: 0.20 },
-  acoustic: { highpassHz: 20, lowShelfHz: 100, lowShelfDb: 0.15, peaks: [{ frequency: 190, gain: 0.45, q: 0.8 }, { frequency: 750, gain: 0.3, q: 0.8 }, { frequency: 1400, gain: 0.55, q: 0.85 }, { frequency: 2800, gain: 1.0, q: 0.92 }, { frequency: 5500, gain: 0.55, q: 0.92 }], highShelfHz: 12000, highShelfDb: 0.55, makeupDb: 0.05, transientAmount: 0.24 },
-  warm: { highpassHz: 18, lowShelfHz: 105, lowShelfDb: 1.0, peaks: [{ frequency: 280, gain: 0.45, q: 0.8 }, { frequency: 4200, gain: -0.65, q: 0.88 }], highShelfHz: 10500, highShelfDb: -0.9, makeupDb: 0.05, transientAmount: 0.08 },
-  bright: { highpassHz: 20, lowShelfHz: 95, lowShelfDb: -0.15, peaks: [{ frequency: 2600, gain: 0.9, q: 0.88 }, { frequency: 6500, gain: 1.35, q: 0.95 }], highShelfHz: 12000, highShelfDb: 1.2, makeupDb: 0, transientAmount: 0.20 },
-  late_night: { highpassHz: 18, lowShelfHz: 95, lowShelfDb: 0.3, peaks: [{ frequency: 2800, gain: -0.65, q: 0.86 }, { frequency: 5500, gain: -0.85, q: 0.9 }], highShelfHz: 10500, highShelfDb: -1.4, makeupDb: -0.15, transientAmount: 0.04 },
-  headphones: { highpassHz: 18, lowShelfHz: 95, lowShelfDb: 0.25, peaks: [{ frequency: 300, gain: -0.45, q: 0.82 }, { frequency: 1700, gain: 0.65, q: 0.86 }, { frequency: 3900, gain: 1.0, q: 0.96 }, { frequency: 8200, gain: 0.45, q: 0.95 }], highShelfHz: 12000, highShelfDb: 0.45, makeupDb: 0.05, transientAmount: 0.20 },
+  power: { ...PRO_PRESET_DEFAULT, transientAmount: 0.64 },
+  rock: { ...PRO_PRESET_DEFAULT, transientAmount: 0.42 },
+  hard_rock: { ...PRO_PRESET_DEFAULT, transientAmount: 0.62 },
+  metal: { ...PRO_PRESET_DEFAULT, transientAmount: 0.70 },
+  alternative: { ...PRO_PRESET_DEFAULT, transientAmount: 0.34 },
+  pop: { ...PRO_PRESET_DEFAULT, transientAmount: 0.30 },
+  hip_hop: { ...PRO_PRESET_DEFAULT, transientAmount: 0.25 },
+  edm: { ...PRO_PRESET_DEFAULT, transientAmount: 0.44 },
+  bass_boost: { ...PRO_PRESET_DEFAULT, transientAmount: 0.14 },
+  deep_bass: { ...PRO_PRESET_DEFAULT, transientAmount: 0.10 },
+  punch: { ...PRO_PRESET_DEFAULT, transientAmount: 0.72 },
+  vocal: { ...PRO_PRESET_DEFAULT, transientAmount: 0.18 },
+  acoustic: { ...PRO_PRESET_DEFAULT, transientAmount: 0.20 },
+  warm: { ...PRO_PRESET_DEFAULT, transientAmount: 0.06 },
+  bright: { ...PRO_PRESET_DEFAULT, transientAmount: 0.16 },
+  late_night: { ...PRO_PRESET_DEFAULT, transientAmount: 0.03 },
+  headphones: { ...PRO_PRESET_DEFAULT, transientAmount: 0.16 },
 };
 
+type StudioPresetPersonality = {
+  transientScale: number;
+  multibandAmount: number;
+  dynamicEqAmount: number;
+  outputCorrectionAmount: number;
+  stereoIntegrityAmount: number;
+};
+const STUDIO_PRESET_PERSONALITIES: Record<BuiltInMusicEqPreset, StudioPresetPersonality> = {
+  flat:        { transientScale: 0.65, multibandAmount: 0.42, dynamicEqAmount: 0.42, outputCorrectionAmount: 0.72, stereoIntegrityAmount: 0.55 },
+  power:       { transientScale: 0.96, multibandAmount: 0.72, dynamicEqAmount: 0.66, outputCorrectionAmount: 0.84, stereoIntegrityAmount: 0.68 },
+  rock:        { transientScale: 0.88, multibandAmount: 0.54, dynamicEqAmount: 0.50, outputCorrectionAmount: 0.78, stereoIntegrityAmount: 0.60 },
+  hard_rock:   { transientScale: 0.96, multibandAmount: 0.66, dynamicEqAmount: 0.66, outputCorrectionAmount: 0.82, stereoIntegrityAmount: 0.64 },
+  metal:       { transientScale: 1.00, multibandAmount: 0.72, dynamicEqAmount: 0.76, outputCorrectionAmount: 0.82, stereoIntegrityAmount: 0.68 },
+  alternative: { transientScale: 0.84, multibandAmount: 0.52, dynamicEqAmount: 0.55, outputCorrectionAmount: 0.76, stereoIntegrityAmount: 0.60 },
+  pop:         { transientScale: 0.78, multibandAmount: 0.50, dynamicEqAmount: 0.48, outputCorrectionAmount: 0.76, stereoIntegrityAmount: 0.58 },
+  hip_hop:     { transientScale: 0.70, multibandAmount: 0.62, dynamicEqAmount: 0.44, outputCorrectionAmount: 0.84, stereoIntegrityAmount: 0.58 },
+  edm:         { transientScale: 0.82, multibandAmount: 0.68, dynamicEqAmount: 0.52, outputCorrectionAmount: 0.84, stereoIntegrityAmount: 0.60 },
+  bass_boost:  { transientScale: 0.60, multibandAmount: 0.58, dynamicEqAmount: 0.40, outputCorrectionAmount: 0.88, stereoIntegrityAmount: 0.55 },
+  deep_bass:   { transientScale: 0.52, multibandAmount: 0.54, dynamicEqAmount: 0.36, outputCorrectionAmount: 0.90, stereoIntegrityAmount: 0.52 },
+  punch:       { transientScale: 1.00, multibandAmount: 0.68, dynamicEqAmount: 0.54, outputCorrectionAmount: 0.80, stereoIntegrityAmount: 0.60 },
+  vocal:       { transientScale: 0.56, multibandAmount: 0.42, dynamicEqAmount: 0.54, outputCorrectionAmount: 0.72, stereoIntegrityAmount: 0.55 },
+  acoustic:    { transientScale: 0.58, multibandAmount: 0.38, dynamicEqAmount: 0.34, outputCorrectionAmount: 0.68, stereoIntegrityAmount: 0.50 },
+  warm:        { transientScale: 0.42, multibandAmount: 0.36, dynamicEqAmount: 0.30, outputCorrectionAmount: 0.68, stereoIntegrityAmount: 0.50 },
+  bright:      { transientScale: 0.50, multibandAmount: 0.42, dynamicEqAmount: 0.56, outputCorrectionAmount: 0.72, stereoIntegrityAmount: 0.54 },
+  late_night:  { transientScale: 0.28, multibandAmount: 0.32, dynamicEqAmount: 0.26, outputCorrectionAmount: 0.66, stereoIntegrityAmount: 0.46 },
+  headphones:  { transientScale: 0.52, multibandAmount: 0.38, dynamicEqAmount: 0.36, outputCorrectionAmount: 0.68, stereoIntegrityAmount: 0.50 },
+};
+const STUDIO_CUSTOM_PERSONALITY: StudioPresetPersonality = {
+  transientScale: 0.78,
+  multibandAmount: 0.52,
+  dynamicEqAmount: 0.50,
+  outputCorrectionAmount: 0.76,
+  stereoIntegrityAmount: 0.58,
+};
+function currentStudioPersonality(): StudioPresetPersonality {
+  return isBuiltInPreset(state.eqPreset) ? STUDIO_PRESET_PERSONALITIES[state.eqPreset] : STUDIO_CUSTOM_PERSONALITY;
+}
+// MVP_STUDIO_V4_MASTERING_REFINEMENT
 // Output profiles are technical device paths, not a second musical EQ.
 const MUSIC_OUTPUT_TUNINGS: Record<Exclude<MusicOutputProfile, "reference">, OutputTuningDefinition> = {
   car_hifi: { highpassHz: 18, lowShelfHz: 80, lowShelfDb: 0.15, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0.15, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0.10, makeupDb: 0 },
@@ -1245,8 +1282,9 @@ function applyStudioProcessingSettings(now: number) {
   // The same preset/source-aware transient amount used by the Compatibility engine
   // now drives a stereo-linked shaper inside the WASM core. It never changes EQ
   // headroom or preamp, so the V1.1 gain-staging fix remains intact.
+  const studioPersonality = currentStudioPersonality();
   const studioTransientAmount = processed && state.eqEnabled
-    ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale()))
+    ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale() * studioPersonality.transientScale))
     : 0;
   setMvpStudioState(studioProcessorNode, {
     bypass: !processed,
@@ -1261,21 +1299,21 @@ function applyStudioProcessingSettings(now: number) {
     transientAmount: studioTransientAmount,
     // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
     multibandEnabled: processed && state.multibandEnabled,
-    multibandAmount: 1,
+    multibandAmount: studioPersonality.multibandAmount,
     // MVP_STUDIO_WASM_V3_PHASE1_DYNAMIC_EQ
     // Cut-only adaptive resonance control. It never adds makeup gain and therefore
     // cannot reintroduce the old EQ-slider/global-volume bug.
     dynamicEqEnabled: processed && state.dynamicEqEnabled,
-    dynamicEqAmount: 0.72,
+    dynamicEqAmount: studioPersonality.dynamicEqAmount,
     // MVP_STUDIO_WASM_V3_PHASE2_OUTPUT_CORRECTION
     // Device-path intelligence stays separate from the musical preset. The WASM
     // core chooses the correct adaptive guard behavior from outputProfileCode.
     outputCorrectionEnabled: processed,
-    outputCorrectionAmount: 1,
+    outputCorrectionAmount: studioPersonality.outputCorrectionAmount,
     // MVP_STUDIO_WASM_V3_PHASE6_STEREO_INTEGRITY
     // Automatic mono-compatible low bass and anti-phase image protection.
     stereoIntegrityEnabled: processed,
-    stereoIntegrityAmount: 1,
+    stereoIntegrityAmount: studioPersonality.stereoIntegrityAmount,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
     normalizationEnabled: processed && state.normalizationEnabled,

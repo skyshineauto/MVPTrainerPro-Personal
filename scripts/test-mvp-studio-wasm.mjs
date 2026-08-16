@@ -568,7 +568,7 @@ if (!(truePeakLimited.gainReductionDb > 0.3 && truePeakLimited.gainReductionDb <
 console.log(JSON.stringify({ truePeak: { unlim: truePeakUnlim, limited: truePeakLimited } }, null, 2));
 
 
-// V3 Phase 6 Stereo Integrity regression.
+// V4 Stereo Integrity refinement regression.
 function renderStereoIntegrity({ mode, frequency = 1000, profile = 2, enabled = true, blocks = 900 }) {
   dsp.mvp_reset();
   baseState();
@@ -608,9 +608,9 @@ if (stereoMono.corr < 0.95 || stereoMono.maxGuard > 0.05) throw new Error(`Stere
 const stereoNormal = renderStereoIntegrity({ mode: "normal", profile: 0 });
 if (stereoNormal.maxGuard > 0.15) throw new Error(`Stereo Integrity guard overreacted to normal stereo: ${JSON.stringify(stereoNormal)}`);
 const stereoAnti = renderStereoIntegrity({ mode: "antiphase", profile: 2 });
-if (!(stereoAnti.corr < -0.9 && stereoAnti.maxGuard > 2.5 && stereoAnti.maxGuard <= 3.1)) throw new Error(`Stereo anti-phase guard failed: ${JSON.stringify(stereoAnti)}`);
+if (!(stereoAnti.corr < -0.9 && stereoAnti.maxGuard > 2.3 && stereoAnti.maxGuard <= 2.6)) throw new Error(`Stereo anti-phase guard failed: ${JSON.stringify(stereoAnti)}`);
 const stereoLowDry = renderStereoIntegrity({ mode: "antiphase", frequency: 80, profile: 2, enabled: false });
 const stereoLowWet = renderStereoIntegrity({ mode: "antiphase", frequency: 80, profile: 2, enabled: true });
 const stereoLowDeltaDb = 20 * Math.log10(Math.max(1e-9, stereoLowWet.rms) / Math.max(1e-9, stereoLowDry.rms));
-if (!(stereoLowDeltaDb < -3.5 && stereoLowDeltaDb > -8.0)) throw new Error(`Stereo low-bass anchor out of range: ${stereoLowDeltaDb.toFixed(3)} dB`);
+if (!(stereoLowDeltaDb < -2.2 && stereoLowDeltaDb > -6.0)) throw new Error(`Stereo low-bass anchor out of range: ${stereoLowDeltaDb.toFixed(3)} dB`);
 console.log("Stereo Integrity:", { stereoMono, stereoNormal, stereoAnti, stereoLowDeltaDb });

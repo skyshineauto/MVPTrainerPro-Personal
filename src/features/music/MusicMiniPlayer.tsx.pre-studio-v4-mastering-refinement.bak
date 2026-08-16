@@ -2029,7 +2029,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div><strong>Music Preset + 31-Band Studio EQ</strong><small className="tr-eqHeadHint">Preset loads the exact live 31-band curve. The sliders and orange dB values are the DSP values you hear.</small></div>
             <div className="tr-dspAbControls">
               <label className="tr-audioEqSwitch"><input type="checkbox" checked={player.eqEnabled} disabled={player.outputProfile === "reference"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicEqEnabled(event.target.checked))} /><span>{player.outputProfile === "reference" ? "REF" : player.eqEnabled ? "ON" : "FLAT"}</span></label>
-              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => void runDspMutation(() => setMusicDspBypass(!player.dspBypass))}>GAIN-MATCH {player.dspBypass || player.outputProfile === "reference" ? "REFERENCE" : "A/B"}</button>
+              <button type="button" className={`tr-dspBypassButton ${player.dspBypass || player.outputProfile === "reference" ? "is-active" : ""}`} onClick={() => void runDspMutation(() => setMusicDspBypass(!player.dspBypass))}>REFERENCE {player.dspBypass || player.outputProfile === "reference" ? "ACTIVE" : "A/B"}</button>
             </div>
             <label className="tr-audioEqPreset"><span>MUSIC PRESET</span><select disabled={player.outputProfile === "reference"} value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
               {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
@@ -5105,67 +5105,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-studioProcessingPanel button.is-active{border-color:rgba(79,214,251,.42)!important;background:linear-gradient(180deg,rgba(8,47,61,.92),rgba(4,24,33,.97))!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 0 18px rgba(55,201,241,.07)!important}.tr-studioProcessingPanel button.is-active>span{color:#63dcff!important}.tr-studioProcessingPanel button.is-active>strong{color:#8ef0c0!important}.tr-studioProcessingPanel button:disabled{opacity:.46!important;cursor:not-allowed!important}
         @media(max-width:700px){.tr-studioProcessingPanel{grid-template-columns:1fr!important}.tr-studioProcessingPanel button{min-height:76px!important;padding:12px!important}.tr-studioProcessingPanel button>span{font-size:8.5px!important}.tr-studioProcessingPanel button>strong{font-size:9.5px!important}.tr-studioProcessingPanel button>small{font-size:8px!important}}
 
-
-        /* MVP_STUDIO_V4_MASTERING_REFINEMENT — desktop geometry + full responsive polish */
-        .tr-studioMeterGrid article i b{transition:width .18s ease-out!important}
-        .tr-dspProofStatus{align-items:center!important;gap:7px 9px!important}
-        .tr-studioProcessingPanel button,.tr-studioMeterGrid article{min-width:0!important}
-        .tr-dspAbControls .tr-dspBypassButton{white-space:nowrap!important}
-        @media(min-width:701px){
-          .tr-playerUtilityRow{align-items:end!important}
-          .tr-playerSourceTools{align-items:end!important}
-          .tr-playerSourceTools>.tr-audioQueueSelector{align-self:end!important}
-          .tr-playerSourceTools>.tr-dspStatusToggle{align-self:end!important;margin:0!important;height:50px!important;min-height:50px!important}
-          .tr-playerSourceTools .tr-audioQueueSelectorField{height:50px!important;min-height:50px!important}
-          .tr-studioMeterGrid{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important}
-        }
-        @media(max-width:700px){
-          .tr-audioEqPanel--pro7{width:calc(100% - 16px)!important;margin-left:auto!important;margin-right:auto!important;padding:10px!important;padding-bottom:104px!important;box-sizing:border-box!important}
-          .tr-outputProfilePanel{grid-template-columns:1fr!important;gap:11px!important}
-          .tr-outputProfileSelect{width:100%!important;max-width:none!important}
-          .tr-outputProfileChoices{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-          .tr-outputProfileChoices button{min-height:46px!important}
-          .tr-outputProfileTelemetry{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:7px!important}
-          .tr-sourceQualityPanel{grid-template-columns:1fr!important}
-          .tr-preampTrim{grid-template-columns:1fr!important;gap:10px!important;padding:12px!important}
-          .tr-preampTrimControl{width:100%!important;min-width:0!important}
-          .tr-preampAutoButton{width:100%!important;min-height:42px!important}
-          .tr-preampTrimScale{position:relative!important}
-          .tr-dspProofStatus{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:7px!important}
-          .tr-dspProofStatus>span{min-width:0!important;white-space:normal!important;line-height:1.25!important}
-          .tr-studioMeterGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-          .tr-studioMeterGrid article{padding:10px!important;min-height:82px!important}
-          .tr-studioProcessingPanel{grid-template-columns:1fr!important;gap:8px!important}
-          .tr-studioProcessingPanel button{min-height:74px!important}
-          .tr-audioEqHead{grid-template-columns:1fr!important;gap:10px!important;align-items:stretch!important}
-          .tr-dspAbControls{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;width:100%!important}
-          .tr-dspAbControls>*{width:100%!important;min-width:0!important}
-          .tr-audioEqPreset{width:100%!important;max-width:none!important}
-          .tr-audioEqPreset select{width:100%!important;min-height:44px!important}
-          .tr-eqArchitecturePanel{grid-template-columns:1fr!important;gap:10px!important}
-          .tr-eqArchitectureButtons{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important}
-          .tr-eqArchitectureButtons button{min-height:42px!important}
-          .tr-audioEqScroll{padding-bottom:8px!important;overscroll-behavior-inline:contain!important;scrollbar-width:thin!important}
-          .tr-audioEqBands--31{grid-template-columns:repeat(31,52px)!important;grid-auto-columns:52px!important;gap:7px!important;padding:0 8px!important}
-          .tr-audioEqBands--31 .tr-audioEqBand{width:52px!important;min-width:52px!important;max-width:52px!important;height:190px!important;grid-template-rows:25px 138px 16px!important}
-          .tr-audioEqBands--31 .tr-audioEqSliderShell{width:52px!important;min-width:52px!important;max-width:52px!important;height:138px!important}
-          .tr-audioEqBands--31 .tr-audioEqSliderShell input[type="range"]{width:122px!important;min-width:122px!important;max-width:122px!important;height:22px!important}
-          .tr-audioEqBands--31 .tr-audioEqGain{font-size:8px!important}
-          .tr-audioEqBands--31 .tr-audioEqFrequency{font-size:8.5px!important}
-        }
-        @media(max-width:430px){
-          .tr-audioEqPanel--pro7{width:calc(100% - 10px)!important;padding:8px!important;padding-bottom:108px!important}
-          .tr-playerUtilityRow{gap:10px!important}
-          .tr-outputProfileTelemetry{grid-template-columns:1fr 1fr!important}
-          .tr-dspProofStatus{grid-template-columns:1fr!important}
-          .tr-studioMeterGrid{grid-template-columns:1fr!important}
-          .tr-studioMeterGrid article{min-height:76px!important}
-          .tr-dspAbControls{grid-template-columns:1fr 1fr!important}
-          .tr-dspAbControls .tr-audioEqSwitch,.tr-dspAbControls .tr-dspBypassButton{min-height:42px!important}
-          .tr-eqArchitectureButtons{grid-template-columns:1fr 1fr!important}
-          .tr-outputProfileChoices button{min-height:48px!important;font-size:9px!important}
-          .tr-sourceQualityCopy>strong{white-space:normal!important;line-height:1.2!important}
-        }
       `}</style>
     </section>
   );

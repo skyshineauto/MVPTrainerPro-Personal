@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V3 Phase 6 Stereo Integrity
+// MVP Trainer Pro - MVP Studio V4 Mastering Refinement
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -642,7 +642,7 @@ void buildLinearFirTarget() {
     for (int band = 0; band < kEqBands; ++band) designGains[band] = eqTarget[band];
     const int nyquistBin = kLinearFirDesignFft / 2;
     const double nyquist = sampleRateHz * 0.5;
-    for (int iteration = 0; iteration < 2; ++iteration) {
+    for (int iteration = 0; iteration < 4; ++iteration) {
       for (int i = 0; i < kLinearFirDesignFft; ++i) { linearFftReal[i] = 0.0f; linearFftImag[i] = 0.0f; }
       for (int bin = 0; bin <= nyquistBin; ++bin) {
         const float frequency = static_cast<float>((static_cast<double>(bin) / nyquistBin) * nyquist);
@@ -662,7 +662,7 @@ void buildLinearFirTarget() {
       }
       fftInPlace(linearFftReal, linearFftImag, kLinearFirDesignFft, true);
       for (int tap = 0; tap < kLinearFirTaps; ++tap) linearFirTaps[tap] = linearFftReal[tap];
-      if (iteration < 1) {
+      if (iteration < 3) {
         for (int i = 0; i < kLinearFirDesignFft; ++i) { linearFftReal[i] = i < kLinearFirTaps ? linearFirTaps[i] : 0.0f; linearFftImag[i] = 0.0f; }
         fftInPlace(linearFftReal, linearFftImag, kLinearFirDesignFft, false);
         for (int band = 0; band < kEqBands; ++band) {
@@ -675,7 +675,7 @@ void buildLinearFirTarget() {
           const double magnitude = pow(re * re + im * im, 0.5);
           const float actualDb = magnitude > 1.0e-9 ? static_cast<float>(20.0 * log10(magnitude)) : -120.0f;
           const float error = clampf(eqTarget[band] - actualDb, -3.0f, 3.0f);
-          designGains[band] = clampf(designGains[band] + error * 0.45f, -15.0f, 15.0f);
+          designGains[band] = clampf(designGains[band] + error * 0.68f, -15.0f, 15.0f);
         }
       }
     }
@@ -822,13 +822,13 @@ void configureOutputProfile() {
   // being over-driven in its vulnerable low-frequency region. Normal material
   // remains untouched; no makeup gain is applied.
   if (outputProfile == 2) {
-    outputGuard.configure(sampleRateHz, 82.0f, 0.82f, -14.5f, 2.2f, 2.0f, 12.0f, 220.0f);
+    outputGuard.configure(sampleRateHz, 82.0f, 0.82f, -12.5f, 1.5f, 1.85f, 15.0f, 260.0f);
     outputCorrectionProfileScale = 1.0f;
   } else if (outputProfile == 1) {
-    outputGuard.configure(sampleRateHz, 55.0f, 0.78f, -8.0f, 0.5f, 1.6f, 18.0f, 260.0f);
+    outputGuard.configure(sampleRateHz, 55.0f, 0.78f, -7.0f, 0.35f, 1.45f, 22.0f, 310.0f);
     outputCorrectionProfileScale = 0.35f;
   } else {
-    outputGuard.configure(sampleRateHz, 58.0f, 0.80f, -10.5f, 1.2f, 1.8f, 15.0f, 240.0f);
+    outputGuard.configure(sampleRateHz, 58.0f, 0.80f, -9.5f, 0.8f, 1.65f, 18.0f, 290.0f);
     outputCorrectionProfileScale = 0.65f;
   }
   outputGuard.reset();
@@ -866,18 +866,18 @@ void configureMultiband() {
 
   // Transparent mastering-style control. No automatic makeup gain is used, so the
   // V1.1 truthful gain staging remains intact and the limiter only handles real peaks.
-  multibandCompressor[0].configure(sampleRateHz, -14.5f, 1.34f, 3.0f, 28.0f, 190.0f, 24.0f, 170.0f);
-  multibandCompressor[1].configure(sampleRateHz, -17.0f, 1.28f, 2.6f, 22.0f, 165.0f, 18.0f, 145.0f);
-  multibandCompressor[2].configure(sampleRateHz, -18.5f, 1.24f, 2.4f, 12.0f, 125.0f, 10.0f, 110.0f);
-  multibandCompressor[3].configure(sampleRateHz, -20.0f, 1.20f, 2.0f, 7.0f, 95.0f, 6.0f, 85.0f);
+  multibandCompressor[0].configure(sampleRateHz, -13.0f, 1.25f, 2.4f, 32.0f, 230.0f, 28.0f, 210.0f);
+  multibandCompressor[1].configure(sampleRateHz, -15.5f, 1.22f, 2.1f, 26.0f, 210.0f, 22.0f, 190.0f);
+  multibandCompressor[2].configure(sampleRateHz, -17.0f, 1.18f, 1.9f, 15.0f, 170.0f, 13.0f, 155.0f);
+  multibandCompressor[3].configure(sampleRateHz, -18.5f, 1.16f, 1.6f, 9.0f, 145.0f, 8.0f, 130.0f);
 }
 
 void configureDynamicEq() {
   // Broad, mastering-style bands with conservative maximum cuts.
-  dynamicEqBands[0].configure(sampleRateHz, 90.0f, 0.85f, -17.0f, 1.8f, 2.0f, 18.0f, 180.0f);
-  dynamicEqBands[1].configure(sampleRateHz, 280.0f, 1.00f, -20.0f, 2.2f, 2.2f, 22.0f, 220.0f);
-  dynamicEqBands[2].configure(sampleRateHz, 3200.0f, 1.10f, -22.0f, 2.5f, 2.4f, 10.0f, 150.0f);
-  dynamicEqBands[3].configure(sampleRateHz, 7600.0f, 1.00f, -24.0f, 1.8f, 2.0f, 7.0f, 125.0f);
+  dynamicEqBands[0].configure(sampleRateHz, 90.0f, 0.85f, -15.5f, 1.4f, 1.8f, 20.0f, 220.0f);
+  dynamicEqBands[1].configure(sampleRateHz, 280.0f, 1.00f, -18.5f, 1.7f, 1.9f, 26.0f, 270.0f);
+  dynamicEqBands[2].configure(sampleRateHz, 3200.0f, 1.10f, -20.5f, 1.8f, 2.0f, 13.0f, 190.0f);
+  dynamicEqBands[3].configure(sampleRateHz, 7600.0f, 1.00f, -22.0f, 1.4f, 1.8f, 9.0f, 165.0f);
 }
 
 void refreshDynamicEqForBlock(int frames) {
@@ -970,7 +970,7 @@ void processStereoIntegrity(float &left, float &right) {
   // excessive anti-phase energy and is where the safety guard begins to narrow.
   const float energy = left * left + right * right;
   const float cross = 2.0f * left * right;
-  const float corrCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.070)));
+  const float corrCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.090)));
   stereoCorrelationEnergy += (energy - stereoCorrelationEnergy) * corrCoeff;
   stereoCorrelationCross += (cross - stereoCorrelationCross) * corrCoeff;
   float correlation = stereoCorrelationEnergy > 1.0e-8f
@@ -981,19 +981,19 @@ void processStereoIntegrity(float &left, float &right) {
   // The guard is transparent above -0.18 correlation. At strongly anti-phase
   // moments it can reduce the high-frequency side channel by at most 3 dB.
   float guardTarget = 1.0f;
-  if (correlation < -0.18f) {
-    const float severity = clampf((-0.18f - correlation) / 0.62f, 0.0f, 1.0f);
-    guardTarget = 1.0f - severity * (1.0f - static_cast<float>(dbToGain(-3.0))) * amount;
+  if (correlation < -0.28f) {
+    const float severity = clampf((-0.28f - correlation) / 0.58f, 0.0f, 1.0f);
+    guardTarget = 1.0f - severity * (1.0f - static_cast<float>(dbToGain(-2.5))) * amount;
   }
-  const float guardAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.020)));
-  const float guardRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
+  const float guardAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.025)));
+  const float guardRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.450)));
   const float guardCoeff = guardTarget < stereoGuardGain ? guardAttack : guardRelease;
   stereoGuardGain += (guardTarget - stereoGuardGain) * guardCoeff;
 
   // Profile-specific base width is intentionally tiny. This is an integrity stage,
   // not a wow-effect widener. Headphone immersion remains a separate later stage.
-  const float baseHighWidth = outputProfile == 0 ? 1.03f : (outputProfile == 2 ? 0.99f : 1.0f);
-  const float lowSideScale = outputProfile == 0 ? 0.55f : (outputProfile == 2 ? 0.45f : 0.78f);
+  const float baseHighWidth = outputProfile == 0 ? 1.02f : (outputProfile == 2 ? 0.995f : 1.0f);
+  const float lowSideScale = outputProfile == 0 ? 0.72f : (outputProfile == 2 ? 0.60f : 0.88f);
 
   const float lowSide = stereoSideLowpass.process(side);
   const float highSide = side - lowSide;

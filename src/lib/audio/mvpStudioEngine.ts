@@ -76,7 +76,7 @@ let latestTelemetry: MvpStudioTelemetry = {
 function loadStudioWasmBytes() {
   if (!wasmBytesPromise) {
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "3.6.0");
+    url.searchParams.set("v", "4.0.0");
     wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
       return response.arrayBuffer();
@@ -91,7 +91,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   }
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "3.6.0");
+  workletUrl.searchParams.set("v", "4.0.0");
   const [wasmBytes] = await Promise.all([
     loadStudioWasmBytes(),
     context.audioWorklet.addModule(workletUrl.href),
