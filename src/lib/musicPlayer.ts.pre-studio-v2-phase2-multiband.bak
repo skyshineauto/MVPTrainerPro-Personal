@@ -302,7 +302,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v14-2-studio-wasm-v2-multiband";
+const AUDIO_ENGINE_VERSION = "v14-0-studio-wasm-v1";
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -1231,9 +1231,6 @@ function applyStudioProcessingSettings(now: number) {
     headroomDb: autoHeadroomDb,
     transientEnabled: studioTransientAmount > 0.001,
     transientAmount: studioTransientAmount,
-    // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
-    multibandEnabled: processed && state.multibandEnabled,
-    multibandAmount: 1,
     limiterEnabled: processed && state.limiterEnabled,
     limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
     outputProfileCode: studioOutputProfileCode(),

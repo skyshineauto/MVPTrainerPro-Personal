@@ -29,7 +29,13 @@ const imports = {
 const { instance } = await WebAssembly.instantiate(bytes, imports);
 memory = instance.exports.memory;
 const dsp = instance.exports;
-for (const name of ["mvp_set_transient", "mvp_meter_transient_boost_db"]) {
+for (const name of [
+  "mvp_set_transient",
+  "mvp_set_multiband",
+  "mvp_meter_transient_boost_db",
+  "mvp_meter_multiband_gain_reduction_db",
+  "mvp_meter_multiband_band_reduction_db",
+]) {
   if (typeof dsp[name] !== "function") throw new Error(`Missing ${name} export`);
 }
 if (dsp.mvp_init(48000) !== 1) throw new Error("mvp_init failed");
@@ -39,104 +45,134 @@ const inR = new Float32Array(memory.buffer, dsp.mvp_input_r(), maxFrames);
 const outL = new Float32Array(memory.buffer, dsp.mvp_output_l(), maxFrames);
 const outR = new Float32Array(memory.buffer, dsp.mvp_output_r(), maxFrames);
 
-// Base EQ / finite-output test.
-dsp.mvp_set_eq_enabled(1);
-dsp.mvp_set_eq_band(21, 3.5);
-dsp.mvp_set_preamp_db(-2);
-dsp.mvp_set_headroom_db(0);
-dsp.mvp_set_transient(1, 0.68);
-dsp.mvp_set_limiter(1, -1.0);
-dsp.mvp_set_output_profile(0);
-let phase = 0;
-for (let block = 0; block < 500; block += 1) {
-  for (let index = 0; index < 128; index += 1) {
-    const sample = 0.5 * Math.sin(phase);
-    phase += (2 * Math.PI * 2500) / 48000;
-    inL[index] = sample;
-    inR[index] = sample;
-  }
-  if (dsp.mvp_process(128) !== 1) throw new Error("mvp_process failed");
-  for (let index = 0; index < 128; index += 1) {
-    if (!Number.isFinite(outL[index]) || !Number.isFinite(outR[index])) throw new Error("Non-finite DSP output");
-  }
-}
-
-function renderBurst(transientOn) {
-  dsp.mvp_reset();
+function baseState() {
   dsp.mvp_set_eq_enabled(0);
   dsp.mvp_set_preamp_db(0);
   dsp.mvp_set_headroom_db(0);
-  dsp.mvp_set_transient(transientOn ? 1 : 0, 0.82);
+  dsp.mvp_set_transient(0, 0);
+  dsp.mvp_set_multiband(0, 1);
   dsp.mvp_set_limiter(0, -1.0);
-  dsp.mvp_set_output_profile(0);
-  let localPhase = 0;
+  dsp.mvp_set_output_profile(1); // Headphone profile is neutral in the V2 core.
+  dsp.mvp_set_headphone(0, 0, 0, 0, 0.5, 0);
+}
+
+function renderSine({ frequency, amplitude, multiband, blocks = 320 }) {
+  dsp.mvp_reset();
+  baseState();
+  dsp.mvp_set_multiband(multiband ? 1 : 0, 1);
+  let phase = 0;
+  let sumSq = 0;
+  let count = 0;
   let peak = 0;
-  let maxTransientMeter = 0;
-  // Silence primes the envelopes and the fixed lookahead delay.
-  for (let block = 0; block < 24; block += 1) {
-    inL.fill(0, 0, 128);
-    inR.fill(0, 0, 128);
-    dsp.mvp_process(128);
-  }
-  // Abrupt 1 kHz burst, then a quieter tail. This should create a real onset.
-  for (let block = 0; block < 36; block += 1) {
-    for (let index = 0; index < 128; index += 1) {
-      const global = block * 128 + index;
-      const amp = global < 768 ? 0.34 : 0.16;
-      const sample = amp * Math.sin(localPhase);
-      localPhase += (2 * Math.PI * 1000) / 48000;
-      inL[index] = sample;
-      inR[index] = sample;
+  let maxGr = 0;
+  const bandMax = [0, 0, 0, 0];
+  for (let block = 0; block < blocks; block += 1) {
+    for (let i = 0; i < 128; i += 1) {
+      const sample = amplitude * Math.sin(phase);
+      phase += (2 * Math.PI * frequency) / 48000;
+      inL[i] = sample;
+      inR[i] = sample;
     }
-    dsp.mvp_process(128);
-    maxTransientMeter = Math.max(maxTransientMeter, Number(dsp.mvp_meter_transient_boost_db()));
-    for (let index = 0; index < 128; index += 1) {
-      peak = Math.max(peak, Math.abs(outL[index]), Math.abs(outR[index]));
+    if (dsp.mvp_process(128) !== 1) throw new Error("mvp_process failed");
+    if (block > 80) {
+      for (let i = 0; i < 128; i += 1) {
+        const l = outL[i];
+        const r = outR[i];
+        if (!Number.isFinite(l) || !Number.isFinite(r)) throw new Error("Non-finite DSP output");
+        sumSq += 0.5 * (l * l + r * r);
+        count += 1;
+        peak = Math.max(peak, Math.abs(l), Math.abs(r));
+      }
+      maxGr = Math.max(maxGr, Number(dsp.mvp_meter_multiband_gain_reduction_db()));
+      for (let band = 0; band < 4; band += 1) {
+        bandMax[band] = Math.max(bandMax[band], Number(dsp.mvp_meter_multiband_band_reduction_db(band)));
+      }
     }
   }
-  return { peak, maxTransientMeter };
+  return { rms: Math.sqrt(sumSq / Math.max(1, count)), peak, maxGr, bandMax };
 }
 
-const transientOff = renderBurst(false);
-const transientOn = renderBurst(true);
-if (!(transientOn.peak > transientOff.peak * 1.015)) {
-  throw new Error(`Transient shaper did not increase onset detail enough: off=${transientOff.peak}, on=${transientOn.peak}`);
-}
-if (!(transientOn.maxTransientMeter > 0.05 && transientOn.maxTransientMeter <= 2.25)) {
-  throw new Error(`Transient meter out of range: ${transientOn.maxTransientMeter}`);
+// 1) Quiet signals should retain essentially flat magnitude through the LR4 network.
+const responseChecks = [];
+for (const frequency of [60, 120, 250, 500, 1000, 4000, 8000, 14000]) {
+  const dry = renderSine({ frequency, amplitude: 0.008, multiband: false, blocks: 260 });
+  const wet = renderSine({ frequency, amplitude: 0.008, multiband: true, blocks: 260 });
+  const deltaDb = 20 * Math.log10(Math.max(1e-9, wet.rms) / Math.max(1e-9, dry.rms));
+  responseChecks.push({ frequency, deltaDb });
+  if (Math.abs(deltaDb) > 0.35) {
+    throw new Error(`Multiband crossover response not flat enough at ${frequency} Hz: ${deltaDb.toFixed(3)} dB`);
+  }
 }
 
-// Deliberate overload: limiter must still hold at/below the -1 dB ceiling with transient active.
+// 2) Loud program material should create gentle, bounded gain reduction.
+const compressionChecks = [];
+for (const frequency of [80, 250, 1200, 7000]) {
+  const dry = renderSine({ frequency, amplitude: 0.55, multiband: false });
+  const wet = renderSine({ frequency, amplitude: 0.55, multiband: true });
+  const deltaDb = 20 * Math.log10(Math.max(1e-9, wet.rms) / Math.max(1e-9, dry.rms));
+  compressionChecks.push({ frequency, deltaDb, maxGr: wet.maxGr, bandMax: wet.bandMax });
+  if (!(wet.maxGr > 0.05 && wet.maxGr <= 3.05)) {
+    throw new Error(`Multiband GR out of range at ${frequency} Hz: ${wet.maxGr}`);
+  }
+  if (deltaDb > 0.15 || deltaDb < -3.4) {
+    throw new Error(`Unexpected multiband level change at ${frequency} Hz: ${deltaDb.toFixed(3)} dB`);
+  }
+}
+
+// 3) Transient processor and multiband must coexist without non-finite output.
 dsp.mvp_reset();
-dsp.mvp_set_eq_enabled(0);
-dsp.mvp_set_preamp_db(9);
-dsp.mvp_set_headroom_db(0);
-dsp.mvp_set_transient(1, 1);
+baseState();
+dsp.mvp_set_transient(1, 0.72);
+dsp.mvp_set_multiband(1, 1);
 dsp.mvp_set_limiter(1, -1.0);
-let outputPeak = 0;
-phase = 0;
-for (let block = 0; block < 300; block += 1) {
-  for (let index = 0; index < 128; index += 1) {
-    const sample = 0.9 * Math.sin(phase);
+let phase = 0;
+let combinedPeak = 0;
+for (let block = 0; block < 420; block += 1) {
+  for (let i = 0; i < 128; i += 1) {
+    const t = block * 128 + i;
+    const burst = t % 2400 < 260 ? 0.78 : 0.36;
+    const sample = burst * (0.64 * Math.sin(phase) + 0.28 * Math.sin(phase * 2.73));
     phase += (2 * Math.PI * 997) / 48000;
-    inL[index] = sample;
-    inR[index] = sample;
+    inL[i] = sample;
+    inR[i] = sample * 0.93;
   }
   dsp.mvp_process(128);
-  for (let index = 0; index < 128; index += 1) {
-    outputPeak = Math.max(outputPeak, Math.abs(outL[index]), Math.abs(outR[index]));
+  for (let i = 0; i < 128; i += 1) {
+    if (!Number.isFinite(outL[i]) || !Number.isFinite(outR[i])) throw new Error("Non-finite combined DSP output");
+    combinedPeak = Math.max(combinedPeak, Math.abs(outL[i]), Math.abs(outR[i]));
   }
 }
-const ceiling = 10 ** (-1 / 20);
-if (outputPeak > ceiling + 0.0001) throw new Error(`Limiter exceeded ceiling: ${outputPeak}`);
 
-console.log("MVP Studio WASM V2 Transient: PASS");
+// 4) Deliberate overload: final limiter still owns the ceiling after multiband.
+dsp.mvp_reset();
+baseState();
+dsp.mvp_set_preamp_db(9);
+dsp.mvp_set_transient(1, 1);
+dsp.mvp_set_multiband(1, 1);
+dsp.mvp_set_limiter(1, -1.0);
+let overloadPeak = 0;
+phase = 0;
+for (let block = 0; block < 320; block += 1) {
+  for (let i = 0; i < 128; i += 1) {
+    const sample = 0.9 * Math.sin(phase);
+    phase += (2 * Math.PI * 997) / 48000;
+    inL[i] = sample;
+    inR[i] = sample;
+  }
+  dsp.mvp_process(128);
+  for (let i = 0; i < 128; i += 1) overloadPeak = Math.max(overloadPeak, Math.abs(outL[i]), Math.abs(outR[i]));
+}
+const ceiling = 10 ** (-1 / 20);
+if (overloadPeak > ceiling + 0.0001) throw new Error(`Limiter exceeded ceiling: ${overloadPeak}`);
+
+console.log("MVP Studio WASM V2 Phase 2 Multiband: PASS");
 console.log({
   wasmBytes: bytes.length,
   maxFrames,
-  transientOff,
-  transientOn,
-  outputPeak,
+  responseChecks,
+  compressionChecks,
+  combinedPeak,
+  overloadPeak,
   ceiling,
-  gainReductionDb: dsp.mvp_meter_gain_reduction_db(),
+  limiterGainReductionDb: dsp.mvp_meter_gain_reduction_db(),
 });

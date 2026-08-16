@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio Engine V2 Transient
+// MVP Trainer Pro - MVP Studio Engine V2 Phase 2 Multiband
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -127,6 +127,115 @@ struct Biquad {
     a1 = (-2.0 * cw) / a0n;
     a2 = (1.0 - alpha) / a0n;
   }
+
+  void setLowpass(double sampleRate, double frequency, double q = 0.7071067811865476) {
+    const double f = clampd(frequency, 10.0, sampleRate * 0.475);
+    const double w0 = 2.0 * kPi * f / sampleRate;
+    const double cw = cos(w0);
+    const double sw = sin(w0);
+    const double alpha = sw / (2.0 * q);
+    const double a0n = 1.0 + alpha;
+    b0 = ((1.0 - cw) * 0.5) / a0n;
+    b1 = (1.0 - cw) / a0n;
+    b2 = ((1.0 - cw) * 0.5) / a0n;
+    a1 = (-2.0 * cw) / a0n;
+    a2 = (1.0 - alpha) / a0n;
+  }
+};
+
+struct LR4Split {
+  Biquad low1;
+  Biquad low2;
+  Biquad high1;
+  Biquad high2;
+
+  void configure(double sampleRate, double frequency) {
+    constexpr double q = 0.7071067811865476;
+    low1.setLowpass(sampleRate, frequency, q);
+    low2.setLowpass(sampleRate, frequency, q);
+    high1.setHighpass(sampleRate, frequency, q);
+    high2.setHighpass(sampleRate, frequency, q);
+  }
+
+  void reset() {
+    low1.reset(); low2.reset(); high1.reset(); high2.reset();
+  }
+
+  inline void split(float input, float &low, float &high) {
+    low = low2.process(low1.process(input));
+    high = high2.process(high1.process(input));
+  }
+
+  inline float allpass(float input) {
+    float low = 0.0f;
+    float high = 0.0f;
+    split(input, low, high);
+    return low + high;
+  }
+};
+
+struct MultibandCompressor {
+  float envelope = 0.0f;
+  float gain = 1.0f;
+  float thresholdDb = -18.0f;
+  float ratio = 1.25f;
+  float maxReductionDb = 3.0f;
+  float envelopeAttack = 0.01f;
+  float envelopeRelease = 0.001f;
+  float gainAttack = 0.01f;
+  float gainRelease = 0.001f;
+  float reductionDb = 0.0f;
+
+  void configure(
+    float sampleRate, float threshold, float ratioValue, float maxReduction,
+    float envelopeAttackMs, float envelopeReleaseMs, float gainAttackMs, float gainReleaseMs
+  ) {
+    thresholdDb = threshold;
+    ratio = ratioValue;
+    maxReductionDb = maxReduction;
+    envelopeAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * envelopeAttackMs * 0.001)));
+    envelopeRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * envelopeReleaseMs * 0.001)));
+    gainAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * gainAttackMs * 0.001)));
+    gainRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * gainReleaseMs * 0.001)));
+  }
+
+  void reset() {
+    envelope = 0.0f;
+    gain = 1.0f;
+    reductionDb = 0.0f;
+  }
+
+  inline float step(float detector, float amount) {
+    const float envCoeff = detector > envelope ? envelopeAttack : envelopeRelease;
+    envelope += (detector - envelope) * envCoeff;
+
+    float targetReductionDb = 0.0f;
+    if (amount > 0.0001f && envelope > 0.000001f) {
+      const float levelDb = static_cast<float>(20.0 * log10(envelope));
+      const float kneeDb = 6.0f;
+      const float kneeStart = thresholdDb - kneeDb * 0.5f;
+      const float kneeEnd = thresholdDb + kneeDb * 0.5f;
+      float compressedOverDb = 0.0f;
+
+      if (levelDb >= kneeEnd) {
+        compressedOverDb = levelDb - thresholdDb;
+      } else if (levelDb > kneeStart) {
+        const float x = levelDb - kneeStart;
+        compressedOverDb = (x * x) / (2.0f * kneeDb);
+      }
+
+      if (compressedOverDb > 0.0f) {
+        const float ratioReduction = compressedOverDb * (1.0f - 1.0f / ratio);
+        targetReductionDb = clampf(ratioReduction * amount, 0.0f, maxReductionDb * amount);
+      }
+    }
+
+    const float targetGain = static_cast<float>(dbToGain(-targetReductionDb));
+    const float gainCoeff = targetGain < gain ? gainAttack : gainRelease;
+    gain += (targetGain - gain) * gainCoeff;
+    reductionDb = gain < 0.999999f ? static_cast<float>(-20.0 * log10(gain)) : 0.0f;
+    return gain;
+  }
 };
 
 float inputL[kMaxFrames];
@@ -195,6 +304,20 @@ float transientGainAttackCoeff = 0.03f;
 float transientGainReleaseCoeff = 0.001f;
 float meterTransientBoostDb = 0.0f;
 
+// Studio V2 Phase 2 multiband dynamics.
+// Binary-tree LR4 crossover: 500 Hz first, then 120 Hz / 4 kHz.
+// Phase-compensation allpasses keep the two halves aligned at the 500 Hz join.
+int multibandEnabled = 0;
+float multibandAmount = 1.0f;
+LR4Split multibandSplit500[2];
+LR4Split multibandSplit120[2];
+LR4Split multibandSplit4000[2];
+LR4Split multibandLowComp4000[2];
+LR4Split multibandHighComp120[2];
+MultibandCompressor multibandCompressor[4];
+float meterMultibandGainReductionDb = 0.0f;
+float meterMultibandBandReductionDb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
 void resetBuffers() {
   for (int i = 0; i < kMaxLookahead; ++i) { limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f; }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
@@ -205,9 +328,19 @@ void resetBuffers() {
   transientSlowEnvelope = 0.0f;
   transientGain = 1.0f;
   meterTransientBoostDb = 0.0f;
+  meterMultibandGainReductionDb = 0.0f;
+  for (int band = 0; band < 4; ++band) {
+    meterMultibandBandReductionDb[band] = 0.0f;
+    multibandCompressor[band].reset();
+  }
   for (int ch = 0; ch < 2; ++ch) {
     for (int band = 0; band < kEqBands; ++band) eq[ch][band].reset();
     outputHp[ch].reset(); outputLow[ch].reset(); outputPresence[ch].reset(); outputHigh[ch].reset(); headphoneBass[ch].reset();
+    multibandSplit500[ch].reset();
+    multibandSplit120[ch].reset();
+    multibandSplit4000[ch].reset();
+    multibandLowComp4000[ch].reset();
+    multibandHighComp120[ch].reset();
   }
 }
 
@@ -236,6 +369,23 @@ void configureHeadphoneBass() {
   const double boost = headphoneEnabled ? clampd(headphoneBassImpact, 0.0, 1.0) * 3.0 : 0.0;
   headphoneBass[0].setLowShelf(sampleRateHz, 92.0, boost);
   headphoneBass[1].setLowShelf(sampleRateHz, 92.0, boost);
+}
+
+void configureMultiband() {
+  for (int ch = 0; ch < 2; ++ch) {
+    multibandSplit500[ch].configure(sampleRateHz, 500.0);
+    multibandSplit120[ch].configure(sampleRateHz, 120.0);
+    multibandSplit4000[ch].configure(sampleRateHz, 4000.0);
+    multibandLowComp4000[ch].configure(sampleRateHz, 4000.0);
+    multibandHighComp120[ch].configure(sampleRateHz, 120.0);
+  }
+
+  // Transparent mastering-style control. No automatic makeup gain is used, so the
+  // V1.1 truthful gain staging remains intact and the limiter only handles real peaks.
+  multibandCompressor[0].configure(sampleRateHz, -14.5f, 1.34f, 3.0f, 28.0f, 190.0f, 24.0f, 170.0f);
+  multibandCompressor[1].configure(sampleRateHz, -17.0f, 1.28f, 2.6f, 22.0f, 165.0f, 18.0f, 145.0f);
+  multibandCompressor[2].configure(sampleRateHz, -18.5f, 1.24f, 2.4f, 12.0f, 125.0f, 10.0f, 110.0f);
+  multibandCompressor[3].configure(sampleRateHz, -20.0f, 1.20f, 2.0f, 7.0f, 95.0f, 6.0f, 85.0f);
 }
 
 void refreshEqForBlock(int frames) {
@@ -357,6 +507,59 @@ void processTransient(float &left, float &right) {
   if (actualBoostDb > meterTransientBoostDb) meterTransientBoostDb = actualBoostDb;
 }
 
+void processMultiband(float &left, float &right) {
+  if (!multibandEnabled || multibandAmount <= 0.0001f) return;
+
+  float low500L = 0.0f, high500L = 0.0f;
+  float low500R = 0.0f, high500R = 0.0f;
+  multibandSplit500[0].split(left, low500L, high500L);
+  multibandSplit500[1].split(right, low500R, high500R);
+
+  float band0L = 0.0f, band1L = 0.0f;
+  float band0R = 0.0f, band1R = 0.0f;
+  multibandSplit120[0].split(low500L, band0L, band1L);
+  multibandSplit120[1].split(low500R, band0R, band1R);
+
+  float band2L = 0.0f, band3L = 0.0f;
+  float band2R = 0.0f, band3R = 0.0f;
+  multibandSplit4000[0].split(high500L, band2L, band3L);
+  multibandSplit4000[1].split(high500R, band2R, band3R);
+
+  const float detector0 = absf(band0L) > absf(band0R) ? absf(band0L) : absf(band0R);
+  const float detector1 = absf(band1L) > absf(band1R) ? absf(band1L) : absf(band1R);
+  const float detector2 = absf(band2L) > absf(band2R) ? absf(band2L) : absf(band2R);
+  const float detector3 = absf(band3L) > absf(band3R) ? absf(band3L) : absf(band3R);
+
+  const float gain0 = multibandCompressor[0].step(detector0, multibandAmount);
+  const float gain1 = multibandCompressor[1].step(detector1, multibandAmount);
+  const float gain2 = multibandCompressor[2].step(detector2, multibandAmount);
+  const float gain3 = multibandCompressor[3].step(detector3, multibandAmount);
+
+  float lowSumL = band0L * gain0 + band1L * gain1;
+  float lowSumR = band0R * gain0 + band1R * gain1;
+  float highSumL = band2L * gain2 + band3L * gain3;
+  float highSumR = band2R * gain2 + band3R * gain3;
+
+  // Each half gets the opposite branch's split phase before the final recombination.
+  // That keeps the 500 Hz binary-tree join phase matched while retaining four
+  // independent stereo-linked gain controls.
+  lowSumL = multibandLowComp4000[0].allpass(lowSumL);
+  lowSumR = multibandLowComp4000[1].allpass(lowSumR);
+  highSumL = multibandHighComp120[0].allpass(highSumL);
+  highSumR = multibandHighComp120[1].allpass(highSumR);
+
+  left = lowSumL + highSumL;
+  right = lowSumR + highSumR;
+
+  meterMultibandGainReductionDb = 0.0f;
+  for (int band = 0; band < 4; ++band) {
+    meterMultibandBandReductionDb[band] = multibandCompressor[band].reductionDb;
+    if (meterMultibandBandReductionDb[band] > meterMultibandGainReductionDb) {
+      meterMultibandGainReductionDb = meterMultibandBandReductionDb[band];
+    }
+  }
+}
+
 inline float intersamplePeak(float previous, float current) {
   float peak = absf(previous) > absf(current) ? absf(previous) : absf(current);
   const float step = (current - previous) * 0.25f;
@@ -425,6 +628,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   currentPreampGain = 1.0f;
   configureOutputProfile();
   configureHeadphoneBass();
+  configureMultiband();
   resetBuffers();
   return 1;
 }
@@ -446,6 +650,21 @@ __attribute__((visibility("default"))) void mvp_set_headroom_db(float value) { h
 __attribute__((visibility("default"))) void mvp_set_transient(int enabled, float amount) {
   transientEnabled = enabled ? 1 : 0;
   transientAmount = clampf(amount, 0.0f, 1.0f);
+}
+__attribute__((visibility("default"))) void mvp_set_multiband(int enabled, float amount) {
+  const int nextEnabled = enabled ? 1 : 0;
+  if (nextEnabled && !multibandEnabled) {
+    for (int band = 0; band < 4; ++band) multibandCompressor[band].reset();
+    for (int ch = 0; ch < 2; ++ch) {
+      multibandSplit500[ch].reset();
+      multibandSplit120[ch].reset();
+      multibandSplit4000[ch].reset();
+      multibandLowComp4000[ch].reset();
+      multibandHighComp120[ch].reset();
+    }
+  }
+  multibandEnabled = nextEnabled;
+  multibandAmount = clampf(amount, 0.0f, 1.0f);
 }
 __attribute__((visibility("default"))) void mvp_set_limiter(int enabled, float ceilingDb) {
   limiterEnabled = enabled ? 1 : 0;
@@ -474,6 +693,8 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   refreshEqForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
   meterTransientBoostDb = 0.0f;
+  meterMultibandGainReductionDb = 0.0f;
+  for (int band = 0; band < 4; ++band) meterMultibandBandReductionDb[band] = multibandCompressor[band].reductionDb;
   double inputEnergy = 0.0;
   double outputEnergy = 0.0;
   const float targetGain = static_cast<float>(dbToGain(targetPreampDb - headroomDb));
@@ -501,6 +722,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     left = processEq(0, left);
     right = processEq(1, right);
     processTransient(left, right);
+    processMultiband(left, right);
     left = processOutput(0, left);
     right = processOutput(1, right);
     processHeadphone(left, right);
@@ -529,4 +751,9 @@ __attribute__((visibility("default"))) float mvp_meter_output_rms() { return met
 __attribute__((visibility("default"))) float mvp_meter_gain_reduction_db() { return meterGainReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_limiter_gain() { return limiterGain; }
 __attribute__((visibility("default"))) float mvp_meter_transient_boost_db() { return meterTransientBoostDb; }
+__attribute__((visibility("default"))) float mvp_meter_multiband_gain_reduction_db() { return meterMultibandGainReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_multiband_band_reduction_db(int band) {
+  if (band < 0 || band >= 4) return 0.0f;
+  return meterMultibandBandReductionDb[band];
+}
 }

@@ -57,7 +57,6 @@ import {
   type MusicEqTopology,
   type MusicHeadphoneMode,
   type MusicOutputProfile,
-  type MusicDspEngineMode,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
 import {
@@ -199,19 +198,15 @@ function MusicActivityRta({
   eqLabel,
   outputProfile,
   sourceQuality,
-  dspEngineMode,
 }: {
   playing: boolean;
   profileLabel: string;
   eqLabel: string;
   outputProfile: MusicOutputProfile;
   sourceQuality: MusicSourceAnalysis;
-  dspEngineMode: MusicDspEngineMode;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const engineBadgeTone = dspEngineMode === "studio_wasm" ? "studio" : dspEngineMode === "advanced_worklet" ? "worklet" : dspEngineMode === "native_fallback" ? "native" : "unavailable";
-  const engineBadgeLabel = dspEngineMode === "studio_wasm" ? "MVP STUDIO • WASM" : dspEngineMode === "advanced_worklet" ? "COMPATIBILITY • WORKLET" : dspEngineMode === "native_fallback" ? "COMPATIBILITY • NATIVE" : "DSP UNAVAILABLE";
 
   useEffect(() => {
     const host = hostRef.current;
@@ -468,7 +463,7 @@ function MusicActivityRta({
     <div ref={hostRef} className="tr-activityRta tr-activityRta--10band tr-rtaFidelity" aria-label="10 band real-time spectrum analyzer">
       <canvas ref={canvasRef} />
       <div className="tr-rtaFidelityHead" aria-hidden>
-        <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM <span className={`tr-rtaEngineBadge is-${engineBadgeTone}`}><svg viewBox="0 0 28 14" aria-hidden><path d="M1 7h3l2-4.5L9 11.5 12 2l3 10 3-7 2 4h7" /></svg><b>{engineBadgeLabel}</b></span></span>
+        <span><i className={playing ? "is-live" : ""} />REAL-TIME SPECTRUM</span>
         <strong>
           <span className={`tr-rtaSourceQuality is-${sourceQuality.tier}`}>
             <span>{sourceQuality.codec} · {sourceQuality.bitrateLabel}</span>
@@ -1839,7 +1834,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <i className={`tr-mobileDspStatusLed is-${player.dspStatus}`} aria-hidden />
       </button>
 
-      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} sourceQuality={sourceQuality} dspEngineMode={player.dspEngineMode} />
+      <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} sourceQuality={sourceQuality} />
 
 
       <div className="tr-playerUtilityRow">
@@ -1945,15 +1940,15 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>DSP ENGINE <b className={player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "studio_wasm" ? "MVP STUDIO • WASM" : player.dspEngineMode === "advanced_worklet" ? "COMPATIBILITY • WORKLET" : player.dspEngineMode === "native_fallback" ? "COMPATIBILITY • NATIVE" : "UNAVAILABLE"}</b></span>
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
               <span>OUTPUT LIMITER <b className="is-good">{player.dspEngineMode === "studio_wasm" ? "WASM • 4× PEAK GUARD" : "4× • -1 dBTP"}</b></span>
-              <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && (player.dspEngineMode === "advanced_worklet" || (player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass)) ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && !player.dspBypass ? "WASM • 4-BAND ACTIVE" : player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
+              <span>MULTIBAND DYNAMICS <b className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "4-BAND ACTIVE" : "BYPASSED"}</b></span>
               <span>LOUDNESS NORMALIZATION <b className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-good" : "is-fallback"}>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "ADAPTIVE • -14 LUFS" : "BYPASSED"}</b></span>
               <span>TRANSIENT DETAIL <b className={player.dspEngineMode === "studio_wasm" && player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "is-good" : "is-fallback"}>{player.dspEngineMode === "studio_wasm" ? (player.outputProfile !== "reference" && player.eqEnabled && !player.dspBypass ? "WASM • AUTO" : "BYPASSED") : "AUTO"}</b></span>
             </div>
           </section>
 
           <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing">
-            <button type="button" className={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? "is-active" : ""} aria-pressed={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet")} disabled={player.outputProfile === "reference" || (player.dspEngineMode !== "studio_wasm" && player.dspEngineMode !== "advanced_worklet")} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
-              <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON") : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz LR4 crossovers</small>
+            <button type="button" className={player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "is-active" : ""} aria-pressed={player.multibandEnabled && player.dspEngineMode === "advanced_worklet"} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
+              <span>MULTIBAND DYNAMICS</span><strong>{player.dspEngineMode === "studio_wasm" ? "V2" : player.multibandEnabled ? "ON" : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz crossovers</small>
             </button>
             <button type="button" className={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? "is-active" : ""} aria-pressed={player.normalizationEnabled && player.dspEngineMode === "advanced_worklet"} disabled={player.outputProfile === "reference" || player.dspEngineMode !== "advanced_worklet"} onClick={() => void runDspMutation(() => setMusicNormalizationEnabled(!player.normalizationEnabled))}>
               <span>LOUDNESS NORMALIZATION</span><strong>{player.dspEngineMode === "studio_wasm" ? "V2" : player.normalizationEnabled ? "ON • -14 LUFS" : "OFF"}</strong><small>{player.normalizationEnabled ? `Adaptive gain ${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB • Program ${player.loudnessMomentaryLufs > -60 ? `${player.loudnessMomentaryLufs.toFixed(1)} LUFS` : "ANALYZING"}` : "Keeps song-to-song loudness consistent without changing the EQ curve"}</small>
@@ -4910,29 +4905,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-rtaFidelityHead>strong{gap:3px!important}
         }
 
-        /* MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND PERSISTENT ENGINE BADGE */
-        .tr-rtaEngineBadge{
-          display:inline-flex!important;align-items:center!important;gap:5px!important;margin-left:4px!important;padding:3px 7px!important;
-          border:1px solid rgba(224,230,233,.34)!important;border-top-color:rgba(255,255,255,.58)!important;border-radius:999px!important;
-          background:linear-gradient(180deg,rgba(242,246,248,.12),rgba(163,174,181,.055))!important;
-          color:#f3f5f6!important;font-size:6.8px!important;font-weight:1100!important;letter-spacing:.045em!important;line-height:1!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 9px rgba(225,233,237,.12),0 3px 10px rgba(0,0,0,.28)!important;
-          text-shadow:0 0 7px rgba(245,249,250,.25)!important;white-space:nowrap!important;vertical-align:middle!important;
-        }
-        .tr-rtaEngineBadge svg{width:13px!important;height:8px!important;fill:none!important;stroke:currentColor!important;stroke-width:1.8!important;stroke-linecap:round!important;stroke-linejoin:round!important;filter:drop-shadow(0 0 3px currentColor)!important}
-        .tr-rtaEngineBadge b{margin:0!important;color:inherit!important;font:inherit!important;font-weight:1100!important;letter-spacing:inherit!important}
-        .tr-rtaEngineBadge.is-studio{color:#f3f5f6!important;border-color:rgba(229,235,238,.40)!important;background:linear-gradient(180deg,rgba(246,249,250,.14),rgba(147,158,166,.065))!important}
-        .tr-rtaEngineBadge.is-worklet{color:#ffc66c!important;border-color:rgba(255,190,81,.40)!important;background:linear-gradient(180deg,rgba(255,185,63,.14),rgba(104,62,11,.09))!important;box-shadow:inset 0 1px 0 rgba(255,235,196,.10),0 0 9px rgba(255,176,56,.14),0 3px 10px rgba(0,0,0,.28)!important}
-        .tr-rtaEngineBadge.is-native,.tr-rtaEngineBadge.is-unavailable{color:#ff7770!important;border-color:rgba(255,104,94,.44)!important;background:linear-gradient(180deg,rgba(255,91,80,.15),rgba(105,24,20,.10))!important;box-shadow:inset 0 1px 0 rgba(255,215,211,.08),0 0 9px rgba(255,78,67,.15),0 3px 10px rgba(0,0,0,.28)!important}
-        @media(max-width:650px){
-          .tr-rtaEngineBadge{gap:3px!important;margin-left:2px!important;padding:2px 4px!important;font-size:5.5px!important;letter-spacing:.01em!important}
-          .tr-rtaEngineBadge svg{width:10px!important;height:7px!important}
-          .tr-rtaEngineBadge b{font-size:0!important}
-          .tr-rtaEngineBadge.is-studio b:after{content:"WASM";font-size:5.5px!important}
-          .tr-rtaEngineBadge.is-worklet b:after{content:"WORKLET";font-size:5.2px!important}
-          .tr-rtaEngineBadge.is-native b:after{content:"NATIVE";font-size:5.2px!important}
-          .tr-rtaEngineBadge.is-unavailable b:after{content:"OFF";font-size:5.2px!important}
-        }
         /* V13.9.13 31-BAND EQ GEOMETRY LOCK: one gain + one centered slider + one label per frequency */
         .tr-audioEqBands--31{
           display:grid!important;

@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Phase 2 Multiband
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V2 Transient
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -95,7 +95,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v2-phase2-multiband",
+        version: "studio-wasm-v2-transient",
       });
     } catch (error) {
       this.failed = true;
@@ -131,12 +131,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       api.mvp_set_transient(
         state.transientEnabled ? 1 : 0,
         Number.isFinite(Number(state.transientAmount)) ? Number(state.transientAmount) : 0,
-      );
-    }
-    if (typeof api.mvp_set_multiband === "function") {
-      api.mvp_set_multiband(
-        state.multibandEnabled ? 1 : 0,
-        Number.isFinite(Number(state.multibandAmount)) ? Number(state.multibandAmount) : 1,
       );
     }
     api.mvp_set_limiter(state.limiterEnabled ? 1 : 0, Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1);
@@ -223,12 +217,6 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         transientBoostDb: typeof this.exports.mvp_meter_transient_boost_db === "function"
           ? this.exports.mvp_meter_transient_boost_db()
           : 0,
-        multibandGainReductionDb: typeof this.exports.mvp_meter_multiband_gain_reduction_db === "function"
-          ? this.exports.mvp_meter_multiband_gain_reduction_db()
-          : 0,
-        multibandBandReductionDb: typeof this.exports.mvp_meter_multiband_band_reduction_db === "function"
-          ? [0, 1, 2, 3].map((band) => this.exports.mvp_meter_multiband_band_reduction_db(band))
-          : [0, 0, 0, 0],
       });
     }
     return true;
