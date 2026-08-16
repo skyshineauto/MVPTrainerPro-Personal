@@ -337,6 +337,9 @@ float eqCurrent[kEqBands];
 // AudioWorklet real-time cost bounded while providing real low-frequency
 // resolution that a tiny FIR cannot.
 int eqTopology = 0; // 0 minimum-phase IIR, 1 linear-phase FIR
+int eqTopologyTarget = 0;
+int eqTopologyTransitionPhase = 0; // 0 idle, 1 fade out, 2 fade in
+float eqTopologyTransitionGain = 1.0f;
 float linearFirTaps[kLinearFirTaps];
 float linearFilterReal[kLinearFirPartitions][kLinearFirFft];
 float linearFilterImag[kLinearFirPartitions][kLinearFirFft];
@@ -1300,6 +1303,9 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
     for (int ch = 0; ch < 2; ++ch) eq[ch][band].setIdentity();
   }
   eqTopology = 0;
+  eqTopologyTarget = 0;
+  eqTopologyTransitionPhase = 0;
+  eqTopologyTransitionGain = 1.0f;
   buildLinearFirTarget();
   resetLinearFir(true);
   targetPreampDb = 0.0f;
@@ -1323,7 +1329,20 @@ __attribute__((visibility("default"))) float* mvp_output_r() { return outputR; }
 
 __attribute__((visibility("default"))) void mvp_set_bypass(int value) { bypassed = value ? 1 : 0; }
 __attribute__((visibility("default"))) void mvp_set_eq_enabled(int value) { eqEnabled = value ? 1 : 0; }
-__attribute__((visibility("default"))) void mvp_set_eq_topology(int value) { eqTopology = value == 1 ? 1 : 0; }
+__attribute__((visibility("default"))) void mvp_set_eq_topology(int value) {
+  const int next = value == 1 ? 1 : 0;
+  eqTopologyTarget = next;
+  if (eqTopologyTarget != eqTopology) {
+    // Start or reverse toward a new topology. If we were already fading back in
+    // from a previous switch, turn around smoothly from the current gain.
+    if (eqTopologyTransitionPhase == 0 || eqTopologyTransitionPhase == 2) {
+      eqTopologyTransitionPhase = 1;
+    }
+  } else if (eqTopologyTransitionPhase == 1) {
+    // User changed their mind before the switch point; simply fade back in.
+    eqTopologyTransitionPhase = 2;
+  }
+}
 __attribute__((visibility("default"))) void mvp_set_eq_band(int index, float gainDb) {
   if (index < 0 || index >= kEqBands) return;
   eqTarget[index] = clampf(gainDb, -12.0f, 12.0f);
@@ -1457,6 +1476,30 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     float limitedL = 0.0f;
     float limitedR = 0.0f;
     processLimiter(left, right, limitedL, limitedR);
+
+    // V4.3 real-time hardening: Minimum/Linear topology changes are muted through
+    // a very short fade-out / fade-in instead of jumping between paths with
+    // different phase/latency behavior. Both paths stay warm, so the actual
+    // topology flip occurs only at the near-silent transition point.
+    if (eqTopologyTransitionPhase == 1) {
+      const float step = 1.0f / (sampleRateHz * 0.012f); // ~12 ms down
+      eqTopologyTransitionGain -= step;
+      if (eqTopologyTransitionGain <= 0.0005f) {
+        eqTopologyTransitionGain = 0.0f;
+        eqTopology = eqTopologyTarget;
+        eqTopologyTransitionPhase = 2;
+      }
+    } else if (eqTopologyTransitionPhase == 2) {
+      const float step = 1.0f / (sampleRateHz * 0.030f); // ~30 ms up
+      eqTopologyTransitionGain += step;
+      if (eqTopologyTransitionGain >= 1.0f) {
+        eqTopologyTransitionGain = 1.0f;
+        eqTopologyTransitionPhase = 0;
+      }
+    }
+
+    limitedL *= eqTopologyTransitionGain;
+    limitedR *= eqTopologyTransitionGain;
     outputL[i] = limitedL;
     outputR[i] = limitedR;
 

@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4 Mastering Refinement
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.3 Real-Time Hardening
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -16,6 +16,11 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     this.outputL = null;
     this.outputR = null;
     this.pendingState = null;
+    this.appliedState = null;
+    this.stateRevision = 0;
+    this.appliedStateRevision = -1;
+    this.linearEqDirty = false;
+    this.linearCommitFrames = 0;
     this.telemetryFrames = 0;
     this.blockSizeWarningSent = false;
     this.u8Cache = null;
@@ -29,8 +34,10 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         return;
       }
       if (data.type === "state") {
+        // Coalesce rapid UI mutations. The newest complete state wins and is
+        // applied once at the next render-quantum boundary.
         this.pendingState = data.state || null;
-        this.applyState();
+        this.stateRevision += 1;
         return;
       }
       if (data.type === "reset" && this.ready && this.exports?.mvp_reset) {
@@ -94,12 +101,11 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       this.maxFrames = api.mvp_max_frames();
       this.refreshViews();
       this.ready = true;
-      this.applyState();
       this.port.postMessage({
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v4-mastering-refinement",
+        version: "studio-wasm-v4.3-real-time-hardening",
       });
     } catch (error) {
       this.failed = true;
@@ -119,68 +125,203 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     this.outputR = new Float32Array(buffer, this.exports.mvp_output_r(), this.maxFrames);
   }
 
-  applyState() {
+  sameNumber(a, b, epsilon = 0.000001) {
+    const left = Number(a);
+    const right = Number(b);
+    if (!Number.isFinite(left) && !Number.isFinite(right)) return true;
+    return Math.abs((Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0)) <= epsilon;
+  }
+
+  sameArray(a, b, length = 31) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    for (let index = 0; index < length; index += 1) {
+      if (!this.sameNumber(a[index], b[index])) return false;
+    }
+    return true;
+  }
+
+  applyStateAtQuantumBoundary() {
     if (!this.ready || !this.exports || !this.pendingState) return;
+    if (this.appliedStateRevision === this.stateRevision && this.appliedState) return;
+
     const state = this.pendingState;
+    const previous = this.appliedState;
     const api = this.exports;
-    api.mvp_set_bypass(state.bypass ? 1 : 0);
-    api.mvp_set_eq_enabled(state.eqEnabled ? 1 : 0);
-    if (typeof api.mvp_set_eq_topology === "function") {
-      api.mvp_set_eq_topology(Number(state.eqTopologyCode) === 1 ? 1 : 0);
-    }
+    const first = !previous;
+
+    const nextTopology = Number(state.eqTopologyCode) === 1 ? 1 : 0;
+    const previousTopology = first ? nextTopology : (Number(previous.eqTopologyCode) === 1 ? 1 : 0);
     const gains = Array.isArray(state.eqGains) ? state.eqGains : [];
-    for (let index = 0; index < 31; index += 1) {
-      api.mvp_set_eq_band(index, Number.isFinite(Number(gains[index])) ? Number(gains[index]) : 0);
+    const previousGains = Array.isArray(previous?.eqGains) ? previous.eqGains : [];
+    const eqChanged = first || !this.sameArray(gains, previousGains, 31);
+
+    if (first || Boolean(state.bypass) !== Boolean(previous.bypass)) {
+      api.mvp_set_bypass(state.bypass ? 1 : 0);
     }
-    if (typeof api.mvp_commit_eq === "function") api.mvp_commit_eq();
-    api.mvp_set_preamp_db(Number.isFinite(Number(state.preampDb)) ? Number(state.preampDb) : 0);
-    api.mvp_set_headroom_db(Number.isFinite(Number(state.headroomDb)) ? Number(state.headroomDb) : 0);
-    if (typeof api.mvp_set_transient === "function") {
-      api.mvp_set_transient(
-        state.transientEnabled ? 1 : 0,
-        Number.isFinite(Number(state.transientAmount)) ? Number(state.transientAmount) : 0,
+    if (first || Boolean(state.eqEnabled) !== Boolean(previous.eqEnabled)) {
+      api.mvp_set_eq_enabled(state.eqEnabled ? 1 : 0);
+    }
+
+    if (eqChanged) {
+      for (let index = 0; index < 31; index += 1) {
+        api.mvp_set_eq_band(index, Number.isFinite(Number(gains[index])) ? Number(gains[index]) : 0);
+      }
+      this.linearEqDirty = true;
+      // Minimum-phase bands update immediately in the core. The expensive FIR
+      // rebuild waits until the user has stopped dragging for ~120 ms.
+      this.linearCommitFrames = Math.max(1, Math.round(sampleRate * 0.12));
+    }
+
+    if (first || nextTopology !== previousTopology) {
+      // Before entering Linear Phase, build its FIR once from the latest EQ
+      // targets. The C++ core then performs a short muted topology transition.
+      if (nextTopology === 1 && this.linearEqDirty && typeof api.mvp_commit_eq === "function") {
+        api.mvp_commit_eq();
+        this.linearEqDirty = false;
+        this.linearCommitFrames = 0;
+      }
+      if (typeof api.mvp_set_eq_topology === "function") {
+        api.mvp_set_eq_topology(nextTopology);
+      }
+    }
+
+    if (first || !this.sameNumber(state.preampDb, previous.preampDb)) {
+      api.mvp_set_preamp_db(Number.isFinite(Number(state.preampDb)) ? Number(state.preampDb) : 0);
+    }
+    if (first || !this.sameNumber(state.headroomDb, previous.headroomDb)) {
+      api.mvp_set_headroom_db(Number.isFinite(Number(state.headroomDb)) ? Number(state.headroomDb) : 0);
+    }
+
+    if (
+      first ||
+      Boolean(state.transientEnabled) !== Boolean(previous.transientEnabled) ||
+      !this.sameNumber(state.transientAmount, previous.transientAmount)
+    ) {
+      if (typeof api.mvp_set_transient === "function") {
+        api.mvp_set_transient(
+          state.transientEnabled ? 1 : 0,
+          Number.isFinite(Number(state.transientAmount)) ? Number(state.transientAmount) : 0,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.multibandEnabled) !== Boolean(previous.multibandEnabled) ||
+      !this.sameNumber(state.multibandAmount, previous.multibandAmount)
+    ) {
+      if (typeof api.mvp_set_multiband === "function") {
+        api.mvp_set_multiband(
+          state.multibandEnabled ? 1 : 0,
+          Number.isFinite(Number(state.multibandAmount)) ? Number(state.multibandAmount) : 1,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.dynamicEqEnabled) !== Boolean(previous.dynamicEqEnabled) ||
+      !this.sameNumber(state.dynamicEqAmount, previous.dynamicEqAmount)
+    ) {
+      if (typeof api.mvp_set_dynamic_eq === "function") {
+        api.mvp_set_dynamic_eq(
+          state.dynamicEqEnabled ? 1 : 0,
+          Number.isFinite(Number(state.dynamicEqAmount)) ? Number(state.dynamicEqAmount) : 0.72,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.outputCorrectionEnabled) !== Boolean(previous.outputCorrectionEnabled) ||
+      !this.sameNumber(state.outputCorrectionAmount, previous.outputCorrectionAmount)
+    ) {
+      if (typeof api.mvp_set_output_correction === "function") {
+        api.mvp_set_output_correction(
+          state.outputCorrectionEnabled ? 1 : 0,
+          Number.isFinite(Number(state.outputCorrectionAmount)) ? Number(state.outputCorrectionAmount) : 1,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.stereoIntegrityEnabled) !== Boolean(previous.stereoIntegrityEnabled) ||
+      !this.sameNumber(state.stereoIntegrityAmount, previous.stereoIntegrityAmount)
+    ) {
+      if (typeof api.mvp_set_stereo_integrity === "function") {
+        api.mvp_set_stereo_integrity(
+          state.stereoIntegrityEnabled ? 1 : 0,
+          Number.isFinite(Number(state.stereoIntegrityAmount)) ? Number(state.stereoIntegrityAmount) : 1,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.normalizationEnabled) !== Boolean(previous.normalizationEnabled) ||
+      !this.sameNumber(state.normalizationTargetLufs, previous.normalizationTargetLufs)
+    ) {
+      if (typeof api.mvp_set_loudness === "function") {
+        api.mvp_set_loudness(
+          state.normalizationEnabled ? 1 : 0,
+          Number.isFinite(Number(state.normalizationTargetLufs)) ? Number(state.normalizationTargetLufs) : -10,
+        );
+      }
+    }
+
+    if (
+      first ||
+      Boolean(state.limiterEnabled) !== Boolean(previous.limiterEnabled) ||
+      !this.sameNumber(state.limiterCeilingDb, previous.limiterCeilingDb)
+    ) {
+      api.mvp_set_limiter(
+        state.limiterEnabled ? 1 : 0,
+        Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1,
       );
     }
-    if (typeof api.mvp_set_multiband === "function") {
-      api.mvp_set_multiband(
-        state.multibandEnabled ? 1 : 0,
-        Number.isFinite(Number(state.multibandAmount)) ? Number(state.multibandAmount) : 1,
+
+    if (first || !this.sameNumber(state.outputProfileCode, previous.outputProfileCode)) {
+      api.mvp_set_output_profile(Number.isFinite(Number(state.outputProfileCode)) ? Number(state.outputProfileCode) : 0);
+    }
+
+    const headphoneChanged =
+      first ||
+      Boolean(state.headphoneEnabled) !== Boolean(previous.headphoneEnabled) ||
+      !this.sameNumber(state.headphoneWidth, previous.headphoneWidth) ||
+      !this.sameNumber(state.headphoneDepth, previous.headphoneDepth) ||
+      !this.sameNumber(state.headphoneCrossfeed, previous.headphoneCrossfeed) ||
+      !this.sameNumber(state.headphoneCenter, previous.headphoneCenter) ||
+      !this.sameNumber(state.headphoneBassImpact, previous.headphoneBassImpact);
+
+    if (headphoneChanged) {
+      api.mvp_set_headphone(
+        state.headphoneEnabled ? 1 : 0,
+        Number(state.headphoneWidth) || 0,
+        Number(state.headphoneDepth) || 0,
+        Number(state.headphoneCrossfeed) || 0,
+        Number.isFinite(Number(state.headphoneCenter)) ? Number(state.headphoneCenter) : 0.5,
+        Number(state.headphoneBassImpact) || 0,
       );
     }
-    if (typeof api.mvp_set_dynamic_eq === "function") {
-      api.mvp_set_dynamic_eq(
-        state.dynamicEqEnabled ? 1 : 0,
-        Number.isFinite(Number(state.dynamicEqAmount)) ? Number(state.dynamicEqAmount) : 0.72,
-      );
+
+    this.appliedState = {
+      ...state,
+      eqGains: gains.slice(0, 31),
+    };
+    this.appliedStateRevision = this.stateRevision;
+  }
+
+  maybeCommitLinearEq(frames) {
+    if (!this.linearEqDirty || !this.appliedState || !this.exports) return;
+    if (Number(this.appliedState.eqTopologyCode) !== 1) return;
+    this.linearCommitFrames -= frames;
+    if (this.linearCommitFrames > 0) return;
+    if (typeof this.exports.mvp_commit_eq === "function") {
+      this.exports.mvp_commit_eq();
     }
-    if (typeof api.mvp_set_output_correction === "function") {
-      api.mvp_set_output_correction(
-        state.outputCorrectionEnabled ? 1 : 0,
-        Number.isFinite(Number(state.outputCorrectionAmount)) ? Number(state.outputCorrectionAmount) : 1,
-      );
-    }
-    if (typeof api.mvp_set_stereo_integrity === "function") {
-      api.mvp_set_stereo_integrity(
-        state.stereoIntegrityEnabled ? 1 : 0,
-        Number.isFinite(Number(state.stereoIntegrityAmount)) ? Number(state.stereoIntegrityAmount) : 1,
-      );
-    }
-    if (typeof api.mvp_set_loudness === "function") {
-      api.mvp_set_loudness(
-        state.normalizationEnabled ? 1 : 0,
-        Number.isFinite(Number(state.normalizationTargetLufs)) ? Number(state.normalizationTargetLufs) : -10,
-      );
-    }
-    api.mvp_set_limiter(state.limiterEnabled ? 1 : 0, Number.isFinite(Number(state.limiterCeilingDb)) ? Number(state.limiterCeilingDb) : -1);
-    api.mvp_set_output_profile(Number.isFinite(Number(state.outputProfileCode)) ? Number(state.outputProfileCode) : 0);
-    api.mvp_set_headphone(
-      state.headphoneEnabled ? 1 : 0,
-      Number(state.headphoneWidth) || 0,
-      Number(state.headphoneDepth) || 0,
-      Number(state.headphoneCrossfeed) || 0,
-      Number.isFinite(Number(state.headphoneCenter)) ? Number(state.headphoneCenter) : 0.5,
-      Number(state.headphoneBassImpact) || 0,
-    );
+    this.linearEqDirty = false;
+    this.linearCommitFrames = 0;
   }
 
   copyBypass(input, output) {
@@ -206,12 +347,19 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     const inR = input?.[1] || inL;
     const outL = output[0];
     const outR = output[1] || output[0];
+
+    // Apply the newest complete UI state once per render quantum. This keeps
+    // coefficient/control work out of the message callback and collapses bursts
+    // of slider/preset mutations to the latest state.
+    this.applyStateAtQuantumBoundary();
+
     if (!inL || !outL) {
       this.copyBypass(input, output);
       return true;
     }
 
     const frames = outL.length;
+    this.maybeCommitLinearEq(frames);
     if (!this.ready || !this.exports || !this.inputL || !this.outputL) {
       this.copyBypass(input, output);
       return true;
