@@ -328,6 +328,13 @@ export function TodayPage() {
   const [metaBySession, setMetaBySession] = useState<Map<string, SessionMeta>>(new Map());
   const [history, setHistory] = useState<HistorySignal[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [workoutPaused, setWorkoutPaused] = useState(() => {
+    try {
+      return localStorage.getItem("mvp_is_paused") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [referenceToday, setReferenceToday] = useState(() => {
     const now = new Date();
     now.setHours(12, 0, 0, 0);
@@ -570,6 +577,28 @@ export function TodayPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  /* MVP_TRAINER_V4_5_2_TRUE_PAUSE_CONTINUITY_R4: PAUSE SYNC */
+  useEffect(() => {
+    const syncWorkoutPaused = () => {
+      try {
+        setWorkoutPaused(localStorage.getItem("mvp_is_paused") === "true");
+      } catch {
+        setWorkoutPaused(false);
+      }
+    };
+
+    syncWorkoutPaused();
+    window.addEventListener("focus", syncWorkoutPaused);
+    window.addEventListener("storage", syncWorkoutPaused);
+    window.addEventListener("mvp:workout-pause-state", syncWorkoutPaused as EventListener);
+
+    return () => {
+      window.removeEventListener("focus", syncWorkoutPaused);
+      window.removeEventListener("storage", syncWorkoutPaused);
+      window.removeEventListener("mvp:workout-pause-state", syncWorkoutPaused as EventListener);
+    };
+  }, []);
+
   const goal = queue?.activeBlock?.goal ? String(queue.activeBlock.goal) : null;
   const goalMode = queue?.activeBlock?.goal_mode ? String(queue.activeBlock.goal_mode) : null;
   const hasProgram = Boolean(queue?.activeBlock?.id);
@@ -609,8 +638,23 @@ export function TodayPage() {
 
   const primaryReadiness = readinessFor(activeMeta ?? nextMeta, history);
 
+  function navigateWithinToday(to: string) {
+    const next = to.length > 1 && to.endsWith("/") ? to.slice(0, -1) : to;
+    if (window.location.pathname === next) return;
+    window.history.pushState({}, "", next);
+    window.dispatchEvent(new Event("popstate"));
+  }
+
   function openSession(sessionId: string) {
-    window.location.pathname = `/workout/${sessionId}`;
+    navigateWithinToday(`/workout/${sessionId}`);
+  }
+
+  function handlePrimarySessionAction(sessionId: string) {
+    if (activeSessionId === sessionId && workoutPaused) {
+      window.dispatchEvent(new Event("mvp:resume-workout-request"));
+      return;
+    }
+    openSession(sessionId);
   }
 
   return (
@@ -630,7 +674,7 @@ export function TodayPage() {
           <span>PROGRAM REQUIRED</span>
           <h2>No active program</h2>
           <p>Generate a program in Coach to build your training schedule.</p>
-          <button type="button" onClick={() => (window.location.pathname = "/coach")}>OPEN COACH</button>
+          <button type="button" onClick={() => navigateWithinToday("/coach")}>OPEN COACH</button>
         </section>
       ) : null}
 
@@ -641,7 +685,7 @@ export function TodayPage() {
             <div className="trp-primaryTop">
               <div>
                 <span>{activeSessionId ? "ACTIVE WORKOUT" : "NEXT WORKOUT"}</span>
-                <div className={`trp-readiness is-${primaryReadiness.tone}`}><i />{activeSessionId ? "IN PROGRESS" : primaryReadiness.label}</div>
+                <div className={`trp-readiness is-${primaryReadiness.tone}`}><i />{activeSessionId ? (workoutPaused ? "PAUSED" : "IN PROGRESS") : primaryReadiness.label}</div>
               </div>
               {!activeSessionId && nextSession ? <div className="trp-dateBadge">{rollingScheduleDateLabel(referenceToday, 0)}</div> : null}
             </div>
@@ -671,10 +715,10 @@ export function TodayPage() {
                 disabled={!activeSessionId && !nextSession}
                 onClick={() => {
                   const id = activeSessionId ?? nextSession?.id;
-                  if (id) openSession(id);
+                  if (id) handlePrimarySessionAction(id);
                 }}
               >
-                <span aria-hidden>▶</span>{activeSessionId ? "RESUME WORKOUT" : "START WORKOUT"}
+                <span aria-hidden>▶</span>{activeSessionId ? (workoutPaused ? "RESUME WORKOUT" : "RETURN TO WORKOUT") : "START WORKOUT"}
               </button>
               {(activeSessionId ?? nextSession?.id) ? (
                 <button type="button" className="trp-editAction" onClick={() => setEditingSessionId(activeSessionId ?? nextSession!.id)}>

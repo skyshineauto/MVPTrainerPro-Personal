@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
 import { inferSymptomKey, isSymptomMode, type SymptomKey } from "../../lib/sessionLabel";
 import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
+import { isMusicPlaying, pauseMusic, playMusic } from "../../lib/musicPlayer";
 import {
   APP_BRANDING_CHANGED_EVENT,
   fetchCurrentWeather,
@@ -22,9 +23,12 @@ const LS = {
   activeWorkoutId: "mvp_active_workout_id",
   activeExerciseName: "mvp_active_exercise_name",
   activeExercisePos: "mvp_active_exercise_pos",
+  musicWasPlayingOnPause: "mvp_music_was_playing_on_workout_pause",
 };
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
+const WORKOUT_RESUME_REQUEST_EVENT = "mvp:resume-workout-request";
+const WORKOUT_PAUSE_STATE_EVENT = "mvp:workout-pause-state";
 
 function lockDocumentForModal() {
   const appWindow = window as any;
@@ -1834,27 +1838,59 @@ export function AppShell({
     const paused = lsGet(LS.isPaused) === "true";
 
     if (!paused) {
+      const musicWasPlaying = isMusicPlaying();
+      lsSet(LS.musicWasPlayingOnPause, musicWasPlaying ? "true" : "false");
+
+      if (musicWasPlaying) {
+        pauseMusic();
+      }
+
       lsSet(LS.isPaused, "true");
       lsSet(LS.pausedAt, new Date().toISOString());
       setHud({ ...hud, isPaused: true });
+      window.dispatchEvent(new Event(WORKOUT_PAUSE_STATE_EVENT));
       return;
     }
 
+    const shouldResumeMusic = lsGet(LS.musicWasPlayingOnPause) === "true";
     const pausedAtISO = lsGet(LS.pausedAt);
     const pausedTotal = Number(lsGet(LS.pausedTotal) ?? "0") || 0;
+
     if (pausedAtISO) {
       const pMs = new Date(pausedAtISO).getTime();
       const add = Math.max(0, Math.floor((Date.now() - pMs) / 1000));
       lsSet(LS.pausedTotal, String(pausedTotal + add));
     }
+
     lsSet(LS.isPaused, "false");
     lsDel(LS.pausedAt);
-
     setHud({ ...hud, isPaused: false });
+    window.dispatchEvent(new Event(WORKOUT_PAUSE_STATE_EVENT));
+
+    if (shouldResumeMusic) {
+      void playMusic().catch((error) => {
+        console.warn("Could not resume workout music.", error);
+      });
+    }
+    lsDel(LS.musicWasPlayingOnPause);
 
     const active = await resolveActiveWorkoutDbFirst();
     if (active?.sessionId) navigate(`/workout/${active.sessionId}`);
-  };
+  }; /* MVP_TRAINER_V4_5_2_TRUE_PAUSE_CONTINUITY_R4: TRUE PAUSE */
+
+  /* MVP_TRAINER_V4_5_2_TRUE_PAUSE_CONTINUITY_R4: RESUME EVENT */
+  useEffect(() => {
+    const handleResumeRequest = () => {
+      if (hud.mode !== "active") return;
+      if (lsGet(LS.isPaused) !== "true") return;
+      void onTogglePause();
+    };
+
+    window.addEventListener(WORKOUT_RESUME_REQUEST_EVENT, handleResumeRequest);
+    return () => {
+      window.removeEventListener(WORKOUT_RESUME_REQUEST_EVENT, handleResumeRequest);
+    };
+  }, [hud]);
 
   async function startSession(sessionId: string) {
     navigate(`/workout/${sessionId}`);

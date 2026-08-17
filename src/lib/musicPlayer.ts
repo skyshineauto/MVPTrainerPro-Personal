@@ -2215,6 +2215,12 @@ export async function playMusic() {
   await audio.play();
 }
 
+/* MVP_TRAINER_V4_5_2_TRUE_PAUSE_CONTINUITY_R4: PLAYBACK QUERY */
+export function isMusicPlaying() {
+  const audio = audioElement;
+  return Boolean(audio && !audio.paused && !audio.ended && Boolean(audio.src));
+}
+
 export function pauseMusic() {
   playbackIntent = false;
   ensureAudioElement().pause();
