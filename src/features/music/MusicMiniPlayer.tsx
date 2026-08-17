@@ -1,9 +1,10 @@
-/* MVP_TRAINER_V5_R7_1_NEURAL_RAIL_POLISH */
+/* MVP_TRAINER_V5_R7_2_PLAYER_VISUAL_REFINEMENT */
 import {
   useEffect,
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
 } from "react";
 import {
   getMusicArtworkSignedUrl,
@@ -185,6 +186,31 @@ function formatHz(frequency: number) {
     return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}K`;
   }
   return String(frequency);
+}
+
+function volumeRailColor(percent: number) {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  const stops: Array<[number, [number, number, number]]> = [
+    [0, [46, 157, 255]],
+    [30, [48, 219, 255]],
+    [60, [62, 226, 203]],
+    [78, [218, 229, 76]],
+    [90, [255, 168, 51]],
+    [100, [255, 78, 64]],
+  ];
+
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const [leftAt, left] = stops[index];
+    const [rightAt, right] = stops[index + 1];
+    if (value < leftAt || value > rightAt) continue;
+    const mix = (value - leftAt) / Math.max(1, rightAt - leftAt);
+    const rgb = left.map((channel, channelIndex) =>
+      Math.round(channel + (right[channelIndex] - channel) * mix),
+    );
+    return `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
+  }
+
+  return "rgb(255 78 64)";
 }
 
 function PlayerIcon({ name }: { name: IconName }) {
@@ -1770,6 +1796,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const duration = Math.max(0, player.duration || track?.duration_seconds || 0);
   const currentTime = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, player.currentTime));
   const volumePercent = Math.max(0, Math.min(100, Math.round(player.volume * 100)));
+  const volumeAccentColor = volumeRailColor(volumePercent);
   const activeSavedProfile = activeCustomSlot ? dspProfiles[activeCustomSlot] : null;
   const activeProfileDirty = activeSavedProfile ? !profileMatchesCurrent(activeSavedProfile) : false;
   const presetSelectValue: MusicEqPreset = activeCustomSlot ? (activeProfileDirty ? "custom" : activeCustomSlot) : player.eqPreset;
@@ -1944,10 +1971,22 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       <div className="tr-playerUtilityRow">
         <label className="tr-playerVolume">
           <span>VOLUME</span>
-          <input type="range" min="0" max="100" step="1" value={volumePercent} onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const percent = Math.max(0, Math.min(100, Number(event.target.value)));
-            setMusicVolume(percent / 100);
-          }} aria-label="Music volume" />
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={volumePercent}
+            style={{
+              "--tr-volume-level": `${volumePercent}%`,
+              "--tr-volume-accent": volumeAccentColor,
+            } as CSSProperties}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              const percent = Math.max(0, Math.min(100, Number(event.target.value)));
+              setMusicVolume(percent / 100);
+            }}
+            aria-label="Music volume"
+          />
           <strong>{volumePercent}%</strong>
         </label>
         <div className="tr-playerSourceTools">
@@ -5544,6 +5583,366 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-neuralStatus{min-height:15px;gap:5px;white-space:nowrap;overflow:hidden}.tr-neuralStatus>span{font-size:6.35px}.tr-neuralStatus small{font-size:6.1px;overflow:hidden;text-overflow:ellipsis}.tr-neuralStatus>span>i{width:4px;height:4px}
         }
         @media(max-width:360px){.tr-neuralSteeringRail{grid-template-columns:repeat(7,minmax(0,1fr));gap:1px}.tr-neuralCommand{padding-left:1px;padding-right:1px}.tr-neuralCommandIcon{width:21px;height:21px}.tr-neuralCommandIcon svg{width:20px;height:20px}.tr-neuralCommandLabel{font-size:5.05px}.tr-neuralStatus small{display:none}}
+
+
+        /* MVP_TRAINER_V5_R7_2_PLAYER_VISUAL_REFINEMENT */
+        /* Neural rail: brighter, centered, color-coded precision controls. */
+        .tr-neuralSteering{
+          width:min(1080px,calc(100% - 18px));
+          margin:7px auto 8px;
+          gap:4px;
+        }
+        .tr-neuralSteeringRail{
+          min-height:58px;
+          grid-template-columns:repeat(7,minmax(0,1fr));
+          gap:4px;
+          padding:4px;
+          border:1px solid rgba(129,189,207,.28);
+          border-radius:14px;
+          background:
+            linear-gradient(180deg,rgba(15,31,39,.985),rgba(5,12,17,.995));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.065),
+            inset 0 -1px 0 rgba(0,0,0,.72),
+            0 10px 25px rgba(0,0,0,.22);
+        }
+        .tr-neuralCommand{
+          --neural-rgb:92,218,255;
+          --neural-accent:rgb(92 218 255);
+          min-height:50px;
+          padding:4px 5px 5px;
+          display:flex;
+          flex-direction:column;
+          align-items:center;
+          justify-content:center;
+          gap:3px;
+          text-align:center;
+          border:1px solid rgba(210,234,241,.13);
+          border-radius:9px;
+          background:
+            linear-gradient(180deg,rgba(25,39,47,.88) 0%,rgba(10,20,26,.94) 55%,rgba(4,10,14,.98) 100%);
+          color:#f4fbfd;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            inset 0 -1px 0 rgba(0,0,0,.52);
+          overflow:hidden;
+          -webkit-font-smoothing:antialiased;
+          text-rendering:geometricPrecision;
+        }
+        .tr-neuralCommand:before{
+          content:"";
+          position:absolute;
+          left:20%;right:20%;top:0;height:1px;
+          background:linear-gradient(90deg,transparent,rgba(var(--neural-rgb),.55),transparent);
+          opacity:.55;
+          pointer-events:none;
+        }
+        .tr-neuralCommand:hover:not(:disabled){
+          color:#fff;
+          border-color:rgba(var(--neural-rgb),.48);
+          background:linear-gradient(180deg,rgba(29,48,58,.96),rgba(8,25,33,.98));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.10),
+            0 0 18px rgba(var(--neural-rgb),.10);
+        }
+        .tr-neuralCommandIcon{
+          width:27px;
+          height:27px;
+          display:grid;
+          place-items:center;
+          color:var(--neural-accent);
+          filter:drop-shadow(0 0 5px rgba(var(--neural-rgb),.28));
+          flex:0 0 27px;
+        }
+        .tr-neuralCommandIcon svg{
+          width:25px;
+          height:25px;
+          stroke:currentColor;
+          stroke-width:1.9;
+          fill:none;
+        }
+        .tr-neuralCommandLabel{
+          width:100%;
+          min-width:0;
+          color:#f0f7f9;
+          font-size:8.15px;
+          line-height:1.02;
+          font-weight:1000;
+          letter-spacing:.035em;
+          text-align:center;
+          white-space:normal;
+          text-wrap:balance;
+          text-shadow:0 1px 1px rgba(0,0,0,.72);
+        }
+        .tr-neuralCommandLed{
+          left:50%;bottom:1px;
+          width:3px;height:3px;
+          transform:translateX(-50%);
+        }
+        .tr-neuralCommand.is-harder{--neural-rgb:255,151,55;--neural-accent:rgb(255 151 55)}
+        .tr-neuralCommand.is-heavier{--neural-rgb:69,199,255;--neural-accent:rgb(69 199 255)}
+        .tr-neuralCommand.is-faster{--neural-rgb:62,231,225;--neural-accent:rgb(62 231 225)}
+        .tr-neuralCommand.is-more_like_this{--neural-rgb:92,156,255;--neural-accent:rgb(92 156 255)}
+        .tr-neuralCommand.is-melodic{--neural-rgb:181,112,255;--neural-accent:rgb(181 112 255)}
+        .tr-neuralCommand.is-darker{--neural-rgb:112,119,255;--neural-accent:rgb(112 119 255)}
+        .tr-neuralCommand.is-surprise{--neural-rgb:255,200,83;--neural-accent:rgb(255 200 83)}
+        .tr-neuralCommand.is-active{
+          color:#fff;
+          border-color:rgba(var(--neural-rgb),.94);
+          background:
+            radial-gradient(circle at 50% 20%,rgba(var(--neural-rgb),.20),transparent 44%),
+            linear-gradient(180deg,rgba(var(--neural-rgb),.18),rgba(5,18,24,.985) 72%);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.16),
+            inset 0 0 22px rgba(var(--neural-rgb),.10),
+            0 0 0 1px rgba(var(--neural-rgb),.18),
+            0 0 20px rgba(var(--neural-rgb),.24);
+        }
+        .tr-neuralCommand.is-active:after{
+          content:"";
+          position:absolute;
+          inset:1px;
+          border-radius:8px;
+          background:linear-gradient(116deg,rgba(255,255,255,.075),transparent 32%,rgba(var(--neural-rgb),.09) 67%,transparent 88%);
+          pointer-events:none;
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandIcon{
+          color:var(--neural-accent);
+          filter:drop-shadow(0 0 8px rgba(var(--neural-rgb),.82));
+          transform:none;
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandLabel{
+          color:#fff;
+          text-shadow:0 0 9px rgba(var(--neural-rgb),.30),0 1px 1px rgba(0,0,0,.7);
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandLed{
+          background:var(--neural-accent);
+          box-shadow:0 0 9px rgba(var(--neural-rgb),.95);
+        }
+        .tr-neuralStatus{
+          min-height:18px;
+          gap:8px;
+          color:#b0c2c8;
+          font-size:8px;
+          font-weight:900;
+        }
+        .tr-neuralStatus>span{
+          color:#f3fbfd;
+          font-size:8.1px;
+          letter-spacing:.06em;
+        }
+        .tr-neuralStatus>span>i{
+          border-color:#64ddff;
+          background:#64ddff;
+          box-shadow:0 0 8px rgba(100,221,255,.75);
+        }
+        .tr-neuralStatus small{
+          color:#9eb2b9;
+          font-size:7.7px;
+          font-weight:850;
+        }
+
+        /* Premium preference controls: clear neutral and selected states. */
+        .tr-heroPreferenceStage{
+          align-items:center!important;
+          justify-content:center!important;
+          gap:9px!important;
+        }
+        .tr-heroPrefButton{
+          --pref-rgb:113,208,235;
+          --pref-accent:rgb(113 208 235);
+          position:relative!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          min-height:42px!important;
+          padding:0 17px!important;
+          gap:7px!important;
+          overflow:hidden!important;
+          border:1px solid rgba(208,233,240,.22)!important;
+          border-radius:13px!important;
+          background:
+            linear-gradient(180deg,rgba(39,53,61,.80),rgba(14,25,31,.85) 54%,rgba(5,11,15,.94))!important;
+          color:#f5fafb!important;
+          font-size:9.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.025em!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.10),
+            inset 0 -1px 0 rgba(0,0,0,.58),
+            0 8px 20px rgba(0,0,0,.20)!important;
+          transition:transform .14s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease,filter .18s ease!important;
+        }
+        .tr-heroPrefButton:before{
+          content:""!important;
+          position:absolute!important;
+          left:17%!important;right:17%!important;top:0!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(var(--pref-rgb),.58),transparent)!important;
+          opacity:.65!important;
+          pointer-events:none!important;
+        }
+        .tr-heroPrefButton:after{
+          content:""!important;
+          position:absolute!important;
+          inset:auto 18% -8px!important;
+          height:15px!important;
+          z-index:0!important;
+          border-radius:50%!important;
+          background:radial-gradient(ellipse,rgba(var(--pref-rgb),.16),transparent 72%)!important;
+          filter:blur(6px)!important;
+          opacity:.45!important;
+          pointer-events:none!important;
+        }
+        .tr-heroPrefButton>*{position:relative;z-index:1}
+        .tr-heroPrefButton>span{
+          display:block!important;
+          min-width:max-content!important;
+          color:#f7fbfc!important;
+          text-align:center!important;
+          white-space:nowrap!important;
+          overflow:visible!important;
+        }
+        .tr-heroPrefButton svg{
+          width:17px!important;
+          height:17px!important;
+          flex:0 0 17px!important;
+          color:var(--pref-accent)!important;
+          fill:currentColor!important;
+          filter:drop-shadow(0 0 5px rgba(var(--pref-rgb),.25));
+        }
+        .tr-heroPrefButton.tr-prefLike{--pref-rgb:68,227,151;--pref-accent:rgb(68 227 151)}
+        .tr-heroPrefButton.tr-prefLess{--pref-rgb:240,143,79;--pref-accent:rgb(240 143 79)}
+        .tr-heroPrefButton.tr-prefDiscover{--pref-rgb:126,114,255;--pref-accent:rgb(126 114 255)}
+        .tr-heroPrefButton:hover:not(:disabled){
+          transform:translateY(-1px)!important;
+          border-color:rgba(var(--pref-rgb),.52)!important;
+          background:linear-gradient(180deg,rgba(var(--pref-rgb),.11),rgba(10,25,32,.92))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 9px 22px rgba(0,0,0,.24),0 0 18px rgba(var(--pref-rgb),.10)!important;
+        }
+        .tr-heroPrefButton:active:not(:disabled){
+          transform:translateY(1px) scale(.992)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked,
+        .tr-heroPrefButton.tr-prefLess.is-disliked,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          color:#fff!important;
+          border-color:rgba(var(--pref-rgb),.78)!important;
+          background:
+            radial-gradient(circle at 50% 0%,rgba(var(--pref-rgb),.20),transparent 55%),
+            linear-gradient(180deg,rgba(var(--pref-rgb),.22),rgba(6,18,24,.96))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.16),
+            inset 0 0 20px rgba(var(--pref-rgb),.08),
+            0 0 0 1px rgba(var(--pref-rgb),.12),
+            0 0 20px rgba(var(--pref-rgb),.16)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked svg,
+        .tr-heroPrefButton.tr-prefLess.is-disliked svg,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming svg{
+          color:var(--pref-accent)!important;
+          filter:drop-shadow(0 0 8px rgba(var(--pref-rgb),.72));
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked>span,
+        .tr-heroPrefButton.tr-prefLess.is-disliked>span,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming>span{
+          color:#fff!important;
+          text-shadow:0 0 8px rgba(var(--pref-rgb),.18);
+        }
+
+        /* Volume: real-time color progression follows actual level. */
+        .tr-playerVolume input[type=range]{
+          --tr-volume-level:0%;
+          --tr-volume-accent:rgb(46 157 255);
+          width:100%;
+          height:18px;
+          padding:0;
+          appearance:none;
+          -webkit-appearance:none;
+          background:transparent!important;
+          accent-color:var(--tr-volume-accent)!important;
+          cursor:pointer;
+        }
+        .tr-playerVolume input[type=range]::-webkit-slider-runnable-track{
+          height:5px;
+          border-radius:999px;
+          background:linear-gradient(90deg,var(--tr-volume-accent) 0 var(--tr-volume-level),rgba(89,113,123,.22) var(--tr-volume-level) 100%);
+          box-shadow:inset 0 1px 1px rgba(0,0,0,.62),0 0 8px color-mix(in srgb,var(--tr-volume-accent) 24%,transparent);
+        }
+        .tr-playerVolume input[type=range]::-webkit-slider-thumb{
+          width:14px;
+          height:14px;
+          margin-top:-4.5px;
+          border:2px solid rgba(255,255,255,.92);
+          border-radius:50%;
+          appearance:none;
+          -webkit-appearance:none;
+          background:var(--tr-volume-accent);
+          box-shadow:0 0 0 3px rgba(2,8,11,.78),0 0 11px color-mix(in srgb,var(--tr-volume-accent) 54%,transparent);
+        }
+        .tr-playerVolume input[type=range]::-moz-range-track{
+          height:5px;
+          border-radius:999px;
+          background:rgba(89,113,123,.22);
+          box-shadow:inset 0 1px 1px rgba(0,0,0,.62);
+        }
+        .tr-playerVolume input[type=range]::-moz-range-progress{
+          height:5px;
+          border-radius:999px;
+          background:var(--tr-volume-accent);
+          box-shadow:0 0 8px color-mix(in srgb,var(--tr-volume-accent) 24%,transparent);
+        }
+        .tr-playerVolume input[type=range]::-moz-range-thumb{
+          width:14px;
+          height:14px;
+          border:2px solid rgba(255,255,255,.92);
+          border-radius:50%;
+          background:var(--tr-volume-accent);
+          box-shadow:0 0 0 3px rgba(2,8,11,.78),0 0 11px color-mix(in srgb,var(--tr-volume-accent) 54%,transparent);
+        }
+        .tr-playerVolume input[type=range]:focus-visible{
+          outline:none;
+          filter:brightness(1.08);
+        }
+
+        @media(max-width:760px){
+          .tr-neuralSteering{width:calc(100% - 8px);margin:5px auto 6px;gap:3px}
+          .tr-neuralSteeringRail{min-height:56px;gap:2px;padding:3px;border-radius:12px}
+          .tr-neuralCommand{
+            min-height:50px;
+            padding:3px 2px 4px;
+            gap:2px;
+            border-radius:8px;
+          }
+          .tr-neuralCommandIcon{width:24px;height:24px;flex-basis:24px}
+          .tr-neuralCommandIcon svg{width:22px;height:22px;stroke-width:1.95}
+          .tr-neuralCommandLabel{font-size:6.25px;line-height:1.01;letter-spacing:.015em;text-align:center}
+          .tr-neuralStatus{min-height:16px;gap:5px;white-space:nowrap;overflow:hidden}
+          .tr-neuralStatus>span{font-size:6.8px}
+          .tr-neuralStatus small{font-size:6.6px;overflow:hidden;text-overflow:ellipsis}
+          .tr-heroPreferenceStage{gap:5px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
+            width:100%!important;
+            min-width:0!important;
+            height:34px!important;
+            min-height:34px!important;
+            padding:0 5px!important;
+            gap:4px!important;
+            border-radius:10px!important;
+            font-size:7.7px!important;
+          }
+          .tr-heroPrefButton svg{width:14px!important;height:14px!important;flex-basis:14px!important}
+          .tr-playerVolume input[type=range]::-webkit-slider-thumb{width:13px;height:13px;margin-top:-4px}
+          .tr-playerVolume input[type=range]::-moz-range-thumb{width:13px;height:13px}
+        }
+        @media(max-width:390px){
+          .tr-neuralSteeringRail{gap:1px;padding:2px}
+          .tr-neuralCommand{min-height:49px;padding-left:1px;padding-right:1px}
+          .tr-neuralCommandIcon{width:22px;height:22px;flex-basis:22px}
+          .tr-neuralCommandIcon svg{width:20px;height:20px}
+          .tr-neuralCommandLabel{font-size:5.7px;letter-spacing:0}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:32px!important;min-height:32px!important;padding:0 3px!important;font-size:7.2px!important;gap:3px!important}
+          .tr-heroPrefButton svg{width:13px!important;height:13px!important;flex-basis:13px!important}
+        }
       `}</style>
     </section>
   );
