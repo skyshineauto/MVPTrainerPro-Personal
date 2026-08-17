@@ -28,6 +28,12 @@ import {
   type SymptomKey,
 } from "../../lib/sessionLabel";
 
+import { getMusicPlayerSnapshot } from "../../lib/musicPlayer";
+import {
+  recordPrSoundtrack,
+  setWorkoutMusicContext,
+} from "../../lib/musicIntelligence";
+
 import icoDumbbell from "../../assets/dumbbell.png";
 import icoRunner from "../../assets/runner.png";
 import icoMachine from "../../assets/cable-row-machine.png";
@@ -3392,6 +3398,15 @@ export function WorkoutPlayerPage({ params }: any) {
 
   const doneCount = useMemo(() => items.filter((x) => !!x.completed_at).length, [items]);
   const current = items[activeIdx];
+
+  /* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: WORKOUT-AWARE QUEUE */
+  useEffect(() => {
+    setWorkoutMusicContext(
+      activeIdx,
+      items.length,
+      doneCount,
+    );
+  }, [activeIdx, items.length, doneCount]);
 
   const atFirst = activeIdx === 0;
   const atLast = activeIdx === Math.max(0, items.length - 1);
@@ -7672,6 +7687,15 @@ function ExerciseRunner({
         reps,
         records: prDetails,
       });
+      /* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: PR SOUNDTRACK */
+      const prTrack = getMusicPlayerSnapshot().currentTrack;
+      if (prTrack) {
+        recordPrSoundtrack(prTrack, {
+          exerciseName: item?.name ?? "Exercise",
+          setNumber: Number(row.set_index),
+          records: prDetails.map((record) => record.label),
+        });
+      }
     } else if (hasNextSet) {
       showToast(`SET ${row.set_index} LOGGED • REST 60 SECONDS.`, "ok");
     } else {

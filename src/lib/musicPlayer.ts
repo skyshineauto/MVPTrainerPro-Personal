@@ -16,6 +16,15 @@ import {
   listMusicPlaylistTrackLinks,
   type MusicPlaylist,
 } from "./playlistStorage";
+import {
+  adaptiveRadioQueueName,
+  chooseAdaptiveNextTrack,
+  isAdaptiveRadioName,
+  isAutoMixEnabled,
+  startRadioSession,
+  syncLikedSongsPlaylist,
+  type MusicRadioMode,
+} from "./musicIntelligence";
 
 export type MusicRepeatMode = "off" | "one" | "all";
 export type MusicCustomPresetSlot = "custom_1" | "custom_2" | "custom_3";
@@ -2258,16 +2267,45 @@ function shouldRecordSkip() {
   return Boolean(state.currentTrack && audio.currentTime < Math.max(30, (duration || 0) * 0.35));
 }
 
+/* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: ADAPTIVE NEXT */
 export async function nextMusicTrack(fromEnded = false) {
   if (!state.libraryLoaded) await loadMusicLibrary();
+
   if (!fromEnded && shouldRecordSkip() && state.currentTrack) {
     void recordMusicTrackSkipped(state.currentTrack.id).catch(() => undefined);
   }
-  const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1);
+
+  if (
+    state.currentTrack &&
+    isAdaptiveRadioName(state.activePlaylistName)
+  ) {
+    const adaptive = chooseAdaptiveNextTrack(
+      state.currentTrack,
+      state.libraryTracks,
+    );
+
+    if (adaptive) {
+      if (!fromEnded && isAutoMixEnabled() && musicGain && audioContext) {
+        const originalGain = Math.max(0.0001, musicGain.gain.value || 1);
+        await fadeOutputTo(Math.min(originalGain, 0.06), 120);
+        await playMusicTrack(adaptive.id, 0);
+        await fadeOutputTo(originalGain, 240);
+      } else {
+        await playMusicTrack(adaptive.id, 0);
+      }
+      return;
+    }
+  }
+
+  const index = state.shuffle
+    ? nextShuffleIndex()
+    : nextSequentialIndex(1);
+
   if (index < 0) {
     if (fromEnded) stopMusic();
     return;
   }
+
   const track = state.tracks[index];
   if (track) await playMusicTrack(track.id, 0);
 }
@@ -2316,18 +2354,73 @@ export function playMusicNext(trackId: string) {
   emit({ tracks: without });
 }
 
+/* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: LIKE RADIO + LIKED SONGS */
 export async function setPlayerMusicPreference(
   trackId: string,
   preference: "neutral" | "like" | "play_less",
 ) {
+  const wasCurrent = state.currentTrack?.id === trackId;
   const updated = await setMusicTrackPreference(trackId, preference);
-  const patchTrack = (track: MusicTrack) => (track.id === trackId ? updated : track);
+  const patchTrack = (track: MusicTrack) =>
+    track.id === trackId ? updated : track;
+
+  const nextLibrary = state.libraryTracks.map(patchTrack);
+  const nextQueue = state.tracks.map(patchTrack);
+
   emit({
-    libraryTracks: state.libraryTracks.map(patchTrack),
-    tracks: state.tracks.map(patchTrack),
-    currentTrack: state.currentTrack?.id === trackId ? updated : state.currentTrack,
+    libraryTracks: nextLibrary,
+    tracks: nextQueue,
+    currentTrack: wasCurrent ? updated : state.currentTrack,
   });
+
+  void syncLikedSongsPlaylist(nextLibrary).catch((error) => {
+    console.warn("Could not synchronize Liked Songs.", error);
+  });
+
+  if (preference === "like" && wasCurrent) {
+    const radio = startRadioSession(
+      updated,
+      nextLibrary,
+      "more_like_this",
+    );
+
+    activateMusicAdHocQueue(
+      `Like Radio • ${updated.title}`,
+      radio,
+    );
+  }
+
   return updated;
+}
+
+export function startMvpNeuralRadio(
+  seedTrackId: string,
+  mode: MusicRadioMode = "more_like_this",
+) {
+  const seed = state.libraryTracks.find(
+    (track) => track.id === seedTrackId,
+  );
+
+  if (!seed) {
+    throw new Error("Song not found in your music library.");
+  }
+
+  const queue = startRadioSession(
+    seed,
+    state.libraryTracks,
+    mode,
+  );
+
+  activateMusicAdHocQueue(
+    adaptiveRadioQueueName(seed, mode),
+    queue,
+  );
+
+  return queue;
+}
+
+export function getMusicPlayerSnapshot() {
+  return state;
 }
 
 export function setMusicVolume(value: number) {

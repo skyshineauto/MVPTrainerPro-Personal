@@ -67,9 +67,11 @@ import {
   type MusicDiscoverySeed,
 } from "../../lib/musicDiscovery";
 
+import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
+
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
-type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "discover";
+type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "intelligence" | "discover";
 type DiscoverySort = "newest" | "oldest" | "artist" | "most";
 type DiscoveryFilter = "all" | "new_current" | "same_era" | "hidden" | "unowned";
 type DiscoveryView = "archive" | "saved";
@@ -1602,7 +1604,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
@@ -1671,6 +1673,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className="tr10-smartCollections"><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("high_rotation");}}>LIKED TRACKS <b>{likedCount}</b></button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("most_played");}}>MOST PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("recently_played");}}>RECENTLY PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("high_rotation");}}>HIGH ROTATION</button><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("least_played");}}>REDISCOVER</button></div>
         </section> : null}
 
+        {/* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: INTELLIGENCE PANEL */}
+        {tab === "intelligence" ? (
+          <MusicIntelligencePanel tracks={tracks} />
+        ) : null}
         {tab === "discover" ? <section className="tr10-discover">
           <header className="tr10-discoverHead">
             <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
@@ -2834,6 +2840,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-savedSongsGrid{grid-template-columns:1fr!important}
           .tr10-savedSongsPager{grid-template-columns:1fr auto 1fr!important;gap:6px!important;padding:7px!important}
           .tr10-savedSongsPager button{height:30px!important}
+        }
+        /* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: 7-TAB NAV */
+        .tr10-tabs{grid-template-columns:repeat(7,minmax(0,1fr))!important}
+        @media(max-width:650px){
+          .tr10-tabs{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+          .tr10-tabs button:last-child{grid-column:auto!important}
         }
       `}</style>
     </main>
