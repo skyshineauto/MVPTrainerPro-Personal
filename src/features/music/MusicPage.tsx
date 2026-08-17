@@ -1,3 +1,4 @@
+/* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
 import {
   useEffect,
   useMemo,
@@ -68,6 +69,7 @@ import {
 } from "../../lib/musicDiscovery";
 
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
+import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -497,6 +499,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const libraryOrderIndex = useMemo(() => new Map(libraryOrderedTracks.map((track, index) => [track.id, index] as const)), [libraryOrderedTracks]);
   const regularPlaylists = useMemo(() => playlists.filter((playlist) => !isSmartMixPlaylist(playlist)), [playlists]);
   const smartMixPlaylists = useMemo(() => playlists.filter(isSmartMixPlaylist), [playlists]);
+  const discoveryRadar = useMemo(() => buildDiscoveryRadar(tracks), [tracks]);
 
   const detailTrack = useMemo(() => tracks.find((track) => track.id === detailTrackId) || null, [tracks, detailTrackId]);
   const detailDraft = detailTrack ? drafts[detailTrack.id] : null;
@@ -1584,7 +1587,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
       <section className="tr10-console">
         <header className="tr10-sectionHead">
-          <div><h2>Song Library</h2></div>
+          <div><span className="tr10-directoryEyebrow">DIRECTORY</span><h2>Song Library</h2></div>
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
             <button type="button" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || trackNeedsArtwork(track)))}>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</button>
@@ -1678,6 +1681,19 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <MusicIntelligencePanel tracks={tracks} />
         ) : null}
         {tab === "discover" ? <section className="tr10-discover">
+          <section className="tr10-radarPanel" aria-label="Discovery Radar">
+            <header className="tr10-radarHead">
+              <div><span>DISCOVERY RADAR</span><h2>Your library, resurfaced intelligently</h2><p>Forgotten favorites, deep cuts, long-unplayed tracks, recent Likes, and high-energy music worth bringing back.</p></div>
+              <strong>{discoveryRadar.reduce((sum, lane) => sum + lane.tracks.length, 0)}</strong>
+            </header>
+            <div className="tr10-radarGrid">
+              {discoveryRadar.map((lane) => <article key={lane.id}>
+                <div><small>{lane.tracks.length} TRACKS</small><h3>{lane.title}</h3><p>{lane.subtitle}</p></div>
+                <button type="button" disabled={!lane.tracks.length} onClick={() => void playMusicAdHocQueue(`Radar • ${lane.title}`, lane.tracks)}>▶ PLAY</button>
+              </article>)}
+            </div>
+          </section>
+
           <header className="tr10-discoverHead">
             <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
             <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? "5 SONGS PER PAGE" : `${discoverySeeds.length} SAVED SEED${discoverySeeds.length === 1 ? "" : "S"} • 3 CURATED LANES`}</small></div>
@@ -2847,6 +2863,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-tabs{grid-template-columns:repeat(3,minmax(0,1fr))!important}
           .tr10-tabs button:last-child{grid-column:auto!important}
         }
+
+        /* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY: DIRECTORY DISCOVERY RADAR */
+        .tr10-directoryEyebrow{display:block;margin-bottom:3px;color:#5edcff;font-size:7px;font-weight:1000;letter-spacing:.16em}
+        .tr10-radarPanel{margin:10px;border:1px solid rgba(70,199,237,.18);border-radius:12px;overflow:hidden;background:radial-gradient(circle at 8% 0%,rgba(36,170,210,.12),transparent 34%),linear-gradient(180deg,#07151c,#040b0f)}
+        .tr10-radarHead{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px;border-bottom:1px solid rgba(88,182,211,.10)}
+        .tr10-radarHead span{color:#59d7f6;font-size:7px;font-weight:1000;letter-spacing:.16em}.tr10-radarHead h2{margin:4px 0 3px;color:#f5fbfe;font-size:18px}.tr10-radarHead p{margin:0;max-width:720px;color:#809aa4;font-size:8px;line-height:1.5}.tr10-radarHead>strong{min-width:48px;text-align:right;color:#f6c55d;font-size:28px;line-height:1}
+        .tr10-radarGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:10px}.tr10-radarGrid article{min-height:94px;padding:10px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px;border:1px solid rgba(100,174,197,.11);border-radius:9px;background:linear-gradient(145deg,rgba(9,27,35,.96),rgba(4,13,18,.96));box-shadow:inset 0 1px rgba(255,255,255,.025)}.tr10-radarGrid small{color:#55d5f5;font-size:6px;font-weight:1000;letter-spacing:.08em}.tr10-radarGrid h3{margin:4px 0 3px;color:#fff;font-size:11px}.tr10-radarGrid p{margin:0;color:#76909a;font-size:7px;line-height:1.4}.tr10-radarGrid button{height:31px;flex:0 0 auto;padding:0 10px;border:1px solid rgba(75,202,239,.28);border-radius:7px;background:#08242e;color:#eafaff;font-size:7px;font-weight:1000}.tr10-radarGrid button:disabled{opacity:.28}
+        @media(max-width:820px){.tr10-radarGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.tr10-radarHead{align-items:flex-start}.tr10-radarHead>strong{font-size:23px}}
+        @media(max-width:520px){.tr10-radarPanel{margin:7px}.tr10-radarHead{padding:10px}.tr10-radarHead h2{font-size:15px}.tr10-radarHead p{font-size:7px}.tr10-radarGrid{grid-template-columns:1fr;padding:7px}.tr10-radarGrid article{min-height:78px;padding:9px}.tr10-radarGrid h3{font-size:10px}.tr10-radarGrid p{font-size:6.5px}}
       `}</style>
     </main>
   );

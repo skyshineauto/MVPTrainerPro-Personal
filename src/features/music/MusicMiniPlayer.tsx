@@ -1,3 +1,4 @@
+/* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
 import {
   useEffect,
   useRef,
@@ -50,6 +51,7 @@ import {
   setMusicOutputProfile,
   setMusicVolume,
   setPlayerMusicPreference,
+  startMvpNeuralRadio,
   stopMusic,
   toggleMusicShuffle,
   useMusicPlayer,
@@ -61,6 +63,12 @@ import {
   type MusicDspEngineMode,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
+import {
+  getActiveRadioMode,
+  isAdaptiveRadioName,
+  radioModeLabel,
+  type MusicRadioMode,
+} from "../../lib/musicIntelligence";
 import {
   analyzeMusicSourceFile,
   analyzeMusicTrackSource,
@@ -92,7 +100,14 @@ type IconName =
   | "headphones"
   | "car"
   | "speaker"
-  | "save";
+  | "save"
+  | "harder"
+  | "heavier"
+  | "faster"
+  | "match"
+  | "melodic"
+  | "darker"
+  | "surprise";
 
 function outputProfileIconName(profile: MusicOutputProfile): IconName {
   if (profile === "headphones") return "headphones";
@@ -188,8 +203,36 @@ function PlayerIcon({ name }: { name: IconName }) {
   if (name === "headphones") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 3a8 8 0 0 0-8 8v6.2A2.8 2.8 0 0 0 6.8 20H9v-7H6v-2a6 6 0 0 1 12 0v2h-3v7h2.2a2.8 2.8 0 0 0 2.8-2.8V11a8 8 0 0 0-8-8ZM7 15v3h-.2a.8.8 0 0 1-.8-.8V15h1Zm11 2.2a.8.8 0 0 1-.8.8H17v-3h1v2.2Z" /></svg>;
   if (name === "car") return <svg viewBox="0 0 24 24" aria-hidden><path d="m5.2 6.2 1.4-2.8A2.5 2.5 0 0 1 8.8 2h6.4a2.5 2.5 0 0 1 2.2 1.4l1.4 2.8 1.4.5c1.1.4 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2h-1v1.2a.8.8 0 0 1-.8.8h-1.4a.8.8 0 0 1-.8-.8V20H8v1.2a.8.8 0 0 1-.8.8H5.8a.8.8 0 0 1-.8-.8V20H4a2 2 0 0 1-2-2V9.3c0-1.2.7-2.2 1.8-2.6l1.4-.5ZM7.4 6h9.2l-.9-1.8a.6.6 0 0 0-.5-.3H8.8a.6.6 0 0 0-.5.3L7.4 6ZM5.5 10a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm13 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM7 16h10v-2H7v2Z" /></svg>;
   if (name === "speaker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm5 3.2a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Zm0 6.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2Zm0 2a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2Z" /></svg>;
+  if (name === "harder") return <svg viewBox="0 0 24 24" aria-hidden><path d="M4 18.5 9.2 13.3l3 3L19.6 9.1"/><path d="M14.7 9.1h4.9V14"/><path d="m11.4 3-2.7 5h3l-1.4 4.1 5-6.2h-3L13.7 3h-2.3Z"/></svg>;
+  if (name === "heavier") return <svg viewBox="0 0 24 24" aria-hidden><path d="M2.5 10.2h3v3.6h-3zM18.5 10.2h3v3.6h-3zM5.5 8.3h2.6v7.4H5.5zM15.9 8.3h2.6v7.4h-2.6zM8.1 11h7.8v2H8.1z"/><path d="M4 8v8M20 8v8"/></svg>;
+  if (name === "faster") return <svg viewBox="0 0 24 24" aria-hidden><path d="m4 7 5 5-5 5M9 7l5 5-5 5M14 7l5 5-5 5"/><path d="M2 4h6M2 20h6"/></svg>;
+  if (name === "match") return <svg viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.3"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>;
+  if (name === "melodic") return <svg viewBox="0 0 24 24" aria-hidden><path d="M14.5 4v11.2a3.3 3.3 0 1 1-2-3V6.1L20 4.3v8.9a3.3 3.3 0 1 1-2-3V3.6L14.5 4Z"/><path d="M2 8.5c2.1-2.2 4.2-2.2 6.3 0 1.1 1.2 2.1 1.7 3.2 1.7"/></svg>;
+  if (name === "darker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M17.4 3.4A8.8 8.8 0 1 0 20.6 16 7.4 7.4 0 0 1 12 6.1a7.5 7.5 0 0 1 5.4-2.7Z"/><path d="M5 18.5h9M7 21h5"/></svg>;
+  if (name === "surprise") return <svg viewBox="0 0 24 24" aria-hidden><path d="m12 2 1.5 4.1L17.6 7.6l-4.1 1.5L12 13.2l-1.5-4.1-4.1-1.5 4.1-1.5L12 2Z"/><path d="m18.5 13 1 2.6L22 16.5l-2.5 1-1 2.5-1-2.5-2.5-1 2.5-.9 1-2.6ZM5 14.2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2Z"/></svg>;
   if (name === "save") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h11.6L21 7.4V21H3V3h2Zm1 2v5h10V5H6Zm0 8v6h12v-6H6Zm2-7h6v2H8V6Z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
+}
+
+type NeuralSteeringDefinition = {
+  mode: MusicRadioMode;
+  label: string;
+  icon: IconName;
+  status: string;
+};
+
+const NEURAL_STEERING: NeuralSteeringDefinition[] = [
+  { mode: "harder", label: "HARDER", icon: "harder", status: "Next tracks building intensity" },
+  { mode: "heavier", label: "HEAVIER", icon: "heavier", status: "Next tracks shifting heavier" },
+  { mode: "faster", label: "FASTER", icon: "faster", status: "Next tracks increasing drive" },
+  { mode: "more_like_this", label: "MORE LIKE THIS", icon: "match", status: "Tightening around this song" },
+  { mode: "melodic", label: "MORE MELODIC", icon: "melodic", status: "Next tracks leaning more melodic" },
+  { mode: "darker", label: "DARKER", icon: "darker", status: "Next tracks shifting darker" },
+  { mode: "surprise", label: "SURPRISE ME", icon: "surprise", status: "Discovery range widened" },
+];
+
+function neuralSteeringStatus(mode: MusicRadioMode) {
+  return NEURAL_STEERING.find((item) => item.mode === mode)?.status ?? "Shaping what plays next";
 }
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
@@ -1381,6 +1424,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   );
   const [profileMessage, setProfileMessage] = useState("");
   const [discoverMessage, setDiscoverMessage] = useState("");
+  const [neuralMessage, setNeuralMessage] = useState("");
+  const neuralMessageTimerRef = useRef<number | null>(null);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [savePresetSlot, setSavePresetSlot] = useState<MusicCustomPresetSlot>("custom_1");
   const [savePresetName, setSavePresetName] = useState("");
@@ -1410,6 +1455,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     refreshPlaylists();
     window.addEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
     return () => window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
+  }, []);
+
+  useEffect(() => () => {
+    if (neuralMessageTimerRef.current != null) {
+      window.clearTimeout(neuralMessageTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -1525,6 +1576,25 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     }
   }
 
+  function steerNeuralRadio(mode: MusicRadioMode) {
+    const currentTrack = player.currentTrack;
+    if (!currentTrack) return;
+
+    try {
+      startMvpNeuralRadio(currentTrack.id, mode);
+      setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
+      if (neuralMessageTimerRef.current != null) {
+        window.clearTimeout(neuralMessageTimerRef.current);
+      }
+      neuralMessageTimerRef.current = window.setTimeout(() => {
+        setNeuralMessage("");
+        neuralMessageTimerRef.current = null;
+      }, 2400);
+    } catch {
+      setNeuralMessage("NEURAL RADIO RETRY");
+    }
+  }
+
   function currentDspSnapshot(name: string): SavedDspProfile {
     return {
       name: name.trim() || "Custom DSP",
@@ -1637,6 +1707,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   const track = player.currentTrack;
   const sourceQuality = analyzeMusicTrackSource(track);
+  const neuralRadioActive = isAdaptiveRadioName(player.activePlaylistName);
+  const activeNeuralMode = neuralRadioActive ? getActiveRadioMode() : null;
 
   useEffect(() => {
     const identity = heroIdentityRef.current;
@@ -1713,7 +1785,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       : activeSavedProfile?.name || activeBuiltInEq || "CUSTOM";
   const activePlaylistLabel = player.activePlaylistId
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
-    : "All Uploaded Songs";
+    : player.activePlaylistName || "All Uploaded Songs";
   const activePlaylistMobileLabel = activePlaylistLabel;
 
   useEffect(() => {
@@ -1826,6 +1898,35 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         <button type="button" className={`tr-audioModeButton is-repeat ${player.repeat !== "off" ? "is-active" : ""}`} onClick={() => cycleMusicRepeat()} aria-label={`Repeat ${player.repeat}`} aria-pressed={player.repeat !== "off"}><PlayerIcon name="repeat" /><span>{player.repeat === "one" ? "REPEAT 1" : "REPEAT"}</span><i className="tr-modeState">{player.repeat === "off" ? "OFF" : "ON"}</i></button>
         <button type="button" className={`tr-audioModeButton is-shuffle ${player.shuffle ? "is-active" : ""}`} onClick={() => toggleMusicShuffle()} aria-label={`Shuffle ${player.shuffle ? "on" : "off"}`} aria-pressed={player.shuffle}><PlayerIcon name="shuffle" /><span>SHUFFLE</span><i className="tr-modeState">{player.shuffle ? "ON" : "OFF"}</i></button>
       </div>
+
+      <section className={`tr-neuralSteering ${neuralRadioActive ? "is-radio-active" : ""}`} aria-label="MVP Neural Radio steering">
+        <div className="tr-neuralSteeringRail">
+          <div className="tr-neuralSteeringBrand" aria-hidden>
+            <i><PlayerIcon name="equalizer" /></i>
+            <span>NEURAL</span>
+          </div>
+          {NEURAL_STEERING.map((item) => {
+            const active = activeNeuralMode === item.mode;
+            return <button
+              type="button"
+              key={item.mode}
+              className={`tr-neuralCommand is-${item.mode} ${active ? "is-active" : ""}`}
+              disabled={!track || player.loading || queueBusy}
+              onClick={() => steerNeuralRadio(item.mode)}
+              aria-pressed={active}
+              title={item.label}
+            >
+              <span className="tr-neuralCommandIcon"><PlayerIcon name={item.icon} /></span>
+              <span className="tr-neuralCommandLabel">{item.label}</span>
+              <i className="tr-neuralCommandLed" aria-hidden />
+            </button>;
+          })}
+        </div>
+        {activeNeuralMode ? <div className={`tr-neuralStatus ${neuralMessage ? "is-fresh" : ""}`} role="status">
+          <span><i aria-hidden />{neuralMessage || `${radioModeLabel(activeNeuralMode).toUpperCase()} ACTIVE`}</span>
+          <small>{neuralSteeringStatus(activeNeuralMode)}</small>
+        </div> : null}
+      </section>
 
       <button
         type="button"
@@ -5431,6 +5532,23 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] .tr-studioMeterGrid article>strong{font-size:11px!important}
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] .tr-studioMeterGrid article>small{font-size:6.1px!important}
         }
+
+        /* MVP_TRAINER_V5_R7_NEURAL_PLAYER: COMPACT NEURAL STEERING */
+        .tr-neuralSteering{width:min(1060px,calc(100% - 22px));margin:6px auto 7px;display:grid;gap:3px;position:relative;z-index:4}
+        .tr-neuralSteeringRail{min-height:47px;display:grid;grid-template-columns:82px repeat(7,minmax(0,1fr));align-items:stretch;gap:2px;padding:3px;border:1px solid rgba(94,170,194,.22);border-radius:13px;background:linear-gradient(180deg,rgba(10,25,32,.98),rgba(3,10,14,.98));box-shadow:inset 0 1px rgba(255,255,255,.035),0 8px 20px rgba(0,0,0,.18);overflow:hidden}
+        .tr-neuralSteeringBrand{display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;border-right:1px solid rgba(103,178,201,.10);color:#8da6b0}.tr-neuralSteeringBrand i{width:20px;height:20px;display:grid;place-items:center;color:#67d8f7;opacity:.72}.tr-neuralSteeringBrand svg{width:16px;height:16px;fill:currentColor}.tr-neuralSteeringBrand span{font-size:7px;font-weight:1000;letter-spacing:.13em}
+        .tr-neuralCommand{position:relative;min-width:0;min-height:39px;padding:3px 4px;display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;justify-items:start;gap:4px;border:1px solid rgba(111,173,194,.09);border-radius:8px;background:linear-gradient(180deg,rgba(10,25,33,.92),rgba(5,14,19,.96));color:#a9bec7;box-shadow:inset 0 1px rgba(255,255,255,.025);transition:border-color .16s ease,background .16s ease,color .16s ease,box-shadow .16s ease,transform .12s ease}.tr-neuralCommand:hover:not(:disabled){border-color:rgba(75,204,242,.34);color:#e9faff;background:linear-gradient(180deg,rgba(11,38,49,.97),rgba(5,21,28,.98))}.tr-neuralCommand:active:not(:disabled){transform:translateY(1px) scale(.992)}.tr-neuralCommand:disabled{opacity:.34;cursor:not-allowed}
+        .tr-neuralCommandIcon{width:22px;height:22px;display:grid;place-items:center;color:#6b909d;transition:color .16s ease,filter .16s ease,transform .16s ease}.tr-neuralCommandIcon svg{width:20px;height:20px;overflow:visible;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}.tr-neuralCommandLabel{min-width:0;color:inherit;font-size:6.8px;line-height:1.05;font-weight:1000;letter-spacing:.035em;text-align:left;white-space:normal}.tr-neuralCommandLed{position:absolute;left:50%;bottom:1px;width:3px;height:3px;border-radius:50%;background:transparent;transform:translateX(-50%)}
+        .tr-neuralCommand.is-active{color:#ecfbff;border-color:rgba(56,210,255,.82);background:linear-gradient(180deg,rgba(7,65,84,.95),rgba(5,31,41,.98));box-shadow:inset 0 1px rgba(255,255,255,.12),0 0 0 1px rgba(52,207,252,.13),0 0 17px rgba(30,187,230,.19)}.tr-neuralCommand.is-active .tr-neuralCommandIcon{color:#5ce0ff;filter:drop-shadow(0 0 5px rgba(76,218,255,.5));transform:translateY(-.5px)}.tr-neuralCommand.is-active .tr-neuralCommandLed{background:#5ce0ff;box-shadow:0 0 7px rgba(80,222,255,.9)}
+        .tr-neuralCommand.is-more_like_this{grid-template-columns:24px minmax(0,1fr)}.tr-neuralCommand.is-more_like_this .tr-neuralCommandIcon{width:24px;height:24px}.tr-neuralCommand.is-surprise .tr-neuralCommandIcon{color:#91b6c1}
+        .tr-neuralStatus{min-height:15px;display:flex;align-items:center;justify-content:center;gap:7px;color:#6f8d99;font-size:6.7px;font-weight:850;letter-spacing:.02em}.tr-neuralStatus>span{display:inline-flex;align-items:center;gap:5px;color:#54d8fa;font-size:6.9px;font-weight:1000;letter-spacing:.06em}.tr-neuralStatus>span>i{width:5px;height:5px;border:1px solid #55ddff;border-radius:50%;box-shadow:0 0 6px rgba(82,220,255,.5)}.tr-neuralStatus small{color:#718a94;font-size:6.6px;font-weight:800}.tr-neuralStatus.is-fresh>span{animation:trNeuralStatusFlash .28s ease-out 1}@keyframes trNeuralStatusFlash{0%{filter:brightness(1.9);transform:translateY(-1px)}100%{filter:brightness(1);transform:none}}
+        @media(max-width:760px){
+          .tr-neuralSteering{width:calc(100% - 10px);margin:4px auto 5px;gap:2px}
+          .tr-neuralSteeringRail{min-height:47px;grid-template-columns:repeat(7,minmax(39px,1fr));gap:2px;padding:3px;border-radius:11px;overflow-x:auto;scrollbar-width:none}.tr-neuralSteeringRail::-webkit-scrollbar{display:none}.tr-neuralSteeringBrand{display:none}
+          .tr-neuralCommand{min-width:39px;min-height:39px;padding:3px 2px;grid-template-columns:1fr;grid-template-rows:22px auto;justify-items:center;gap:1px;border-radius:7px}.tr-neuralCommandIcon,.tr-neuralCommand.is-more_like_this .tr-neuralCommandIcon{width:21px;height:21px}.tr-neuralCommandIcon svg{width:19px;height:19px}.tr-neuralCommandLabel{font-size:5.2px;line-height:1;text-align:center;letter-spacing:.015em;white-space:normal}.tr-neuralCommand.is-more_like_this{grid-template-columns:1fr;grid-template-rows:22px auto}.tr-neuralCommandLed{bottom:1px;width:2.5px;height:2.5px}
+          .tr-neuralStatus{min-height:13px;gap:5px;font-size:5.8px;white-space:nowrap;overflow:hidden}.tr-neuralStatus>span{font-size:5.9px}.tr-neuralStatus small{font-size:5.7px;overflow:hidden;text-overflow:ellipsis}.tr-neuralStatus>span>i{width:4px;height:4px}
+        }
+        @media(max-width:360px){.tr-neuralSteeringRail{grid-template-columns:repeat(7,40px);justify-content:start}.tr-neuralCommandLabel{font-size:4.9px}.tr-neuralStatus small{display:none}}
       `}</style>
     </section>
   );

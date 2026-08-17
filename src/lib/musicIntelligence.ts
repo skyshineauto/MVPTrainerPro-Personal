@@ -1,3 +1,4 @@
+/* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
 import type { MusicTrack } from "./musicStorage";
 import {
   createMusicPlaylist,
@@ -12,7 +13,9 @@ export type MusicRadioMode =
   | "harder"
   | "heavier"
   | "faster"
-  | "melodic";
+  | "melodic"
+  | "darker"
+  | "surprise";
 
 export type WorkoutMusicStage =
   | "off"
@@ -42,17 +45,23 @@ export type PrSoundtrackRecord = {
 };
 
 const KEYS = {
-  radio: "mvp_music_neural_radio_v2",
-  recent: "mvp_music_neural_recent_v2",
+  radio: "mvp_music_neural_radio_v3",
+  recent: "mvp_music_neural_recent_v3",
   stage: "mvp_music_workout_stage_v2",
   autoMix: "mvp_music_automix_v2",
   prSoundtrack: "mvp_music_pr_soundtrack_v2",
+};
+
+const LEGACY_KEYS = {
+  radio: "mvp_music_neural_radio_v2",
+  recent: "mvp_music_neural_recent_v2",
 };
 
 type RadioState = {
   seedTrackId: string;
   mode: MusicRadioMode;
   startedAt: string;
+  steeringRemaining: number;
 };
 
 function clamp(value: number) {
@@ -76,6 +85,32 @@ function writeJson(key: string, value: unknown) {
   } catch {
     // Intelligence memory is best effort only.
   }
+}
+
+function readRadioState(): RadioState | null {
+  const current = readJson<RadioState | null>(KEYS.radio, null);
+  if (current) return current;
+
+  const legacy = readJson<
+    | {
+        seedTrackId?: string;
+        mode?: MusicRadioMode;
+        startedAt?: string;
+      }
+    | null
+  >(LEGACY_KEYS.radio, null);
+
+  if (!legacy?.seedTrackId) return null;
+
+  const migrated: RadioState = {
+    seedTrackId: legacy.seedTrackId,
+    mode: legacy.mode ?? "more_like_this",
+    startedAt: legacy.startedAt ?? new Date().toISOString(),
+    steeringRemaining: 0,
+  };
+
+  writeJson(KEYS.radio, migrated);
+  return migrated;
 }
 
 function trackText(track: MusicTrack) {
@@ -140,6 +175,16 @@ export function getSongDna(track: MusicTrack): SongDna {
       "grave",
       "pain",
       "dead",
+      "bleed",
+      "blood",
+      "black",
+      "night",
+      "shadow",
+      "broken",
+      "alone",
+      "failure",
+      "hate",
+      "fear",
     ])
   ) {
     dark += 28;
@@ -188,7 +233,17 @@ export function radioModeLabel(mode: MusicRadioMode) {
   if (mode === "heavier") return "Heavier";
   if (mode === "faster") return "Faster";
   if (mode === "melodic") return "More Melodic";
+  if (mode === "darker") return "Darker";
+  if (mode === "surprise") return "Surprise Me";
   return "More Like This";
+}
+
+export function getActiveRadioMode(): MusicRadioMode | null {
+  return readRadioState()?.mode ?? null;
+}
+
+export function getActiveRadioSteeringRemaining() {
+  return Math.max(0, readRadioState()?.steeringRemaining ?? 0);
 }
 
 export function adaptiveRadioQueueName(
@@ -240,13 +295,15 @@ export function getWorkoutMusicStage(): WorkoutMusicStage {
 }
 
 function recentIds() {
-  return readJson<string[]>(KEYS.recent, []).slice(0, 24);
+  const current = readJson<string[]>(KEYS.recent, []);
+  if (current.length) return current.slice(0, 32);
+  return readJson<string[]>(LEGACY_KEYS.recent, []).slice(0, 32);
 }
 
 function rememberTrack(trackId: string) {
   writeJson(
     KEYS.recent,
-    [trackId, ...recentIds().filter((id) => id !== trackId)].slice(0, 24),
+    [trackId, ...recentIds().filter((id) => id !== trackId)].slice(0, 32),
   );
 }
 
@@ -274,9 +331,13 @@ function dnaDistance(a: SongDna, b: SongDna, mode: MusicRadioMode) {
         ? [1.1, 0.6, 0.5, 0.4, 2]
         : mode === "melodic"
           ? [0.7, 0.5, 2, 0.5, 0.7]
-          : mode === "harder"
-            ? [1.6, 1.4, 0.4, 0.5, 1.5]
-            : [1, 1, 1, 0.7, 1];
+          : mode === "darker"
+            ? [0.7, 0.8, 0.5, 2.1, 0.8]
+            : mode === "surprise"
+              ? [0.55, 0.55, 0.5, 0.5, 0.6]
+              : mode === "harder"
+                ? [1.6, 1.4, 0.4, 0.5, 1.5]
+                : [1, 1, 1, 0.7, 1];
 
   const values = [
     Math.abs(a.energy - b.energy),
@@ -313,9 +374,12 @@ function candidateScore(
   const seedDna = getSongDna(seed);
   const candidateDna = getSongDna(candidate);
 
-  let score = 100 - dnaDistance(seedDna, candidateDna, mode);
+  const surpriseSimilarityScale = mode === "surprise" ? 0.58 : 1;
+  let score = 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
 
-  if (normalizedArtist(seed) === normalizedArtist(candidate)) score += 20;
+  if (normalizedArtist(seed) === normalizedArtist(candidate)) {
+    score += mode === "surprise" ? -8 : 20;
+  }
   if (normalizedArtist(current) === normalizedArtist(candidate)) score -= 34;
 
   if (recent.has(candidate.id)) score -= 130;
@@ -324,13 +388,21 @@ function candidateScore(
   if (mode === "harder") {
     score += Math.max(0, candidateDna.energy - seedDna.energy) * 0.7;
     score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 0.5;
+    score += Math.max(0, candidateDna.drive - seedDna.drive) * 0.4;
   } else if (mode === "heavier") {
     score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 1.05;
   } else if (mode === "faster") {
     score += Math.max(0, candidateDna.drive - seedDna.drive) * 1.05;
   } else if (mode === "melodic") {
-    score +=
-      Math.max(0, candidateDna.melodic - seedDna.melodic) * 1.05;
+    score += Math.max(0, candidateDna.melodic - seedDna.melodic) * 1.05;
+  } else if (mode === "darker") {
+    score += Math.max(0, candidateDna.dark - seedDna.dark) * 1.08;
+    score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 0.18;
+  } else if (mode === "surprise") {
+    const lowPlayBoost = Math.max(0, 10 - Math.min(10, candidate.play_count)) * 1.25;
+    score += lowPlayBoost;
+    score += candidate.favorite ? 3 : 0;
+    score += Math.random() * 22;
   }
 
   score += stageBias(candidateDna, getWorkoutMusicStage());
@@ -346,12 +418,18 @@ function candidateScore(
     if (hours < 6) score -= 45;
     else if (hours < 24) score -= 22;
     else if (hours < 72) score -= 9;
-    else if (hours > 336) score += 8;
+    else if (hours > 336) score += mode === "surprise" ? 16 : 8;
   } else {
-    score += 12;
+    score += mode === "surprise" ? 22 : 12;
   }
 
-  return score + Math.random() * 4;
+  return score + Math.random() * (mode === "surprise" ? 8 : 4);
+}
+
+function steeringLength(mode: MusicRadioMode) {
+  if (mode === "more_like_this") return 0;
+  if (mode === "surprise") return 3;
+  return 4;
 }
 
 export function startRadioSession(
@@ -363,6 +441,7 @@ export function startRadioSession(
     seedTrackId: seed.id,
     mode,
     startedAt: new Date().toISOString(),
+    steeringRemaining: steeringLength(mode),
   };
 
   writeJson(KEYS.radio, radio);
@@ -395,7 +474,7 @@ export function chooseAdaptiveNextTrack(
   current: MusicTrack,
   library: MusicTrack[],
 ) {
-  const radio = readJson<RadioState | null>(KEYS.radio, null);
+  const radio = readRadioState();
   if (!radio) return null;
 
   const seed =
@@ -425,7 +504,10 @@ export function chooseAdaptiveNextTrack(
       }))
       .sort((a, b) => b.score - a.score)[0]?.track ?? null;
 
-  if (next) rememberTrack(next.id);
+  if (next) {
+    rememberTrack(next.id);
+  }
+
   return next;
 }
 
@@ -492,6 +574,15 @@ export function buildDiscoveryRadar(library: MusicTrack[]) {
         .slice(0, 16),
     },
     {
+      id: "ninety",
+      title: "Haven't Played in 90 Days",
+      subtitle: "Strong library tracks that have been quiet for months",
+      tracks: [...available]
+        .filter((track) => staleHours(track) > 2160)
+        .sort((a, b) => getSongDna(b).workoutFit - getSongDna(a).workoutFit)
+        .slice(0, 16),
+    },
+    {
       id: "deep",
       title: "Deep Cuts",
       subtitle: "Low-play tracks with strong workout potential",
@@ -508,7 +599,7 @@ export function buildDiscoveryRadar(library: MusicTrack[]) {
     {
       id: "rare",
       title: "Rarely Played",
-      subtitle: "Hidden corners of your library",
+      subtitle: "Hidden corners of your uploaded library",
       tracks: [...available]
         .sort((a, b) => a.play_count - b.play_count)
         .slice(0, 16),
@@ -516,7 +607,7 @@ export function buildDiscoveryRadar(library: MusicTrack[]) {
     {
       id: "energy",
       title: "High-Energy Rediscovery",
-      subtitle: "Hard-driving tracks that have cooled off",
+      subtitle: "Hard-driving tracks you have not heard lately",
       tracks: [...available]
         .filter(
           (track) =>
@@ -526,6 +617,19 @@ export function buildDiscoveryRadar(library: MusicTrack[]) {
         .sort(
           (a, b) =>
             getSongDna(b).workoutFit - getSongDna(a).workoutFit,
+        )
+        .slice(0, 16),
+    },
+    {
+      id: "recent-liked",
+      title: "Recently Liked",
+      subtitle: "Your newest permanent Liked Songs additions",
+      tracks: [...available]
+        .filter((track) => track.favorite)
+        .sort(
+          (a, b) =>
+            new Date(b.updated_at).getTime() -
+            new Date(a.updated_at).getTime(),
         )
         .slice(0, 16),
     },
