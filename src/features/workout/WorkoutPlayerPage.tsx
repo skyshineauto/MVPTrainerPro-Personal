@@ -301,6 +301,19 @@ function resolveMedia(item: any): { gif?: string; video?: string; poster?: strin
   };
 }
 
+/* MVP_TRAINER_V4_5_4_WORKOUT_INTERNAL_NAV_CONTINUITY
+ * Internal workout navigation must stay inside the running React app.
+ * Full window.location navigation tears down the live music/Web Audio runtime.
+ */
+function navigateWithinWorkoutPlayer(to: string) {
+  const next = to.length > 1 && to.endsWith("/") ? to.slice(0, -1) : to;
+
+  if (window.location.pathname === next) return;
+
+  window.history.pushState({}, "", next);
+  window.dispatchEvent(new Event("popstate"));
+}
+
 function MediaOrFallback({ item, exerciseId }: { item: any; exerciseId?: string }) {
   const { gif, video, poster } = resolveMedia(item);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -308,7 +321,7 @@ function MediaOrFallback({ item, exerciseId }: { item: any; exerciseId?: string 
   const goUpload = () => {
     const exId = exerciseId || item?.id || item?.exercise_id;
     if (!exId) return;
-    window.location.pathname = `/library/${exId}`;
+    navigateWithinWorkoutPlayer(`/library/${exId}`);
   };
 
   const has = !!(video || gif || poster);
@@ -4409,7 +4422,7 @@ export function WorkoutPlayerPage({ params }: any) {
             <button className="tr-btn tr-btn--primary" onClick={hydrateGateOnly}>
               Retry
             </button>
-            <button className="tr-btn" onClick={() => (window.location.pathname = "/")}>
+            <button className="tr-btn" onClick={() => navigateWithinWorkoutPlayer("/")}>
               Back to Workouts
             </button>
           </div>
@@ -4428,7 +4441,7 @@ export function WorkoutPlayerPage({ params }: any) {
           weight={gateWeight}
           onWeightChange={setGateWeight}
           onStart={startWorkoutNow}
-          onCancel={() => (window.location.pathname = "/")}
+          onCancel={() => navigateWithinWorkoutPlayer("/")}
         />
       </div>
     );
@@ -8156,7 +8169,7 @@ const unlock = async () => {
                           <button
                             type="button"
                             className="tr-btn tr-proCoachHistory"
-                            onClick={() => (window.location.pathname = `/library/${exerciseId}`)}
+                            onClick={() => navigateWithinWorkoutPlayer(`/library/${exerciseId}`)}
                           >
                             VIEW FULL EXERCISE HISTORY
                           </button>
