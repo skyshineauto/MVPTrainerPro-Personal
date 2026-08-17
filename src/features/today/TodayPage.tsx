@@ -599,6 +599,19 @@ export function TodayPage() {
     };
   }, []);
 
+  /* MVP_TRAINER_V4_5_3_ACTIVE_WORKOUT_DIRECT_RETURN
+   * Workouts is a dashboard only when there is no actively running session.
+   * If a session is active and NOT manually paused, landing on Workouts should
+   * immediately return the user to the live WorkoutPlayer with no extra button.
+   */
+  useEffect(() => {
+    if (!activeSessionId) return;
+    if (workoutPaused) return;
+    if (window.location.pathname !== "/") return;
+
+    navigateWithinToday(`/workout/${activeSessionId}`);
+  }, [activeSessionId, workoutPaused]);
+
   const goal = queue?.activeBlock?.goal ? String(queue.activeBlock.goal) : null;
   const goalMode = queue?.activeBlock?.goal_mode ? String(queue.activeBlock.goal_mode) : null;
   const hasProgram = Boolean(queue?.activeBlock?.id);
