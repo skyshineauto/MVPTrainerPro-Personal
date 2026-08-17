@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R7_2_PLAYER_VISUAL_REFINEMENT */
+/* MVP_TRAINER_V5_R7_3_PREMIUM_CONTROL_SYSTEM */
 import {
   useEffect,
   useRef,
@@ -108,7 +108,8 @@ type IconName =
   | "match"
   | "melodic"
   | "darker"
-  | "surprise";
+  | "surprise"
+  | "source";
 
 function outputProfileIconName(profile: MusicOutputProfile): IconName {
   if (profile === "headphones") return "headphones";
@@ -221,21 +222,22 @@ function PlayerIcon({ name }: { name: IconName }) {
   if (name === "next") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.5 6H19v12h-2.5V6ZM5.5 6l9.7 6-9.7 6V6Z" /></svg>;
   if (name === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.8 4.5H20V7.7h-2V6.9l-3.7 3.7-1.4-1.4 3.6-3.6h-.7v-2Zm-12.8 2h3.2c1.6 0 2.7.5 3.7 1.5l6.8 6.8V14H20v5.5h-5.5v-2h1.8l-6.8-6.8c-.6-.6-1.2-.8-2.3-.8H4v-3.4Zm0 11h3.2c1.1 0 1.7-.2 2.3-.8l1.5-1.5 1.4 1.4-1.5 1.5c-1 1-2.1 1.4-3.7 1.4H4v-2Z" /></svg>;
   if (name === "repeat") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 5h9.3l-1.8-1.8L16 1.8 20.2 6 16 10.2l-1.5-1.4L16.3 7H7a3 3 0 0 0-3 3v1H2v-1a5 5 0 0 1 5-5Zm15 8v1a5 5 0 0 1-5 5H7.7l1.8 1.8L8 22.2 3.8 18 8 13.8l1.5 1.4L7.7 17H17a3 3 0 0 0 3-3v-1h2Z" /></svg>;
-  if (name === "like") return <svg viewBox="0 0 24 24" aria-hidden><path d="M9.2 21H5.5A2.5 2.5 0 0 1 3 18.5v-8A2.5 2.5 0 0 1 5.5 8H9l3.2-5.1A2 2 0 0 1 16 4v4h3.2a2.8 2.8 0 0 1 2.7 3.5l-1.8 7A3.4 3.4 0 0 1 16.8 21H9.2Zm-1.7-2V10H5.5a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h2Zm2 0h7.3a1.4 1.4 0 0 0 1.4-1.1l1.8-7a.8.8 0 0 0-.8-.9H14V4.8l-4.5 7.1V19Z" /></svg>;
-  if (name === "dislike") return <svg viewBox="0 0 24 24" aria-hidden><path d="M14.8 3h3.7A2.5 2.5 0 0 1 21 5.5v8a2.5 2.5 0 0 1-2.5 2.5H15l-3.2 5.1A2 2 0 0 1 8 20v-4H4.8a2.8 2.8 0 0 1-2.7-3.5l1.8-7A3.4 3.4 0 0 1 7.2 3h7.6Zm1.7 2v9h2a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2Zm-2 0H7.2a1.4 1.4 0 0 0-1.4 1.1L4 13.1a.8.8 0 0 0 .8.9H10v5.2l4.5-7.1V5Z" /></svg>;
+  if (name === "like") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 20.2 5.1 13.8C1.7 10.6 3.6 5.2 7.8 5.2c1.9 0 3.4 1 4.2 2.4.8-1.4 2.3-2.4 4.2-2.4 4.2 0 6.1 5.4 2.7 8.6L12 20.2Z"/><path d="m8.7 12 2 2 4.6-4.7"/><path d="M18.8 3.4v2.8M17.4 4.8h2.8"/></svg>;
+  if (name === "dislike") return <svg viewBox="0 0 24 24" aria-hidden><path d="M18.8 7.6A8 8 0 1 0 19 16.1"/><path d="M18.8 4.3v3.3h-3.3"/><path d="M12 7.1v9.3"/><path d="m8.8 13.2 3.2 3.2 3.2-3.2"/><path d="M7 4.8h2.2M4.8 7v2.2"/></svg>;
   if (name === "guitar") return <svg viewBox="0 0 24 24" aria-hidden><path d="M15.7 2.7 21.3 8.3l-2.1 2.1-1.3-1.3-4.3 4.3c.7 2 .2 4.3-1.5 6-2.5 2.5-6.4 2.7-8.7.4-2.3-2.3-2.1-6.2.4-8.7 1.7-1.7 4-2.2 6-1.5l4.3-4.3-1.3-1.3 2.9-1.3ZM7.1 12.2a2.35 2.35 0 1 0 0 4.7 2.35 2.35 0 0 0 0-4.7Zm4-1.1 1.8 1.8 4.3-4.3-1.8-1.8-4.3 4.3Z" /></svg>;
-  if (name === "discover") return <svg viewBox="0 0 24 24" aria-hidden><path d="m12 1.7 2.05 5.25L19.3 9 14.05 11.05 12 16.3l-2.05-5.25L4.7 9l5.25-2.05L12 1.7Zm6.2 11.6 1.15 2.95 2.95 1.15-2.95 1.15-1.15 2.95-1.15-2.95-2.95-1.15 2.95-1.15 1.15-2.95ZM5.1 14.6l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z" /></svg>;
+  if (name === "discover") return <svg viewBox="0 0 24 24" aria-hidden><ellipse cx="11.3" cy="12" rx="8.2" ry="4.5" transform="rotate(-24 11.3 12)"/><ellipse cx="11.3" cy="12" rx="8.2" ry="4.5" transform="rotate(24 11.3 12)"/><circle cx="11.3" cy="12" r="2.1"/><path d="m18.6 3.2.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z"/><path d="M4.2 18.7 6 17.4l1.8 1.3"/></svg>;
   if (name === "equalizer") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h2v18H5V3Zm6 4h2v14h-2V7Zm6-4h2v18h-2V3ZM3 8h6v3H3V8Zm6 5h6v3H9v-3Zm6-4h6v3h-6V9Z" /></svg>;
   if (name === "headphones") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 3a8 8 0 0 0-8 8v6.2A2.8 2.8 0 0 0 6.8 20H9v-7H6v-2a6 6 0 0 1 12 0v2h-3v7h2.2a2.8 2.8 0 0 0 2.8-2.8V11a8 8 0 0 0-8-8ZM7 15v3h-.2a.8.8 0 0 1-.8-.8V15h1Zm11 2.2a.8.8 0 0 1-.8.8H17v-3h1v2.2Z" /></svg>;
   if (name === "car") return <svg viewBox="0 0 24 24" aria-hidden><path d="m5.2 6.2 1.4-2.8A2.5 2.5 0 0 1 8.8 2h6.4a2.5 2.5 0 0 1 2.2 1.4l1.4 2.8 1.4.5c1.1.4 1.8 1.4 1.8 2.6V18a2 2 0 0 1-2 2h-1v1.2a.8.8 0 0 1-.8.8h-1.4a.8.8 0 0 1-.8-.8V20H8v1.2a.8.8 0 0 1-.8.8H5.8a.8.8 0 0 1-.8-.8V20H4a2 2 0 0 1-2-2V9.3c0-1.2.7-2.2 1.8-2.6l1.4-.5ZM7.4 6h9.2l-.9-1.8a.6.6 0 0 0-.5-.3H8.8a.6.6 0 0 0-.5.3L7.4 6ZM5.5 10a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm13 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM7 16h10v-2H7v2Z" /></svg>;
   if (name === "speaker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm5 3.2a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4Zm0 6.1a4.1 4.1 0 1 0 0 8.2 4.1 4.1 0 0 0 0-8.2Zm0 2a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2Z" /></svg>;
-  if (name === "harder") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3.3 18.8h4.1v-4.1h4.1v-4.1h4.1V6.5h4.1"/><path d="m15.8 3.4 3.9 3.1-3.9 3.1"/><path d="M4.2 10.8 8 7l2.1 2.1"/></svg>;
-  if (name === "heavier") return <svg viewBox="0 0 24 24" aria-hidden><path d="M2.2 9.8h2.4v4.4H2.2zM19.4 9.8h2.4v4.4h-2.4zM4.6 7.6h3v8.8h-3zM16.4 7.6h3v8.8h-3zM7.6 11h8.8v2H7.6z"/><path d="M12 3.2v3.1m-2-1.8L12 6.5l2-2"/></svg>;
-  if (name === "faster") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3 8h6M2 12h8M3 16h6"/><path d="m10.2 6.2 7.2 5.8-7.2 5.8"/><path d="m14.7 6.2 7.2 5.8-7.2 5.8"/></svg>;
-  if (name === "match") return <svg viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="7.2"/><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="1.1"/><path d="M12 1.8v2.5M12 19.7v2.5M1.8 12h2.5M19.7 12h2.5"/><path d="M17.2 6.8a7.4 7.4 0 0 1 1.7 2.6"/></svg>;
-  if (name === "melodic") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3 15.6c2.1-3 4.3-3 6.4 0s4.3 3 6.4 0 4.3-3 5.2-1.9"/><path d="M14.5 4.2v10.3a3 3 0 1 1-1.9-2.8V6.3l7.1-1.7v7.9a3 3 0 1 1-1.9-2.8V4.9l-3.3.8"/></svg>;
-  if (name === "darker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M17.7 3.3A8.9 8.9 0 1 0 20.6 16a7.2 7.2 0 0 1-8.8-9.5 7.3 7.3 0 0 1 5.9-3.2Z"/><path d="m5.3 17.4 3 2.6 3-2.6 3 2.6"/><path d="M5.3 21h9"/></svg>;
-  if (name === "surprise") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5.2 5.2 12 2l6.8 3.2L22 12l-3.2 6.8L12 22l-6.8-3.2L2 12l3.2-6.8Z"/><circle cx="8" cy="8" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/></svg>;
+  if (name === "harder") return <svg viewBox="0 0 24 24" aria-hidden><path d="M4.2 19V15M8.4 19v-6.6M12.6 19V9.7M16.8 19V6.8"/><path d="m4.2 12.8 4.3-4.1 3.3 2.4 7.9-7"/><path d="M16.2 4.1h3.5v3.5"/></svg>;
+  if (name === "heavier") return <svg viewBox="0 0 24 24" aria-hidden><path d="M2.7 9.2v5.6M5.4 7.3v9.4M18.6 7.3v9.4M21.3 9.2v5.6M5.4 12h13.2"/><path d="M9 9.1h6v5.8H9z"/><path d="M12 3.1v3.1m-2-1.7L12 6.4l2-1.9"/></svg>;
+  if (name === "faster") return <svg viewBox="0 0 24 24" aria-hidden><path d="M2.5 7.3h6.2M1.5 11.9h8.4M3.3 16.5h5.4"/><path d="m9.2 5.1 8.5 6.8-8.5 6.8"/><path d="m14.1 5.1 7.1 6.8-7.1 6.8"/></svg>;
+  if (name === "match") return <svg viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="7.4"/><circle cx="12" cy="12" r="3.3"/><path d="M12 1.7v3M12 19.3v3M1.7 12h3M19.3 12h3"/><path d="m9.7 12 1.5 1.5 3.4-3.5"/><path d="M17.4 6.6a7.6 7.6 0 0 1 1.3 2.1"/></svg>;
+  if (name === "melodic") return <svg viewBox="0 0 24 24" aria-hidden><path d="M2.5 15.8c2.2-3.4 4.4-3.4 6.6 0s4.4 3.4 6.6 0 4.3-3.4 5.8-1.6"/><path d="M14.7 3.9v10.2a3 3 0 1 1-1.9-2.8V6.2l7-1.7v7.5a3 3 0 1 1-1.9-2.8V4.9"/><path d="M4.1 11.4h2.1"/></svg>;
+  if (name === "darker") return <svg viewBox="0 0 24 24" aria-hidden><path d="M17.8 3A9 9 0 1 0 21 15.7a7.4 7.4 0 0 1-9.1-9.7A7.5 7.5 0 0 1 17.8 3Z"/><path d="M5.7 17.1h8.8M7.3 19.6h6M9.2 22h2.2"/><path d="M18.1 8.2h2.2"/></svg>;
+  if (name === "surprise") return <svg viewBox="0 0 24 24" aria-hidden><path d="m12 2.1 1.7 5.2 5.2 1.7-5.2 1.7-1.7 5.2-1.7-5.2L5.1 9l5.2-1.7L12 2.1Z"/><path d="m18.2 13.2.9 2.7 2.7.9-2.7.9-.9 2.7-.9-2.7-2.7-.9 2.7-.9.9-2.7Z"/><path d="M4.1 14.7 6 16.2l-1.5 1.9"/><path d="M3.5 6.1 5 4.7l1.5 1.4"/></svg>;
+  if (name === "source") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3.5 6.2h8.4M3.5 11.2h6.3M3.5 16.2h4.5"/><path d="M14.1 5.2v10.3a3 3 0 1 1-1.9-2.8V7.1l7-1.8v7.8a3 3 0 1 1-1.9-2.8V5.8"/><path d="m18.4 2.9 1.1 1.1 1.4-1.4"/></svg>;
   if (name === "save") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 3h11.6L21 7.4V21H3V3h2Zm1 2v5h10V5H6Zm0 8v6h12v-6H6Zm2-7h6v2H8V6Z" /></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden><path d="M9 4v11.1A4.5 4.5 0 1 0 11 19V8.1l8-2V12a4.5 4.5 0 1 0 2 3.9V2L9 4Z" /></svg>;
 }
@@ -1892,18 +1894,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <button type="button" className={`tr-heroPrefButton tr-prefLike ${track?.favorite ? "is-liked" : ""}`} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
               if (!track) return;
               void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
-            }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><PlayerIcon name="like" /><span>{track?.favorite ? "Liked" : "Like"}</span></button>
+            }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"} aria-pressed={Boolean(track?.favorite)}><span className="tr-heroPrefIcon"><PlayerIcon name="like" /></span><span className="tr-heroPrefLabel">{track?.favorite ? "Liked" : "Like"}</span></button>
             <button type="button" className={`tr-heroPrefButton tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
               if (!track) return;
               void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
-            }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><PlayerIcon name="dislike" /><span>Play Less</span></button>
+            }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"} aria-pressed={Boolean(track?.play_less)}><span className="tr-heroPrefIcon"><PlayerIcon name="dislike" /></span><span className="tr-heroPrefLabel">Play Less</span></button>
             <button type="button" className={`tr-heroPrefButton tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
               if (!track) return;
               setDiscoverMessage("SEARCHING…");
               void discoverMoreFromTrack(track, player.libraryTracks)
                 .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
                 .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
-            }} aria-label="Rediscover music"><PlayerIcon name="discover" /><span>Rediscover</span></button>
+            }} aria-label="Rediscover music" aria-busy={Boolean(discoverMessage)}><span className="tr-heroPrefIcon"><PlayerIcon name="discover" /></span><span className="tr-heroPrefLabel">Rediscover</span></button>
           </div>
         </div>
       </div>
@@ -1990,17 +1992,17 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           <strong>{volumePercent}%</strong>
         </label>
         <div className="tr-playerSourceTools">
-          <label className={`tr-audioQueueSelector ${sourcePulse ? "is-changed" : ""}`}>
+          <label className={`tr-audioQueueSelector ${sourcePulse ? "is-changed" : ""} ${neuralRadioActive ? "is-intelligent-source" : ""}`}>
             <span>PLAYING FROM</span>
             <span className="tr-audioQueueSelectorField">
-              <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="music" /></i>
+              <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="source" /></i>
               <span ref={sourceDesktopValueRef} className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--desktop" aria-hidden>{activePlaylistLabel}</span>
               <span ref={sourceMobileValueRef} className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--mobile" aria-hidden>{activePlaylistMobileLabel}</span>
               <select value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
               </select>
-              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></i>
+              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m7.4 9.1 4.6 4.6 4.6-4.6"/><path d="M9.4 6.7h5.2"/></svg></i>
             </span>
           </label>
           <button type="button" data-profile={player.outputProfile} className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
@@ -5943,6 +5945,370 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:32px!important;min-height:32px!important;padding:0 3px!important;font-size:7.2px!important;gap:3px!important}
           .tr-heroPrefButton svg{width:13px!important;height:13px!important;flex-basis:13px!important}
         }
+
+
+        /* MVP_TRAINER_V5_R7_3_PREMIUM_CONTROL_SYSTEM */
+        /* Signature Neural rail: brighter typography, custom icon medallions, machined active state. */
+        .tr-neuralCommand{
+          border-color:rgba(205,231,239,.17);
+          background:
+            linear-gradient(180deg,rgba(31,47,55,.90) 0%,rgba(11,23,29,.96) 50%,rgba(4,10,14,.995) 100%);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.085),
+            inset 0 -1px 0 rgba(0,0,0,.72),
+            inset 0 -12px 20px rgba(0,0,0,.13);
+        }
+        .tr-neuralCommandIcon{
+          width:29px;
+          height:29px;
+          flex-basis:29px;
+          border:1px solid rgba(var(--neural-rgb),.18);
+          border-radius:9px;
+          background:
+            radial-gradient(circle at 50% 32%,rgba(var(--neural-rgb),.15),transparent 58%),
+            linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.14));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.055),
+            0 0 0 1px rgba(0,0,0,.20);
+          filter:drop-shadow(0 0 5px rgba(var(--neural-rgb),.30));
+        }
+        .tr-neuralCommandIcon svg{
+          width:22px;
+          height:22px;
+          stroke-width:1.78;
+          stroke-linecap:round;
+          stroke-linejoin:round;
+        }
+        .tr-neuralCommandLabel{
+          color:#fbfeff;
+          font-size:8.45px;
+          font-weight:1000;
+          letter-spacing:.032em;
+          text-shadow:0 1px 1px rgba(0,0,0,.85),0 0 4px rgba(255,255,255,.045);
+        }
+        .tr-neuralCommand.is-surprise .tr-neuralCommandIcon{
+          background:
+            radial-gradient(circle at 34% 28%,rgba(255,221,114,.22),transparent 40%),
+            radial-gradient(circle at 72% 70%,rgba(162,116,255,.15),transparent 50%),
+            linear-gradient(180deg,rgba(255,255,255,.04),rgba(0,0,0,.15));
+          border-color:rgba(255,205,92,.28);
+          filter:drop-shadow(0 0 6px rgba(255,197,70,.28));
+        }
+        .tr-neuralCommand.is-active{
+          animation:trNeuralPremiumLock .48s cubic-bezier(.18,.82,.28,1) 1;
+          border:1px solid transparent;
+          background:
+            radial-gradient(circle at 50% 18%,rgba(var(--neural-rgb),.30),transparent 45%) padding-box,
+            linear-gradient(180deg,rgba(var(--neural-rgb),.19),rgba(4,15,21,.985) 72%) padding-box,
+            linear-gradient(135deg,rgba(var(--neural-rgb),.98),rgba(255,255,255,.30) 46%,rgba(var(--neural-rgb),.72)) border-box;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.20),
+            inset 0 -1px 0 rgba(0,0,0,.65),
+            inset 0 0 28px rgba(var(--neural-rgb),.13),
+            0 0 0 1px rgba(var(--neural-rgb),.10),
+            0 0 24px rgba(var(--neural-rgb),.27),
+            0 10px 22px rgba(0,0,0,.20);
+        }
+        .tr-neuralCommand.is-active:before{
+          left:12%;right:12%;height:2px;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.68),rgba(var(--neural-rgb),1),rgba(255,255,255,.54),transparent);
+          opacity:.92;
+          box-shadow:0 0 8px rgba(var(--neural-rgb),.65);
+        }
+        .tr-neuralCommand.is-active:after{
+          inset:2px;
+          border-radius:7px;
+          background:
+            linear-gradient(118deg,rgba(255,255,255,.105),transparent 28%,rgba(var(--neural-rgb),.10) 62%,transparent 84%);
+          opacity:.92;
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandIcon{
+          color:#fff;
+          border-color:rgba(var(--neural-rgb),.68);
+          background:
+            radial-gradient(circle at 50% 45%,rgba(var(--neural-rgb),.40),rgba(var(--neural-rgb),.12) 58%,rgba(3,11,15,.34) 100%);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.18),
+            inset 0 0 14px rgba(var(--neural-rgb),.16),
+            0 0 13px rgba(var(--neural-rgb),.24);
+          filter:drop-shadow(0 0 8px rgba(var(--neural-rgb),.86));
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandLabel{
+          color:#fff;
+          text-shadow:0 0 10px rgba(var(--neural-rgb),.34),0 1px 1px rgba(0,0,0,.82);
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandLed{
+          width:18px;
+          height:2px;
+          bottom:1px;
+          border-radius:999px;
+          background:linear-gradient(90deg,transparent,var(--neural-accent),transparent);
+          box-shadow:0 0 10px rgba(var(--neural-rgb),.95);
+        }
+        @keyframes trNeuralPremiumLock{
+          0%{filter:brightness(1.5);transform:translateY(-1px);box-shadow:0 0 0 1px rgba(var(--neural-rgb),.38),0 0 34px rgba(var(--neural-rgb),.42)}
+          100%{filter:brightness(1);transform:none}
+        }
+
+        /* Luxury track-preference capsules. The three controls share one material system, each with a distinct identity. */
+        .tr-heroPreferenceStage{
+          gap:10px!important;
+          perspective:700px;
+        }
+        .tr-heroPrefButton{
+          min-height:44px!important;
+          padding:0 18px!important;
+          gap:8px!important;
+          border:1px solid rgba(222,239,244,.20)!important;
+          border-radius:14px!important;
+          background:
+            radial-gradient(circle at 50% -35%,rgba(255,255,255,.12),transparent 45%),
+            linear-gradient(180deg,rgba(43,59,68,.82) 0%,rgba(15,27,34,.91) 48%,rgba(5,11,15,.98) 100%)!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.14),
+            inset 0 -1px 0 rgba(0,0,0,.72),
+            inset 0 -13px 22px rgba(0,0,0,.13),
+            0 9px 22px rgba(0,0,0,.24)!important;
+          color:#f8fcfd!important;
+          font-size:10px!important;
+          letter-spacing:.018em!important;
+          -webkit-font-smoothing:antialiased;
+          text-rendering:geometricPrecision;
+        }
+        .tr-heroPrefButton:before{
+          left:12%!important;right:12%!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.32),rgba(var(--pref-rgb),.55),rgba(255,255,255,.20),transparent)!important;
+          opacity:.84!important;
+        }
+        .tr-heroPrefButton:after{
+          left:18%!important;right:18%!important;bottom:-8px!important;height:16px!important;
+          background:radial-gradient(ellipse,rgba(var(--pref-rgb),.18),transparent 70%)!important;
+          filter:blur(7px)!important;
+          opacity:.36!important;
+        }
+        .tr-heroPrefIcon{
+          position:relative!important;
+          z-index:2!important;
+          width:26px!important;
+          height:26px!important;
+          flex:0 0 26px!important;
+          display:grid!important;
+          place-items:center!important;
+          border:1px solid rgba(var(--pref-rgb),.25)!important;
+          border-radius:9px!important;
+          background:
+            radial-gradient(circle at 50% 38%,rgba(var(--pref-rgb),.18),transparent 62%),
+            linear-gradient(180deg,rgba(255,255,255,.045),rgba(0,0,0,.14))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.08),
+            0 0 0 1px rgba(0,0,0,.18)!important;
+        }
+        .tr-heroPrefIcon svg{
+          width:18px!important;
+          height:18px!important;
+          color:var(--pref-accent)!important;
+          fill:none!important;
+          stroke:currentColor!important;
+          stroke-width:1.75!important;
+          stroke-linecap:round!important;
+          stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 5px rgba(var(--pref-rgb),.34))!important;
+        }
+        .tr-heroPrefLabel{
+          position:relative!important;
+          z-index:2!important;
+          display:block!important;
+          min-width:max-content!important;
+          color:#fbfeff!important;
+          font-size:inherit!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          text-align:center!important;
+          white-space:nowrap!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.82)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike{--pref-rgb:48,232,147;--pref-accent:rgb(71 245 164)}
+        .tr-heroPrefButton.tr-prefLess{--pref-rgb:255,153,69;--pref-accent:rgb(255 171 82)}
+        .tr-heroPrefButton.tr-prefDiscover{--pref-rgb:126,104,255;--pref-accent:rgb(157 128 255)}
+        .tr-heroPrefButton:hover:not(:disabled){
+          transform:translateY(-1px) scale(1.006)!important;
+          border-color:rgba(var(--pref-rgb),.54)!important;
+          background:
+            radial-gradient(circle at 50% -28%,rgba(var(--pref-rgb),.15),transparent 52%),
+            linear-gradient(180deg,rgba(47,66,76,.92),rgba(9,23,30,.98))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.16),
+            0 11px 24px rgba(0,0,0,.26),
+            0 0 18px rgba(var(--pref-rgb),.10)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked,
+        .tr-heroPrefButton.tr-prefLess.is-disliked,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          border:1px solid transparent!important;
+          background:
+            radial-gradient(circle at 50% -18%,rgba(var(--pref-rgb),.34),transparent 52%) padding-box,
+            linear-gradient(180deg,rgba(var(--pref-rgb),.23),rgba(7,19,25,.97) 72%) padding-box,
+            linear-gradient(135deg,rgba(var(--pref-rgb),.96),rgba(255,255,255,.25) 48%,rgba(var(--pref-rgb),.62)) border-box!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.20),
+            inset 0 0 26px rgba(var(--pref-rgb),.12),
+            0 0 0 1px rgba(var(--pref-rgb),.11),
+            0 10px 24px rgba(0,0,0,.23),
+            0 0 24px rgba(var(--pref-rgb),.22)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked:before,
+        .tr-heroPrefButton.tr-prefLess.is-disliked:before,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming:before{
+          height:2px!important;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.62),rgba(var(--pref-rgb),1),rgba(255,255,255,.46),transparent)!important;
+          box-shadow:0 0 8px rgba(var(--pref-rgb),.55)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefIcon{
+          border-color:rgba(var(--pref-rgb),.72)!important;
+          background:
+            radial-gradient(circle at 50% 45%,rgba(var(--pref-rgb),.38),rgba(var(--pref-rgb),.10) 62%,rgba(2,9,12,.22))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.17),
+            inset 0 0 12px rgba(var(--pref-rgb),.15),
+            0 0 12px rgba(var(--pref-rgb),.18)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon svg,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon svg,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefIcon svg{
+          color:#fff!important;
+          filter:drop-shadow(0 0 7px rgba(var(--pref-rgb),.88))!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefLabel,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefLabel,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefLabel{
+          color:#fff!important;
+          text-shadow:0 0 9px rgba(var(--pref-rgb),.25),0 1px 1px rgba(0,0,0,.80)!important;
+        }
+
+        /* Playing From: premium source selector with visible custom arrow and intelligent-source state. */
+        .tr-audioQueueSelector>span:first-child{
+          margin:0 0 6px 3px!important;
+          color:#c3dce4!important;
+          font-size:8.5px!important;
+          font-weight:1000!important;
+          letter-spacing:.115em!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.65)!important;
+        }
+        .tr-playerSourceTools .tr-audioQueueSelectorField{
+          position:relative!important;
+          border:1px solid rgba(102,192,222,.30)!important;
+          border-radius:11px!important;
+          background:
+            radial-gradient(circle at 13% 0%,rgba(55,183,221,.075),transparent 34%),
+            linear-gradient(180deg,rgba(14,35,45,.98),rgba(5,16,22,.995))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.075),
+            inset 0 -1px 0 rgba(0,0,0,.67),
+            0 8px 18px rgba(0,0,0,.17)!important;
+          overflow:hidden!important;
+          transition:border-color .18s ease,box-shadow .18s ease,background .18s ease!important;
+        }
+        .tr-playerSourceTools .tr-audioQueueSelectorField:before{
+          content:"";
+          position:absolute;
+          left:42px;right:42px;top:0;height:1px;
+          background:linear-gradient(90deg,transparent,rgba(93,214,248,.48),transparent);
+          pointer-events:none;
+          z-index:1;
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon,
+        .tr-audioQueueSelectorField .tr-sourceChevron{
+          width:32px!important;
+          height:32px!important;
+          align-self:center!important;
+          display:grid!important;
+          place-items:center!important;
+          border:1px solid rgba(86,205,240,.20)!important;
+          border-radius:9px!important;
+          color:#61dfff!important;
+          background:
+            radial-gradient(circle at 50% 38%,rgba(56,207,244,.14),transparent 62%),
+            linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.16))!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.055)!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon svg{
+          width:19px!important;height:19px!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:1.65!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 5px rgba(75,211,247,.36));
+        }
+        .tr-audioQueueSelectorField .tr-sourceChevron{
+          justify-self:end!important;
+          color:#bcecf8!important;
+          border-color:rgba(118,209,234,.24)!important;
+          transition:color .16s ease,border-color .16s ease,background .16s ease,filter .16s ease!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceChevron svg{
+          width:17px!important;height:17px!important;
+          margin:0!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:1.75!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+        }
+        .tr-audioQueueSelectorValue{
+          color:#fbfeff!important;
+          font-weight:950!important;
+          letter-spacing:.005em!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.74)!important;
+        }
+        .tr-audioQueueSelector:hover .tr-audioQueueSelectorField{
+          border-color:rgba(91,211,244,.50)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 8px 20px rgba(0,0,0,.18),0 0 16px rgba(65,197,233,.09)!important;
+        }
+        .tr-audioQueueSelector:hover .tr-sourceChevron{
+          color:#fff!important;
+          border-color:rgba(95,220,252,.55)!important;
+          background:radial-gradient(circle,rgba(70,211,246,.18),rgba(4,15,20,.30))!important;
+          filter:drop-shadow(0 0 5px rgba(80,216,250,.32));
+        }
+        .tr-audioQueueSelector.is-intelligent-source .tr-audioQueueSelectorField{
+          border-color:rgba(79,207,244,.52)!important;
+          background:
+            radial-gradient(circle at 12% 0%,rgba(57,207,245,.12),transparent 38%),
+            radial-gradient(circle at 88% 100%,rgba(122,104,255,.075),transparent 42%),
+            linear-gradient(180deg,rgba(12,39,50,.99),rgba(4,16,22,.995))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.09),
+            inset 0 0 18px rgba(63,204,242,.045),
+            0 8px 20px rgba(0,0,0,.18),
+            0 0 15px rgba(57,200,238,.08)!important;
+        }
+        .tr-audioQueueSelector.is-intelligent-source .tr-sourceIcon{
+          color:#79e5ff!important;
+          border-color:rgba(90,221,252,.40)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.075),0 0 9px rgba(69,205,243,.10)!important;
+        }
+        .tr-audioQueueSelector.is-intelligent-source .tr-sourceChevron{
+          color:#fff!important;
+          border-color:rgba(100,215,247,.42)!important;
+        }
+
+        @media(max-width:760px){
+          .tr-neuralCommandIcon{width:26px;height:26px;flex-basis:26px;border-radius:8px}
+          .tr-neuralCommandIcon svg{width:20px;height:20px;stroke-width:1.72}
+          .tr-neuralCommandLabel{font-size:6.55px;line-height:1;letter-spacing:.012em}
+          .tr-heroPreferenceStage{gap:6px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
+            height:36px!important;min-height:36px!important;padding:0 5px!important;gap:4px!important;border-radius:11px!important;font-size:7.9px!important
+          }
+          .tr-heroPrefIcon{width:22px!important;height:22px!important;flex-basis:22px!important;border-radius:7px!important}
+          .tr-heroPrefIcon svg{width:15px!important;height:15px!important;stroke-width:1.75!important}
+          .tr-audioQueueSelector>span:first-child{font-size:8px!important;margin-bottom:5px!important}
+          .tr-audioQueueSelectorField .tr-sourceIcon,.tr-audioQueueSelectorField .tr-sourceChevron{width:34px!important;height:34px!important;border-radius:9px!important}
+          .tr-audioQueueSelectorField .tr-sourceIcon svg{width:18px!important;height:18px!important}
+          .tr-audioQueueSelectorField .tr-sourceChevron svg{width:16px!important;height:16px!important}
+        }
+        @media(max-width:390px){
+          .tr-neuralCommandLabel{font-size:5.95px}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){height:34px!important;min-height:34px!important;padding:0 3px!important;gap:3px!important;font-size:7.35px!important}
+          .tr-heroPrefIcon{width:20px!important;height:20px!important;flex-basis:20px!important;border-radius:6px!important}
+          .tr-heroPrefIcon svg{width:14px!important;height:14px!important}
+        }
+        @media(prefers-reduced-motion:reduce){.tr-neuralCommand.is-active{animation:none!important}}
       `}</style>
     </section>
   );
