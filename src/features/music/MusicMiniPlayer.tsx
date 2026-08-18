@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R7_5_MOBILE_FINAL_CONTROL_POLISH */
+/* MVP_TRAINER_V5_R7_6_ACTION_BUTTON_LUXURY_FINISH */
 import {
   useEffect,
   useRef,
@@ -7146,6 +7146,271 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector .tr-audioQueueSelectorValue--mobile{
             padding:0 6px!important;font-size:9.7px!important;
           }
+        }
+
+
+        /* MVP_TRAINER_V5_R7_6_ACTION_BUTTON_LUXURY_FINISH */
+        /*
+         * Focused visual-only luxury pass for LIKE / PLAY LESS / REDISCOVER.
+         * No player behavior, radio logic, DSP, transport, source selector,
+         * spectrum, or mobile queue logic is changed here.
+         */
+
+        .tr-heroPreferenceStage{
+          gap:11px!important;
+          align-items:center!important;
+          justify-content:center!important;
+        }
+
+        .tr-heroPrefButton{
+          --pref-rgb:113,208,235;
+          --pref-accent:rgb(113 208 235);
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:hidden!important;
+          min-height:46px!important;
+          padding:0 20px!important;
+          gap:8px!important;
+          border:1px solid transparent!important;
+          border-radius:14px!important;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.11) 0%,rgba(255,255,255,.025) 22%,transparent 42%) padding-box,
+            radial-gradient(120% 150% at 50% -40%,rgba(var(--pref-rgb),.16),transparent 58%) padding-box,
+            linear-gradient(180deg,rgba(35,51,60,.97) 0%,rgba(13,26,33,.985) 48%,rgba(3,9,13,.998) 100%) padding-box,
+            linear-gradient(145deg,rgba(255,255,255,.28),rgba(var(--pref-rgb),.36) 28%,rgba(118,151,163,.16) 58%,rgba(255,255,255,.08)) border-box!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.23),
+            inset 0 -1px 0 rgba(0,0,0,.92),
+            inset 0 -10px 18px rgba(0,0,0,.25),
+            inset 0 0 0 1px rgba(var(--pref-rgb),.055),
+            0 2px 0 rgba(0,0,0,.72),
+            0 10px 22px rgba(0,0,0,.30),
+            0 0 14px rgba(var(--pref-rgb),.07)!important;
+          transform:translateZ(0)!important;
+          transition:
+            transform .16s cubic-bezier(.2,.8,.2,1),
+            filter .18s ease,
+            box-shadow .18s ease,
+            background .18s ease!important;
+        }
+
+        /* Specular glass crown. Keeps the face dimensional instead of matte. */
+        .tr-heroPrefButton::before{
+          content:""!important;
+          position:absolute!important;
+          z-index:0!important;
+          left:7%!important;
+          right:7%!important;
+          top:2px!important;
+          height:43%!important;
+          border-radius:11px 11px 48% 48%!important;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.17),rgba(255,255,255,.038) 48%,transparent 100%)!important;
+          opacity:.80!important;
+          pointer-events:none!important;
+        }
+
+        /* Controlled accent bloom under the emblem, never a full neon blob. */
+        .tr-heroPrefButton::after{
+          content:""!important;
+          position:absolute!important;
+          z-index:0!important;
+          width:70px!important;
+          height:36px!important;
+          left:2px!important;
+          top:50%!important;
+          transform:translateY(-50%)!important;
+          border-radius:50%!important;
+          background:radial-gradient(ellipse,rgba(var(--pref-rgb),.18),rgba(var(--pref-rgb),.045) 45%,transparent 72%)!important;
+          filter:blur(5px)!important;
+          opacity:.72!important;
+          pointer-events:none!important;
+        }
+
+        .tr-heroPrefButton>*{position:relative!important;z-index:2!important}
+
+        .tr-heroPrefIcon{
+          position:relative!important;
+          display:grid!important;
+          place-items:center!important;
+          width:31px!important;
+          height:31px!important;
+          flex:0 0 31px!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+          overflow:visible!important;
+          isolation:isolate!important;
+          transform:translateY(-1px)!important;
+          filter:
+            drop-shadow(0 6px 8px rgba(0,0,0,.52))
+            drop-shadow(0 0 7px rgba(var(--pref-rgb),.42))!important;
+        }
+        .tr-heroPrefIcon::before{
+          content:""!important;
+          position:absolute!important;
+          z-index:-2!important;
+          inset:-1px!important;
+          clip-path:polygon(50% 0%,89% 14%,86% 65%,50% 100%,14% 65%,11% 14%)!important;
+          background:
+            linear-gradient(145deg,rgba(255,255,255,.58) 0%,rgba(var(--pref-rgb),.74) 24%,rgba(var(--pref-rgb),.30) 55%,rgba(1,8,12,.98) 100%)!important;
+          filter:drop-shadow(0 2px 2px rgba(0,0,0,.48))!important;
+        }
+        .tr-heroPrefIcon::after{
+          content:""!important;
+          position:absolute!important;
+          z-index:-1!important;
+          inset:3px!important;
+          clip-path:polygon(50% 0%,89% 14%,86% 65%,50% 100%,14% 65%,11% 14%)!important;
+          background:
+            radial-gradient(circle at 48% 30%,rgba(255,255,255,.15),transparent 33%),
+            radial-gradient(circle at 50% 42%,rgba(var(--pref-rgb),.34),rgba(4,16,22,.93) 70%)!important;
+        }
+        .tr-heroPrefIcon svg{
+          position:relative!important;
+          z-index:2!important;
+          width:20.5px!important;
+          height:20.5px!important;
+          color:#fff!important;
+          fill:none!important;
+          stroke:var(--pref-accent)!important;
+          stroke-width:2.25!important;
+          stroke-linecap:round!important;
+          stroke-linejoin:round!important;
+          filter:
+            drop-shadow(0 0 2px rgba(255,255,255,.42))
+            drop-shadow(0 0 6px rgba(var(--pref-rgb),.86))!important;
+        }
+
+        .tr-heroPrefLabel{
+          text-transform:uppercase!important;
+          color:#ffffff!important;
+          font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-size:11.15px!important;
+          font-weight:950!important;
+          font-variation-settings:"wght" 920!important;
+          font-feature-settings:"kern" 1,"liga" 1!important;
+          letter-spacing:.082em!important;
+          line-height:1!important;
+          text-rendering:geometricPrecision!important;
+          -webkit-font-smoothing:antialiased!important;
+          text-shadow:
+            0 2px 2px rgba(0,0,0,.98),
+            0 0 1px rgba(255,255,255,.42),
+            0 0 5px rgba(var(--pref-rgb),.10)!important;
+        }
+
+        .tr-heroPrefButton.tr-prefLike{--pref-rgb:55,235,153;--pref-accent:rgb(55 235 153)!important}
+        .tr-heroPrefButton.tr-prefLess{--pref-rgb:246,151,69;--pref-accent:rgb(246 151 69)!important}
+        .tr-heroPrefButton.tr-prefDiscover{--pref-rgb:144,104,255;--pref-accent:rgb(144 104 255)!important}
+
+        .tr-heroPrefButton:hover:not(:disabled){
+          transform:translateY(-2px)!important;
+          filter:saturate(1.06) brightness(1.04)!important;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.025) 30%,transparent 48%) padding-box,
+            radial-gradient(110% 150% at 18% -28%,rgba(var(--pref-rgb),.24),transparent 60%) padding-box,
+            linear-gradient(180deg,rgba(38,57,66,.98),rgba(10,23,30,.99) 55%,rgba(3,9,13,.998)) padding-box,
+            linear-gradient(145deg,rgba(255,255,255,.35),rgba(var(--pref-rgb),.64) 33%,rgba(var(--pref-rgb),.24) 70%,rgba(255,255,255,.10)) border-box!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.28),
+            inset 0 -10px 18px rgba(0,0,0,.24),
+            0 2px 0 rgba(0,0,0,.65),
+            0 12px 25px rgba(0,0,0,.34),
+            0 0 20px rgba(var(--pref-rgb),.14)!important;
+        }
+        .tr-heroPrefButton:active:not(:disabled){
+          transform:translateY(1px) scale(.992)!important;
+          box-shadow:
+            inset 0 2px 8px rgba(0,0,0,.34),
+            inset 0 1px 0 rgba(255,255,255,.16),
+            0 1px 0 rgba(0,0,0,.72),
+            0 5px 13px rgba(0,0,0,.28)!important;
+        }
+
+        /* Full-face selected glass. Active and inactive now read instantly. */
+        .tr-heroPrefButton.tr-prefLike.is-liked,
+        .tr-heroPrefButton.tr-prefLess.is-disliked,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          border-color:transparent!important;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,.035) 25%,transparent 43%) padding-box,
+            radial-gradient(100% 180% at 20% -25%,rgba(var(--pref-rgb),.56),transparent 58%) padding-box,
+            linear-gradient(180deg,rgba(var(--pref-rgb),.34) 0%,rgba(var(--pref-rgb),.19) 42%,rgba(5,17,22,.985) 100%) padding-box,
+            linear-gradient(145deg,rgba(255,255,255,.62),rgba(var(--pref-rgb),1) 30%,rgba(var(--pref-rgb),.58) 72%,rgba(255,255,255,.17)) border-box!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.36),
+            inset 0 -10px 20px rgba(0,0,0,.25),
+            inset 0 0 25px rgba(var(--pref-rgb),.20),
+            0 2px 0 rgba(0,0,0,.62),
+            0 11px 25px rgba(0,0,0,.31),
+            0 0 23px rgba(var(--pref-rgb),.27)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked::after,
+        .tr-heroPrefButton.tr-prefLess.is-disliked::after,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming::after{
+          opacity:1!important;
+          background:radial-gradient(ellipse,rgba(var(--pref-rgb),.36),rgba(var(--pref-rgb),.08) 48%,transparent 72%)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefIcon{
+          transform:translateY(-2px) scale(1.07)!important;
+          filter:
+            drop-shadow(0 7px 9px rgba(0,0,0,.50))
+            drop-shadow(0 0 11px rgba(var(--pref-rgb),.88))!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefLabel,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefLabel,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefLabel{
+          color:#fff!important;
+          text-shadow:
+            0 2px 2px rgba(0,0,0,.98),
+            0 0 1px rgba(255,255,255,.62),
+            0 0 8px rgba(var(--pref-rgb),.48)!important;
+        }
+
+        @media(max-width:760px){
+          .tr-heroPreferenceStage{gap:6px!important}
+          .tr-heroPrefButton{
+            min-height:39px!important;
+            height:39px!important;
+            padding:0 9px!important;
+            gap:5px!important;
+            border-radius:11px!important;
+          }
+          .tr-heroPrefIcon{
+            width:25px!important;
+            height:25px!important;
+            flex-basis:25px!important;
+          }
+          .tr-heroPrefIcon svg{width:16.5px!important;height:16.5px!important;stroke-width:2.2!important}
+          .tr-heroPrefLabel{
+            font-size:8.85px!important;
+            font-weight:950!important;
+            font-variation-settings:"wght" 920!important;
+            letter-spacing:.064em!important;
+          }
+        }
+        @media(max-width:420px){
+          .tr-heroPreferenceStage{gap:4px!important}
+          .tr-heroPrefButton{
+            min-height:36px!important;
+            height:36px!important;
+            padding:0 6px!important;
+            gap:4px!important;
+            border-radius:10px!important;
+          }
+          .tr-heroPrefIcon{width:23px!important;height:23px!important;flex-basis:23px!important}
+          .tr-heroPrefIcon svg{width:15.5px!important;height:15.5px!important}
+          .tr-heroPrefLabel{font-size:8.05px!important;letter-spacing:.045em!important}
+        }
+        @media(max-width:360px){
+          .tr-heroPrefButton{padding:0 4px!important;gap:3px!important}
+          .tr-heroPrefIcon{width:21px!important;height:21px!important;flex-basis:21px!important}
+          .tr-heroPrefIcon svg{width:14.5px!important;height:14.5px!important}
+          .tr-heroPrefLabel{font-size:7.55px!important;letter-spacing:.028em!important}
         }
       `}</style>
     </section>
