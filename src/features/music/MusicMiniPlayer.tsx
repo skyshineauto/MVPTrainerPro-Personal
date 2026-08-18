@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R7_3_PREMIUM_CONTROL_SYSTEM */
+/* MVP_TRAINER_V5_R7_4_PREMIUM_CONTROL_CLEANUP_TRANSPORT */
 import {
   useEffect,
   useRef,
@@ -215,13 +215,13 @@ function volumeRailColor(percent: number) {
 }
 
 function PlayerIcon({ name }: { name: IconName }) {
-  if (name === "play") return <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5.4v13.2L19 12 8 5.4Z" /></svg>;
-  if (name === "pause") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 5h4v14H7V5Zm6 0h4v14h-4V5Z" /></svg>;
-  if (name === "stop") return <svg viewBox="0 0 24 24" aria-hidden><rect x="6" y="6" width="12" height="12" rx="1.6" /></svg>;
-  if (name === "back") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 6h2.5v12H5V6Zm3.8 6 9.7-6v12l-9.7-6Z" /></svg>;
-  if (name === "next") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.5 6H19v12h-2.5V6ZM5.5 6l9.7 6-9.7 6V6Z" /></svg>;
-  if (name === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden><path d="M16.8 4.5H20V7.7h-2V6.9l-3.7 3.7-1.4-1.4 3.6-3.6h-.7v-2Zm-12.8 2h3.2c1.6 0 2.7.5 3.7 1.5l6.8 6.8V14H20v5.5h-5.5v-2h1.8l-6.8-6.8c-.6-.6-1.2-.8-2.3-.8H4v-3.4Zm0 11h3.2c1.1 0 1.7-.2 2.3-.8l1.5-1.5 1.4 1.4-1.5 1.5c-1 1-2.1 1.4-3.7 1.4H4v-2Z" /></svg>;
-  if (name === "repeat") return <svg viewBox="0 0 24 24" aria-hidden><path d="M7 5h9.3l-1.8-1.8L16 1.8 20.2 6 16 10.2l-1.5-1.4L16.3 7H7a3 3 0 0 0-3 3v1H2v-1a5 5 0 0 1 5-5Zm15 8v1a5 5 0 0 1-5 5H7.7l1.8 1.8L8 22.2 3.8 18 8 13.8l1.5 1.4L7.7 17H17a3 3 0 0 0 3-3v-1h2Z" /></svg>;
+  if (name === "play") return <svg viewBox="0 0 24 24" aria-hidden><path d="M8.2 5.4 18.8 12 8.2 18.6V5.4Z"/><path d="M6.3 4.2v15.6"/></svg>;
+  if (name === "pause") return <svg viewBox="0 0 24 24" aria-hidden><rect x="6.6" y="4.7" width="4.1" height="14.6" rx="1.25"/><rect x="13.3" y="4.7" width="4.1" height="14.6" rx="1.25"/></svg>;
+  if (name === "stop") return <svg viewBox="0 0 24 24" aria-hidden><rect x="5.9" y="5.9" width="12.2" height="12.2" rx="2.2"/><path d="M8.2 8.2h7.6v7.6H8.2z"/></svg>;
+  if (name === "back") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3.6 5.3v13.4"/><path d="m11.7 6.2-7.1 5.8 7.1 5.8V6.2Z"/><path d="m20.1 6.2-7.1 5.8 7.1 5.8V6.2Z"/></svg>;
+  if (name === "next") return <svg viewBox="0 0 24 24" aria-hidden><path d="M20.4 5.3v13.4"/><path d="m12.3 6.2 7.1 5.8-7.1 5.8V6.2Z"/><path d="m3.9 6.2 7.1 5.8-7.1 5.8V6.2Z"/></svg>;
+  if (name === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden><path d="M3.1 6.8h3.4c1.7 0 2.8.5 3.9 1.7l6.2 6.7c.8.9 1.6 1.2 2.9 1.2H21"/><path d="m18 13.4 3 3-3 3"/><path d="M3.1 17.2h3.2c1.6 0 2.7-.5 3.7-1.6l1.9-2.1"/><path d="m13.4 8.6 3.2-3.5c.8-.9 1.7-1.3 2.9-1.3H21"/><path d="m18 1 3 2.9-3 3"/></svg>;
+  if (name === "repeat") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5.7 6h11.2c2.1 0 3.8 1.7 3.8 3.8v.8"/><path d="m17.7 3 3 3-3 3"/><path d="M18.3 18H7.1a3.8 3.8 0 0 1-3.8-3.8v-.8"/><path d="m6.3 21-3-3 3-3"/></svg>;
   if (name === "like") return <svg viewBox="0 0 24 24" aria-hidden><path d="M12 20.2 5.1 13.8C1.7 10.6 3.6 5.2 7.8 5.2c1.9 0 3.4 1 4.2 2.4.8-1.4 2.3-2.4 4.2-2.4 4.2 0 6.1 5.4 2.7 8.6L12 20.2Z"/><path d="m8.7 12 2 2 4.6-4.7"/><path d="M18.8 3.4v2.8M17.4 4.8h2.8"/></svg>;
   if (name === "dislike") return <svg viewBox="0 0 24 24" aria-hidden><path d="M18.8 7.6A8 8 0 1 0 19 16.1"/><path d="M18.8 4.3v3.3h-3.3"/><path d="M12 7.1v9.3"/><path d="m8.8 13.2 3.2 3.2 3.2-3.2"/><path d="M7 4.8h2.2M4.8 7v2.2"/></svg>;
   if (name === "guitar") return <svg viewBox="0 0 24 24" aria-hidden><path d="M15.7 2.7 21.3 8.3l-2.1 2.1-1.3-1.3-4.3 4.3c.7 2 .2 4.3-1.5 6-2.5 2.5-6.4 2.7-8.7.4-2.3-2.3-2.1-6.2.4-8.7 1.7-1.7 4-2.2 6-1.5l4.3-4.3-1.3-1.3 2.9-1.3ZM7.1 12.2a2.35 2.35 0 1 0 0 4.7 2.35 2.35 0 0 0 0-4.7Zm4-1.1 1.8 1.8 4.3-4.3-1.8-1.8-4.3 4.3Z" /></svg>;
@@ -1815,7 +1815,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const activePlaylistLabel = player.activePlaylistId
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : player.activePlaylistName || "All Uploaded Songs";
-  const activePlaylistMobileLabel = activePlaylistLabel;
+  const activePlaylistMobileLabel = activePlaylistLabel
+    .replace(/^MVP Neural • /, "NEURAL • ")
+    .replace(/^Like Radio • /, "LIKE RADIO • ");
 
   useEffect(() => {
     let frame = 0;
@@ -1844,8 +1846,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     const fitSourceLabels = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        fitLabel(sourceDesktopValueRef.current, 12, 9.5);
-        fitLabel(sourceMobileValueRef.current, 14, 10.5);
+        fitLabel(sourceDesktopValueRef.current, 13, 9.5);
+        fitLabel(sourceMobileValueRef.current, 12.75, 8.75);
       });
     };
 
@@ -2002,7 +2004,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
               </select>
-              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m7.4 9.1 4.6 4.6 4.6-4.6"/><path d="M9.4 6.7h5.2"/></svg></i>
+              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.8 8.8 5.2 5.4 5.2-5.4"/></svg></i>
             </span>
           </label>
           <button type="button" data-profile={player.outputProfile} className={`tr-audioEqToggle tr-dspStatusToggle ${eqOpen ? "is-active" : ""}`} onClick={() => setEqOpen((current) => !current)} aria-expanded={eqOpen}>
@@ -6309,6 +6311,509 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-heroPrefIcon svg{width:14px!important;height:14px!important}
         }
         @media(prefers-reduced-motion:reduce){.tr-neuralCommand.is-active{animation:none!important}}
+
+
+        /* MVP_TRAINER_V5_R7_4_PREMIUM_CONTROL_CLEANUP_TRANSPORT */
+        /*
+         * R7.4 visual-only layer.
+         * - removes the accidental nested icon-box look
+         * - turns Neural/feedback glyphs into bold shield emblems
+         * - rebuilds transport controls around luminous hardware-style faces
+         * - repairs Playing From so icon/text/chevron actually share the full field
+         */
+
+        /* --------------------------
+           TRANSPORT: luminous hardware controls
+           -------------------------- */
+        .tr-playerTransportStage{
+          gap:10px!important;
+          align-items:start!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportUnit{
+          grid-template-rows:58px 16px!important;
+          gap:7px!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton{
+          --transport-rgb:54,202,255;
+          position:relative!important;
+          isolation:isolate!important;
+          overflow:visible!important;
+          height:58px!important;
+          min-height:58px!important;
+          border:1px solid rgba(var(--transport-rgb),.72)!important;
+          border-radius:14px!important;
+          background:
+            radial-gradient(circle at 50% 46%,rgba(var(--transport-rgb),.13),transparent 58%),
+            linear-gradient(180deg,rgba(13,27,34,.985),rgba(2,8,12,.995))!important;
+          color:rgb(202 245 255)!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.16),
+            inset 0 0 0 1px rgba(var(--transport-rgb),.10),
+            inset 0 0 20px rgba(var(--transport-rgb),.09),
+            0 0 9px rgba(var(--transport-rgb),.22),
+            0 0 24px rgba(var(--transport-rgb),.08),
+            0 10px 26px rgba(0,0,0,.28)!important;
+          transition:transform .12s ease,border-color .16s ease,box-shadow .16s ease,filter .16s ease!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton::before{
+          content:""!important;
+          display:block!important;
+          position:absolute!important;
+          z-index:-1!important;
+          inset:3px!important;
+          border-radius:11px!important;
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.075),transparent 27%),
+            radial-gradient(circle at 50% 118%,rgba(var(--transport-rgb),.11),transparent 55%)!important;
+          box-shadow:inset 0 0 16px rgba(var(--transport-rgb),.08)!important;
+          transform:none!important;
+          pointer-events:none!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton::after{
+          content:""!important;
+          display:block!important;
+          position:absolute!important;
+          left:12%!important;
+          right:12%!important;
+          top:-2px!important;
+          height:2px!important;
+          border-radius:999px!important;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.72),rgba(var(--transport-rgb),1),rgba(255,255,255,.52),transparent)!important;
+          box-shadow:0 0 10px rgba(var(--transport-rgb),.66)!important;
+          pointer-events:none!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton.is-previous,
+        .tr-playerTransportStage .tr-audioTransportButton.is-next{
+          --transport-rgb:49,201,255;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton.is-stop{
+          --transport-rgb:255,76,101;
+          color:rgb(255 201 211)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton--primary{
+          --transport-rgb:255,174,54;
+          color:rgb(255 225 166)!important;
+          border-color:rgba(255,180,61,.92)!important;
+          background:
+            radial-gradient(circle at 50% 45%,rgba(255,176,58,.26),transparent 52%),
+            linear-gradient(180deg,rgba(48,29,8,.98),rgba(14,9,4,.995))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,245,218,.24),
+            inset 0 0 0 1px rgba(255,188,74,.13),
+            inset 0 0 24px rgba(255,167,42,.15),
+            0 0 11px rgba(255,164,39,.30),
+            0 0 28px rgba(255,157,27,.11),
+            0 10px 26px rgba(0,0,0,.29)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){
+          transform:translateY(-1px)!important;
+          filter:brightness(1.10)!important;
+          border-color:rgba(var(--transport-rgb),.96)!important;
+          box-shadow:
+            inset 0 1px rgba(255,255,255,.20),
+            inset 0 0 22px rgba(var(--transport-rgb),.14),
+            0 0 12px rgba(var(--transport-rgb),.35),
+            0 0 30px rgba(var(--transport-rgb),.13),
+            0 12px 28px rgba(0,0,0,.30)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportButton:active:not(:disabled){
+          transform:translateY(1px) scale(.985)!important;
+          filter:brightness(.98)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportFace{
+          display:grid!important;
+          place-items:center!important;
+          width:100%!important;
+          height:100%!important;
+          color:inherit!important;
+          filter:drop-shadow(0 0 6px rgba(var(--transport-rgb),.58));
+        }
+        .tr-playerTransportStage .tr-audioTransportFace svg{
+          width:31px!important;
+          height:31px!important;
+          overflow:visible!important;
+          fill:none!important;
+          stroke:currentColor!important;
+          stroke-width:1.85!important;
+          stroke-linecap:round!important;
+          stroke-linejoin:round!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportUnit>span{
+          color:#d8e7ec!important;
+          font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-size:8.6px!important;
+          font-weight:850!important;
+          letter-spacing:.075em!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.85)!important;
+        }
+        .tr-playerTransportStage .tr-audioTransportUnit.is-primary>span{color:#ffd077!important}
+        .tr-playerTransportStage .tr-audioTransportUnit.is-stop>span{color:#ff9aaa!important}
+
+        /* Secondary transport family. */
+        .tr-playerModeStage .tr-audioModeButton{
+          position:relative!important;
+          overflow:hidden!important;
+          border:1px solid rgba(68,202,244,.42)!important;
+          border-radius:11px!important;
+          background:
+            radial-gradient(circle at 30% 0%,rgba(57,204,245,.09),transparent 45%),
+            linear-gradient(180deg,rgba(15,35,44,.98),rgba(4,13,18,.995))!important;
+          color:#e8f8fc!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.09),
+            inset 0 0 13px rgba(52,197,239,.055),
+            0 0 10px rgba(52,197,239,.055)!important;
+        }
+        .tr-playerModeStage .tr-audioModeButton::after{
+          content:""!important;
+          position:absolute!important;
+          left:15%!important;right:15%!important;top:0!important;height:1px!important;
+          background:linear-gradient(90deg,transparent,rgba(107,226,255,.72),transparent)!important;
+          opacity:.62!important;
+        }
+        .tr-playerModeStage .tr-audioModeButton svg{
+          width:18px!important;height:18px!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:1.8!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 4px rgba(70,215,255,.35));
+        }
+        .tr-playerModeStage .tr-audioModeButton.is-active{
+          border-color:rgba(74,220,255,.82)!important;
+          background:
+            radial-gradient(circle at 26% 0%,rgba(65,220,255,.18),transparent 46%),
+            linear-gradient(180deg,rgba(13,64,81,.98),rgba(5,28,38,.995))!important;
+          color:#d8f8ff!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.13),inset 0 0 18px rgba(64,215,252,.10),0 0 15px rgba(61,211,250,.16)!important;
+        }
+
+        /* --------------------------
+           NEURAL: shield emblems, not boxes
+           -------------------------- */
+        .tr-neuralCommandIcon{
+          position:relative!important;
+          width:30px!important;
+          height:30px!important;
+          flex-basis:30px!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+          filter:drop-shadow(0 5px 7px rgba(0,0,0,.42)) drop-shadow(0 0 6px rgba(var(--neural-rgb),.38))!important;
+          overflow:visible!important;
+          isolation:isolate!important;
+        }
+        .tr-neuralCommandIcon::before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          inset:0;
+          clip-path:polygon(50% 0%,88% 15%,84% 66%,50% 100%,16% 66%,12% 15%);
+          background:
+            linear-gradient(145deg,rgba(255,255,255,.24),rgba(var(--neural-rgb),.28) 26%,rgba(var(--neural-rgb),.11) 56%,rgba(1,8,12,.92) 100%);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.20),inset 0 0 12px rgba(var(--neural-rgb),.18);
+        }
+        .tr-neuralCommandIcon::after{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          inset:3px;
+          clip-path:polygon(50% 0%,88% 15%,84% 66%,50% 100%,16% 66%,12% 15%);
+          background:radial-gradient(circle at 50% 36%,rgba(var(--neural-rgb),.20),rgba(3,12,16,.82) 72%);
+        }
+        .tr-neuralCommandIcon svg{
+          position:relative!important;z-index:2!important;
+          width:21px!important;height:21px!important;
+          color:var(--neural-accent)!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:2.05!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 4px rgba(var(--neural-rgb),.80))!important;
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandIcon{
+          border:0!important;background:none!important;box-shadow:none!important;
+          filter:drop-shadow(0 6px 9px rgba(0,0,0,.42)) drop-shadow(0 0 9px rgba(var(--neural-rgb),.80))!important;
+          transform:translateY(-1px) scale(1.06)!important;
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandIcon::before{
+          background:linear-gradient(145deg,rgba(255,255,255,.42),rgba(var(--neural-rgb),.58) 25%,rgba(var(--neural-rgb),.22) 58%,rgba(2,9,13,.94) 100%);
+        }
+        .tr-neuralCommand.is-active .tr-neuralCommandIcon::after{
+          background:radial-gradient(circle at 50% 38%,rgba(var(--neural-rgb),.42),rgba(3,12,16,.72) 70%);
+        }
+        .tr-neuralCommandLabel{
+          color:#ffffff!important;
+          font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-weight:900!important;
+          letter-spacing:.025em!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.82)!important;
+        }
+
+        /* --------------------------
+           FEEDBACK ACTIONS: premium type + raised shield emblems
+           -------------------------- */
+        .tr-heroPrefButton{
+          min-height:44px!important;
+          border-radius:13px!important;
+          background:
+            linear-gradient(180deg,rgba(42,58,67,.92) 0%,rgba(12,25,32,.96) 52%,rgba(4,10,14,.995) 100%)!important;
+          border-color:rgba(218,238,244,.22)!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.14),
+            inset 0 -1px 0 rgba(0,0,0,.72),
+            0 9px 22px rgba(0,0,0,.25)!important;
+        }
+        .tr-heroPrefIcon{
+          position:relative!important;
+          width:29px!important;
+          height:29px!important;
+          flex:0 0 29px!important;
+          border:0!important;
+          border-radius:0!important;
+          background:none!important;
+          box-shadow:none!important;
+          overflow:visible!important;
+          isolation:isolate!important;
+          filter:drop-shadow(0 5px 7px rgba(0,0,0,.40)) drop-shadow(0 0 6px rgba(var(--pref-rgb),.30))!important;
+        }
+        .tr-heroPrefIcon::before{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          inset:0;
+          clip-path:polygon(50% 0%,88% 15%,84% 66%,50% 100%,16% 66%,12% 15%);
+          background:linear-gradient(145deg,rgba(255,255,255,.26),rgba(var(--pref-rgb),.30) 27%,rgba(var(--pref-rgb),.11) 58%,rgba(2,9,13,.94) 100%);
+        }
+        .tr-heroPrefIcon::after{
+          content:"";
+          position:absolute;
+          z-index:-1;
+          inset:3px;
+          clip-path:polygon(50% 0%,88% 15%,84% 66%,50% 100%,16% 66%,12% 15%);
+          background:radial-gradient(circle at 50% 36%,rgba(var(--pref-rgb),.19),rgba(3,12,16,.82) 72%);
+        }
+        .tr-heroPrefIcon svg{
+          position:relative!important;z-index:2!important;
+          width:20px!important;height:20px!important;
+          color:var(--pref-accent)!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:2.05!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 5px rgba(var(--pref-rgb),.62))!important;
+        }
+        .tr-heroPrefLabel{
+          font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-size:10.6px!important;
+          font-weight:850!important;
+          font-variation-settings:"wght" 780!important;
+          font-feature-settings:"kern" 1,"liga" 1!important;
+          letter-spacing:.012em!important;
+          color:#fff!important;
+          text-rendering:geometricPrecision!important;
+          -webkit-font-smoothing:antialiased!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.88),0 0 1px rgba(255,255,255,.12)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked,
+        .tr-heroPrefButton.tr-prefLess.is-disliked,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming{
+          background:
+            radial-gradient(circle at 18% 0%,rgba(var(--pref-rgb),.29),transparent 45%) padding-box,
+            linear-gradient(180deg,rgba(var(--pref-rgb),.24),rgba(5,17,22,.985) 76%) padding-box,
+            linear-gradient(135deg,rgba(var(--pref-rgb),1),rgba(255,255,255,.30) 46%,rgba(var(--pref-rgb),.70)) border-box!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.21),
+            inset 0 0 28px rgba(var(--pref-rgb),.13),
+            0 0 14px rgba(var(--pref-rgb),.18),
+            0 10px 24px rgba(0,0,0,.24)!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefIcon{
+          border:0!important;background:none!important;box-shadow:none!important;
+          transform:translateY(-1px) scale(1.05)!important;
+          filter:drop-shadow(0 6px 9px rgba(0,0,0,.42)) drop-shadow(0 0 9px rgba(var(--pref-rgb),.68))!important;
+        }
+        .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon::before,
+        .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon::before,
+        .tr-heroPrefButton.tr-prefDiscover.is-confirming .tr-heroPrefIcon::before{
+          background:linear-gradient(145deg,rgba(255,255,255,.45),rgba(var(--pref-rgb),.64) 27%,rgba(var(--pref-rgb),.24) 58%,rgba(2,9,13,.94) 100%);
+        }
+
+        /* --------------------------
+           PLAYING FROM: repaired full-field layout
+           -------------------------- */
+        .tr-playerSourceTools .tr-audioQueueSelector{
+          min-width:0!important;
+          width:100%!important;
+          max-width:none!important;
+        }
+        .tr-playerSourceTools .tr-audioQueueSelectorField{
+          position:relative!important;
+          display:grid!important;
+          grid-template-columns:44px minmax(0,1fr) 40px!important;
+          grid-template-rows:1fr!important;
+          align-items:stretch!important;
+          width:100%!important;
+          height:42px!important;
+          min-height:42px!important;
+          padding:0!important;
+          overflow:hidden!important;
+          border-radius:11px!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon,
+        .tr-audioQueueSelectorField .tr-sourceChevron{
+          position:relative!important;
+          z-index:3!important;
+          width:100%!important;
+          height:100%!important;
+          min-width:0!important;
+          min-height:0!important;
+          border:0!important;
+          border-radius:0!important;
+          background:transparent!important;
+          box-shadow:none!important;
+          align-self:stretch!important;
+          justify-self:stretch!important;
+          display:grid!important;
+          place-items:center!important;
+          overflow:visible!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon{
+          grid-column:1!important;
+          grid-row:1!important;
+          color:#5ee1ff!important;
+          background:linear-gradient(90deg,rgba(54,205,245,.10),transparent)!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon::after{
+          content:"";
+          position:absolute;
+          right:0;top:22%;bottom:22%;width:1px;
+          background:linear-gradient(180deg,transparent,rgba(101,213,243,.28),transparent);
+        }
+        .tr-audioQueueSelectorField .tr-sourceIcon svg{
+          width:23px!important;height:23px!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:1.95!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 6px rgba(76,220,255,.48))!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceChevron{
+          grid-column:3!important;
+          grid-row:1!important;
+          color:#d8f6ff!important;
+          background:linear-gradient(270deg,rgba(81,206,241,.09),transparent)!important;
+        }
+        .tr-audioQueueSelectorField .tr-sourceChevron::before{
+          content:"";
+          position:absolute;
+          left:0;top:22%;bottom:22%;width:1px;
+          background:linear-gradient(180deg,transparent,rgba(101,213,243,.24),transparent);
+        }
+        .tr-audioQueueSelectorField .tr-sourceChevron svg{
+          width:22px!important;height:22px!important;
+          margin:0!important;
+          overflow:visible!important;
+          fill:none!important;stroke:currentColor!important;stroke-width:2.25!important;stroke-linecap:round!important;stroke-linejoin:round!important;
+          filter:drop-shadow(0 0 5px rgba(91,220,255,.36))!important;
+        }
+        .tr-audioQueueSelectorValue{
+          position:relative!important;
+          left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;
+          grid-column:2!important;
+          grid-row:1!important;
+          width:100%!important;
+          height:100%!important;
+          min-width:0!important;
+          padding:0 12px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:flex-start!important;
+          overflow:hidden!important;
+          white-space:nowrap!important;
+          text-overflow:ellipsis!important;
+          color:#fff!important;
+          font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-weight:820!important;
+          font-variation-settings:"wght" 760!important;
+          letter-spacing:.005em!important;
+          line-height:1!important;
+          text-shadow:0 1px 1px rgba(0,0,0,.82)!important;
+          z-index:1!important;
+        }
+        .tr-audioQueueSelectorValue--desktop{display:flex!important}
+        .tr-audioQueueSelectorValue--mobile{display:none!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelectorField select{
+          position:absolute!important;
+          inset:0!important;
+          z-index:5!important;
+          width:100%!important;
+          height:100%!important;
+          opacity:0!important;
+          cursor:pointer!important;
+        }
+        .tr-audioQueueSelector:hover .tr-sourceChevron{
+          color:#fff!important;
+          filter:brightness(1.15)!important;
+        }
+
+        @media(max-width:760px){
+          .tr-playerTransportStage{gap:6px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:49px 14px!important;gap:5px!important}
+          .tr-playerTransportStage .tr-audioTransportButton{height:49px!important;min-height:49px!important;border-radius:12px!important}
+          .tr-playerTransportStage .tr-audioTransportButton::before{inset:2px!important;border-radius:9px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:25px!important;height:25px!important;stroke-width:1.9!important}
+          .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:8px!important;letter-spacing:.03em!important}
+          .tr-playerModeStage{gap:7px!important}
+          .tr-playerModeStage .tr-audioModeButton{height:38px!important;min-height:38px!important;border-radius:10px!important}
+
+          .tr-neuralCommandIcon{width:27px!important;height:27px!important;flex-basis:27px!important}
+          .tr-neuralCommandIcon svg{width:19px!important;height:19px!important;stroke-width:2!important}
+          .tr-neuralCommandLabel{font-size:6.7px!important;letter-spacing:.008em!important}
+
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){
+            height:37px!important;min-height:37px!important;padding:0 7px!important;gap:5px!important;border-radius:11px!important;
+          }
+          .tr-heroPrefIcon{width:24px!important;height:24px!important;flex-basis:24px!important}
+          .tr-heroPrefIcon svg{width:16px!important;height:16px!important;stroke-width:2!important}
+          .tr-heroPrefLabel{font-size:8.45px!important;letter-spacing:.005em!important}
+
+          .tr-playerSourceTools .tr-audioQueueSelectorField{
+            grid-template-columns:38px minmax(0,1fr) 38px!important;
+            height:46px!important;min-height:46px!important;
+            border-radius:11px!important;
+          }
+          .tr-audioQueueSelectorValue--desktop{display:none!important}
+          .tr-audioQueueSelectorValue--mobile{display:flex!important}
+          .tr-audioQueueSelectorValue{
+            padding:0 8px!important;
+            font-size:12px!important;
+            letter-spacing:0!important;
+          }
+          .tr-audioQueueSelectorField .tr-sourceIcon svg{width:21px!important;height:21px!important}
+          .tr-audioQueueSelectorField .tr-sourceChevron svg{width:21px!important;height:21px!important}
+          .tr-audioQueueSelector>span:first-child{font-size:8.5px!important;letter-spacing:.10em!important;margin-bottom:5px!important}
+        }
+        @media(max-width:420px){
+          .tr-playerTransportStage{gap:4px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:46px 13px!important}
+          .tr-playerTransportStage .tr-audioTransportButton{height:46px!important;min-height:46px!important;border-radius:11px!important}
+          .tr-playerTransportStage .tr-audioTransportFace svg{width:23px!important;height:23px!important}
+          .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:7.5px!important}
+          .tr-playerModeStage .tr-audioModeButton{height:36px!important;min-height:36px!important}
+          .tr-playerSourceTools .tr-audioQueueSelectorField{grid-template-columns:35px minmax(0,1fr) 35px!important;height:44px!important;min-height:44px!important}
+          .tr-audioQueueSelectorValue{padding:0 6px!important;font-size:11px!important}
+          .tr-audioQueueSelectorField .tr-sourceIcon svg,.tr-audioQueueSelectorField .tr-sourceChevron svg{width:19px!important;height:19px!important}
+          .tr-heroPrefLabel{font-size:7.9px!important}
+        }
+        @media(max-width:360px){
+          .tr-audioQueueSelectorValue{font-size:9.8px!important;padding:0 5px!important}
+          .tr-playerSourceTools .tr-audioQueueSelectorField{grid-template-columns:33px minmax(0,1fr) 33px!important}
+          .tr-heroPrefButton,.tr-heroPrefButton:nth-child(n){padding:0 4px!important;gap:3px!important}
+          .tr-heroPrefIcon{width:21px!important;height:21px!important;flex-basis:21px!important}
+          .tr-heroPrefIcon svg{width:15px!important;height:15px!important}
+          .tr-heroPrefLabel{font-size:7.3px!important}
+        }
+        @media(hover:none){
+          .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){transform:none!important;filter:none!important}
+        }
+        @media(prefers-reduced-motion:reduce){
+          .tr-playerTransportStage .tr-audioTransportButton,
+          .tr-playerModeStage .tr-audioModeButton,
+          .tr-neuralCommandIcon,
+          .tr-heroPrefIcon{transition:none!important;animation:none!important}
+        }
       `}</style>
     </section>
   );
