@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R8_1_1_BUILD_FIX */
+/* MVP_TRAINER_V5_R8_2_DESKTOP_MOBILE_CONTROL_RESIZE */
 import {
   useEffect,
   useRef,
@@ -9530,6 +9530,294 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         @media(hover:none){
           .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),.tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled),.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){transform:none!important}
           .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike.is-liked,.tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike[aria-pressed="true"],.tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess.is-disliked,.tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess[aria-pressed="true"],.tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover.is-confirming,.tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover[aria-busy="true"],.tr-audioDeck--pro7 .tr-neuralCommand.is-active,.tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"]{transform:translateY(-4px) scale(1.025)!important}
+        }
+
+
+        /* =====================================================================
+           MVP TRAINER V5 R8.2 — DESKTOP + MOBILE CONTROL RESIZE
+           Final responsive scale pass: huge icon-first transport on every
+           screen, compact mobile feature controls, tighter Repeat/Shuffle,
+           and a shorter 4+3 Neural deck without sacrificing readable text.
+           ===================================================================== */
+
+        /* ---------- DESKTOP TRANSPORT: BIG, BOLD, HARD TO MISS ---------- */
+        .tr-audioDeck--pro7 .tr-playerTransportStage{
+          width:min(570px,78%)!important;
+          display:grid!important;
+          grid-template-columns:repeat(4,minmax(0,1fr))!important;
+          gap:8px!important;
+          margin:7px auto 2px!important;
+          justify-items:center!important;
+          align-items:start!important;
+          overflow:visible!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{
+          width:100%!important;
+          grid-template-rows:124px 24px!important;
+          gap:3px!important;
+          justify-items:center!important;
+          overflow:visible!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{
+          width:124px!important;
+          height:124px!important;
+          min-width:124px!important;
+          min-height:124px!important;
+          max-width:none!important;
+          border:0!important;
+          background:transparent!important;
+          box-shadow:none!important;
+          overflow:visible!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{
+          transform:translateZ(52px)!important;
+          filter:drop-shadow(0 4px 0 rgba(0,0,0,.94)) drop-shadow(0 10px 5px rgba(0,0,0,.54)) drop-shadow(0 21px 15px rgba(0,0,0,.24))!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{
+          width:108px!important;
+          height:108px!important;
+          max-width:none!important;
+          transform:scale(1.12)!important;
+          transform-origin:center!important;
+          overflow:visible!important;
+          filter:drop-shadow(0 0 9px rgba(var(--transport-rgb),.36))!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{
+          width:116px!important;
+          height:116px!important;
+          transform:scale(1.15)!important;
+          filter:drop-shadow(0 0 12px rgba(255,184,55,.72)) drop-shadow(0 0 28px rgba(255,157,20,.24))!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{
+          width:94px!important;
+          height:94px!important;
+          transform:scale(1.14)!important;
+          filter:drop-shadow(0 0 10px rgba(255,72,83,.62))!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit>span{
+          font-size:14.5px!important;
+          line-height:1!important;
+          font-weight:1000!important;
+          letter-spacing:.025em!important;
+          color:#fff!important;
+          opacity:1!important;
+          text-shadow:0 2px 1px rgba(0,0,0,1),0 5px 10px rgba(0,0,0,.68)!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary>span{color:#ffe19a!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop>span{color:#ffc8ce!important}
+
+        /* ---------- SECONDARY MODES: CLEAR, BUT DO NOT DOMINATE ---------- */
+        .tr-audioDeck--pro7 .tr-playerModeStage{
+          width:min(410px,66%)!important;
+          gap:10px!important;
+          margin:2px auto 11px!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{
+          height:48px!important;
+          min-height:48px!important;
+          padding:0 11px!important;
+          grid-template-columns:30px minmax(0,1fr) auto!important;
+          gap:7px!important;
+        }
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{width:28px!important;height:28px!important}
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton>span{font-size:11.5px!important;color:#fff!important}
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-modeState{font-size:9px!important;color:#f1f8fa!important}
+
+        /* ---------- MOBILE: TRUE PHONE-SPECIFIC REBALANCE ---------- */
+        @media(max-width:760px){
+          .tr-audioDeck--pro7 .tr-playerHero{
+            grid-template-columns:41% minmax(0,1fr)!important;
+            min-height:188px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioArtwork{min-height:188px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentity{
+            min-height:188px!important;
+            padding:10px 8px 10px 14px!important;
+            justify-content:center!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentityMain strong{
+            font-size:clamp(22px,6.4vw,27px)!important;
+            line-height:1.01!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentityMain small{
+            margin-top:5px!important;
+            font-size:13.5px!important;
+            line-height:1.06!important;
+          }
+
+          /* Three equal compact feature tiles. No giant Rediscover slab. */
+          .tr-audioDeck--pro7 .tr-heroPreferenceStage{
+            width:100%!important;
+            max-width:none!important;
+            margin-top:10px!important;
+            display:grid!important;
+            grid-template-columns:repeat(3,minmax(0,1fr))!important;
+            gap:4px!important;
+            align-items:stretch!important;
+          }
+          .tr-audioDeck--pro7 .tr-heroPrefButton,
+          .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){
+            grid-column:auto!important;
+            justify-self:stretch!important;
+            width:100%!important;
+            min-width:0!important;
+            max-width:none!important;
+            height:52px!important;
+            min-height:52px!important;
+            padding:4px 2px 5px!important;
+            gap:2px!important;
+            border-radius:11px!important;
+          }
+          .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(3){grid-column:auto!important;width:100%!important;min-width:0!important}
+          .tr-audioDeck--pro7 .tr-heroPrefIcon{width:31px!important;height:27px!important;flex:0 0 27px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefIcon svg{width:27px!important;height:27px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefLabel{
+            font-size:9.8px!important;
+            line-height:1!important;
+            letter-spacing:0!important;
+            color:#fff!important;
+            white-space:nowrap!important;
+            text-shadow:0 2px 1px rgba(0,0,0,.98),0 4px 7px rgba(0,0,0,.48)!important;
+          }
+
+          /* Main transport gets the visual authority on phone. */
+          .tr-audioDeck--pro7 .tr-playerTransportStage{
+            width:100%!important;
+            max-width:430px!important;
+            display:grid!important;
+            grid-template-columns:repeat(4,minmax(0,1fr))!important;
+            gap:3px!important;
+            margin:6px auto 2px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{
+            width:100%!important;
+            grid-template-rows:90px 21px!important;
+            gap:2px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{
+            width:90px!important;
+            height:90px!important;
+            min-width:90px!important;
+            min-height:90px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{
+            width:78px!important;
+            height:78px!important;
+            transform:scale(1.16)!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{
+            width:86px!important;
+            height:86px!important;
+            transform:scale(1.18)!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{
+            width:70px!important;
+            height:70px!important;
+            transform:scale(1.16)!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit>span{
+            font-size:11.5px!important;
+            line-height:1!important;
+            letter-spacing:.005em!important;
+            color:#fff!important;
+          }
+
+          /* Repeat / Shuffle shrink back to secondary controls. */
+          .tr-audioDeck--pro7 .tr-playerModeStage{
+            width:100%!important;
+            gap:7px!important;
+            margin:2px auto 9px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{
+            height:42px!important;
+            min-height:42px!important;
+            padding:0 9px!important;
+            grid-template-columns:25px minmax(0,1fr) auto!important;
+            gap:6px!important;
+            border-radius:11px!important;
+          }
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{width:23px!important;height:23px!important}
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton>span{font-size:10.4px!important;letter-spacing:.01em!important}
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-modeState{font-size:8px!important}
+
+          /* Neural stays 4 + 3, but loses the oversized vertical bulk. */
+          .tr-audioDeck--pro7 .tr-neuralSteering{width:calc(100% - 8px)!important;margin:7px auto 7px!important}
+          .tr-audioDeck--pro7 .tr-neuralSteeringRail{
+            grid-template-columns:repeat(8,minmax(0,1fr))!important;
+            gap:5px!important;
+            padding:0!important;
+            overflow:visible!important;
+          }
+          .tr-audioDeck--pro7 .tr-neuralCommand{
+            grid-column:span 2!important;
+            height:67px!important;
+            min-height:67px!important;
+            padding:5px 3px 6px!important;
+            gap:2px!important;
+            border-radius:11px!important;
+          }
+          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(5){grid-column:2 / span 2!important}
+          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(6){grid-column:4 / span 2!important}
+          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(7){grid-column:6 / span 2!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandIcon{width:36px!important;height:31px!important;flex-basis:31px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:30px!important;height:30px!important;stroke-width:2.15!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandLabel{
+            font-size:10.2px!important;
+            line-height:1.01!important;
+            letter-spacing:0!important;
+            color:#fff!important;
+            text-shadow:0 2px 1px rgba(0,0,0,.98),0 4px 7px rgba(0,0,0,.48)!important;
+          }
+          .tr-audioDeck--pro7 .tr-audioTimeline>span{font-size:11.5px!important;color:#fff!important}
+        }
+
+        @media(max-width:420px){
+          .tr-audioDeck--pro7 .tr-playerHero{grid-template-columns:40% minmax(0,1fr)!important;min-height:182px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioArtwork{min-height:182px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentity{min-height:182px!important;padding:9px 6px 9px 12px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentityMain strong{font-size:clamp(21px,6vw,25px)!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentityMain small{font-size:13px!important}
+          .tr-audioDeck--pro7 .tr-heroPreferenceStage{gap:3px!important;margin-top:8px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefButton,
+          .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){height:49px!important;min-height:49px!important;padding:3px 1px 4px!important;border-radius:10px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefIcon{width:29px!important;height:25px!important;flex-basis:25px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefIcon svg{width:25px!important;height:25px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefLabel{font-size:9.3px!important}
+
+          .tr-audioDeck--pro7 .tr-playerTransportStage{gap:1px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:86px 20px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:86px!important;height:86px!important;min-width:86px!important;min-height:86px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:75px!important;height:75px!important;transform:scale(1.16)!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:82px!important;height:82px!important;transform:scale(1.18)!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:67px!important;height:67px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:10.9px!important}
+
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{height:40px!important;min-height:40px!important}
+          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton>span{font-size:10px!important}
+
+          .tr-audioDeck--pro7 .tr-neuralSteeringRail{gap:4px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommand{height:64px!important;min-height:64px!important;padding:4px 2px 5px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandIcon{width:34px!important;height:29px!important;flex-basis:29px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:28px!important;height:28px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:9.8px!important}
+        }
+
+        @media(max-width:360px){
+          .tr-audioDeck--pro7 .tr-playerHero{grid-template-columns:39% minmax(0,1fr)!important;min-height:178px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioArtwork{min-height:178px!important}
+          .tr-audioDeck--pro7 .tr-playerHero .tr-audioIdentity{min-height:178px!important;padding-left:10px!important}
+          .tr-audioDeck--pro7 .tr-heroPrefLabel{font-size:8.8px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{grid-template-rows:78px 19px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:78px!important;height:78px!important;min-width:78px!important;min-height:78px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:68px!important;height:68px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:75px!important;height:75px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:61px!important;height:61px!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit>span{font-size:10.2px!important}
+          .tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:9.3px!important}
         }
 
       `}</style>
