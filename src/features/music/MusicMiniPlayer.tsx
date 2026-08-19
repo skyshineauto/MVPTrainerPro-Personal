@@ -1471,8 +1471,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const sourceUpgradeInputRef = useRef<HTMLInputElement | null>(null);
   const restoredProfileRef = useRef<string>("");
   const heroIdentityRef = useRef<HTMLDivElement | null>(null);
-  const sourceDesktopValueRef = useRef<HTMLSpanElement | null>(null);
-  const sourceMobileValueRef = useRef<HTMLSpanElement | null>(null);
   const heroTitleRef = useRef<HTMLElement | null>(null);
   const heroArtistRef = useRef<HTMLElement | null>(null);
   const heroActionsRef = useRef<HTMLDivElement | null>(null);
@@ -1818,58 +1816,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : player.activePlaylistName || "All Uploaded Songs";
 
-  useEffect(() => {
-    let frame = 0;
-
-    const fitLabel = (
-      element: HTMLSpanElement | null,
-      maxSize: number,
-      minSize: number
-    ) => {
-      if (!element) return;
-
-      element.style.fontSize = `${maxSize}px`;
-      element.style.letterSpacing = "0.015em";
-
-      let size = maxSize;
-      while (element.scrollWidth > element.clientWidth + 1 && size > minSize) {
-        size = Math.max(minSize, size - 0.25);
-        element.style.fontSize = `${size}px`;
-      }
-
-      if (element.scrollWidth > element.clientWidth + 1) {
-        element.style.letterSpacing = "0";
-      }
-    };
-
-    const fitSourceLabels = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        fitLabel(sourceDesktopValueRef.current, 13, 9.5);
-        fitLabel(sourceMobileValueRef.current, 12.75, 8.75);
-      });
-    };
-
-    fitSourceLabels();
-
-    const observer =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(fitSourceLabels)
-        : null;
-
-    if (sourceDesktopValueRef.current) observer?.observe(sourceDesktopValueRef.current);
-    if (sourceMobileValueRef.current) observer?.observe(sourceMobileValueRef.current);
-
-    window.addEventListener("resize", fitSourceLabels);
-    window.addEventListener("orientationchange", fitSourceLabels);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer?.disconnect();
-      window.removeEventListener("resize", fitSourceLabels);
-      window.removeEventListener("orientationchange", fitSourceLabels);
-    };
-  }, [activePlaylistLabel]);
 
   return (
     <section
@@ -1891,25 +1837,26 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <strong ref={heroTitleRef}>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
             <small ref={heroArtistRef}>{track?.artist || "Unknown Artist"}</small>
           </button>
-          <div ref={heroActionsRef} className="tr-heroPreferenceStage" aria-label="Track preference controls">
-            <button type="button" className={`tr-heroPrefButton tr-prefLike ${track?.favorite ? "is-liked" : ""}`} aria-pressed={!!track?.favorite} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
-              if (!track) return;
-              void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
-            }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><span className="tr-heroPrefIcon"><PlayerIcon name="like" /></span><span className="tr-heroPrefLabel">LIKE</span></button>
-            <button type="button" className={`tr-heroPrefButton tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} aria-pressed={!!track?.play_less} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
-              if (!track) return;
-              void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
-            }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><span className="tr-heroPrefIcon"><PlayerIcon name="dislike" /></span><span className="tr-heroPrefLabel">PLAY LESS</span></button>
-            <button type="button" className={`tr-heroPrefButton tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
-              if (!track) return;
-              setDiscoverMessage("SEARCHING…");
-              void discoverMoreFromTrack(track, player.libraryTracks)
-                .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
-                .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
-            }} aria-label="Rediscover music" aria-busy={Boolean(discoverMessage)}><span className="tr-heroPrefIcon"><PlayerIcon name="discover" /></span><span className="tr-heroPrefLabel">REDISCOVER</span></button>
-          </div>
         </div>
       </div>
+
+        <div ref={heroActionsRef} className="tr-heroPreferenceStage" aria-label="Track preference controls">
+          <button type="button" className={`tr-heroPrefButton tr-prefLike ${track?.favorite ? "is-liked" : ""}`} aria-pressed={!!track?.favorite} disabled={!track} title={track?.favorite ? "Unlike" : "Like"} onClick={() => {
+            if (!track) return;
+            void setPlayerMusicPreference(track.id, track.favorite ? "neutral" : "like");
+          }} aria-label={track?.favorite ? "Unlike this song" : "Like this song"}><span className="tr-heroPrefIcon"><PlayerIcon name="like" /></span><span className="tr-heroPrefLabel">LIKE</span></button>
+          <button type="button" className={`tr-heroPrefButton tr-prefLess ${track?.play_less ? "is-disliked" : ""}`} aria-pressed={!!track?.play_less} disabled={!track} title={track?.play_less ? "Remove Play Less" : "Play Less"} onClick={() => {
+            if (!track) return;
+            void setPlayerMusicPreference(track.id, track.play_less ? "neutral" : "play_less");
+          }} aria-label={track?.play_less ? "Remove play less preference" : "Play this song less"}><span className="tr-heroPrefIcon"><PlayerIcon name="dislike" /></span><span className="tr-heroPrefLabel">PLAY LESS</span></button>
+          <button type="button" className={`tr-heroPrefButton tr-prefDiscover ${discoverMessage ? "is-confirming" : ""}`} disabled={!track} title="Rediscover music" onClick={() => {
+            if (!track) return;
+            setDiscoverMessage("SEARCHING…");
+            void discoverMoreFromTrack(track, player.libraryTracks)
+              .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+              .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
+          }} aria-label="Rediscover music" aria-busy={Boolean(discoverMessage)}><span className="tr-heroPrefIcon"><PlayerIcon name="discover" /></span><span className="tr-heroPrefLabel">REDISCOVER</span></button>
+        </div>
 
       <div className="tr-audioTimeline">
         <span>{formatMusicTime(currentTime)}</span>
@@ -1975,19 +1922,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div> : null}
       </section>
 
-      <button
-        type="button"
-        data-profile={player.outputProfile}
-        className={`tr-mobileDspStatusToggle ${eqOpen ? "is-active" : ""}`}
-        onClick={() => setEqOpen((current) => !current)}
-        aria-expanded={eqOpen}
-        aria-label="Open DSP and equalizer controls"
-      >
-        <span className="tr-mobileDspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
-        <span className="tr-mobileDspStatusCopy"><b>DSP / EQ</b><small>{dspOutputStatus} • {dspEqStatus}</small></span>
-        <span className={`tr-mobileDspChevron ${eqOpen ? "is-open" : ""}`} aria-hidden><svg viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9" /></svg></span>
-        <i className={`tr-mobileDspStatusLed is-${player.dspStatus}`} aria-hidden />
-      </button>
 
       <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} sourceQuality={sourceQuality} dspEngineMode={player.dspEngineMode} />
 
@@ -1998,7 +1932,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <span>PLAYING FROM</span>
             <span className="tr-audioQueueSelectorField">
               <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="source" /></i>
-              <span ref={sourceDesktopValueRef} className="tr-audioQueueSelectorValue tr-audioQueueSelectorValue--desktop" aria-hidden>{activePlaylistLabel}</span>
+              <span className="tr-audioQueueSelectorValue" aria-hidden>{activePlaylistLabel}</span>
               <select className="tr-audioQueueNativeControl" value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
                 <option value="all">All Uploaded Songs</option>
                 {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
@@ -9974,357 +9908,91 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
 
         /* =====================================================================
-           MVP TRAINER V5 R8.5 — FINAL PLAYER CONTROL REBUILD
-           Clean reference-driven controls. Structural volume move. Icon-only
-           transport + repeat/shuffle. Transparent preference glass. Fixed
-           desktop/mobile Neural squares. Single-layer Playing From selector.
+           MVP TRAINER V5 R8.6 — PLAYER ALIGNMENT + SOURCE CONTROL REBUILD
+           One canonical final control layer. Preference strip is outside the
+           artwork/title column, transport icons are high-contrast, and the
+           Playing From + DSP utility cluster is centered on every viewport.
            ===================================================================== */
 
-        /* -------- LIKE / PLAY LESS / REDISCOVER -------- */
-        .tr-audioDeck--pro7 .tr-heroPreferenceStage{
-          width:min(470px,82%)!important;
-          max-width:470px!important;
-          margin-top:16px!important;
-          display:grid!important;
-          grid-template-columns:repeat(3,minmax(0,1fr))!important;
-          gap:10px!important;
+        /* -------- PREFERENCE STRIP: TRANSPARENT TINT, ZERO LAYOUT SHIFT -------- */
+        .tr-audioDeck--pro7 > .tr-heroPreferenceStage{
+          width:min(470px,calc(100% - 28px))!important;max-width:470px!important;margin:12px auto 8px!important;
+          display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important;align-items:stretch!important;
         }
-        .tr-audioDeck--pro7 .tr-heroPrefButton,
-        .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){
-          --pref-rgb:65,220,170;
-          position:relative!important;
-          width:100%!important;
-          min-width:0!important;
-          height:48px!important;
-          min-height:48px!important;
-          padding:0 14px!important;
-          display:grid!important;
-          grid-template-columns:24px minmax(0,1fr)!important;
-          align-items:center!important;
-          justify-content:center!important;
-          gap:9px!important;
-          border:1px solid rgba(var(--pref-rgb),.42)!important;
-          border-radius:12px!important;
-          background:linear-gradient(180deg,rgba(var(--pref-rgb),.075),rgba(var(--pref-rgb),.022) 48%,rgba(0,0,0,.08)),rgba(8,13,17,.38)!important;
-          backdrop-filter:blur(9px) saturate(1.06)!important;
-          -webkit-backdrop-filter:blur(9px) saturate(1.06)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 6px 14px rgba(0,0,0,.24)!important;
-          color:#fff!important;
-          overflow:hidden!important;
-          transform:none!important;
-          filter:none!important;
-          transition:border-color .16s ease,box-shadow .16s ease,background .16s ease!important;
+        .tr-audioDeck--pro7 .tr-heroPrefButton,.tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){
+          --pref-rgb:65,220,170;position:relative!important;width:100%!important;min-width:0!important;height:48px!important;min-height:48px!important;
+          padding:0 13px!important;display:grid!important;grid-template-columns:24px minmax(0,1fr)!important;align-items:center!important;justify-content:center!important;gap:8px!important;
+          border:1px solid rgba(var(--pref-rgb),.42)!important;border-radius:12px!important;
+          background:linear-gradient(180deg,rgba(var(--pref-rgb),.075),rgba(var(--pref-rgb),.022) 50%,rgba(0,0,0,.08)),rgba(7,13,17,.44)!important;
+          backdrop-filter:blur(9px) saturate(1.06)!important;-webkit-backdrop-filter:blur(9px) saturate(1.06)!important;
+          box-shadow:inset 0 1px rgba(255,255,255,.055),0 7px 16px rgba(0,0,0,.24)!important;color:#fff!important;overflow:hidden!important;
+          transform:none!important;filter:none!important;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease!important;
         }
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike{--pref-rgb:52,231,170}
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess{--pref-rgb:255,82,92}
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover{--pref-rgb:54,158,255}
-        .tr-audioDeck--pro7 .tr-heroPrefButton::before,
-        .tr-audioDeck--pro7 .tr-heroPrefButton::after,
-        .tr-audioDeck--pro7 .tr-heroPrefIcon::before,
-        .tr-audioDeck--pro7 .tr-heroPrefIcon::after{display:none!important;content:none!important}
-        .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),
-        .tr-audioDeck--pro7 .tr-heroPrefButton:active:not(:disabled){
-          transform:none!important;
-          filter:none!important;
-          background:linear-gradient(180deg,rgba(var(--pref-rgb),.095),rgba(var(--pref-rgb),.028) 48%,rgba(0,0,0,.08)),rgba(8,13,17,.40)!important;
-          border-color:rgba(var(--pref-rgb),.58)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 6px 14px rgba(0,0,0,.24)!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefIcon{
-          width:24px!important;height:24px!important;flex:0 0 24px!important;
-          display:grid!important;place-items:center!important;
-          background:none!important;border:0!important;box-shadow:none!important;filter:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefIcon svg{
-          width:23px!important;height:23px!important;
-          stroke:#fff!important;fill:none!important;stroke-width:2.2!important;
-          filter:drop-shadow(0 2px 3px rgba(0,0,0,.58))!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefLabel{
-          display:block!important;
-          min-width:0!important;
-          color:#fff!important;
-          font-size:12px!important;
-          font-weight:950!important;
-          letter-spacing:.015em!important;
-          line-height:1!important;
-          text-align:left!important;
-          text-transform:uppercase!important;
-          white-space:nowrap!important;
-          text-shadow:0 2px 3px rgba(0,0,0,.92)!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike.is-liked,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike[aria-pressed="true"],
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess.is-disliked,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess[aria-pressed="true"],
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover.is-confirming,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover[aria-busy="true"]{
-          transform:none!important;
-          filter:none!important;
-          border-color:rgba(var(--pref-rgb),.96)!important;
-          background:linear-gradient(180deg,rgba(var(--pref-rgb),.09),rgba(var(--pref-rgb),.025) 48%,rgba(0,0,0,.08)),rgba(8,13,17,.40)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(var(--pref-rgb),.38),0 0 19px rgba(var(--pref-rgb),.46),0 8px 16px rgba(0,0,0,.26)!important;
-        }
+        .tr-audioDeck--pro7 .tr-prefLike{--pref-rgb:52,231,170!important}.tr-audioDeck--pro7 .tr-prefLess{--pref-rgb:255,82,92!important}.tr-audioDeck--pro7 .tr-prefDiscover{--pref-rgb:54,158,255!important}
+        .tr-audioDeck--pro7 .tr-heroPrefButton::before,.tr-audioDeck--pro7 .tr-heroPrefButton::after,.tr-audioDeck--pro7 .tr-heroPrefIcon::before,.tr-audioDeck--pro7 .tr-heroPrefIcon::after{display:none!important;content:none!important}
+        .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),.tr-audioDeck--pro7 .tr-heroPrefButton:active:not(:disabled){transform:none!important;filter:none!important;border-color:rgba(var(--pref-rgb),.58)!important;background:linear-gradient(180deg,rgba(var(--pref-rgb),.095),rgba(var(--pref-rgb),.028) 50%,rgba(0,0,0,.08)),rgba(7,13,17,.46)!important;box-shadow:inset 0 1px rgba(255,255,255,.065),0 7px 16px rgba(0,0,0,.24)!important}
+        .tr-audioDeck--pro7 .tr-heroPrefIcon{width:24px!important;height:24px!important;display:grid!important;place-items:center!important;background:none!important;border:0!important;box-shadow:none!important;filter:none!important}
+        .tr-audioDeck--pro7 .tr-heroPrefIcon svg{width:23px!important;height:23px!important;stroke:#fff!important;fill:none!important;stroke-width:2.2!important;filter:drop-shadow(0 2px 3px rgba(0,0,0,.58))!important}
+        .tr-audioDeck--pro7 .tr-heroPrefLabel{display:block!important;min-width:0!important;color:#fff!important;font-size:12px!important;font-weight:950!important;letter-spacing:.015em!important;line-height:1!important;text-align:left!important;white-space:nowrap!important;text-shadow:0 2px 3px rgba(0,0,0,.92)!important}
+        .tr-audioDeck--pro7 .tr-prefLike.is-liked,.tr-audioDeck--pro7 .tr-prefLike[aria-pressed="true"],.tr-audioDeck--pro7 .tr-prefLess.is-disliked,.tr-audioDeck--pro7 .tr-prefLess[aria-pressed="true"],.tr-audioDeck--pro7 .tr-prefDiscover.is-confirming,.tr-audioDeck--pro7 .tr-prefDiscover[aria-busy="true"]{transform:none!important;filter:none!important;border-color:rgba(var(--pref-rgb),.98)!important;background:linear-gradient(180deg,rgba(var(--pref-rgb),.09),rgba(var(--pref-rgb),.025) 50%,rgba(0,0,0,.08)),rgba(7,13,17,.46)!important;box-shadow:inset 0 1px rgba(255,255,255,.075),0 0 0 1px rgba(var(--pref-rgb),.34),0 0 20px rgba(var(--pref-rgb),.45),0 8px 17px rgba(0,0,0,.25)!important}
 
-        /* -------- MAIN TRANSPORT: ICONS ONLY -------- */
-        .tr-audioDeck--pro7 .tr-playerTransportStage{
-          width:min(560px,76%)!important;
-          display:grid!important;
-          grid-template-columns:repeat(4,1fr)!important;
-          gap:18px!important;
-          margin:10px auto 4px!important;
-          justify-items:center!important;
-          align-items:center!important;
-          overflow:visible!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{
-          width:100%!important;height:92px!important;min-height:92px!important;
-          display:grid!important;place-items:center!important;
-          overflow:visible!important;
-        }
+        /* -------- TRANSPORT: LARGE WHITE ICONS, BLUE PRIMARY CIRCLE -------- */
+        .tr-audioDeck--pro7 .tr-playerTransportStage{width:min(590px,80%)!important;margin:9px auto 4px!important;display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:16px!important;align-items:center!important;justify-items:center!important;overflow:visible!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{width:100%!important;height:100px!important;min-height:100px!important;display:grid!important;place-items:center!important;overflow:visible!important}
         .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit>span{display:none!important}
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{
-          width:82px!important;height:82px!important;min-width:82px!important;min-height:82px!important;
-          display:grid!important;place-items:center!important;
-          padding:0!important;margin:0!important;
-          border:0!important;border-radius:999px!important;
-          background:transparent!important;box-shadow:none!important;
-          color:#fff!important;overflow:visible!important;
-          transform:none!important;filter:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton::before,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton::after,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace::before,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace::after{display:none!important;content:none!important}
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled),
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:focus-visible,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:active:not(:disabled){
-          border:0!important;background:transparent!important;box-shadow:none!important;outline:none!important;transform:none!important;filter:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{
-          width:58px!important;height:58px!important;
-          stroke:#fff!important;fill:#fff!important;color:#fff!important;
-          filter:drop-shadow(0 4px 8px rgba(0,0,0,.62))!important;
-          transform:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:51px!important;height:51px!important}
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton{
-          width:88px!important;height:88px!important;min-width:88px!important;min-height:88px!important;
-          background:radial-gradient(circle at 32% 24%,rgba(192,242,255,.40),transparent 23%),linear-gradient(180deg,#38b7ff 0%,#148cff 46%,#0b6ee8 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.48),inset 0 -7px 13px rgba(0,58,151,.26),0 0 0 1px rgba(91,194,255,.34),0 9px 22px rgba(0,0,0,.38),0 0 24px rgba(27,145,255,.34)!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{
-          width:88px!important;height:88px!important;min-width:88px!important;min-height:88px!important;
-          background:transparent!important;box-shadow:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton:hover:not(:disabled),
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton:focus-visible,
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton:active:not(:disabled){
-          background:radial-gradient(circle at 32% 24%,rgba(214,248,255,.45),transparent 23%),linear-gradient(180deg,#45bdff 0%,#198fff 46%,#0b6ee8 100%)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.52),inset 0 -7px 13px rgba(0,58,151,.24),0 0 0 1px rgba(91,194,255,.38),0 9px 22px rgba(0,0,0,.38),0 0 28px rgba(27,145,255,.42)!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{
-          width:48px!important;height:48px!important;stroke:#fff!important;fill:#fff!important;color:#fff!important;
-          filter:drop-shadow(0 3px 7px rgba(0,35,89,.38))!important;
-        }
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:92px!important;height:92px!important;min-width:92px!important;min-height:92px!important;display:grid!important;place-items:center!important;padding:0!important;margin:0!important;border:0!important;border-radius:999px!important;background:transparent!important;box-shadow:none!important;color:#fff!important;overflow:visible!important;transform:none!important;filter:none!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton::before,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton::after,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace::before,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace::after{display:none!important;content:none!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled),.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:focus-visible,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:active:not(:disabled){border:0!important;background:transparent!important;box-shadow:none!important;outline:none!important;transform:none!important;filter:none!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:64px!important;height:64px!important;color:#fff!important;stroke:#fff!important;fill:none!important;filter:drop-shadow(0 4px 8px rgba(0,0,0,.62))!important;transform:none!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg .tr-icon-core{fill:#fff!important;stroke:#fff!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg .tr-icon-depth{fill:rgba(255,255,255,.58)!important;stroke:rgba(255,255,255,.58)!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg .tr-icon-glint{fill:none!important;stroke:#fff!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg .tr-icon-cut{fill:none!important;stroke:#06101a!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:56px!important;height:56px!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton{width:96px!important;height:96px!important;min-width:96px!important;min-height:96px!important;background:radial-gradient(circle at 31% 23%,rgba(210,247,255,.40),transparent 23%),linear-gradient(180deg,#39b9ff 0%,#178fff 48%,#0b70ea 100%)!important;box-shadow:inset 0 1px rgba(255,255,255,.50),inset 0 -7px 13px rgba(0,58,151,.25),0 0 0 1px rgba(91,194,255,.34),0 10px 23px rgba(0,0,0,.38),0 0 25px rgba(27,145,255,.34)!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{width:96px!important;height:96px!important;min-width:96px!important;min-height:96px!important;background:transparent!important;box-shadow:none!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:54px!important;height:54px!important;stroke:#fff!important;color:#fff!important;fill:none!important;filter:drop-shadow(0 3px 6px rgba(0,35,89,.34))!important}
+        .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg .tr-icon-core,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg .tr-icon-depth{fill:#fff!important;stroke:#fff!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg .tr-icon-glint{fill:none!important;stroke:#fff!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg .tr-icon-cut{fill:none!important;stroke:#fff!important}
 
-        /* -------- VOLUME DIRECTLY UNDER TRANSPORT -------- */
-        .tr-audioDeck--pro7 .tr-playerVolume--transport{
-          width:min(560px,76%)!important;
-          margin:0 auto 10px!important;
-          min-height:34px!important;
-          display:grid!important;
-          grid-template-columns:30px minmax(0,1fr) 48px!important;
-          gap:11px!important;
-          align-items:center!important;
-          padding:0!important;
-          background:none!important;border:0!important;box-shadow:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon{
-          width:28px!important;height:28px!important;display:grid!important;place-items:center!important;color:#fff!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon svg{
-          width:26px!important;height:26px!important;fill:none!important;stroke:#fff!important;stroke-width:1.9!important;stroke-linecap:round!important;stroke-linejoin:round!important;
-          filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerVolume--transport input{width:100%!important;min-width:0!important;margin:0!important}
-        .tr-audioDeck--pro7 .tr-playerVolume--transport strong{
-          min-width:48px!important;text-align:right!important;color:#fff!important;font-size:13px!important;font-weight:950!important;letter-spacing:.015em!important;text-shadow:0 2px 3px rgba(0,0,0,.92)!important;
-        }
+        /* -------- VOLUME: STRUCTURALLY BELOW TRANSPORT, KEEP LIVE COLOR LOGIC -------- */
+        .tr-audioDeck--pro7 .tr-playerVolume--transport{width:min(560px,74%)!important;margin:0 auto 9px!important;min-height:36px!important;display:grid!important;grid-template-columns:31px minmax(0,1fr) 50px!important;gap:10px!important;align-items:center!important;padding:0!important;background:none!important;border:0!important;box-shadow:none!important}
+        .tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon{width:30px!important;height:30px!important;display:grid!important;place-items:center!important;color:#fff!important}.tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon svg{width:27px!important;height:27px!important;fill:none!important;stroke:#fff!important;stroke-width:1.9!important;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))!important}.tr-audioDeck--pro7 .tr-playerVolume--transport input{width:100%!important;min-width:0!important;margin:0!important}.tr-audioDeck--pro7 .tr-playerVolume--transport strong{min-width:50px!important;text-align:right!important;color:#fff!important;font-size:13px!important;font-weight:950!important;text-shadow:0 2px 3px rgba(0,0,0,.92)!important}
 
-        /* -------- REPEAT / SHUFFLE: ICONS ONLY -------- */
-        .tr-audioDeck--pro7 .tr-playerModeStage{
-          width:min(260px,42%)!important;
-          margin:0 auto 12px!important;
-          display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:34px!important;
-          justify-items:center!important;align-items:center!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{
-          width:64px!important;height:58px!important;min-width:64px!important;min-height:58px!important;
-          display:grid!important;place-items:center!important;
-          padding:0!important;margin:0!important;
-          border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#fff!important;
-          overflow:visible!important;transform:none!important;filter:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton::before,
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton::after,
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton>span,
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-modeState{display:none!important;content:none!important}
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{
-          width:42px!important;height:42px!important;stroke:#fff!important;fill:none!important;color:#fff!important;stroke-width:2.15!important;
-          filter:drop-shadow(0 3px 7px rgba(0,0,0,.62))!important;transition:color .16s ease,stroke .16s ease,filter .16s ease!important;
-        }
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:hover,
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:focus-visible,
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:active{background:transparent!important;border:0!important;box-shadow:none!important;outline:none!important;transform:none!important}
-        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton.is-active svg{
-          stroke:#2aa7ff!important;color:#2aa7ff!important;
-          filter:drop-shadow(0 0 5px rgba(42,167,255,.88)) drop-shadow(0 0 14px rgba(42,167,255,.56))!important;
-        }
+        /* -------- REPEAT + SHUFFLE: LARGE ICONS ONLY -------- */
+        .tr-audioDeck--pro7 .tr-playerModeStage{width:min(270px,44%)!important;margin:0 auto 11px!important;display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:38px!important;justify-items:center!important;align-items:center!important}
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{width:66px!important;height:58px!important;min-width:66px!important;min-height:58px!important;display:grid!important;place-items:center!important;padding:0!important;margin:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#fff!important;overflow:visible!important;transform:none!important;filter:none!important}
+        .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton::before,.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton::after,.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton>span,.tr-audioDeck--pro7 .tr-playerModeStage .tr-modeState{display:none!important;content:none!important}.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{width:44px!important;height:44px!important;stroke:#fff!important;fill:none!important;color:#fff!important;stroke-width:2.15!important;filter:drop-shadow(0 3px 7px rgba(0,0,0,.62))!important;transition:stroke .16s ease,color .16s ease,filter .16s ease!important}.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:hover,.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:focus-visible,.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton:active{background:transparent!important;border:0!important;box-shadow:none!important;outline:none!important;transform:none!important}.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton.is-active svg{stroke:#2aa7ff!important;color:#2aa7ff!important;filter:drop-shadow(0 0 5px rgba(42,167,255,.88)) drop-shadow(0 0 14px rgba(42,167,255,.56))!important}
 
-        /* -------- NEURAL RAIL: EQUAL DARK SQUARES -------- */
-        .tr-audioDeck--pro7 .tr-neuralSteering{width:min(900px,calc(100% - 18px))!important;margin:10px auto 8px!important}
-        .tr-audioDeck--pro7 .tr-neuralSteeringRail{
-          width:100%!important;display:grid!important;
-          grid-template-columns:repeat(7,minmax(88px,104px))!important;
-          justify-content:center!important;gap:10px!important;
-          padding:0!important;background:none!important;border:0!important;box-shadow:none!important;overflow:visible!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand{
-          position:relative!important;width:100%!important;height:auto!important;min-height:0!important;aspect-ratio:1 / 1!important;
-          padding:11px 7px 9px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:7px!important;
-          border:1px solid rgba(255,255,255,.14)!important;border-radius:13px!important;
-          background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 36%,rgba(0,0,0,.19)),rgba(19,24,30,.92)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.075),inset 0 -10px 18px rgba(0,0,0,.24),0 8px 17px rgba(0,0,0,.27)!important;
-          color:#fff!important;filter:none!important;transform:none!important;overflow:hidden!important;
-          transition:border-color .16s ease,box-shadow .16s ease!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand::before,
-        .tr-audioDeck--pro7 .tr-neuralCommand::after,
-        .tr-audioDeck--pro7 .tr-neuralCommandIcon::before,
-        .tr-audioDeck--pro7 .tr-neuralCommandIcon::after,
-        .tr-audioDeck--pro7 .tr-neuralCommandLed{display:none!important;content:none!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled),
-        .tr-audioDeck--pro7 .tr-neuralCommand:active:not(:disabled){transform:none!important;filter:none!important}
-        .tr-audioDeck--pro7 .tr-neuralCommandIcon{
-          width:38px!important;height:38px!important;flex:0 0 38px!important;display:grid!important;place-items:center!important;background:none!important;border:0!important;box-shadow:none!important;filter:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommandIcon svg{
-          width:35px!important;height:35px!important;stroke:#fff!important;fill:none!important;color:#fff!important;stroke-width:2.15!important;
-          filter:drop-shadow(0 2px 4px rgba(0,0,0,.62))!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommandLabel{
-          color:#fff!important;font-size:11.4px!important;font-weight:950!important;letter-spacing:.005em!important;line-height:1.04!important;text-align:center!important;text-transform:uppercase!important;
-          text-shadow:0 2px 3px rgba(0,0,0,.94)!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active,
-        .tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"]{
-          transform:none!important;filter:none!important;
-          background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 36%,rgba(0,0,0,.19)),rgba(19,24,30,.92)!important;
-          border-color:rgba(var(--neural-rgb),.98)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.08),inset 0 -10px 18px rgba(0,0,0,.24),0 0 0 1px rgba(var(--neural-rgb),.54),0 0 20px rgba(var(--neural-rgb),.43),0 8px 17px rgba(0,0,0,.27)!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandIcon,
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandLabel{transform:none!important}
+        /* -------- NEURAL: LARGER DESKTOP, COMPACT LOCKED 4 + 3 MOBILE -------- */
+        .tr-audioDeck--pro7 .tr-neuralSteering{width:min(980px,calc(100% - 18px))!important;margin:9px auto 8px!important}.tr-audioDeck--pro7 .tr-neuralSteeringRail{width:100%!important;display:grid!important;grid-template-columns:repeat(7,minmax(100px,116px))!important;justify-content:center!important;gap:11px!important;padding:0!important;background:none!important;border:0!important;box-shadow:none!important;overflow:visible!important}
+        .tr-audioDeck--pro7 .tr-neuralCommand{position:relative!important;width:100%!important;height:auto!important;min-height:0!important;aspect-ratio:1/1!important;padding:12px 8px 10px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:8px!important;border:1px solid rgba(255,255,255,.14)!important;border-radius:13px!important;background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 36%,rgba(0,0,0,.19)),rgba(19,24,30,.92)!important;box-shadow:inset 0 1px rgba(255,255,255,.075),inset 0 -10px 18px rgba(0,0,0,.24),0 8px 17px rgba(0,0,0,.27)!important;color:#fff!important;filter:none!important;transform:none!important;overflow:hidden!important;transition:border-color .16s ease,box-shadow .16s ease!important}.tr-audioDeck--pro7 .tr-neuralCommand::before,.tr-audioDeck--pro7 .tr-neuralCommand::after,.tr-audioDeck--pro7 .tr-neuralCommandIcon::before,.tr-audioDeck--pro7 .tr-neuralCommandIcon::after,.tr-audioDeck--pro7 .tr-neuralCommandLed{display:none!important;content:none!important}.tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled),.tr-audioDeck--pro7 .tr-neuralCommand:active:not(:disabled){transform:none!important;filter:none!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon{width:43px!important;height:43px!important;flex:0 0 43px!important;display:grid!important;place-items:center!important;background:none!important;border:0!important;box-shadow:none!important;filter:none!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:40px!important;height:40px!important;stroke:#fff!important;fill:none!important;color:#fff!important;stroke-width:2.15!important;filter:drop-shadow(0 2px 4px rgba(0,0,0,.62))!important}.tr-audioDeck--pro7 .tr-neuralCommandLabel{color:#fff!important;font-size:12.2px!important;font-weight:950!important;letter-spacing:.005em!important;line-height:1.04!important;text-align:center!important;text-shadow:0 2px 3px rgba(0,0,0,.94)!important;white-space:normal!important}.tr-audioDeck--pro7 .tr-neuralCommand.is-active,.tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"]{transform:none!important;filter:none!important;background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 36%,rgba(0,0,0,.19)),rgba(19,24,30,.92)!important;border-color:rgba(var(--neural-rgb),.98)!important;box-shadow:inset 0 1px rgba(255,255,255,.08),inset 0 -10px 18px rgba(0,0,0,.24),0 0 0 1px rgba(var(--neural-rgb),.54),0 0 20px rgba(var(--neural-rgb),.43),0 8px 17px rgba(0,0,0,.27)!important}.tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandIcon,.tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandLabel{transform:none!important}
 
-        /* -------- PLAYING FROM: COMPACT SINGLE VISIBLE VALUE -------- */
-        .tr-audioDeck--pro7 .tr-playerUtilityRow{display:block!important;margin-top:10px!important}
-        .tr-audioDeck--pro7 .tr-playerSourceTools{
-          display:grid!important;grid-template-columns:minmax(280px,380px) auto!important;gap:10px!important;align-items:end!important;justify-content:start!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioQueueSelector{width:100%!important;min-width:0!important;max-width:380px!important}
-        .tr-audioDeck--pro7 .tr-audioQueueSelector>span:first-child{
-          display:block!important;margin-bottom:5px!important;color:#dff8ff!important;font-size:11px!important;font-weight:950!important;letter-spacing:.09em!important;line-height:1!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioQueueSelectorField{
-          position:relative!important;width:100%!important;min-width:0!important;min-height:46px!important;
-          display:grid!important;grid-template-columns:23px minmax(0,1fr) 16px!important;gap:10px!important;align-items:center!important;
-          padding:0 13px!important;border-radius:12px!important;overflow:hidden!important;
-        }
-        .tr-audioDeck--pro7 .tr-sourceIcon{position:relative!important;z-index:2!important;width:22px!important;height:22px!important;display:grid!important;place-items:center!important}
-        .tr-audioDeck--pro7 .tr-sourceIcon svg{width:21px!important;height:21px!important}
-        .tr-audioDeck--pro7 .tr-audioQueueSelectorValue--desktop{
-          display:block!important;position:relative!important;z-index:2!important;grid-column:2!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;
-          color:#fff!important;font-size:12px!important;font-weight:800!important;line-height:1!important;
-        }
-        .tr-audioDeck--pro7 .tr-audioQueueNativeControl{
-          position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:4!important;opacity:0!important;cursor:pointer!important;
-        }
-        .tr-audioDeck--pro7 .tr-sourceChevron{position:relative!important;z-index:2!important;grid-column:3!important;justify-self:end!important}
+        /* -------- PLAYING FROM + DSP: ONE CENTERED UTILITY CLUSTER -------- */
+        .tr-audioDeck--pro7 .tr-mobileDspStatusToggle{display:none!important}
+        .tr-audioDeck--pro7 .tr-playerUtilityRow{width:100%!important;display:flex!important;justify-content:center!important;align-items:flex-end!important;margin:11px auto 2px!important;padding:0 10px!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools{width:max-content!important;max-width:100%!important;display:grid!important;grid-template-columns:minmax(270px,330px) 190px!important;gap:12px!important;align-items:end!important;justify-content:center!important;margin:0 auto!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector{width:100%!important;max-width:330px!important;min-width:0!important;display:grid!important;grid-template-columns:1fr!important;gap:5px!important;margin:0!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector>span:first-child{display:block!important;margin:0!important;color:#dff8ff!important;font-size:10px!important;font-weight:950!important;letter-spacing:.09em!important;line-height:1!important;text-align:center!important}
+        .tr-audioDeck--pro7 .tr-audioQueueSelectorField{position:relative!important;width:100%!important;min-width:0!important;height:46px!important;min-height:46px!important;display:grid!important;grid-template-columns:25px minmax(0,1fr) 18px!important;gap:9px!important;align-items:center!important;padding:0 12px!important;border:1px solid rgba(95,182,214,.24)!important;border-radius:11px!important;background:linear-gradient(180deg,#071a23,#041016)!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important;overflow:hidden!important}.tr-audioDeck--pro7 .tr-sourceIcon{position:relative!important;z-index:2!important;width:24px!important;height:24px!important;display:grid!important;place-items:center!important;color:#dff8ff!important}.tr-audioDeck--pro7 .tr-sourceIcon svg{width:22px!important;height:22px!important}.tr-audioDeck--pro7 .tr-audioQueueSelectorValue{position:relative!important;z-index:2!important;grid-column:2!important;display:block!important;min-width:0!important;padding:0!important;color:#fff!important;font-size:12px!important;font-weight:850!important;letter-spacing:.005em!important;line-height:1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;pointer-events:none!important}.tr-audioDeck--pro7 .tr-audioQueueNativeControl{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:4!important;opacity:0!important;color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important;font-size:0!important;appearance:none!important;-webkit-appearance:none!important;background:transparent!important;border:0!important;cursor:pointer!important}.tr-audioDeck--pro7 .tr-sourceChevron{position:relative!important;z-index:2!important;grid-column:3!important;justify-self:end!important;width:18px!important;height:18px!important;display:grid!important;place-items:center!important;pointer-events:none!important}.tr-audioDeck--pro7 .tr-sourceChevron svg{width:17px!important;height:17px!important}
+        .tr-audioDeck--pro7 .tr-playerSourceTools>.tr-dspStatusToggle{display:grid!important;width:190px!important;min-width:190px!important;max-width:190px!important;height:46px!important;min-height:46px!important;margin:0!important;grid-template-columns:31px minmax(0,1fr) 18px!important;column-gap:9px!important;align-items:center!important;padding:0 28px 0 9px!important;border-radius:11px!important}.tr-audioDeck--pro7 .tr-playerSourceTools>.tr-dspStatusToggle .tr-dspStatusIcon{width:30px!important;height:30px!important;min-width:30px!important}.tr-audioDeck--pro7 .tr-playerSourceTools>.tr-dspStatusToggle .tr-dspStatusCopy b{font-size:10.5px!important}.tr-audioDeck--pro7 .tr-playerSourceTools>.tr-dspStatusToggle .tr-dspStatusCopy small{font-size:7.4px!important}
 
-        /* -------- MOBILE: FIT, READABLE, PROPORTIONAL -------- */
+        /* -------- MOBILE REBALANCE -------- */
         @media(max-width:760px){
-          .tr-audioDeck--pro7 .tr-heroPreferenceStage{width:100%!important;max-width:none!important;gap:5px!important;margin-top:10px!important}
-          .tr-audioDeck--pro7 .tr-heroPrefButton,
-          .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){
-            height:58px!important;min-height:58px!important;padding:6px 3px 5px!important;
-            display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:4px!important;border-radius:11px!important;
-          }
-          .tr-audioDeck--pro7 .tr-heroPrefIcon{width:22px!important;height:22px!important;flex:0 0 22px!important}
-          .tr-audioDeck--pro7 .tr-heroPrefIcon svg{width:21px!important;height:21px!important}
-          .tr-audioDeck--pro7 .tr-heroPrefLabel{width:100%!important;text-align:center!important;font-size:10.3px!important;letter-spacing:0!important;white-space:nowrap!important}
-
-          .tr-audioDeck--pro7 .tr-playerTransportStage{width:100%!important;max-width:390px!important;gap:5px!important;margin:9px auto 3px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{height:72px!important;min-height:72px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:66px!important;height:66px!important;min-width:66px!important;min-height:66px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:45px!important;height:45px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:40px!important;height:40px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important;background:transparent!important;box-shadow:none!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:39px!important;height:39px!important}
-
-          .tr-audioDeck--pro7 .tr-playerVolume--transport{width:100%!important;margin:0 auto 9px!important;grid-template-columns:28px minmax(0,1fr) 44px!important;gap:8px!important;min-height:32px!important}
-          .tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon{width:26px!important;height:26px!important}
-          .tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon svg{width:24px!important;height:24px!important}
-          .tr-audioDeck--pro7 .tr-playerVolume--transport strong{min-width:44px!important;font-size:12px!important}
-
-          .tr-audioDeck--pro7 .tr-playerModeStage{width:min(210px,62%)!important;gap:28px!important;margin:0 auto 10px!important}
-          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{width:58px!important;height:50px!important;min-width:58px!important;min-height:50px!important}
-          .tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{width:36px!important;height:36px!important}
-
-          .tr-audioDeck--pro7 .tr-neuralSteering{width:100%!important;margin:8px auto 8px!important}
-          .tr-audioDeck--pro7 .tr-neuralSteeringRail{
-            width:100%!important;display:grid!important;grid-template-columns:repeat(8,minmax(0,1fr))!important;gap:6px!important;justify-content:stretch!important;
-          }
-          .tr-audioDeck--pro7 .tr-neuralCommand{grid-column:span 2!important;width:100%!important;aspect-ratio:1 / 1!important;height:auto!important;min-height:0!important;padding:7px 3px 6px!important;gap:5px!important;border-radius:11px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(5){grid-column:2 / span 2!important}
-          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(6){grid-column:4 / span 2!important}
-          .tr-audioDeck--pro7 .tr-neuralCommand:nth-child(7){grid-column:6 / span 2!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandIcon{width:31px!important;height:31px!important;flex:0 0 31px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:29px!important;height:29px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:10.2px!important;line-height:1!important;letter-spacing:0!important;white-space:normal!important}
-
-          .tr-audioDeck--pro7 .tr-playerSourceTools{grid-template-columns:1fr!important;gap:8px!important;align-items:stretch!important}
-          .tr-audioDeck--pro7 .tr-audioQueueSelector{max-width:100%!important}
-          .tr-audioDeck--pro7 .tr-audioQueueSelectorField{min-height:44px!important;padding:0 11px!important;grid-template-columns:21px minmax(0,1fr) 15px!important;gap:8px!important}
-          .tr-audioDeck--pro7 .tr-audioQueueSelectorValue--desktop{font-size:11.5px!important}
+          .tr-audioDeck--pro7 > .tr-heroPreferenceStage{width:calc(100% - 16px)!important;max-width:430px!important;margin:9px auto 7px!important;gap:5px!important}.tr-audioDeck--pro7 .tr-heroPrefButton,.tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){height:60px!important;min-height:60px!important;padding:6px 3px 5px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:4px!important;border-radius:11px!important}.tr-audioDeck--pro7 .tr-heroPrefIcon{width:24px!important;height:24px!important;flex:0 0 24px!important}.tr-audioDeck--pro7 .tr-heroPrefIcon svg{width:23px!important;height:23px!important}.tr-audioDeck--pro7 .tr-heroPrefLabel{width:100%!important;text-align:center!important;font-size:9.8px!important;letter-spacing:0!important;white-space:nowrap!important}
+          .tr-audioDeck--pro7 .tr-playerTransportStage{width:100%!important;max-width:390px!important;gap:3px!important;margin:8px auto 3px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit{height:74px!important;min-height:74px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:64px!important;height:64px!important;min-width:64px!important;min-height:64px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:48px!important;height:48px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:43px!important;height:43px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{width:72px!important;height:72px!important;min-width:72px!important;min-height:72px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:42px!important;height:42px!important}
+          .tr-audioDeck--pro7 .tr-playerVolume--transport{width:calc(100% - 18px)!important;max-width:420px!important;margin:0 auto 8px!important;grid-template-columns:27px minmax(0,1fr) 44px!important;gap:8px!important;min-height:32px!important}.tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon{width:26px!important;height:26px!important}.tr-audioDeck--pro7 .tr-playerVolume--transport .tr-playerVolumeIcon svg{width:24px!important;height:24px!important}.tr-audioDeck--pro7 .tr-playerVolume--transport strong{min-width:44px!important;font-size:12px!important}
+          .tr-audioDeck--pro7 .tr-playerModeStage{width:min(210px,62%)!important;gap:30px!important;margin:0 auto 9px!important}.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton{width:60px!important;height:52px!important;min-width:60px!important;min-height:52px!important}.tr-audioDeck--pro7 .tr-playerModeStage .tr-audioModeButton svg{width:38px!important;height:38px!important}
+          .tr-audioDeck--pro7 .tr-neuralSteering{width:100%!important;margin:7px auto 8px!important}.tr-audioDeck--pro7 .tr-neuralSteeringRail{width:min(314px,calc(100% - 14px))!important;margin:0 auto!important;display:grid!important;grid-template-columns:repeat(8,minmax(0,1fr))!important;gap:5px!important;justify-content:stretch!important}.tr-audioDeck--pro7 .tr-neuralCommand{grid-column:span 2!important;width:100%!important;aspect-ratio:1/1!important;height:auto!important;min-height:0!important;padding:6px 2px 5px!important;gap:4px!important;border-radius:10px!important}.tr-audioDeck--pro7 .tr-neuralCommand:nth-child(5){grid-column:2 / span 2!important}.tr-audioDeck--pro7 .tr-neuralCommand:nth-child(6){grid-column:4 / span 2!important}.tr-audioDeck--pro7 .tr-neuralCommand:nth-child(7){grid-column:6 / span 2!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon{width:30px!important;height:30px!important;flex:0 0 30px!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:28px!important;height:28px!important}.tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:8.9px!important;line-height:1.02!important;letter-spacing:0!important;white-space:normal!important}
+          .tr-audioDeck--pro7 .tr-playerUtilityRow{padding:0 8px!important;margin:9px auto 2px!important}.tr-audioDeck--pro7 .tr-playerSourceTools{width:min(340px,100%)!important;max-width:340px!important;grid-template-columns:1fr!important;gap:8px!important;justify-items:center!important;margin:0 auto!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector{width:100%!important;max-width:330px!important}.tr-audioDeck--pro7 .tr-playerSourceTools .tr-audioQueueSelector>span:first-child{text-align:center!important;font-size:9px!important}.tr-audioDeck--pro7 .tr-audioQueueSelectorField{height:45px!important;min-height:45px!important;grid-template-columns:24px minmax(0,1fr) 17px!important;gap:8px!important;padding:0 11px!important}.tr-audioDeck--pro7 .tr-audioQueueSelectorValue{font-size:11.5px!important}.tr-audioDeck--pro7 .tr-playerSourceTools>.tr-dspStatusToggle{display:grid!important;width:100%!important;max-width:330px!important;min-width:0!important;height:46px!important;min-height:46px!important;grid-template-columns:31px minmax(0,1fr) 18px!important;column-gap:9px!important;padding:0 28px 0 9px!important}
         }
-
-        @media(max-width:420px){
-          .tr-audioDeck--pro7 .tr-heroPreferenceStage{gap:4px!important}
-          .tr-audioDeck--pro7 .tr-heroPrefButton,
-          .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){height:55px!important;min-height:55px!important;padding:5px 2px!important}
-          .tr-audioDeck--pro7 .tr-heroPrefLabel{font-size:9.7px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage{gap:2px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:61px!important;height:61px!important;min-width:61px!important;min-height:61px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:42px!important;height:42px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:37px!important;height:37px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton{width:68px!important;height:68px!important;min-width:68px!important;min-height:68px!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{width:68px!important;height:68px!important;min-width:68px!important;min-height:68px!important;background:transparent!important;box-shadow:none!important}
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:36px!important;height:36px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandIcon{width:29px!important;height:29px!important;flex:0 0 29px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:27px!important;height:27px!important}
-          .tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:9.6px!important}
+        @media(max-width:420px){.tr-audioDeck--pro7 > .tr-heroPreferenceStage{width:calc(100% - 12px)!important;gap:4px!important}.tr-audioDeck--pro7 .tr-heroPrefButton,.tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){height:57px!important;min-height:57px!important;padding:5px 2px!important}.tr-audioDeck--pro7 .tr-heroPrefLabel{font-size:9.2px!important}.tr-audioDeck--pro7 .tr-playerTransportStage{gap:1px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace{width:60px!important;height:60px!important;min-width:60px!important;min-height:60px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportFace svg{width:45px!important;height:45px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-stop .tr-audioTransportFace svg{width:40px!important;height:40px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportButton,.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace{width:69px!important;height:69px!important;min-width:69px!important;min-height:69px!important}.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportUnit.is-primary .tr-audioTransportFace svg{width:40px!important;height:40px!important}.tr-audioDeck--pro7 .tr-neuralSteeringRail{width:min(304px,calc(100% - 10px))!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon{width:28px!important;height:28px!important;flex-basis:28px!important}.tr-audioDeck--pro7 .tr-neuralCommandIcon svg{width:26px!important;height:26px!important}.tr-audioDeck--pro7 .tr-neuralCommandLabel{font-size:8.4px!important}.tr-audioDeck--pro7 .tr-audioQueueSelectorValue{font-size:11px!important}}
+        @media(max-width:760px){
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow{width:100%!important;margin-left:auto!important;margin-right:auto!important;display:flex!important;justify-content:center!important;padding-left:8px!important;padding-right:8px!important}
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools{display:grid!important;width:min(340px,100%)!important;max-width:340px!important;grid-template-columns:1fr!important;gap:8px!important;justify-items:center!important;margin:0 auto!important}
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-audioQueueSelector{display:grid!important;width:100%!important;max-width:330px!important;min-width:0!important}
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-playerSourceTools > .tr-dspStatusToggle{display:grid!important;width:100%!important;max-width:330px!important;min-width:0!important;height:46px!important;min-height:46px!important;grid-template-columns:31px minmax(0,1fr) 18px!important;column-gap:9px!important;padding:0 28px 0 9px!important}
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorValue{position:relative!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;display:block!important;grid-column:2!important;padding:0!important;font-size:11.5px!important;line-height:1!important;text-overflow:ellipsis!important}
+          .tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelector > span:first-child{display:block!important;text-align:center!important;font-size:9px!important;letter-spacing:.09em!important;color:#dff8ff!important}
         }
+        @media(max-width:420px){.tr-audioDeck.tr-audioDeck--pro7 .tr-playerUtilityRow .tr-audioQueueSelectorValue{font-size:11px!important;padding:0!important}}
+        @media(hover:none){.tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),.tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled),.tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){transform:none!important}}
 
-        @media(hover:none){
-          .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),
-          .tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled),
-          .tr-audioDeck--pro7 .tr-playerTransportStage .tr-audioTransportButton:hover:not(:disabled){transform:none!important}
-        }
 
       `}</style>
     </section>

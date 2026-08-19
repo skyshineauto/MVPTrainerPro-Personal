@@ -104,6 +104,9 @@ type ReviewItem = { trackId: string; candidates: MusicMetadataCandidate[] };
 type EnrichmentState = { running: boolean; current: number; total: number; matched: number; review: number; notFound: number; label: string; serviceMessage: string };
 type BurnMode = "mp3" | "audio";
 type BurnDisc = { number: number; tracks: MusicTrack[]; bytes: number; seconds: number };
+type LibraryCollectionDetail =
+  | { kind: "artist"; artist: string }
+  | { kind: "album"; artist: string; album: string };
 
 const MP3_CD_CAPACITY_BYTES = 700 * 1024 * 1024;
 const AUDIO_CD_CAPACITY_SECONDS = 80 * 60;
@@ -253,6 +256,16 @@ function buildSmartMix(tracks: MusicTrack[], minutes: number, intensity: SmartIn
   }
   return selected.length ? selected : tracks.slice(0, 1);
 }
+
+function shuffleMusicTracks(tracks: MusicTrack[]) {
+  const next = [...tracks];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
 
 function TrackArtwork({ track, size = "row" }: { track: MusicTrack; size?: "row" | "detail" | "card" }) {
   const [url, setUrl] = useState<string | null>(track.external_artwork_url || null);
@@ -409,12 +422,89 @@ function SavedSongCard({
   </article>;
 }
 
+
+type CollectionDetailViewProps = {
+  kind: "artist" | "album";
+  title: string;
+  subtitle: string;
+  tracks: MusicTrack[];
+  backLabel: string;
+  currentTrackId: string | null;
+  playing: boolean;
+  trackMeta: (track: MusicTrack) => string;
+  onBack: () => void;
+  onPlayAll: () => void;
+  onShuffle: () => void;
+  onPlayTrack: (track: MusicTrack) => void;
+  onLike: (track: MusicTrack) => void;
+  onPlayLess: (track: MusicTrack) => void;
+  onPlaylist: (track: MusicTrack) => void;
+  onEdit: (track: MusicTrack) => void;
+};
+
+function CollectionDetailView({
+  kind,
+  title,
+  subtitle,
+  tracks,
+  backLabel,
+  currentTrackId,
+  playing,
+  trackMeta,
+  onBack,
+  onPlayAll,
+  onShuffle,
+  onPlayTrack,
+  onLike,
+  onPlayLess,
+  onPlaylist,
+  onEdit,
+}: CollectionDetailViewProps) {
+  const totalSeconds = tracks.reduce((sum, track) => sum + Number(track.duration_seconds || 0), 0);
+  const heroTrack = tracks[0];
+  return <section className="tr10-collectionDetail">
+    <button type="button" className="tr10-collectionBack" onClick={onBack}>‹ {backLabel}</button>
+    <header className="tr10-collectionDetailHero">
+      {heroTrack ? <TrackArtwork track={heroTrack} size="card" /> : null}
+      <div className="tr10-collectionDetailIdentity">
+        <small>{kind === "artist" ? "ARTIST" : "ALBUM"}</small>
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+        <span>{tracks.length} SONG{tracks.length === 1 ? "" : "S"} • {formatLongDuration(totalSeconds)}</span>
+      </div>
+      <div className="tr10-collectionDetailActions">
+        <button type="button" className="is-primary" disabled={!tracks.length} onClick={onPlayAll}>▶ PLAY ALL</button>
+        <button type="button" disabled={tracks.length < 2} onClick={onShuffle}>⤨ SHUFFLE</button>
+      </div>
+    </header>
+    <div className="tr10-collectionSongList">
+      {tracks.map((track, index) => {
+        const current = currentTrackId === track.id;
+        return <article className={`tr10-collectionSong ${current ? "is-current" : ""}`} key={track.id}>
+          <b className="tr10-collectionSongNumber">{String(index + 1).padStart(2, "0")}</b>
+          <button type="button" className={`tr10-collectionSongPlay ${current && playing ? "is-playing" : ""}`} onClick={() => onPlayTrack(track)} aria-label={`${current && playing ? "Pause" : "Play"} ${track.title}`}>{current && playing ? "Ⅱ" : "▶"}</button>
+          <TrackArtwork track={track} />
+          <div className="tr10-collectionSongText"><strong>{track.title}</strong><span>{trackMeta(track)}</span></div>
+          <span className="tr10-collectionSongDuration">{formatDuration(track.duration_seconds)}</span>
+          <div className="tr10-collectionSongActions">
+            <button type="button" className={track.favorite ? "is-liked" : ""} onClick={() => onLike(track)}>{track.favorite ? "♥ LIKED" : "♡ LIKE"}</button>
+            <button type="button" className={track.play_less ? "is-less" : ""} onClick={() => onPlayLess(track)}>{track.play_less ? "✓ PLAY LESS" : "PLAY LESS"}</button>
+            <button type="button" onClick={() => onPlaylist(track)}>+ PLAYLIST</button>
+            <button type="button" onClick={() => onEdit(track)}>EDIT</button>
+          </div>
+        </article>;
+      })}
+    </div>
+  </section>;
+}
+
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
   const player = useMusicPlayer();
 
   const [tab, setTab] = useState<MusicTab>("songs");
+  const [collectionDetail, setCollectionDetail] = useState<LibraryCollectionDetail | null>(null);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [drafts, setDrafts] = useState<DraftMap>({});
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
@@ -517,15 +607,50 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const reviewRemainingCount = reviewItems.filter((item) => !reviewResolvedIds.has(item.trackId)).length;
 
   const artistGroups = useMemo(() => {
-    const map = new Map<string, MusicTrack[]>();
-    tracks.forEach((track) => { const key = artistLabel(track); map.set(key, [...(map.get(key) || []), track]); });
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const map = new Map<string, { artist: string; tracks: MusicTrack[] }>();
+    tracks.forEach((track) => {
+      const artist = artistLabel(track);
+      const key = artist.toLocaleLowerCase();
+      const group = map.get(key) || { artist, tracks: [] as MusicTrack[] };
+      group.tracks.push(track);
+      map.set(key, group);
+    });
+    return [...map.values()]
+      .map((group) => [group.artist, group.tracks] as [string, MusicTrack[]])
+      .sort(([a], [b]) => a.localeCompare(b));
   }, [tracks]);
   const albumGroups = useMemo(() => {
     const map = new Map<string, { album: string; artist: string; tracks: MusicTrack[] }>();
-    tracks.forEach((track) => { const album = albumLabel(track); const artist = artistLabel(track); const key = `${artist}|||${album}`; const group = map.get(key) || { album, artist, tracks: [] as MusicTrack[] }; group.tracks.push(track); map.set(key, group); });
-    return [...map.values()].sort((a, b) => a.album.localeCompare(b.album));
+    tracks.forEach((track) => {
+      const album = albumLabel(track);
+      const artist = artistLabel(track);
+      const key = `${artist.toLocaleLowerCase()}|||${album.toLocaleLowerCase()}`;
+      const group = map.get(key) || { album, artist, tracks: [] as MusicTrack[] };
+      group.tracks.push(track);
+      map.set(key, group);
+    });
+    return [...map.values()].sort((a, b) => a.album.localeCompare(b.album) || a.artist.localeCompare(b.artist));
   }, [tracks]);
+
+  const activeArtistDetail = useMemo(() => {
+    if (collectionDetail?.kind !== "artist") return null;
+    const group = artistGroups.find(([artist]) => artist === collectionDetail.artist);
+    if (!group) return null;
+    const ordered = [...group[1]].sort((a, b) => {
+      const yearA = a.release_year ?? 9999;
+      const yearB = b.release_year ?? 9999;
+      return yearA - yearB || albumLabel(a).localeCompare(albumLabel(b)) || a.sort_order - b.sort_order || a.title.localeCompare(b.title);
+    });
+    return { artist: group[0], tracks: ordered };
+  }, [collectionDetail, artistGroups]);
+
+  const activeAlbumDetail = useMemo(() => {
+    if (collectionDetail?.kind !== "album") return null;
+    const group = albumGroups.find((item) => item.artist === collectionDetail.artist && item.album === collectionDetail.album);
+    if (!group) return null;
+    return { ...group, tracks: [...group.tracks].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)) };
+  }, [collectionDetail, albumGroups]);
+
 
   const discoveryArchive = useMemo(() => {
     const query = discoverySearch.trim().toLowerCase();
@@ -687,6 +812,20 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
     }
+  }
+
+  async function playCollectionTrack(queueName: string, queueTracks: MusicTrack[], track: MusicTrack) {
+    const current = player.currentTrack?.id === track.id;
+    const queueActive = !player.activePlaylistId && player.activePlaylistName === queueName;
+    if (current && queueActive && player.playing) { pauseMusic(); return; }
+    if (current && queueActive) { await playMusic(); return; }
+    await playMusicAdHocQueue(queueName, queueTracks, track.id);
+  }
+
+  async function playCollectionShuffle(queueName: string, queueTracks: MusicTrack[]) {
+    if (!queueTracks.length) return;
+    const shuffled = shuffleMusicTracks(queueTracks);
+    await playMusicAdHocQueue(queueName, shuffled, shuffled[0]?.id);
   }
 
   async function playTrackOnce(track: MusicTrack) {
@@ -1607,7 +1746,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
@@ -1661,9 +1800,49 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className="tr10-pager"><span>{filteredTracks.length ? `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, filteredTracks.length)} OF ${filteredTracks.length}` : "0 SONGS"}</span><div><button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1,value-1))}>PREV</button><b>{safePage} / {pageCount}</b><button disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount,value+1))}>NEXT</button></div></div>
         </> : null}
 
-        {tab === "artists" ? <div className="tr10-cardGrid">{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div><button onClick={() => void playMusicAdHocQueue(artist,songs)}>▶ PLAY</button></article>)}</div> : null}
+        {tab === "artists" ? activeArtistDetail ? <CollectionDetailView
+          kind="artist"
+          title={activeArtistDetail.artist}
+          subtitle="Every uploaded song by this artist"
+          tracks={activeArtistDetail.tracks}
+          backLabel="ARTISTS"
+          currentTrackId={player.currentTrack?.id || null}
+          playing={player.playing}
+          trackMeta={(track) => [albumLabel(track), track.release_year ? String(track.release_year) : ""].filter(Boolean).join(" • ")}
+          onBack={() => setCollectionDetail(null)}
+          onPlayAll={() => void playMusicAdHocQueue(activeArtistDetail.artist, activeArtistDetail.tracks)}
+          onShuffle={() => void playCollectionShuffle(activeArtistDetail.artist, activeArtistDetail.tracks)}
+          onPlayTrack={(track) => void playCollectionTrack(activeArtistDetail.artist, activeArtistDetail.tracks, track)}
+          onLike={(track) => void changePreference(track, track.favorite ? "neutral" : "like")}
+          onPlayLess={(track) => void changePreference(track, track.play_less ? "neutral" : "play_less")}
+          onPlaylist={(track) => openPlaylistModal([track.id])}
+          onEdit={openDetail}
+        /> : <div className="tr10-cardGrid">{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
+          <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div><span className="tr10-collectionChevron" aria-hidden>›</span></button>
+          <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}>▶ PLAY</button>
+        </article>)}</div> : null}
 
-        {tab === "albums" ? <div className="tr10-cardGrid">{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div><button onClick={() => void playMusicAdHocQueue(group.album,group.tracks)}>▶ PLAY</button></article>)}</div> : null}
+        {tab === "albums" ? activeAlbumDetail ? <CollectionDetailView
+          kind="album"
+          title={activeAlbumDetail.album}
+          subtitle={activeAlbumDetail.artist}
+          tracks={activeAlbumDetail.tracks}
+          backLabel="ALBUMS"
+          currentTrackId={player.currentTrack?.id || null}
+          playing={player.playing}
+          trackMeta={(track) => [artistLabel(track), track.release_year ? String(track.release_year) : ""].filter(Boolean).join(" • ")}
+          onBack={() => setCollectionDetail(null)}
+          onPlayAll={() => void playMusicAdHocQueue(`Album • ${activeAlbumDetail.album}`, activeAlbumDetail.tracks)}
+          onShuffle={() => void playCollectionShuffle(`Album • ${activeAlbumDetail.album}`, activeAlbumDetail.tracks)}
+          onPlayTrack={(track) => void playCollectionTrack(`Album • ${activeAlbumDetail.album}`, activeAlbumDetail.tracks, track)}
+          onLike={(track) => void changePreference(track, track.favorite ? "neutral" : "like")}
+          onPlayLess={(track) => void changePreference(track, track.play_less ? "neutral" : "play_less")}
+          onPlaylist={(track) => openPlaylistModal([track.id])}
+          onEdit={openDetail}
+        /> : <div className="tr10-cardGrid">{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
+          <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div><span className="tr10-collectionChevron" aria-hidden>›</span></button>
+          <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}>▶ PLAY</button>
+        </article>)}</div> : null}
 
         {tab === "playlists" ? <div className="tr10-playlistLayout">
           <aside><div className="tr10-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="New playlist" /><button onClick={() => void createPlaylist()}>+</button></div>{regularPlaylists.map((playlist) => <button key={playlist.id} className={selectedPlaylistId === playlist.id ? "is-active" : ""} onClick={() => setSelectedPlaylistId(playlist.id)}><strong>{playlist.name}</strong><span>{(playlistTrackIds[playlist.id] || []).length} SONGS</span></button>)}</aside>
@@ -2872,6 +3051,33 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-radarGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:10px}.tr10-radarGrid article{min-height:94px;padding:10px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px;border:1px solid rgba(100,174,197,.11);border-radius:9px;background:linear-gradient(145deg,rgba(9,27,35,.96),rgba(4,13,18,.96));box-shadow:inset 0 1px rgba(255,255,255,.025)}.tr10-radarGrid small{color:#55d5f5;font-size:6px;font-weight:1000;letter-spacing:.08em}.tr10-radarGrid h3{margin:4px 0 3px;color:#fff;font-size:11px}.tr10-radarGrid p{margin:0;color:#76909a;font-size:7px;line-height:1.4}.tr10-radarGrid button{height:31px;flex:0 0 auto;padding:0 10px;border:1px solid rgba(75,202,239,.28);border-radius:7px;background:#08242e;color:#eafaff;font-size:7px;font-weight:1000}.tr10-radarGrid button:disabled{opacity:.28}
         @media(max-width:820px){.tr10-radarGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.tr10-radarHead{align-items:flex-start}.tr10-radarHead>strong{font-size:23px}}
         @media(max-width:520px){.tr10-radarPanel{margin:7px}.tr10-radarHead{padding:10px}.tr10-radarHead h2{font-size:15px}.tr10-radarHead p{font-size:7px}.tr10-radarGrid{grid-template-columns:1fr;padding:7px}.tr10-radarGrid article{min-height:78px;padding:9px}.tr10-radarGrid h3{font-size:10px}.tr10-radarGrid p{font-size:6.5px}}
+
+
+        /* MVP_TRAINER_V5_R8_6_LIBRARY_COLLECTION_DRILLDOWN */
+        .tr10-collectionCard{padding:0!important;grid-template-columns:minmax(0,1fr) auto!important;gap:0!important;overflow:hidden!important}
+        .tr10-collectionCard>.tr10-collectionOpen{width:100%!important;height:auto!important;min-width:0!important;min-height:86px!important;padding:12px!important;display:grid!important;grid-template-columns:auto minmax(0,1fr) 24px!important;gap:12px!important;align-items:center!important;border:0!important;border-radius:0!important;background:transparent!important;color:#fff!important;text-align:left!important;font-size:inherit!important;font-weight:inherit!important;cursor:pointer!important}
+        .tr10-collectionCard>.tr10-collectionOpen:hover{background:linear-gradient(90deg,rgba(49,193,237,.075),transparent)!important}
+        .tr10-collectionOpen>div{min-width:0}.tr10-collectionOpen small{color:#56ceef;font-size:7px;font-weight:1000;letter-spacing:.09em}.tr10-collectionOpen h3{margin:4px 0 3px;color:#f8fcfe;font-size:16px;line-height:1.08;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr10-collectionOpen p{margin:0;color:#8299a2;font-size:8px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr10-collectionChevron{display:grid;place-items:center;width:24px;height:34px;color:#8fdff7;font-size:28px;font-weight:500;opacity:.78}
+        .tr10-collectionCard>.tr10-collectionPlay{align-self:center;height:38px;margin-right:12px;padding:0 13px;border:1px solid rgba(70,196,236,.30);border-radius:9px;background:#082633;color:#e8faff;font-size:8px;font-weight:1000;white-space:nowrap;cursor:pointer}.tr10-collectionCard>.tr10-collectionPlay:hover{border-color:rgba(78,216,255,.55);background:#0a3443}
+
+        .tr10-collectionDetail{padding:12px;display:grid;gap:10px}
+        .tr10-collectionBack{justify-self:start;height:34px;padding:0 11px;border:1px solid rgba(101,177,204,.18);border-radius:9px;background:#07141a;color:#dff7ff;font-size:8px;font-weight:1000;letter-spacing:.05em;cursor:pointer}
+        .tr10-collectionDetailHero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;border:1px solid rgba(75,184,218,.17);border-radius:14px;background:radial-gradient(circle at 8% 0%,rgba(48,188,232,.11),transparent 34%),linear-gradient(180deg,#091820,#050d12);box-shadow:inset 0 1px rgba(255,255,255,.035),0 14px 30px rgba(0,0,0,.22)}
+        .tr10-collectionDetailHero .tr10-art--card{width:92px;height:92px;border-radius:12px}
+        .tr10-collectionDetailIdentity{min-width:0}.tr10-collectionDetailIdentity small{display:block;color:#58d8f8;font-size:7px;font-weight:1000;letter-spacing:.14em}.tr10-collectionDetailIdentity h2{margin:5px 0 4px;color:#fff;font-size:28px;line-height:1.02;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr10-collectionDetailIdentity p{margin:0;color:#b7cad1;font-size:10px;font-weight:850}.tr10-collectionDetailIdentity>span{display:block;margin-top:7px;color:#718d98;font-size:8px;font-weight:900;letter-spacing:.035em}
+        .tr10-collectionDetailActions{display:flex;gap:7px;align-items:center}.tr10-collectionDetailActions button{height:40px;padding:0 13px;border:1px solid rgba(102,172,197,.18);border-radius:9px;background:#07151b;color:#d9e9ee;font-size:8px;font-weight:1000;white-space:nowrap;cursor:pointer}.tr10-collectionDetailActions button.is-primary{border-color:rgba(67,206,246,.38);background:linear-gradient(180deg,#0b4052,#082a36);color:#f2fcff;box-shadow:inset 0 -2px rgba(70,210,249,.48)}.tr10-collectionDetailActions button:disabled{opacity:.35;cursor:not-allowed}
+        .tr10-collectionSongList{overflow:hidden;border:1px solid rgba(95,159,181,.11);border-radius:12px;background:#050d11}
+        .tr10-collectionSong{display:grid;grid-template-columns:30px 38px 46px minmax(0,1fr) 54px auto;gap:9px;align-items:center;min-height:68px;padding:8px 10px;border-bottom:1px solid rgba(85,144,165,.085);background:rgba(2,8,11,.36)}.tr10-collectionSong:last-child{border-bottom:0}.tr10-collectionSong:hover{background:rgba(8,28,36,.48)}.tr10-collectionSong.is-current{background:linear-gradient(90deg,rgba(7,67,88,.52),rgba(3,13,18,.4));box-shadow:inset 3px 0 #3ed2f8}
+        .tr10-collectionSongNumber{color:#57717b;font-size:8px;text-align:center}.tr10-collectionSongPlay{width:34px;height:34px;border:1px solid rgba(76,201,239,.26);border-radius:999px;background:#071b23;color:#eafaff;font-size:11px;font-weight:1000;cursor:pointer}.tr10-collectionSongPlay.is-playing{border-color:rgba(77,218,255,.58);background:#0a3544;color:#fff;box-shadow:0 0 12px rgba(57,199,241,.16)}
+        .tr10-collectionSongText{min-width:0}.tr10-collectionSongText strong{display:block;color:#fff;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr10-collectionSongText span{display:block;margin-top:3px;color:#8199a2;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tr10-collectionSongDuration{color:#a6bbc2;font-size:8px;font-weight:900;text-align:right}
+        .tr10-collectionSongActions{display:flex;gap:5px;align-items:center}.tr10-collectionSongActions button{height:30px;padding:0 8px;border:1px solid rgba(102,158,178,.13);border-radius:7px;background:#071117;color:#a8bdc5;font-size:6.5px;font-weight:1000;white-space:nowrap;cursor:pointer}.tr10-collectionSongActions button.is-liked{border-color:rgba(65,225,166,.30);color:#91f2c8;background:rgba(22,109,79,.18)}.tr10-collectionSongActions button.is-less{border-color:rgba(255,94,103,.28);color:#ffb2b7;background:rgba(112,28,35,.16)}
+        @media(max-width:760px){
+          .tr10-collectionCard{grid-template-columns:minmax(0,1fr) 74px!important}.tr10-collectionCard>.tr10-collectionOpen{min-height:78px!important;padding:9px!important;grid-template-columns:54px minmax(0,1fr) 18px!important;gap:8px!important}.tr10-collectionOpen .tr10-art--card{width:54px;height:54px}.tr10-collectionOpen h3{font-size:14px}.tr10-collectionOpen p{font-size:7px}.tr10-collectionChevron{width:18px;font-size:23px}.tr10-collectionCard>.tr10-collectionPlay{height:34px;margin-right:8px;padding:0 8px;font-size:7px}
+          .tr10-collectionDetail{padding:8px;gap:8px}.tr10-collectionBack{height:32px;font-size:7px}.tr10-collectionDetailHero{grid-template-columns:70px minmax(0,1fr);gap:10px;padding:11px}.tr10-collectionDetailHero .tr10-art--card{width:70px;height:70px}.tr10-collectionDetailIdentity h2{font-size:20px;white-space:normal}.tr10-collectionDetailIdentity p{font-size:9px}.tr10-collectionDetailIdentity>span{font-size:7px}.tr10-collectionDetailActions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;width:100%}.tr10-collectionDetailActions button{height:38px}
+          .tr10-collectionSong{grid-template-columns:24px 34px 42px minmax(0,1fr);grid-template-areas:"num play art text" ". duration duration duration" "actions actions actions actions";gap:7px;min-height:0;padding:9px 8px}.tr10-collectionSongNumber{grid-area:num}.tr10-collectionSongPlay{grid-area:play;width:32px;height:32px}.tr10-collectionSong>.tr10-art--row{grid-area:art;width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important}.tr10-collectionSongText{grid-area:text}.tr10-collectionSongText strong{font-size:12px;white-space:normal}.tr10-collectionSongText span{font-size:8px;white-space:normal}.tr10-collectionSongDuration{grid-area:duration;justify-self:start;text-align:left;font-size:8px}.tr10-collectionSongActions{grid-area:actions;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.tr10-collectionSongActions button{width:100%;height:32px;padding:0 3px;font-size:6.5px;white-space:normal;line-height:1.05}
+        }
+        @media(max-width:390px){.tr10-collectionSongActions{grid-template-columns:repeat(2,minmax(0,1fr))}.tr10-collectionDetailIdentity h2{font-size:18px}.tr10-collectionOpen h3{font-size:13px}}
+
       `}</style>
     </main>
   );
