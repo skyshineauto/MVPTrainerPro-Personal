@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R8_8_2_DSP_EQ_CORNER_LAUNCHER */
+/* MVP_TRAINER_V5_R8_8_6_TRUE_PLAYER_CORNER_DSP_REPAIR */
 import {
   useEffect,
   useRef,
@@ -1933,36 +1933,35 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       <MusicActivityRta playing={player.playing} profileLabel={dspOutputStatus} eqLabel={dspEqStatus} outputProfile={player.outputProfile} sourceQuality={sourceQuality} dspEngineMode={player.dspEngineMode} />
 
 
-      <div className="tr-playerBottomDock">
-        <div className="tr-playerUtilityRow">
-          <div className="tr-playerSourceTools">
-            <label className={`tr-audioQueueSelector ${sourcePulse ? "is-changed" : ""} ${neuralRadioActive ? "is-intelligent-source" : ""}`}>
-              <span className="tr-audioQueueSelectorCaption">PLAYING FROM</span>
-              <span className="tr-audioQueueSelectorField">
-                <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="source" /></i>
-                <span className="tr-audioQueueSelectorValue" aria-hidden>{activePlaylistLabel}</span>
-                <select className="tr-audioQueueNativeHit" value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
-                  <option value="all">All Uploaded Songs</option>
-                  {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
-                </select>
-                <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.8 8.8 5.2 5.4 5.2-5.4"/></svg></i>
-              </span>
-            </label>
-          </div>
+      <div className="tr-playerUtilityRow">
+        <div className="tr-playerSourceTools">
+          <label className={`tr-audioQueueSelector ${sourcePulse ? "is-changed" : ""} ${neuralRadioActive ? "is-intelligent-source" : ""}`}>
+            <span className="tr-audioQueueSelectorCaption">PLAYING FROM</span>
+            <span className="tr-audioQueueSelectorField">
+              <i className="tr-sourceIcon" aria-hidden><PlayerIcon name="source" /></i>
+              <span className="tr-audioQueueSelectorValue" aria-hidden>{activePlaylistLabel}</span>
+              <select className="tr-audioQueueNativeHit" value={player.activePlaylistId || "all"} disabled={queueBusy} onChange={(event: ChangeEvent<HTMLSelectElement>) => void selectQueue(event.target.value)} aria-label="Choose music playlist">
+                <option value="all">All Uploaded Songs</option>
+                {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+              </select>
+              <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.8 8.8 5.2 5.4 5.2-5.4"/></svg></i>
+            </span>
+          </label>
         </div>
-        <button
-          type="button"
-          data-profile={player.outputProfile}
-          className={`tr-audioEqToggle tr-dspStatusToggle tr-dspCornerLauncher ${eqOpen ? "is-active" : ""}`}
-          onClick={() => setEqOpen((current) => !current)}
-          aria-expanded={eqOpen}
-          aria-label={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP`}
-          title={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} • DSP`}
-        >
-          <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
-          <span className="tr-dspCornerLabel">DSP</span>
-        </button>
       </div>
+
+      <button
+        type="button"
+        data-profile={player.outputProfile}
+        className={`tr-dspPlayerCornerDock ${eqOpen ? "is-active" : ""}`}
+        onClick={() => setEqOpen((current) => !current)}
+        aria-expanded={eqOpen}
+        aria-label={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP`}
+        title={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} • DSP`}
+      >
+        <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
+        <span className="tr-dspCornerLabel">DSP</span>
+      </button>
 
       {discoverMessage ? <div className="tr-discoverToast" role="status">{discoverMessage}</div> : null}
 
@@ -10222,241 +10221,315 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-neuralSteering > .tr-neuralSteeringRail > .tr-neuralCommand:hover:not(:disabled){transform:none!important;translate:none!important;scale:1!important}
         }
 
+
         /* ============================================================
-           MVP TRAINER V5 R8.8.5 - TRUE IN-PLAYER DSP CORNER DOCK
-           DSP is structurally separated from Playing From and absolutely
-           anchored to the lower-right corner of the player's own bottom
-           dock. It no longer participates in a row/grid placement.
+           MVP TRAINER V5 R8.8.6 - TRUE PLAYER-CORNER DSP + SOURCE RESTORE
+           Playing From is restored to the last known-good direct-child
+           structure. DSP is a separate absolute control anchored to the
+           MUSIC PLAYER CARD itself, not to Playing From or a utility row.
            ============================================================ */
 
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock{
+        .tr-audioDeck.tr-audioDeck--pro7{
           position:relative!important;
-          width:100%!important;
-          max-width:none!important;
-          box-sizing:border-box!important;
-          margin:10px auto 0!important;
-          padding:0 14px 11px!important;
-          min-height:67px!important;
-          overflow:visible!important;
-        }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-playerUtilityRow{
-          width:100%!important;
-          max-width:none!important;
-          min-height:56px!important;
-          margin:0!important;
-          padding:0!important;
-          display:flex!important;
-          align-items:flex-end!important;
-          justify-content:center!important;
-          position:relative!important;
-          box-sizing:border-box!important;
-          overflow:visible!important;
-        }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-playerUtilityRow > .tr-playerSourceTools{
-          width:360px!important;
-          max-width:360px!important;
-          min-width:270px!important;
-          margin:0 auto!important;
-          padding:0!important;
-          display:block!important;
-          position:relative!important;
-        }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock .tr-audioQueueSelector{
-          width:100%!important;
-          max-width:360px!important;
-          min-width:0!important;
-          margin:0 auto!important;
         }
 
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher{
-          --dsp-corner-rgb:66,214,255;
-          position:absolute!important;
-          right:14px!important;
-          bottom:11px!important;
-          left:auto!important;
-          top:auto!important;
-          inset:auto 14px 11px auto!important;
-          z-index:12!important;
-          width:82px!important;
-          min-width:82px!important;
-          max-width:82px!important;
-          height:31px!important;
-          min-height:31px!important;
-          margin:0!important;
-          padding:0 8px 0 5px!important;
+        /* Restore one centered Playing From control. No second visible select text. */
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow{
+          width:100%!important;
+          margin:10px auto 4px!important;
+          padding:0 14px 10px!important;
           display:flex!important;
-          align-items:center!important;
           justify-content:center!important;
-          gap:6px!important;
-          isolation:isolate!important;
-          overflow:hidden!important;
-          border-radius:9px!important;
-          border:1px solid rgba(var(--dsp-corner-rgb),.58)!important;
-          background:
-            radial-gradient(115% 150% at 18% -18%,rgba(var(--dsp-corner-rgb),.18),transparent 47%),
-            linear-gradient(180deg,rgba(14,34,44,.99),rgba(3,11,16,.995))!important;
-          color:#fbfeff!important;
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.12),
-            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.11),
-            0 6px 16px rgba(0,0,0,.34),
-            0 0 12px rgba(var(--dsp-corner-rgb),.09)!important;
-          transform:none!important;
-          translate:none!important;
-          scale:1!important;
-          -webkit-tap-highlight-color:transparent!important;
+          align-items:flex-end!important;
+          box-sizing:border-box!important;
+          overflow:visible!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher[data-profile="reference"]{--dsp-corner-rgb:179,210,221}
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher[data-profile="car_hifi"]{--dsp-corner-rgb:255,177,59}
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher[data-profile="headphones"]{--dsp-corner-rgb:60,215,255}
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher[data-profile="speaker"]{--dsp-corner-rgb:181,112,255}
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher::before{
-          content:""!important;
-          position:absolute!important;
-          inset:0!important;
-          display:block!important;
-          pointer-events:none!important;
-          border-radius:inherit!important;
-          background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,0) 34%)!important;
-          opacity:1!important;
-          transform:none!important;
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-playerSourceTools{
+          width:300px!important;
+          max-width:300px!important;
+          min-width:0!important;
+          margin:0 auto!important;
+          display:grid!important;
+          grid-template-columns:minmax(0,300px)!important;
+          gap:0!important;
+          align-items:end!important;
+          justify-content:center!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher::after{
-          content:""!important;
-          position:absolute!important;
-          left:10px!important;
-          right:10px!important;
-          bottom:0!important;
-          height:1px!important;
-          display:block!important;
-          pointer-events:none!important;
-          background:linear-gradient(90deg,transparent,rgba(var(--dsp-corner-rgb),.82),transparent)!important;
-          opacity:.85!important;
-          transform:none!important;
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelector{
+          width:300px!important;
+          max-width:300px!important;
+          min-width:0!important;
+          margin:0!important;
+          display:grid!important;
+          grid-template-rows:auto 46px!important;
+          gap:5px!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspStatusIcon{
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorCaption{
+          width:100%!important;
+          margin:0!important;
+          text-align:center!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorField{
           position:relative!important;
-          z-index:2!important;
-          width:22px!important;
-          height:22px!important;
-          min-width:22px!important;
+          width:100%!important;
+          height:46px!important;
+          min-height:46px!important;
+          min-width:0!important;
+          margin:0!important;
+          padding:0 8px!important;
+          display:grid!important;
+          grid-template-columns:32px minmax(0,1fr) 32px!important;
+          grid-template-rows:1fr!important;
+          column-gap:4px!important;
+          align-items:center!important;
+          overflow:hidden!important;
+          box-sizing:border-box!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceIcon,
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceChevron{
+          position:relative!important;
+          inset:auto!important;
+          width:32px!important;
+          height:100%!important;
+          min-width:32px!important;
           margin:0!important;
           display:grid!important;
           place-items:center!important;
-          border-radius:7px!important;
+          align-self:stretch!important;
+          z-index:3!important;
+          pointer-events:none!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceIcon{
+          grid-column:1!important;
+          grid-row:1!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceChevron{
+          grid-column:3!important;
+          grid-row:1!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorValue{
+          position:relative!important;
+          inset:auto!important;
+          grid-column:2!important;
+          grid-row:1!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          align-self:stretch!important;
+          width:100%!important;
+          height:100%!important;
+          min-width:0!important;
+          margin:0!important;
+          padding:0 4px!important;
+          text-align:center!important;
+          white-space:nowrap!important;
+          overflow:hidden!important;
+          text-overflow:ellipsis!important;
+          transform:none!important;
+          translate:none!important;
+          z-index:2!important;
+          pointer-events:none!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueNativeHit,
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorField > select{
+          position:absolute!important;
+          inset:0!important;
+          width:100%!important;
+          height:100%!important;
+          margin:0!important;
+          padding:0!important;
+          opacity:0!important;
+          color:transparent!important;
+          -webkit-text-fill-color:transparent!important;
+          text-shadow:none!important;
+          background:transparent!important;
+          border:0!important;
+          outline:0!important;
+          appearance:none!important;
+          -webkit-appearance:none!important;
+          z-index:6!important;
+          cursor:pointer!important;
+        }
+
+        /* TRUE corner anchor: direct child of the full music-player card. */
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock{
+          --dsp-corner-rgb:66,214,255;
+          position:absolute!important;
+          right:10px!important;
+          bottom:8px!important;
+          left:auto!important;
+          top:auto!important;
+          z-index:40!important;
+          width:72px!important;
+          min-width:72px!important;
+          max-width:72px!important;
+          height:28px!important;
+          min-height:28px!important;
+          margin:0!important;
+          padding:0 7px 0 5px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:5px!important;
+          border-radius:9px!important;
+          border:1px solid rgba(var(--dsp-corner-rgb),.58)!important;
+          background:
+            radial-gradient(100% 130% at 18% -12%,rgba(var(--dsp-corner-rgb),.17),transparent 48%),
+            linear-gradient(180deg,rgba(13,31,40,.985),rgba(3,10,15,.995))!important;
+          color:#fff!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.12),
+            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.12),
+            0 5px 14px rgba(0,0,0,.34),
+            0 0 12px rgba(var(--dsp-corner-rgb),.10)!important;
+          overflow:hidden!important;
+          isolation:isolate!important;
+          transform:none!important;
+          translate:none!important;
+          scale:1!important;
+          cursor:pointer!important;
+          -webkit-tap-highlight-color:transparent!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock[data-profile="reference"]{--dsp-corner-rgb:179,210,221}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock[data-profile="car_hifi"]{--dsp-corner-rgb:255,177,59}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock[data-profile="headphones"]{--dsp-corner-rgb:60,215,255}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock[data-profile="speaker"]{--dsp-corner-rgb:181,112,255}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock::before{
+          content:""!important;
+          position:absolute!important;
+          inset:0!important;
+          pointer-events:none!important;
+          border-radius:inherit!important;
+          background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,0) 38%)!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock::after{
+          content:""!important;
+          position:absolute!important;
+          left:9px!important;
+          right:9px!important;
+          bottom:0!important;
+          height:1px!important;
+          pointer-events:none!important;
+          background:linear-gradient(90deg,transparent,rgba(var(--dsp-corner-rgb),.88),transparent)!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspStatusIcon{
+          position:relative!important;
+          z-index:2!important;
+          width:19px!important;
+          height:19px!important;
+          min-width:19px!important;
+          display:grid!important;
+          place-items:center!important;
+          margin:0!important;
+          border-radius:6px!important;
           border:1px solid rgba(var(--dsp-corner-rgb),.40)!important;
           background:rgba(var(--dsp-corner-rgb),.08)!important;
           color:rgb(var(--dsp-corner-rgb))!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 9px rgba(var(--dsp-corner-rgb),.13)!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 8px rgba(var(--dsp-corner-rgb),.15)!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspStatusIcon svg{
-          width:15px!important;
-          height:15px!important;
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspStatusIcon svg{
+          width:13px!important;
+          height:13px!important;
           display:block!important;
           color:inherit!important;
           fill:currentColor!important;
           stroke:currentColor!important;
-          filter:drop-shadow(0 0 3px rgba(var(--dsp-corner-rgb),.28))!important;
+          filter:drop-shadow(0 0 3px rgba(var(--dsp-corner-rgb),.30))!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspCornerLabel{
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspCornerLabel{
           position:relative!important;
           z-index:2!important;
           margin:0!important;
-          display:block!important;
-          color:#fbfeff!important;
-          font-size:10px!important;
+          color:#fff!important;
+          font-size:9px!important;
           line-height:1!important;
           font-weight:1000!important;
           letter-spacing:.07em!important;
           white-space:nowrap!important;
-          text-shadow:0 1px 2px rgba(0,0,0,.92)!important;
+          text-shadow:0 1px 2px rgba(0,0,0,.9)!important;
         }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher:hover:not(:disabled){
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock:hover:not(:disabled),
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock.is-active{
           transform:none!important;
-          border-color:rgba(var(--dsp-corner-rgb),.88)!important;
+          border-color:rgba(var(--dsp-corner-rgb),.92)!important;
           box-shadow:
             inset 0 1px 0 rgba(255,255,255,.14),
-            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.15),
+            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.16),
             0 0 0 1px rgba(var(--dsp-corner-rgb),.08),
-            0 0 15px rgba(var(--dsp-corner-rgb),.17),
-            0 7px 17px rgba(0,0,0,.36)!important;
-        }
-        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher.is-active{
-          transform:none!important;
-          border-color:rgba(var(--dsp-corner-rgb),.98)!important;
-          box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.15),
-            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.18),
-            0 0 0 1px rgba(var(--dsp-corner-rgb),.12),
-            0 0 16px rgba(var(--dsp-corner-rgb),.24),
-            0 7px 17px rgba(0,0,0,.36)!important;
+            0 0 15px rgba(var(--dsp-corner-rgb),.19),
+            0 6px 15px rgba(0,0,0,.35)!important;
         }
 
         @media(max-width:760px){
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock{
-            min-height:101px!important;
-            margin:10px auto 0!important;
-            padding:0 8px 9px!important;
-          }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-playerUtilityRow{
-            min-height:67px!important;
-            align-items:flex-start!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow{
+            width:100%!important;
+            margin:10px auto 4px!important;
+            padding:0 8px 38px!important;
             justify-content:center!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-playerUtilityRow > .tr-playerSourceTools{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-playerSourceTools{
             width:min(360px,100%)!important;
             max-width:360px!important;
-            min-width:0!important;
+            grid-template-columns:minmax(0,1fr)!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock .tr-audioQueueSelector{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelector{
             width:100%!important;
             max-width:350px!important;
+            grid-template-rows:auto 52px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher{
-            right:9px!important;
-            bottom:9px!important;
-            inset:auto 9px 9px auto!important;
-            width:68px!important;
-            min-width:68px!important;
-            max-width:68px!important;
-            height:27px!important;
-            min-height:27px!important;
-            padding:0 6px 0 4px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorField{
+            height:52px!important;
+            min-height:52px!important;
+            grid-template-columns:38px minmax(0,1fr) 38px!important;
+            padding:0 8px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceIcon,
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceChevron{
+            width:38px!important;
+            min-width:38px!important;
+            height:52px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorValue{
+            height:52px!important;
+            font-size:12.5px!important;
+            transform:translateY(-2px)!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock{
+            right:8px!important;
+            bottom:7px!important;
+            width:58px!important;
+            min-width:58px!important;
+            max-width:58px!important;
+            height:24px!important;
+            min-height:24px!important;
+            padding:0 5px 0 4px!important;
             gap:4px!important;
             border-radius:8px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspStatusIcon{
-            width:19px!important;
-            height:19px!important;
-            min-width:19px!important;
-            border-radius:6px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspStatusIcon{
+            width:17px!important;
+            height:17px!important;
+            min-width:17px!important;
+            border-radius:5px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspStatusIcon svg{
-            width:13px!important;
-            height:13px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspStatusIcon svg{
+            width:11.5px!important;
+            height:11.5px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher .tr-dspCornerLabel{
-            font-size:8.7px!important;
-            letter-spacing:.065em!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock .tr-dspCornerLabel{
+            font-size:7.8px!important;
+            letter-spacing:.06em!important;
           }
         }
-
         @media(max-width:390px){
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-dspPlayerCornerDock{
             right:7px!important;
-            bottom:8px!important;
-            inset:auto 7px 8px auto!important;
-            width:64px!important;
-            min-width:64px!important;
-            max-width:64px!important;
-            height:26px!important;
-            min-height:26px!important;
-          }
-        }
-
-        @media(hover:none){
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerBottomDock > .tr-dspCornerLauncher:hover:not(:disabled){
-            transform:none!important;
+            bottom:6px!important;
+            width:54px!important;
+            min-width:54px!important;
+            max-width:54px!important;
+            height:23px!important;
+            min-height:23px!important;
           }
         }
 
