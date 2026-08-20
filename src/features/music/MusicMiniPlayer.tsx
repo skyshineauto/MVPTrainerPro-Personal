@@ -10202,7 +10202,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelectorValue{
             position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;grid-column:2!important;grid-row:1!important;align-self:stretch!important;
-            display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:52px!important;margin:0!important;padding:0 5px!important;text-align:center!important;line-height:1.15!important;text-overflow:ellipsis!important;transform:none!important;translate:none!important;
+            display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:52px!important;margin:0!important;padding:0 5px!important;text-align:center!important;line-height:1.15!important;text-overflow:ellipsis!important;transform:translateY(-2px)!important;translate:none!important;
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-sourceChevron svg{margin:0!important;transform:none!important}
         }
