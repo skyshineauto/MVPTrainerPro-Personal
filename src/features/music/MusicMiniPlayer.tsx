@@ -1947,19 +1947,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <i className="tr-sourceChevron" aria-hidden><svg viewBox="0 0 24 24"><path d="m6.8 8.8 5.2 5.4 5.2-5.4"/></svg></i>
             </span>
           </label>
-          <button
-            type="button"
-            data-profile={player.outputProfile}
-            className={`tr-audioEqToggle tr-dspStatusToggle tr-dspCornerLauncher ${eqOpen ? "is-active" : ""}`}
-            onClick={() => setEqOpen((current) => !current)}
-            aria-expanded={eqOpen}
-            aria-label={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP / EQ`}
-            title={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} • DSP / EQ`}
-          >
-            <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
-            <span className="tr-dspCornerLabel">DSP / EQ</span>
-          </button>
         </div>
+        <button
+          type="button"
+          data-profile={player.outputProfile}
+          className={`tr-audioEqToggle tr-dspStatusToggle tr-dspCornerLauncher ${eqOpen ? "is-active" : ""}`}
+          onClick={() => setEqOpen((current) => !current)}
+          aria-expanded={eqOpen}
+          aria-label={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP / EQ`}
+          title={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} • DSP / EQ`}
+        >
+          <span className="tr-dspStatusIcon"><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span>
+          <span className="tr-dspCornerLabel">DSP / EQ</span>
+        </button>
       </div>
 
       {discoverMessage ? <div className="tr-discoverToast" role="status">{discoverMessage}</div> : null}
@@ -10221,12 +10221,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
         /* ============================================================
-           MVP TRAINER V5 R8.8.3 - TRUE DSP / EQ CORNER LAUNCHER
-           Playing From remains centered. DSP/EQ becomes a compact,
-           premium output-aware launcher at the real lower-right edge.
+           MVP TRAINER V5 R8.8.4 - DSP / EQ PLAYER-CORNER INTEGRATION
+           Playing From stays centered. DSP/EQ is now a direct child of
+           the player's bottom utility row so it cannot fall into a
+           detached left-side row. Desktop pins it to the real lower-right.
            ============================================================ */
 
-        /* Profile-aware accent. The active output icon is still supplied by JSX. */
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher{
           --dsp-corner-rgb:66,214,255;
           isolation:isolate!important;
@@ -10237,6 +10237,22 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           scale:1!important;
           cursor:pointer!important;
           -webkit-tap-highlight-color:transparent!important;
+          position:relative!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:6px!important;
+          border-radius:10px!important;
+          border:1px solid rgba(var(--dsp-corner-rgb),.52)!important;
+          background:
+            radial-gradient(130% 150% at 18% -18%,rgba(var(--dsp-corner-rgb),.17),transparent 46%),
+            linear-gradient(180deg,rgba(14,34,44,.985),rgba(3,12,17,.995))!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.11),
+            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.10),
+            0 7px 18px rgba(0,0,0,.34),
+            0 0 0 1px rgba(var(--dsp-corner-rgb),.025),
+            0 0 14px rgba(var(--dsp-corner-rgb),.075)!important;
         }
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher[data-profile="reference"]{--dsp-corner-rgb:179,210,221}
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher[data-profile="car_hifi"]{--dsp-corner-rgb:255,177,59}
@@ -10251,8 +10267,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           pointer-events:none!important;
           border-radius:inherit!important;
           background:
-            linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,0) 34%),
-            radial-gradient(90% 120% at 18% 10%,rgba(var(--dsp-corner-rgb),.18),transparent 55%)!important;
+            linear-gradient(180deg,rgba(255,255,255,.095),rgba(255,255,255,0) 32%),
+            linear-gradient(105deg,transparent 18%,rgba(255,255,255,.035) 47%,transparent 69%)!important;
           opacity:1!important;
           transform:none!important;
         }
@@ -10260,13 +10276,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           content:""!important;
           display:block!important;
           position:absolute!important;
-          left:10px!important;
-          right:10px!important;
+          left:12px!important;
+          right:12px!important;
           bottom:0!important;
           height:1px!important;
           pointer-events:none!important;
-          background:linear-gradient(90deg,transparent,rgba(var(--dsp-corner-rgb),.62),transparent)!important;
-          opacity:.72!important;
+          background:linear-gradient(90deg,transparent,rgba(var(--dsp-corner-rgb),.72),transparent)!important;
+          opacity:.82!important;
           transform:none!important;
         }
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon{
@@ -10277,20 +10293,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           display:grid!important;
           place-items:center!important;
           color:rgb(var(--dsp-corner-rgb))!important;
-          border:1px solid rgba(var(--dsp-corner-rgb),.35)!important;
+          border:1px solid rgba(var(--dsp-corner-rgb),.38)!important;
           background:
-            radial-gradient(circle at 34% 24%,rgba(255,255,255,.13),transparent 42%),
+            radial-gradient(circle at 34% 24%,rgba(255,255,255,.14),transparent 42%),
             rgba(var(--dsp-corner-rgb),.075)!important;
           box-shadow:
-            inset 0 1px 0 rgba(255,255,255,.08),
-            0 0 11px rgba(var(--dsp-corner-rgb),.12)!important;
+            inset 0 1px 0 rgba(255,255,255,.09),
+            0 0 10px rgba(var(--dsp-corner-rgb),.13)!important;
         }
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon svg{
           display:block!important;
           color:inherit!important;
           fill:currentColor!important;
           stroke:currentColor!important;
-          filter:drop-shadow(0 0 4px rgba(var(--dsp-corner-rgb),.26))!important;
+          filter:drop-shadow(0 0 4px rgba(var(--dsp-corner-rgb),.28))!important;
         }
         .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspCornerLabel{
           position:relative!important;
@@ -10300,10 +10316,30 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           color:#fbfeff!important;
           line-height:1!important;
           font-weight:1000!important;
-          letter-spacing:.045em!important;
+          letter-spacing:.04em!important;
           white-space:nowrap!important;
           text-align:center!important;
           text-shadow:0 1px 2px rgba(0,0,0,.92)!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher:hover:not(:disabled){
+          transform:none!important;
+          border-color:rgba(var(--dsp-corner-rgb),.80)!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.13),
+            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.14),
+            0 0 0 1px rgba(var(--dsp-corner-rgb),.08),
+            0 0 17px rgba(var(--dsp-corner-rgb),.15),
+            0 8px 19px rgba(0,0,0,.35)!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher.is-active{
+          transform:none!important;
+          border-color:rgba(var(--dsp-corner-rgb),.94)!important;
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.14),
+            inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.18),
+            0 0 0 1px rgba(var(--dsp-corner-rgb),.13),
+            0 0 18px rgba(var(--dsp-corner-rgb),.22),
+            0 8px 19px rgba(0,0,0,.35)!important;
         }
 
         @media(min-width:761px){
@@ -10313,91 +10349,63 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             min-height:66px!important;
             margin:10px auto 0!important;
             padding:0 12px 10px!important;
-            display:block!important;
+            display:grid!important;
+            grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important;
+            align-items:end!important;
+            column-gap:12px!important;
             position:relative!important;
             box-sizing:border-box!important;
             overflow:visible!important;
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-playerSourceTools{
-            width:100%!important;
-            max-width:none!important;
+            grid-column:2!important;
+            width:360px!important;
+            max-width:360px!important;
+            min-width:270px!important;
             min-height:56px!important;
             margin:0!important;
             padding:0!important;
             display:block!important;
-            position:static!important;
+            position:relative!important;
+            justify-self:center!important;
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelector{
-            width:min(360px,calc(100% - 250px))!important;
-            min-width:270px!important;
+            width:100%!important;
+            min-width:0!important;
             max-width:360px!important;
-            margin:0 auto!important;
-            justify-self:auto!important;
+            margin:0!important;
           }
-
-          /* True lower-right launcher. Roughly half the visual area of a hero action. */
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-dspCornerLauncher{
-            position:absolute!important;
-            right:10px!important;
-            bottom:9px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher{
+            grid-column:3!important;
+            justify-self:end!important;
+            align-self:end!important;
+            position:relative!important;
+            inset:auto!important;
+            right:auto!important;
+            bottom:auto!important;
             left:auto!important;
             top:auto!important;
-            width:112px!important;
-            min-width:112px!important;
-            max-width:112px!important;
-            height:36px!important;
-            min-height:36px!important;
+            width:106px!important;
+            min-width:106px!important;
+            max-width:106px!important;
+            height:35px!important;
+            min-height:35px!important;
             margin:0!important;
-            padding:0 10px 0 7px!important;
-            display:flex!important;
-            align-items:center!important;
-            justify-content:center!important;
-            gap:7px!important;
-            border-radius:10px!important;
-            border:1px solid rgba(var(--dsp-corner-rgb),.48)!important;
-            background:
-              linear-gradient(180deg,rgba(13,31,40,.98),rgba(3,13,18,.99))!important;
-            box-shadow:
-              inset 0 1px 0 rgba(255,255,255,.085),
-              inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.08),
-              0 7px 17px rgba(0,0,0,.32),
-              0 0 13px rgba(var(--dsp-corner-rgb),.07)!important;
+            padding:0 9px 0 6px!important;
             z-index:7!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon{
-            width:26px!important;
-            height:26px!important;
-            min-width:26px!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspStatusIcon{
+            width:25px!important;
+            height:25px!important;
+            min-width:25px!important;
             border-radius:8px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon svg{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspStatusIcon svg{
             width:17px!important;
             height:17px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspCornerLabel{
-            font-size:10.8px!important;
-          }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher:hover:not(:disabled){
-            transform:none!important;
-            border-color:rgba(var(--dsp-corner-rgb),.78)!important;
-            background:linear-gradient(180deg,rgba(15,39,49,.99),rgba(4,17,23,.99))!important;
-            box-shadow:
-              inset 0 1px 0 rgba(255,255,255,.11),
-              inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.12),
-              0 0 0 1px rgba(var(--dsp-corner-rgb),.08),
-              0 0 16px rgba(var(--dsp-corner-rgb),.14),
-              0 8px 18px rgba(0,0,0,.34)!important;
-          }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher.is-active{
-            transform:none!important;
-            border-color:rgba(var(--dsp-corner-rgb),.92)!important;
-            background:linear-gradient(180deg,rgba(16,43,54,.99),rgba(4,19,25,.99))!important;
-            box-shadow:
-              inset 0 1px 0 rgba(255,255,255,.12),
-              inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.17),
-              0 0 0 1px rgba(var(--dsp-corner-rgb),.13),
-              0 0 17px rgba(var(--dsp-corner-rgb),.20),
-              0 8px 18px rgba(0,0,0,.34)!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspCornerLabel{
+            font-size:10.4px!important;
           }
         }
 
@@ -10406,70 +10414,47 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             width:100%!important;
             margin:10px auto 0!important;
             padding:0 8px 10px!important;
-            display:flex!important;
-            justify-content:center!important;
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            justify-items:center!important;
+            row-gap:8px!important;
             position:relative!important;
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-playerSourceTools{
             width:min(360px,100%)!important;
             max-width:360px!important;
-            display:grid!important;
-            grid-template-columns:1fr!important;
-            gap:8px!important;
-            justify-items:stretch!important;
+            display:block!important;
             margin:0 auto!important;
           }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-audioQueueSelector{
             width:100%!important;
             max-width:350px!important;
-            justify-self:center!important;
+            margin:0 auto!important;
           }
-
-          /* Mobile keeps the corner-launcher language without covering Playing From. */
-          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow .tr-dspCornerLauncher{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher{
+            justify-self:end!important;
             position:relative!important;
             inset:auto!important;
-            justify-self:end!important;
-            width:104px!important;
-            min-width:104px!important;
-            max-width:104px!important;
+            width:102px!important;
+            min-width:102px!important;
+            max-width:102px!important;
             height:34px!important;
             min-height:34px!important;
             margin:0 2px 0 0!important;
             padding:0 8px 0 6px!important;
-            display:flex!important;
-            align-items:center!important;
-            justify-content:center!important;
-            gap:6px!important;
-            border-radius:9px!important;
-            border:1px solid rgba(var(--dsp-corner-rgb),.50)!important;
-            background:linear-gradient(180deg,rgba(13,31,40,.98),rgba(3,13,18,.99))!important;
-            box-shadow:
-              inset 0 1px 0 rgba(255,255,255,.085),
-              inset 0 -1px 0 rgba(var(--dsp-corner-rgb),.08),
-              0 6px 15px rgba(0,0,0,.30),
-              0 0 12px rgba(var(--dsp-corner-rgb),.07)!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspStatusIcon{
             width:24px!important;
             height:24px!important;
             min-width:24px!important;
             border-radius:7px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspStatusIcon svg{
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspStatusIcon svg{
             width:16px!important;
             height:16px!important;
           }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher .tr-dspCornerLabel{
-            font-size:10.2px!important;
-          }
-          .tr-audioDeck.tr-audioDeck--pro7 .tr-dspCornerLauncher.is-active{
-            border-color:rgba(var(--dsp-corner-rgb),.90)!important;
-            box-shadow:
-              inset 0 1px 0 rgba(255,255,255,.11),
-              0 0 0 1px rgba(var(--dsp-corner-rgb),.12),
-              0 0 15px rgba(var(--dsp-corner-rgb),.18),
-              0 6px 15px rgba(0,0,0,.30)!important;
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerUtilityRow > .tr-dspCornerLauncher .tr-dspCornerLabel{
+            font-size:10px!important;
           }
         }
 
