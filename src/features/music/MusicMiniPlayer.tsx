@@ -1500,6 +1500,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia("(max-width: 760px)").matches) return;
     try { window.localStorage.setItem("mvp_music_dsp_control_tab_v1", dspTab); } catch { /* optional */ }
   }, [dspTab]);
 
@@ -1873,7 +1874,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           type="button"
           data-profile={player.outputProfile}
           className={`tr-dspPlayerCornerDock ${eqOpen ? "is-active" : ""}`}
-          onClick={() => setEqOpen((current) => !current)}
+          onClick={() => {
+            if (!eqOpen && typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches) {
+              setDspTab("output");
+            }
+            setEqOpen((current) => !current);
+          }}
           aria-expanded={eqOpen}
           aria-label={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP`}
           title={`${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} • DSP`}
@@ -10856,6 +10862,94 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspEnginePanel{min-height:0!important;height:auto!important;margin:0!important;padding:11px!important}
           .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
           .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus>span{min-width:0!important;white-space:normal!important;line-height:1.25!important;justify-content:space-between!important}
+        }
+        /* MVP TRAINER V5 R9.0.3 - DESKTOP DSP OUTPUT-FIRST COMPACT WORKSPACE ONLY
+           Desktop only: Output is the first/default workspace, profile switching is immediate,
+           and short tabs shrink to their content instead of leaving a full-height empty drawer. */
+        @media(min-width:761px){
+          .tr-dspControlCenterBack{
+            align-items:flex-start!important;
+          }
+          .tr-dspControlCenter.tr-audioEqPanel--pro7{
+            height:auto!important;
+            min-height:0!important;
+            max-height:calc(100dvh - 24px)!important;
+            align-self:flex-start!important;
+            overflow-y:auto!important;
+          }
+
+          /* Desktop tab order: OUTPUT first. DOM/mobile order is intentionally unchanged. */
+          .tr-dspControlCenter .tr-dspTabs button:nth-child(4){order:1!important}
+          .tr-dspControlCenter .tr-dspTabs button:nth-child(1){order:2!important}
+          .tr-dspControlCenter .tr-dspTabs button:nth-child(2){order:3!important}
+          .tr-dspControlCenter .tr-dspTabs button:nth-child(3){order:4!important}
+
+          /* OUTPUT: device switching is the first control and gets full-size targets. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfilePanel{
+            display:flex!important;
+            flex-direction:column!important;
+            gap:8px!important;
+            margin:2px 0 9px!important;
+            padding:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices{
+            order:-3!important;
+            width:100%!important;
+            display:grid!important;
+            grid-template-columns:repeat(4,minmax(0,1fr))!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices:before{
+            content:"OUTPUT PROFILE";
+            grid-column:1/-1;
+            display:block;
+            margin:0 0 1px;
+            color:#62dcfa;
+            font-size:8px;
+            font-weight:1000;
+            letter-spacing:.12em;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices button{
+            min-height:58px!important;
+            padding:8px 7px!important;
+            border-radius:10px!important;
+            font-size:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices button.is-active{
+            border-color:rgba(76,219,255,.82)!important;
+            box-shadow:0 0 18px rgba(50,208,248,.18),inset 0 1px rgba(255,255,255,.10)!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileSelect{display:none!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileIntro{
+            order:-2!important;
+            min-width:0!important;
+            padding-top:2px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileIntro>small{display:none!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTitle{margin:0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTitleText{font-size:14px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileIntro p{
+            margin:4px 0 0!important;
+            max-width:none!important;
+            font-size:8px!important;
+            line-height:1.4!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry{
+            order:-1!important;
+            margin-top:0!important;
+          }
+
+          /* Short desktop tabs should end where their content ends. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor,
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfilePanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-sourceQualityPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrim,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitions,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspEnginePanel{
+            flex:none!important;
+          }
         }
         @keyframes trDspLauncherPulse{0%{filter:brightness(1);transform:scale(1)}45%{filter:brightness(1.55);transform:scale(1.055)}100%{filter:brightness(1);transform:scale(1)}}@keyframes trDspBackIn{from{opacity:0}to{opacity:1}}@keyframes trDspPanelIn{from{opacity:.2;transform:translateX(28px)}to{opacity:1;transform:none}}@keyframes trDspSectionIn{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}
         @media(max-width:760px){.tr-dspControlCenterBack{padding:0;align-items:flex-end;background:rgba(0,4,8,.68)}.tr-dspControlCenter.tr-audioEqPanel--pro7{width:100%!important;max-width:none!important;height:93dvh!important;max-height:93dvh!important;border-radius:22px 22px 0 0!important;border-left:0!important;border-right:0!important;border-bottom:0!important;padding:0 10px 20px!important;box-shadow:0 -22px 60px rgba(0,0,0,.58),0 0 34px rgba(45,201,242,.12)!important;animation:trDspSheetIn .24s cubic-bezier(.2,.8,.2,1) 1}.tr-dspControlCenter.tr-audioEqPanel--pro7:before{content:"";position:sticky;top:4px;z-index:40;display:block;width:46px;height:4px;margin:5px auto -1px;border-radius:99px;background:rgba(174,221,234,.34)}.tr-dspControlCenterHeader{top:0;margin:0 -10px 8px;padding:14px 12px 10px}.tr-dspControlCenterHeader strong{font-size:15px}.tr-dspControlCenter .tr-mobileDspWorkspace{top:72px!important}.tr-dspTabs button span{font-size:6.4px!important}.tr-intelligentTransitionsModes{grid-template-columns:repeat(2,minmax(0,1fr))}}@keyframes trDspSheetIn{from{opacity:.45;transform:translateY(36px)}to{opacity:1;transform:none}}
