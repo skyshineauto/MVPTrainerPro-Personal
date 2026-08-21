@@ -1,5 +1,11 @@
 import { useSyncExternalStore } from "react";
-import { createMvpStudioNode, getMvpStudioTelemetry, resetMvpStudioLoudness, setMvpStudioState } from "./audio/mvpStudioEngine";
+import {
+  createMvpStudioNode,
+  getMvpStudioRuntimeInfo,
+  getMvpStudioTelemetry,
+  resetMvpStudioLoudness,
+  setMvpStudioState,
+} from "./audio/mvpStudioEngine";
 import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
@@ -57,6 +63,7 @@ export type MusicDspVerificationMode = "off" | "eq" | "spatial";
 export type MusicEqTopology = "minimum_phase" | "linear_phase";
 export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "stage" | "focus" | "bass_impact";
 export type MusicOutputProfile = "reference" | "car_hifi" | "headphones" | "speaker";
+export type MusicTransitionMode = "auto" | "gapless" | "smooth" | "off";
 
 export const MUSIC_EQ_FREQUENCIES = [
   20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500,
@@ -296,6 +303,7 @@ export type MusicPlayerState = {
   effectivePreampDb: number;
   autoHeadroomDb: number;
   crossfadeSeconds: number;
+  transitionMode: MusicTransitionMode;
   normalizationEnabled: boolean;
   multibandEnabled: boolean;
   dynamicEqEnabled: boolean;
@@ -344,6 +352,7 @@ const STORAGE_KEYS = {
   eqTopology: "mvp_music_eq_topology_v13_8",
   preampDb: "mvp_music_eq_preamp_db",
   crossfadeSeconds: "mvp_music_crossfade_seconds",
+  transitionMode: "mvp_music_transition_mode_v1",
   normalizationEnabled: "mvp_music_volume_match_enabled_v1",
   multibandEnabled: "mvp_music_multiband_enabled_v13_9",
   dynamicEqEnabled: "mvp_music_dynamic_eq_enabled_v1",
@@ -363,7 +372,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v14-2-studio-wasm-v2-multiband";
+const AUDIO_ENGINE_VERSION = "v14-3-r9-runtime-verified";
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -495,6 +504,10 @@ function readOutputProfile(): MusicOutputProfile {
 function readEqTopology(): MusicEqTopology {
   return readStored(STORAGE_KEYS.eqTopology) === "linear_phase" ? "linear_phase" : "minimum_phase";
 }
+function readTransitionMode(): MusicTransitionMode {
+  const value = readStored(STORAGE_KEYS.transitionMode);
+  return value === "gapless" || value === "smooth" || value === "off" ? value : "auto";
+}
 
 function migrateAudioFidelitySettings() {
   if (readStored(STORAGE_KEYS.audioEngineVersion) === AUDIO_ENGINE_VERSION) return;
@@ -547,6 +560,7 @@ let state: MusicPlayerState = {
   effectivePreampDb: 0,
   autoHeadroomDb: 0,
   crossfadeSeconds: readNumber(STORAGE_KEYS.crossfadeSeconds, 0, 0, 8),
+  transitionMode: readTransitionMode(),
   normalizationEnabled: readBoolean(STORAGE_KEYS.normalizationEnabled, false),
   multibandEnabled: readBoolean(STORAGE_KEYS.multibandEnabled, true),
   dynamicEqEnabled: readBoolean(STORAGE_KEYS.dynamicEqEnabled, true),
@@ -636,6 +650,11 @@ let visualizerEnvelope = new Float32Array(64);
 let mediaSourceConnected = false;
 let graphBuildPromise: Promise<void> | null = null;
 let loadingTrackId: string | null = null;
+let transitionPreloadAudio: HTMLAudioElement | null = null;
+let transitionPreloadTrackId: string | null = null;
+let transitionPreloadUrl: string | null = null;
+let studioRecoveryInFlight = false;
+let lastStudioRecoveryAt = 0;
 let timeSaveTimer = 0;
 let recordedPlayToken = "";
 let transportQueue: Promise<void> = Promise.resolve();
@@ -673,7 +692,14 @@ function gainToDb(gain: number) {
   return 20 * Math.log10(Math.max(0.000001, gain));
 }
 function volumeToGain(volume: number) {
-  return Math.max(0, Math.min(1, Number(volume) || 0));
+  const normalized = Math.max(0, Math.min(1, Number(volume) || 0));
+  if (normalized <= 0) return 0;
+  // 80% is calibrated unity. The top 20% is protected output-drive reserve.
+  if (normalized <= 0.8) return normalized / 0.8;
+  // Reserve is only available on a protected processed path. Reference / limiter-off stays at unity.
+  if (state.outputProfile === "reference" || state.dspBypass || !state.limiterEnabled) return 1;
+  const reserve = (normalized - 0.8) / 0.2;
+  return dbToGain(reserve * 6);
 }
 function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.018) {
   param.cancelScheduledValues(now);
@@ -1135,6 +1161,7 @@ function disconnectNode(node: AudioNode | null) {
   }
 }
 function releaseGraph() {
+  clearTransitionPreload();
   [
     mediaSource,
     masterVolumeGain,
@@ -1340,8 +1367,10 @@ function applyStudioProcessingSettings(now: number) {
     headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
     headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
   });
+  const runtime = getMvpStudioRuntimeInfo();
+  const stateVerified = runtime.ready && !runtime.faulted && runtime.requestedRevision <= runtime.appliedRevision;
   const status: MusicDspStatus = audioContext.state === "running"
-    ? (pureReference || abBypass ? "bypassed" : "active")
+    ? (pureReference || abBypass ? "bypassed" : stateVerified ? "active" : "recovering")
     : "recovering";
   setDspTelemetry(status, effectivePreampDb, autoHeadroomDb);
   const immersionStatus = currentImmersionStatus();
@@ -1761,6 +1790,26 @@ function startLevelMeter() {
   levelMeterTimer = window.setInterval(() => {
     if (!state.playing || !referenceLevelAnalyser || !processedLevelAnalyser) return;
     if (state.dspEngineMode === "studio_wasm") {
+      const runtime = getMvpStudioRuntimeInfo();
+      if (runtime.faulted) {
+        if (state.dspStatus !== "recovering") emit({ dspStatus: "recovering" });
+        const now = Date.now();
+        if (!studioRecoveryInFlight && now - lastStudioRecoveryAt > 4000) {
+          studioRecoveryInFlight = true;
+          lastStudioRecoveryAt = now;
+          void rebuildMusicAudioEngine().catch(() => emit({ dspStatus: "unavailable" })).finally(() => { studioRecoveryInFlight = false; });
+        }
+        return;
+      }
+      const pureReference = state.outputProfile === "reference";
+      const abBypass = !pureReference && state.dspBypass;
+      const stateVerified = runtime.ready && runtime.requestedRevision <= runtime.appliedRevision;
+      const verifiedStatus: MusicDspStatus = pureReference || abBypass
+        ? "bypassed"
+        : stateVerified
+          ? "active"
+          : "recovering";
+      setDspTelemetry(verifiedStatus, state.effectivePreampDb, state.autoHeadroomDb);
       const telemetry = getMvpStudioTelemetry();
       const loudnessActive = state.normalizationEnabled && state.outputProfile !== "reference" && !state.dspBypass;
       const gainDb = loudnessActive && Number.isFinite(telemetry.loudnessGainDb)
@@ -1919,6 +1968,7 @@ function ensureAudioElement() {
   audio.crossOrigin = "anonymous";
   audio.volume = 1;
   audio.addEventListener("play", () => {
+    if (audio !== audioElement) return;
     playbackIntent = true;
     emit({ playing: true, error: null });
     configureMediaSession();
@@ -1929,20 +1979,29 @@ function ensureAudioElement() {
       void recordMusicTrackPlayed(trackId).catch(() => undefined);
     }
   });
-  audio.addEventListener("pause", () => emit({ playing: false }));
+  audio.addEventListener("pause", () => { if (audio === audioElement) emit({ playing: false }); });
   audio.addEventListener("loadedmetadata", () => {
+    if (audio !== audioElement) return;
     const duration = Number(audio.duration);
     emit({ duration: Number.isFinite(duration) ? duration : 0 });
   });
   audio.addEventListener("durationchange", () => {
+    if (audio !== audioElement) return;
     const duration = Number(audio.duration);
     emit({ duration: Number.isFinite(duration) ? duration : 0 });
   });
   audio.addEventListener("timeupdate", () => {
+    if (audio !== audioElement) return;
     emit({ currentTime: audio.currentTime || 0 });
     savePlaybackPosition();
+    const duration = Number(audio.duration);
+    const remaining = duration - Number(audio.currentTime || 0);
+    if (Number.isFinite(remaining) && remaining <= 12 && remaining > 0) {
+      void preloadNextTransitionTrack();
+    }
   });
   audio.addEventListener("ended", () => {
+    if (audio !== audioElement) return;
     const finishedId = state.currentTrack?.id;
     recordedPlayToken = "";
     emit({ playing: false, currentTime: 0 });
@@ -1970,7 +2029,9 @@ async function resolveTrackUrl(track: MusicTrack, force = false) {
 
 async function assignTrackSource(track: MusicTrack, startAt: number, force: boolean) {
   const audio = ensureAudioElement();
-  const url = await resolveTrackUrl(track, force);
+  const url = !force && transitionPreloadTrackId === track.id && transitionPreloadUrl
+    ? transitionPreloadUrl
+    : await resolveTrackUrl(track, force);
   if (loadingTrackId !== track.id) return;
   if (audio.dataset.trackId !== track.id || audio.src !== url) {
     audio.pause();
@@ -2016,6 +2077,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     }
     if (loadingTrackId !== track.id) return;
     emit({ loading: false, currentTime: startAt, error: null });
+    void preloadNextTransitionTrack();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load this song.";
     emit({ loading: false, playing: false, error: `COULDN'T PLAY THIS TRACK • ${message}` });
@@ -2047,12 +2109,73 @@ function nextShuffleIndex() {
   while (next === current) next = Math.floor(Math.random() * count);
   return next;
 }
+function nextTransitionCandidate() {
+  if (!state.tracks.length || state.repeat === "one") return null;
+  if (state.currentTrack && isAdaptiveRadioName(state.activePlaylistName)) {
+    return chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks) ?? null;
+  }
+  // A shuffled next choice is intentionally selected at transition time, not preloaded early.
+  if (state.shuffle) return null;
+  const index = nextSequentialIndex(1);
+  return index >= 0 ? state.tracks[index] ?? null : null;
+}
+
+function clearTransitionPreload() {
+  if (transitionPreloadAudio) {
+    try {
+      transitionPreloadAudio.pause();
+      transitionPreloadAudio.removeAttribute("src");
+      transitionPreloadAudio.load();
+    } catch { /* preload cleanup */ }
+  }
+  transitionPreloadAudio = null;
+  transitionPreloadTrackId = null;
+  transitionPreloadUrl = null;
+}
+
+async function preloadNextTransitionTrack() {
+  if (state.transitionMode === "off") return;
+  const next = nextTransitionCandidate();
+  if (!next || next.id === transitionPreloadTrackId) return;
+  try {
+    const url = await resolveTrackUrl(next, false);
+    if (next.id !== nextTransitionCandidate()?.id) return;
+    clearTransitionPreload();
+    const preload = new Audio();
+    preload.preload = "auto";
+    preload.crossOrigin = "anonymous";
+    preload.volume = 0;
+    preload.src = url;
+    preload.load();
+    transitionPreloadAudio = preload;
+    transitionPreloadTrackId = next.id;
+    transitionPreloadUrl = url;
+  } catch {
+    clearTransitionPreload();
+  }
+}
+
+function transitionTimings() {
+  if (state.transitionMode === "off" || state.transitionMode === "gapless") return { down: 0, up: 0 };
+  if (state.transitionMode === "smooth") return { down: 180, up: 420 };
+  return { down: 90, up: 260 };
+}
+
 async function handleTrackEnded() {
   if (state.repeat === "one" && state.currentTrack) {
     await playMusicTrack(state.currentTrack.id, 0);
     return;
   }
+  const { up } = transitionTimings();
+  const originalGain = Math.max(0.0001, musicGain?.gain.value || 1);
+  if (up > 0 && musicGain && audioContext) {
+    musicGain.gain.cancelScheduledValues(audioContext.currentTime);
+    musicGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  }
   await nextMusicTrack(true);
+  clearTransitionPreload();
+  if (up > 0 && musicGain && audioContext) await fadeOutputTo(originalGain, up);
+  void preloadNextTransitionTrack();
 }
 
 async function resolveSavedQueue(libraryTracks: MusicTrack[]) {
@@ -2267,6 +2390,18 @@ function shouldRecordSkip() {
   return Boolean(state.currentTrack && audio.currentTime < Math.max(30, (duration || 0) * 0.35));
 }
 
+async function playTrackWithIntelligentTransition(trackId: string, fromEnded: boolean) {
+  const { down, up } = transitionTimings();
+  if (fromEnded || state.transitionMode === "off" || state.transitionMode === "gapless" || !musicGain || !audioContext) {
+    await playMusicTrack(trackId, 0);
+    return;
+  }
+  const originalGain = Math.max(0.0001, musicGain.gain.value || 1);
+  if (down > 0) await fadeOutputTo(Math.min(originalGain, 0.0001), down);
+  await playMusicTrack(trackId, 0);
+  if (up > 0) await fadeOutputTo(originalGain, up);
+}
+
 /* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: ADAPTIVE NEXT */
 export async function nextMusicTrack(fromEnded = false) {
   if (!state.libraryLoaded) await loadMusicLibrary();
@@ -2285,14 +2420,10 @@ export async function nextMusicTrack(fromEnded = false) {
     );
 
     if (adaptive) {
-      if (!fromEnded && isAutoMixEnabled() && musicGain && audioContext) {
-        const originalGain = Math.max(0.0001, musicGain.gain.value || 1);
-        await fadeOutputTo(Math.min(originalGain, 0.06), 120);
-        await playMusicTrack(adaptive.id, 0);
-        await fadeOutputTo(originalGain, 240);
-      } else {
-        await playMusicTrack(adaptive.id, 0);
-      }
+      // Adaptive Radio and normal queues share the same transition engine.
+      // Legacy AutoMix still enables the feature, but no artificial sound is inserted.
+      if (isAutoMixEnabled() || state.transitionMode !== "off") await playTrackWithIntelligentTransition(adaptive.id, fromEnded);
+      else await playMusicTrack(adaptive.id, 0);
       return;
     }
   }
@@ -2307,7 +2438,7 @@ export async function nextMusicTrack(fromEnded = false) {
   }
 
   const track = state.tracks[index];
-  if (track) await playMusicTrack(track.id, 0);
+  if (track) await playTrackWithIntelligentTransition(track.id, fromEnded);
 }
 
 export async function previousMusicTrack() {
@@ -2497,14 +2628,16 @@ export function setMusicEqBand(index: number, gainDb: number) {
   const gains = [...state.eqGains];
   gains[index] = Math.max(-12, Math.min(12, Number(gainDb) || 0));
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(gains));
-  emit({ eqGains: gains });
+  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
+  emit({ eqGains: gains, eqPreset: "custom", dspVerificationMode: "off" });
   applyProcessingSettings();
 }
 
 export function setMusicPreamp(preampDb: number) {
   const next = Math.max(-12, Math.min(12, Number(preampDb) || 0));
   savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
-  emit({ preampDb: next });
+  savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
+  emit({ preampDb: next, eqPreset: "custom", dspVerificationMode: "off" });
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -2529,6 +2662,14 @@ export function setMusicCrossfadeSeconds(seconds: number) {
   const next = Math.max(0, Math.min(8, Number(seconds) || 0));
   savePlayerSetting(STORAGE_KEYS.crossfadeSeconds, String(next));
   emit({ crossfadeSeconds: next });
+}
+
+export function setMusicTransitionMode(mode: MusicTransitionMode) {
+  const next: MusicTransitionMode = mode === "gapless" || mode === "smooth" || mode === "off" ? mode : "auto";
+  savePlayerSetting(STORAGE_KEYS.transitionMode, next);
+  emit({ transitionMode: next });
+  clearTransitionPreload();
+  void preloadNextTransitionTrack();
 }
 
 export function setMusicNormalizationEnabled(enabled: boolean) {

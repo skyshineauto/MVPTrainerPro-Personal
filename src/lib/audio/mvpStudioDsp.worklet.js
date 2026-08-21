@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.5 Headphone Power + Continuity
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.6 Runtime Verification + Headphone Power
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -18,6 +18,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     this.pendingState = null;
     this.appliedState = null;
     this.stateRevision = 0;
+    this.pendingExternalRevision = 0;
     this.appliedStateRevision = -1;
     this.linearEqDirty = false;
     this.linearCommitFrames = 0;
@@ -38,6 +39,9 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         // applied once at the next render-quantum boundary.
         this.pendingState = data.state || null;
         this.stateRevision += 1;
+        this.pendingExternalRevision = Number.isFinite(Number(data.revision))
+          ? Math.max(0, Math.floor(Number(data.revision)))
+          : this.stateRevision;
         return;
       }
       if (data.type === "reset" && this.ready && this.exports?.mvp_reset) {
@@ -105,7 +109,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v4.5-headphone-continuity",
+        version: "studio-wasm-v4.6-runtime-verified",
       });
     } catch (error) {
       this.failed = true;
@@ -310,6 +314,20 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       eqGains: gains.slice(0, 31),
     };
     this.appliedStateRevision = this.stateRevision;
+    this.port.postMessage({
+      type: "state-applied",
+      revision: this.pendingExternalRevision || this.appliedStateRevision,
+      eqEnabled: Boolean(state.eqEnabled),
+      eqTopologyCode: nextTopology,
+      eqGains: gains.slice(0, 31),
+      preampDb: Number.isFinite(Number(state.preampDb)) ? Number(state.preampDb) : 0,
+      headphoneEnabled: Boolean(state.headphoneEnabled),
+      headphoneWidth: Number(state.headphoneWidth) || 0,
+      headphoneDepth: Number(state.headphoneDepth) || 0,
+      headphoneCrossfeed: Number(state.headphoneCrossfeed) || 0,
+      headphoneCenter: Number.isFinite(Number(state.headphoneCenter)) ? Number(state.headphoneCenter) : 0.5,
+      headphoneBassImpact: Number(state.headphoneBassImpact) || 0,
+    });
   }
 
   maybeCommitLinearEq(frames) {

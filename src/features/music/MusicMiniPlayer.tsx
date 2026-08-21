@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R8_8_7_HERO_CORNER_DSP_DOCK */
+/* MVP_TRAINER_V5_R9_0_STUDIO_CONTROL_CENTER */
 import {
   useEffect,
   useRef,
@@ -6,6 +6,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   getMusicArtworkSignedUrl,
   type MusicTrack,
@@ -50,6 +51,7 @@ import {
   setMusicHeadphoneWidth,
   setMusicPreamp,
   setMusicOutputProfile,
+  setMusicTransitionMode,
   setMusicVolume,
   setPlayerMusicPreference,
   startMvpNeuralRadio,
@@ -61,6 +63,7 @@ import {
   type MusicHeadphoneMode,
   type MusicOutputProfile,
   type MusicDspEngineMode,
+  type MusicTransitionMode,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
 import {
@@ -1444,7 +1447,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const player = useMusicPlayer();
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
   const [eqOpen, setEqOpen] = useState(false);
-  const [mobileDspTab, setMobileDspTab] = useState<"overview" | "eq" | "processing" | "meters">("overview");
+  const [dspTab, setDspTab] = useState<"eq" | "immersion" | "dynamics" | "output">(() => {
+    if (typeof window === "undefined") return "eq";
+    const saved = window.localStorage.getItem("mvp_music_dsp_control_tab_v1");
+    return saved === "immersion" || saved === "dynamics" || saved === "output" ? saved : "eq";
+  });
+  const dspPanelRef = useRef<HTMLElement | null>(null);
+  const dspTouchStartYRef = useRef<number | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
   const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
   const [dspProfiles, setDspProfiles] = useState<SavedDspProfiles>(() => readSavedDspProfiles());
@@ -1489,6 +1498,29 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       window.clearTimeout(neuralMessageTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem("mvp_music_dsp_control_tab_v1", dspTab); } catch { /* optional */ }
+  }, [dspTab]);
+
+  useEffect(() => {
+    if (!eqOpen || typeof document === "undefined") return;
+    const body = document.body;
+    const html = document.documentElement;
+    const previousBodyOverflow = body.style.overflow;
+    const previousHtmlOverflow = html.style.overflow;
+    body.style.overflow = "hidden";
+    html.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setEqOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      html.style.overflow = previousHtmlOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [eqOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1965,8 +1997,28 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
       {discoverMessage ? <div className="tr-discoverToast" role="status">{discoverMessage}</div> : null}
 
-      {eqOpen ? (
-        <section className="tr-audioEqPanel tr-audioEqPanel--pro7" data-mobile-dsp-tab={mobileDspTab}>
+      {eqOpen && typeof document !== "undefined" ? createPortal(
+        <div className="tr-dspControlCenterBack" role="presentation" onMouseDown={() => setEqOpen(false)}>
+          <section
+            ref={dspPanelRef}
+            className="tr-audioEqPanel tr-audioEqPanel--pro7 tr-dspControlCenter"
+            data-mobile-dsp-tab={dspTab}
+            role="dialog"
+            aria-modal="true"
+            aria-label="MVP Studio DSP Control Center"
+            onMouseDown={(event) => event.stopPropagation()}
+            onTouchStart={(event) => { dspTouchStartYRef.current = event.touches[0]?.clientY ?? null; }}
+            onTouchEnd={(event) => {
+              const start = dspTouchStartYRef.current;
+              const end = event.changedTouches[0]?.clientY;
+              dspTouchStartYRef.current = null;
+              if (start != null && end != null && end - start > 110 && (dspPanelRef.current?.scrollTop ?? 0) <= 2) setEqOpen(false);
+            }}
+          >
+            <header className="tr-dspControlCenterHeader">
+              <div><small>MVP STUDIO</small><strong>DSP CONTROL CENTER</strong><span>{player.dspEngineMode === "studio_wasm" ? "WASM ACTIVE" : player.dspEngineMode === "advanced_worklet" ? "WORKLET ACTIVE" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "DSP UNAVAILABLE"} • {MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span></div>
+              <button type="button" onClick={() => setEqOpen(false)} aria-label="Close DSP Control Center">×</button>
+            </header>
           <div className="tr-mobileDspWorkspace" aria-label="Mobile Studio DSP workspace">
             <div className="tr-mobileDspContext" aria-label="Current Studio DSP context">
               <span className={`tr-mobileDspContextEngine is-${player.dspEngineMode}`}><i aria-hidden />{player.dspEngineMode === "studio_wasm" ? "STUDIO WASM" : player.dspEngineMode === "advanced_worklet" ? "WORKLET" : player.dspEngineMode === "native_fallback" ? "NATIVE" : "DSP"}</span>
@@ -1974,14 +2026,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>{dspEqStatus}</span>
               <span>{player.eqTopology === "linear_phase" ? "LINEAR" : "MIN PHASE"}</span>
             </div>
-            <nav className="tr-mobileDspTabs" role="tablist" aria-label="DSP workspace sections">
-              <button type="button" role="tab" aria-selected={mobileDspTab === "overview"} className={mobileDspTab === "overview" ? "is-active" : ""} onClick={() => setMobileDspTab("overview")}><svg viewBox="0 0 24 24" aria-hidden><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg><span>OVERVIEW</span></button>
-              <button type="button" role="tab" aria-selected={mobileDspTab === "eq"} className={mobileDspTab === "eq" ? "is-active" : ""} onClick={() => setMobileDspTab("eq")}><svg viewBox="0 0 24 24" aria-hidden><path d="M5 3v18M12 3v18M19 3v18M2 8h6M9 15h6M16 10h6" /></svg><span>EQ</span></button>
-              <button type="button" role="tab" aria-selected={mobileDspTab === "processing"} className={mobileDspTab === "processing" ? "is-active" : ""} onClick={() => setMobileDspTab("processing")}><svg viewBox="0 0 24 24" aria-hidden><path d="M2 12h3l2.2-6 3.4 12 2.8-9 2.7 7 2-4H22" /></svg><span>PROCESS</span></button>
-              <button type="button" role="tab" aria-selected={mobileDspTab === "meters"} className={mobileDspTab === "meters" ? "is-active" : ""} onClick={() => setMobileDspTab("meters")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 20V11h3v9H4Zm6 0V5h3v15h-3Zm6 0V8h3v12h-3Z" /></svg><span>METERS</span></button>
+            <nav className="tr-dspTabs" role="tablist" aria-label="DSP Control Center sections">
+              <button type="button" role="tab" aria-selected={dspTab === "eq"} className={dspTab === "eq" ? "is-active" : ""} onClick={() => setDspTab("eq")}><svg viewBox="0 0 24 24" aria-hidden><path d="M5 3v18M12 3v18M19 3v18M2 8h6M9 15h6M16 10h6" /></svg><span>EQ</span></button>
+              <button type="button" role="tab" aria-selected={dspTab === "immersion"} className={dspTab === "immersion" ? "is-active" : ""} onClick={() => setDspTab("immersion")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 12c2.2-4 5-6 8-6s5.8 2 8 6c-2.2 4-5 6-8 6s-5.8-2-8-6Z"/><path d="M8 12c1.1-1.8 2.4-2.7 4-2.7s2.9.9 4 2.7c-1.1 1.8-2.4 2.7-4 2.7S9.1 13.8 8 12Z"/></svg><span>IMMERSION</span></button>
+              <button type="button" role="tab" aria-selected={dspTab === "dynamics"} className={dspTab === "dynamics" ? "is-active" : ""} onClick={() => setDspTab("dynamics")}><svg viewBox="0 0 24 24" aria-hidden><path d="M2 12h3l2.2-6 3.4 12 2.8-9 2.7 7 2-4H22" /></svg><span>DYNAMICS</span></button>
+              <button type="button" role="tab" aria-selected={dspTab === "output"} className={dspTab === "output" ? "is-active" : ""} onClick={() => setDspTab("output")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 8h4l5-4v16l-5-4H4V8Z"/><path d="M16 9c1.8 1.6 1.8 4.4 0 6M18.8 6.5c3.3 3 3.3 8 0 11"/></svg><span>OUTPUT</span></button>
             </nav>
           </div>
-          <div className="tr-outputProfilePanel" data-mobile-dsp-section="overview">
+          <div className="tr-outputProfilePanel" data-mobile-dsp-section="output">
             <div className="tr-outputProfileIntro">
               <small>HIGH-FIDELITY OUTPUT</small>
               <div className="tr-outputProfileTitle"><span className="tr-outputProfileIcon" data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></span><span className="tr-outputProfileTitleText">{MUSIC_OUTPUT_PROFILES[player.outputProfile].label}</span></div>
@@ -2010,7 +2062,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <section className={`tr-sourceQualityPanel is-${sourceQuality.tier}`} aria-label="Source quality" data-mobile-dsp-section="overview">
+          <section className={`tr-sourceQualityPanel is-${sourceQuality.tier}`} aria-label="Source quality" data-mobile-dsp-section="output">
             <div className="tr-sourceQualityCopy">
               <span>SOURCE QUALITY</span>
               <strong>{sourceQuality.codec} · {sourceQuality.bitrateLabel} · {sourceQuality.qualityLabel}</strong>
@@ -2029,7 +2081,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             )}
           </section>
 
-          <section className="tr-preampTrim" aria-label="Preamp trim" data-mobile-dsp-section="overview">
+          <section className="tr-preampTrim" aria-label="Preamp trim" data-mobile-dsp-section="output">
             <div className="tr-preampTrimCopy">
               <span>ADVANCED GAIN</span>
               <strong>PREAMP TRIM</strong>
@@ -2037,13 +2089,27 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
-              <input type="range" min="-6" max="3" step="0.5" value={Math.max(-6, Math.min(3, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
-              <div className="tr-preampTrimScale" aria-hidden="true"><span>-6 dB</span><span className="tr-preampTrimZero">0 dB</span><span>+3 dB</span></div>
+              <input type="range" min="-12" max="12" step="0.5" value={Math.max(-12, Math.min(12, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
+              <div className="tr-preampTrimScale" aria-hidden="true"><span>-12 dB</span><span className="tr-preampTrimZero">0 dB</span><span>+12 dB</span></div>
             </div>
             <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => void runDspMutation(() => setMusicPreamp(0), true)}>RESET TO AUTO</button>
           </section>
 
-          <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status" data-mobile-dsp-section="overview">
+          <section className="tr-intelligentTransitions" aria-label="Intelligent track transitions" data-mobile-dsp-section="output">
+            <div className="tr-intelligentTransitionsCopy"><span>TRACK FLOW</span><strong>INTELLIGENT TRANSITIONS</strong><small>AUTO preloads the next song and keeps hard endings tight without adding artificial sound effects.</small></div>
+            <div className="tr-intelligentTransitionsModes" role="group" aria-label="Track transition mode">
+              {([
+                ["auto", "AUTO"],
+                ["gapless", "GAPLESS"],
+                ["smooth", "SMOOTH"],
+                ["off", "OFF"],
+              ] as Array<[MusicTransitionMode, string]>).map(([value, label]) => (
+                <button key={value} type="button" className={player.transitionMode === value ? "is-active" : ""} aria-pressed={player.transitionMode === value} onClick={() => setMusicTransitionMode(value)}>{label}</button>
+              ))}
+            </div>
+          </section>
+
+          <section className="tr-dspProofPanel tr-dspEnginePanel" aria-label="DSP engine status" data-mobile-dsp-section="output">
             <div className="tr-dspProofStatus">
               <span>DSP ENGINE <b className={player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet" ? "is-good" : player.dspEngineMode === "native_fallback" ? "is-fallback" : "is-bad"}>{player.dspEngineMode === "studio_wasm" ? "MVP STUDIO • WASM" : player.dspEngineMode === "advanced_worklet" ? "COMPATIBILITY • WORKLET" : player.dspEngineMode === "native_fallback" ? "COMPATIBILITY • NATIVE" : "UNAVAILABLE"}</b></span>
               <span>IMMERSION PATH <b className={player.immersionStatus === "active" ? "is-good" : player.immersionStatus === "native_fallback" ? "is-fallback" : player.immersionStatus === "unavailable" ? "is-bad" : ""}>{player.immersionStatus === "active" ? "ADVANCED ACTIVE" : player.immersionStatus === "native_fallback" ? "NATIVE ACTIVE" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}</b></span>
@@ -2059,7 +2125,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </section>
 
-          <section className="tr-studioMeterPanel" aria-label="Live Studio DSP metering" data-mobile-dsp-section="meters">
+          <section className="tr-studioMeterPanel" aria-label="Live Studio DSP metering" data-mobile-dsp-section="dynamics">
             <header>
               <div><span>LIVE DSP METERING</span><strong>REAL-TIME ENGINE TELEMETRY</strong></div>
               <small>{player.dspEngineMode === "studio_wasm" ? "DIRECT FROM WASM CORE" : "AVAILABLE IN MVP STUDIO"}</small>
@@ -2115,7 +2181,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               </article>
             </div>
           </section>
-          <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing" data-mobile-dsp-section="processing">
+          <section className="tr-studioProcessingPanel" aria-label="Studio dynamics processing" data-mobile-dsp-section="dynamics">
             <button type="button" className={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? "is-active" : ""} aria-pressed={player.multibandEnabled && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet")} disabled={player.outputProfile === "reference" || (player.dspEngineMode !== "studio_wasm" && player.dspEngineMode !== "advanced_worklet")} onClick={() => void runDspMutation(() => setMusicMultibandEnabled(!player.multibandEnabled))}>
               <span>MULTIBAND DYNAMICS</span><strong>{player.multibandEnabled ? (player.dspEngineMode === "studio_wasm" ? "ON • WASM" : "ON") : "OFF"}</strong><small>4-band transparent control • 120 Hz / 500 Hz / 4 kHz LR4 crossovers</small>
             </button>
@@ -2178,7 +2244,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <section className={`tr-headphoneProcessor ${player.outputProfile !== "headphones" ? "is-disabled" : ""}`} data-mobile-dsp-section="processing">
+          <section className={`tr-headphoneProcessor ${player.outputProfile !== "headphones" ? "is-disabled" : ""}`} data-mobile-dsp-section="immersion">
             <header><div><strong>Headphone Immersion</strong><small>{player.outputProfile === "headphones" ? `Headphone-only processing path • ${player.immersionStatus === "active" ? "ADVANCED" : player.immersionStatus === "native_fallback" ? "NATIVE FALLBACK" : player.immersionStatus === "unavailable" ? "UNAVAILABLE" : "BYPASSED"}` : "Disabled outside Headphones profile to preserve stereo fidelity"}</small></div><label><span>MODE</span><select disabled={player.outputProfile !== "headphones"} value={player.headphoneMode} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicHeadphoneMode(event.target.value as MusicHeadphoneMode))}>{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <option key={value} value={value}>{mode.label}</option>)}</select></label></header>
             <div className="tr-headphoneModes">{(Object.entries(MUSIC_HEADPHONE_MODES) as Array<[MusicHeadphoneMode, (typeof MUSIC_HEADPHONE_MODES)[MusicHeadphoneMode]]>).map(([value, mode]) => <button key={value} type="button" className={player.headphoneMode === value ? "is-active" : ""} disabled={player.outputProfile !== "headphones"} onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}>{mode.label}</button>)}</div>
             <div className="tr-headphoneControls">
@@ -2189,7 +2255,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <label><span>BASS IMPACT <b>{player.headphoneBassImpact}%</b></span><input disabled={player.outputProfile !== "headphones"} type="range" min="0" max="100" value={player.headphoneBassImpact} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHeadphoneBassImpact(Number(event.target.value)))} /></label>
             </div>
           </section>
-        </section>
+          </section>
+        </div>,
+        document.body
       ) : null}
 
       {savePresetOpen ? (
@@ -5323,10 +5391,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         /* MVP_STUDIO_V4_4_MOBILE_DSP_WORKSPACE — high-end mobile tabbed Studio workspace */
         .tr-mobileDspWorkspace{display:none}
         @media(max-width:700px){
-          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="overview"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="overview"]),
+          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="overview"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="output"]),
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="eq"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="eq"]),
-          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="processing"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="processing"]),
-          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="meters"]){
+          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="processing"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="dynamics"]),
+          .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="dynamics"]){
             display:none!important;
           }
           .tr-audioEqPanel--pro7 > [data-mobile-dsp-section]{
@@ -5388,7 +5456,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-mobileDspContextEngine.is-advanced_worklet>i{background:#ffb545;box-shadow:0 0 8px rgba(255,181,69,.35)}
           .tr-mobileDspContextEngine.is-native_fallback>i,.tr-mobileDspContextEngine.is-unavailable>i{background:#ff675f;box-shadow:0 0 8px rgba(255,103,95,.35)}
 
-          .tr-mobileDspTabs{
+          .tr-dspTabs{
             display:grid;
             grid-template-columns:repeat(4,minmax(0,1fr));
             gap:5px;
@@ -5397,7 +5465,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             border-radius:12px;
             background:rgba(0,5,8,.58);
           }
-          .tr-mobileDspTabs button{
+          .tr-dspTabs button{
             min-width:0;
             height:47px;
             padding:5px 2px 4px;
@@ -5412,7 +5480,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             color:#718d98;
             box-shadow:none;
           }
-          .tr-mobileDspTabs button svg{
+          .tr-dspTabs button svg{
             width:16px;
             height:16px;
             fill:none;
@@ -5421,19 +5489,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             stroke-linecap:round;
             stroke-linejoin:round;
           }
-          .tr-mobileDspTabs button span{
+          .tr-dspTabs button span{
             font-size:7.4px;
             line-height:1;
             font-weight:1000;
             letter-spacing:.075em;
           }
-          .tr-mobileDspTabs button.is-active{
+          .tr-dspTabs button.is-active{
             border-color:rgba(72,202,239,.34);
             background:linear-gradient(180deg,rgba(11,55,70,.88),rgba(5,28,38,.95));
             color:#eaf9fd;
             box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 0 18px rgba(36,190,229,.07);
           }
-          .tr-mobileDspTabs button.is-active svg{color:#51d8f5}
+          .tr-dspTabs button.is-active svg{color:#51d8f5}
 
           /* OVERVIEW: remove redundant vertical bulk while keeping the important controls. */
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="overview"] .tr-outputProfilePanel{
@@ -5510,10 +5578,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-mobileDspContext{gap:5px;padding-left:2px;padding-right:2px}
           .tr-mobileDspContext>span{font-size:7.3px;letter-spacing:.035em}
           .tr-mobileDspContext>span+span:before{margin-right:5px}
-          .tr-mobileDspTabs{gap:4px;padding:3px}
-          .tr-mobileDspTabs button{height:45px;border-radius:8px}
-          .tr-mobileDspTabs button svg{width:15px;height:15px}
-          .tr-mobileDspTabs button span{font-size:6.8px;letter-spacing:.045em}
+          .tr-dspTabs{gap:4px;padding:3px}
+          .tr-dspTabs button{height:45px;border-radius:8px}
+          .tr-dspTabs button svg{width:15px;height:15px}
+          .tr-dspTabs button span{font-size:6.8px;letter-spacing:.045em}
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="overview"] .tr-outputProfileChoices{grid-template-columns:repeat(2,minmax(0,1fr))!important}
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] .tr-studioMeterGrid article>strong{font-size:11px!important}
           .tr-audioEqPanel--pro7[data-mobile-dsp-tab="meters"] .tr-studioMeterGrid article>small{font-size:6.1px!important}
@@ -10536,6 +10604,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             min-height:22px!important;
           }
         }
+
+
+        /* MVP TRAINER V5 R9.0 - FLOATING DSP CONTROL CENTER */
+        .tr-dspControlCenterBack{position:fixed;inset:0;z-index:2147483000;background:rgba(0,5,9,.62);backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);display:flex;justify-content:flex-end;align-items:stretch;padding:10px;animation:trDspBackIn .18s ease-out 1}
+        .tr-dspControlCenter.tr-audioEqPanel--pro7{position:relative!important;inset:auto!important;width:min(490px,calc(100vw - 24px))!important;max-width:490px!important;height:calc(100dvh - 20px)!important;max-height:calc(100dvh - 20px)!important;margin:0!important;padding:0 14px 18px!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain!important;border:1px solid rgba(74,211,246,.36)!important;border-radius:18px!important;background:linear-gradient(180deg,rgba(8,24,32,.995),rgba(2,9,14,.998))!important;box-shadow:-18px 0 60px rgba(0,0,0,.56),0 0 0 1px rgba(70,214,251,.05),0 0 36px rgba(40,188,231,.12)!important;animation:trDspPanelIn .22s cubic-bezier(.2,.8,.2,1) 1;scrollbar-width:thin;scrollbar-color:rgba(83,215,247,.45) rgba(255,255,255,.04)}
+        .tr-dspControlCenterHeader{position:sticky;top:0;z-index:30;margin:0 -14px 10px;padding:13px 14px 11px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(86,205,239,.16);background:linear-gradient(180deg,rgba(7,24,32,.995),rgba(5,17,24,.97));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+        .tr-dspControlCenterHeader>div{min-width:0;display:grid;gap:2px}.tr-dspControlCenterHeader small{color:#54ddff;font-size:8px;font-weight:1000;letter-spacing:.14em}.tr-dspControlCenterHeader strong{color:#fff;font-size:17px;font-weight:950;letter-spacing:.025em}.tr-dspControlCenterHeader span{color:#88aab5;font-size:8px;font-weight:900;letter-spacing:.06em}.tr-dspControlCenterHeader>button{width:36px;height:36px;min-width:36px;border-radius:11px;border:1px solid rgba(118,205,229,.25);background:rgba(255,255,255,.035);color:#eafaff;font-size:25px;line-height:1;cursor:pointer}.tr-dspControlCenterHeader>button:hover{border-color:rgba(78,220,255,.75);background:rgba(55,205,244,.10);box-shadow:0 0 16px rgba(52,205,244,.14)}
+        .tr-dspControlCenter .tr-mobileDspWorkspace{display:block!important;position:sticky!important;top:72px!important;z-index:24!important;margin:0 0 10px!important;background:rgba(3,14,20,.965)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}.tr-dspControlCenter .tr-dspTabs{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;padding:4px;border:1px solid rgba(108,190,214,.14);border-radius:12px;background:rgba(0,7,11,.72)}.tr-dspControlCenter .tr-dspTabs button{height:44px;min-width:0;padding:4px 3px;display:grid;place-items:center;align-content:center;gap:2px;border:1px solid transparent;border-radius:9px;background:transparent;color:#728f99;cursor:pointer}.tr-dspControlCenter .tr-dspTabs button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.tr-dspControlCenter .tr-dspTabs button span{font-size:7px;font-weight:1000;letter-spacing:.045em;white-space:nowrap}.tr-dspControlCenter .tr-dspTabs button.is-active{color:#f5fdff;border-color:rgba(75,218,255,.62);background:linear-gradient(180deg,rgba(16,87,109,.88),rgba(5,40,53,.92));box-shadow:0 0 14px rgba(49,204,243,.14),inset 0 1px rgba(255,255,255,.08)}.tr-dspControlCenter .tr-dspTabs button.is-active svg{color:#59dcfb;filter:drop-shadow(0 0 5px rgba(77,218,252,.4))}
+        .tr-dspControlCenter[data-mobile-dsp-tab="eq"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="eq"]),.tr-dspControlCenter[data-mobile-dsp-tab="immersion"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="immersion"]),.tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="dynamics"]),.tr-dspControlCenter[data-mobile-dsp-tab="output"] > [data-mobile-dsp-section]:not([data-mobile-dsp-section="output"]){display:none!important}
+        .tr-dspControlCenter > [data-mobile-dsp-section]{animation:trDspSectionIn .16s ease-out 1}
+        .tr-intelligentTransitions{margin:10px 0;padding:12px;border:1px solid rgba(91,193,222,.16);border-radius:12px;background:linear-gradient(180deg,rgba(10,27,35,.9),rgba(4,13,18,.94));display:grid;gap:10px}.tr-intelligentTransitionsCopy{display:grid;gap:3px}.tr-intelligentTransitionsCopy>span{color:#61dcfa;font-size:8px;font-weight:1000;letter-spacing:.12em}.tr-intelligentTransitionsCopy>strong{color:#f4fcff;font-size:13px;font-weight:950}.tr-intelligentTransitionsCopy>small{color:#829da7;font-size:9px;line-height:1.45}.tr-intelligentTransitionsModes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.tr-intelligentTransitionsModes button{min-height:38px;border-radius:9px;border:1px solid rgba(126,183,201,.17);background:rgba(255,255,255,.025);color:#8da8b1;font-size:8px;font-weight:1000;letter-spacing:.06em}.tr-intelligentTransitionsModes button.is-active{color:#fff;border-color:rgba(75,219,255,.88);background:linear-gradient(180deg,rgba(20,106,132,.82),rgba(7,49,64,.9));box-shadow:0 0 16px rgba(53,211,251,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock.is-active{background:radial-gradient(100% 150% at 18% -12%,rgba(var(--dsp-corner-rgb),.34),transparent 52%),linear-gradient(180deg,rgba(14,48,61,.99),rgba(3,18,25,.995))!important;border-color:rgba(var(--dsp-corner-rgb),1)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 0 0 1px rgba(var(--dsp-corner-rgb),.28),0 0 24px rgba(var(--dsp-corner-rgb),.46),0 0 46px rgba(var(--dsp-corner-rgb),.18),0 8px 18px rgba(0,0,0,.42)!important;animation:trDspLauncherPulse .42s ease-out 1}.tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock.is-active .tr-dspStatusIcon{background:rgba(var(--dsp-corner-rgb),.20)!important;box-shadow:inset 0 1px rgba(255,255,255,.14),0 0 14px rgba(var(--dsp-corner-rgb),.60)!important}
+        @keyframes trDspLauncherPulse{0%{filter:brightness(1);transform:scale(1)}45%{filter:brightness(1.55);transform:scale(1.055)}100%{filter:brightness(1);transform:scale(1)}}@keyframes trDspBackIn{from{opacity:0}to{opacity:1}}@keyframes trDspPanelIn{from{opacity:.2;transform:translateX(28px)}to{opacity:1;transform:none}}@keyframes trDspSectionIn{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}
+        @media(max-width:760px){.tr-dspControlCenterBack{padding:0;align-items:flex-end;background:rgba(0,4,8,.68)}.tr-dspControlCenter.tr-audioEqPanel--pro7{width:100%!important;max-width:none!important;height:93dvh!important;max-height:93dvh!important;border-radius:22px 22px 0 0!important;border-left:0!important;border-right:0!important;border-bottom:0!important;padding:0 10px 20px!important;box-shadow:0 -22px 60px rgba(0,0,0,.58),0 0 34px rgba(45,201,242,.12)!important;animation:trDspSheetIn .24s cubic-bezier(.2,.8,.2,1) 1}.tr-dspControlCenter.tr-audioEqPanel--pro7:before{content:"";position:sticky;top:4px;z-index:40;display:block;width:46px;height:4px;margin:5px auto -1px;border-radius:99px;background:rgba(174,221,234,.34)}.tr-dspControlCenterHeader{top:0;margin:0 -10px 8px;padding:14px 12px 10px}.tr-dspControlCenterHeader strong{font-size:15px}.tr-dspControlCenter .tr-mobileDspWorkspace{top:72px!important}.tr-dspTabs button span{font-size:6.4px!important}.tr-intelligentTransitionsModes{grid-template-columns:repeat(2,minmax(0,1fr))}}@keyframes trDspSheetIn{from{opacity:.45;transform:translateY(36px)}to{opacity:1;transform:none}}
+        @media(prefers-reduced-motion:reduce){.tr-dspControlCenterBack,.tr-dspControlCenter,.tr-dspControlCenter>[data-mobile-dsp-section],.tr-dspPlayerCornerDock.is-active{animation:none!important}}
 
 
       `}</style>

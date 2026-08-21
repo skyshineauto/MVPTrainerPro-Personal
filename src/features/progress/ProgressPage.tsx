@@ -2,6 +2,7 @@
 // MVP Trainer Pro - program-separated progress/history + delete-session final pass
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
+import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
 
 type Range = 30 | 90 | 180 | 365 | "all";
 type Tone = "blue" | "green" | "amber" | "red";
@@ -83,11 +84,13 @@ type ExerciseRow = {
   name: string;
   primary_muscles?: string[] | null;
   secondary_muscles?: string[] | null;
+  equipment?: string[] | null;
 };
 
 type ExerciseDetail = {
   workoutExerciseId: string;
   exerciseId: string;
+  identityKey: string;
   name: string;
   primaryMuscles: string[];
   orderIndex: number;
@@ -600,7 +603,7 @@ export function ProgressPage() {
       if (exerciseIds.length) {
         const { data: exerciseData, error: exerciseError } = await supabase
           .from("exercises")
-          .select("id,name,primary_muscles,secondary_muscles")
+          .select("id,name,primary_muscles,secondary_muscles,equipment")
           .in("id", exerciseIds);
         if (exerciseError) throw exerciseError;
         for (const row of (exerciseData ?? []) as ExerciseRow[]) exerciseMap.set(row.id, row);
@@ -637,6 +640,12 @@ export function ProgressPage() {
         list.push({
           workoutExerciseId: row.id,
           exerciseId: row.exercise_id,
+          identityKey: canonicalExerciseKey({
+            id: row.exercise_id,
+            name: meta?.name ?? "Exercise",
+            primary_muscles: meta?.primary_muscles ?? null,
+            equipment: meta?.equipment ?? null,
+          }),
           name: meta?.name ?? "Exercise",
           primaryMuscles: Array.isArray(meta?.primary_muscles) ? meta!.primary_muscles!.map(prettyMuscle) : [],
           orderIndex: Number(row.order_index ?? 0),
@@ -731,7 +740,7 @@ export function ProgressPage() {
         const sets = exercise.sets.filter((set) => set.reps > 0);
         if (!sets.length) return;
         const best = sets.slice().sort((a, b) => e1rm(b.weight, b.reps) - e1rm(a.weight, a.reps))[0];
-        const list = map.get(exercise.exerciseId) ?? [];
+        const list = map.get(exercise.identityKey) ?? [];
         list.push({
           date: workout.completedAt,
           name: exercise.name,
@@ -741,7 +750,7 @@ export function ProgressPage() {
           e1rm: best ? e1rm(best.weight, best.reps) : 0,
           pain: exercise.pain,
         });
-        map.set(exercise.exerciseId, list);
+        map.set(exercise.identityKey, list);
       });
     });
     return [...map.entries()].map(([id, points]) => {
@@ -804,9 +813,9 @@ export function ProgressPage() {
     [...scopedHistory].reverse().forEach((workout) => workout.exercises.forEach((exercise) => {
       const bestSet = exercise.sets.filter((set)=>set.reps>0).sort((a,b)=>e1rm(b.weight,b.reps)-e1rm(a.weight,a.reps))[0];
       if (!bestSet) return;
-      const list = exerciseHistory.get(exercise.exerciseId) ?? [];
+      const list = exerciseHistory.get(exercise.identityKey) ?? [];
       list.push({ date: workout.completedAt, best: e1rm(bestSet.weight,bestSet.reps), weight: bestSet.weight, reps: bestSet.reps });
-      exerciseHistory.set(exercise.exerciseId,list);
+      exerciseHistory.set(exercise.identityKey,list);
     }));
     exerciseHistory.forEach((points) => {
       if (points.length < 2) return;

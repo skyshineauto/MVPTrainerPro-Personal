@@ -1,3 +1,6 @@
+// MVP Trainer Pro - Studio WASM bridge V4.6 runtime-verification pass
+// This bridge owns asset freshness, processor lifecycle, state revisions and low-rate telemetry.
+
 export type MvpStudioTelemetry = {
   inputPeak: number;
   outputPeak: number;
@@ -24,7 +27,7 @@ export type MvpStudioTelemetry = {
 export type MvpStudioState = {
   bypass: boolean;
   eqEnabled: boolean;
-  eqTopologyCode: 0 | 1;
+  eqTopologyCode: number;
   eqGains: number[];
   preampDb: number;
   headroomDb: number;
@@ -42,7 +45,7 @@ export type MvpStudioState = {
   normalizationTargetLufs: number;
   limiterEnabled: boolean;
   limiterCeilingDb: number;
-  outputProfileCode: 0 | 1 | 2;
+  outputProfileCode: number;
   headphoneEnabled: boolean;
   headphoneWidth: number;
   headphoneDepth: number;
@@ -51,8 +54,22 @@ export type MvpStudioState = {
   headphoneBassImpact: number;
 };
 
-let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
-let latestTelemetry: MvpStudioTelemetry = {
+export type MvpStudioRuntimeInfo = {
+  assetVersion: string;
+  processorVersion: string;
+  ready: boolean;
+  faulted: boolean;
+  requestedRevision: number;
+  appliedRevision: number;
+  lastError: string | null;
+  lastRequestedAt: number;
+  lastAppliedAt: number;
+};
+
+const MVP_STUDIO_ASSET_VERSION = "4.6.0-r9";
+const READY_TIMEOUT_MS = 6000;
+
+const EMPTY_TELEMETRY: MvpStudioTelemetry = {
   inputPeak: 0,
   outputPeak: 0,
   inputRms: 0,
@@ -75,114 +92,206 @@ let latestTelemetry: MvpStudioTelemetry = {
   loudnessProgramLufs: -70,
 };
 
-function loadStudioWasmBytes() {
-  if (!wasmBytesPromise) {
+let latestTelemetry: MvpStudioTelemetry = { ...EMPTY_TELEMETRY };
+let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
+let nextStateRevision = 0;
+let runtimeInfo: MvpStudioRuntimeInfo = {
+  assetVersion: MVP_STUDIO_ASSET_VERSION,
+  processorVersion: "not-ready",
+  ready: false,
+  faulted: false,
+  requestedRevision: 0,
+  appliedRevision: 0,
+  lastError: null,
+  lastRequestedAt: 0,
+  lastAppliedAt: 0,
+};
+
+function finite(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function fixedFour(value: unknown): [number, number, number, number] {
+  const values = Array.isArray(value) ? value : [];
+  return [
+    finite(values[0]),
+    finite(values[1]),
+    finite(values[2]),
+    finite(values[3]),
+  ];
+}
+
+function updateTelemetry(data: Record<string, unknown>) {
+  latestTelemetry = {
+    inputPeak: finite(data.inputPeak),
+    outputPeak: finite(data.outputPeak),
+    inputRms: finite(data.inputRms),
+    outputRms: finite(data.outputRms),
+    gainReductionDb: finite(data.gainReductionDb),
+    limiterGain: finite(data.limiterGain, 1),
+    truePeakDbtp: finite(data.truePeakDbtp, -120),
+    transientBoostDb: finite(data.transientBoostDb),
+    multibandGainReductionDb: finite(data.multibandGainReductionDb),
+    multibandBandReductionDb: fixedFour(data.multibandBandReductionDb),
+    dynamicEqGainReductionDb: finite(data.dynamicEqGainReductionDb),
+    dynamicEqBandReductionDb: fixedFour(data.dynamicEqBandReductionDb),
+    outputCorrectionReductionDb: finite(data.outputCorrectionReductionDb),
+    stereoCorrelation: finite(data.stereoCorrelation, 1),
+    stereoWidthPercent: finite(data.stereoWidthPercent, 100),
+    stereoGuardReductionDb: finite(data.stereoGuardReductionDb),
+    headphoneOutputDriveDb: finite(data.headphoneOutputDriveDb),
+    loudnessGainDb: finite(data.loudnessGainDb),
+    loudnessMomentaryLufs: finite(data.loudnessMomentaryLufs, -70),
+    loudnessProgramLufs: finite(data.loudnessProgramLufs, -70),
+  };
+}
+
+async function loadStudioWasmBytes() {
+  if (wasmBytesPromise) return wasmBytesPromise;
+  wasmBytesPromise = (async () => {
+    if (typeof window === "undefined") throw new Error("MVP Studio requires a browser runtime.");
     const url = new URL("/audio/mvpStudioEngine.wasm", window.location.origin);
-    url.searchParams.set("v", "4.5.0");
-    wasmBytesPromise = fetch(url.href, { cache: "force-cache" }).then(async (response) => {
-      if (!response.ok) throw new Error(`MVP Studio WASM request failed (${response.status}).`);
-      return response.arrayBuffer();
-    });
-  }
+    url.searchParams.set("v", MVP_STUDIO_ASSET_VERSION);
+    const response = await fetch(url.href, { cache: "no-store" });
+    if (!response.ok) throw new Error(`MVP Studio WASM download failed (${response.status}).`);
+    return response.arrayBuffer();
+  })().catch((error) => {
+    wasmBytesPromise = null;
+    throw error;
+  });
   return wasmBytesPromise;
 }
 
 export async function createMvpStudioNode(context: AudioContext) {
-  if (!context.audioWorklet || typeof AudioWorkletNode === "undefined") {
-    throw new Error("AudioWorklet is unavailable.");
-  }
+  if (!context.audioWorklet) throw new Error("AudioWorklet is unavailable.");
+
+  runtimeInfo = {
+    assetVersion: MVP_STUDIO_ASSET_VERSION,
+    processorVersion: "loading",
+    ready: false,
+    faulted: false,
+    requestedRevision: 0,
+    appliedRevision: 0,
+    lastError: null,
+    lastRequestedAt: 0,
+    lastAppliedAt: 0,
+  };
+  latestTelemetry = { ...EMPTY_TELEMETRY };
 
   const workletUrl = new URL("./mvpStudioDsp.worklet.js", import.meta.url);
-  workletUrl.searchParams.set("v", "4.5.0");
-  const [wasmBytes] = await Promise.all([
-    loadStudioWasmBytes(),
-    context.audioWorklet.addModule(workletUrl.href),
-  ]);
+  workletUrl.searchParams.set("v", MVP_STUDIO_ASSET_VERSION);
+  await context.audioWorklet.addModule(workletUrl.href);
+  const wasmBytes = await loadStudioWasmBytes();
 
   const node = new AudioWorkletNode(context, "mvp-studio-wasm", {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     channelCount: 2,
-    channelCountMode: "max",
+    channelCountMode: "explicit",
+    channelInterpretation: "speakers",
   });
 
-  return await new Promise<AudioWorkletNode>((resolve, reject) => {
+  return new Promise<AudioWorkletNode>((resolve, reject) => {
     let settled = false;
-    const timer = window.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { node.disconnect(); } catch { /* already disconnected */ }
-      reject(new Error("MVP Studio WASM initialization timed out."));
-    }, 5000);
+      runtimeInfo = { ...runtimeInfo, faulted: true, lastError: "MVP Studio processor timed out during startup." };
+      try { node.port.close(); } catch { /* already closed */ }
+      reject(new Error(runtimeInfo.lastError ?? "MVP Studio startup timeout."));
+    }, READY_TIMEOUT_MS);
 
-    const fail = (message: string) => {
+    const failStartup = (message: string) => {
+      runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
-      try { node.disconnect(); } catch { /* already disconnected */ }
+      window.clearTimeout(timeout);
+      try { node.port.close(); } catch { /* already closed */ }
       reject(new Error(message));
     };
 
-    node.addEventListener("processorerror", () => fail("MVP Studio AudioWorklet processor failed."), { once: true });
-    node.port.onmessage = (event) => {
-      const data = event.data;
+    node.port.onmessage = (event: MessageEvent) => {
+      const data = event.data as Record<string, unknown> | null;
       if (!data || typeof data !== "object") return;
+
       if (data.type === "ready") {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        resolve(node);
-        return;
-      }
-      if (data.type === "error") {
-        fail(String(data.message || "MVP Studio WASM initialization failed."));
-        return;
-      }
-      if (data.type === "telemetry") {
-        latestTelemetry = {
-          inputPeak: Number(data.inputPeak) || 0,
-          outputPeak: Number(data.outputPeak) || 0,
-          inputRms: Number(data.inputRms) || 0,
-          outputRms: Number(data.outputRms) || 0,
-          gainReductionDb: Number(data.gainReductionDb) || 0,
-          limiterGain: Number.isFinite(Number(data.limiterGain)) ? Number(data.limiterGain) : 1,
-          truePeakDbtp: Number.isFinite(Number(data.truePeakDbtp)) ? Number(data.truePeakDbtp) : -120,
-          transientBoostDb: Number(data.transientBoostDb) || 0,
-          multibandGainReductionDb: Number(data.multibandGainReductionDb) || 0,
-          multibandBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.multibandBandReductionDb?.[index]) || 0) as [number, number, number, number],
-          dynamicEqGainReductionDb: Number(data.dynamicEqGainReductionDb) || 0,
-          dynamicEqBandReductionDb: [0, 1, 2, 3].map((index) => Number(data.dynamicEqBandReductionDb?.[index]) || 0) as [number, number, number, number],
-          outputCorrectionReductionDb: Number(data.outputCorrectionReductionDb) || 0,
-          stereoCorrelation: Number.isFinite(Number(data.stereoCorrelation)) ? Number(data.stereoCorrelation) : 1,
-          stereoWidthPercent: Number.isFinite(Number(data.stereoWidthPercent)) ? Number(data.stereoWidthPercent) : 100,
-          stereoGuardReductionDb: Number(data.stereoGuardReductionDb) || 0,
-          headphoneOutputDriveDb: Number(data.headphoneOutputDriveDb) || 0,
-          loudnessGainDb: Number(data.loudnessGainDb) || 0,
-          loudnessMomentaryLufs: Number.isFinite(Number(data.loudnessMomentaryLufs)) ? Number(data.loudnessMomentaryLufs) : -70,
-          loudnessProgramLufs: Number.isFinite(Number(data.loudnessProgramLufs)) ? Number(data.loudnessProgramLufs) : -70,
+        runtimeInfo = {
+          ...runtimeInfo,
+          processorVersion: String(data.version || "studio-wasm"),
+          ready: true,
+          faulted: false,
+          lastError: null,
         };
+        if (!settled) {
+          settled = true;
+          window.clearTimeout(timeout);
+          resolve(node);
+        }
+        return;
+      }
+
+      if (data.type === "telemetry") {
+        updateTelemetry(data);
+        return;
+      }
+
+      if (data.type === "state-applied") {
+        const revision = Math.max(0, Math.floor(finite(data.revision)));
+        runtimeInfo = {
+          ...runtimeInfo,
+          appliedRevision: Math.max(runtimeInfo.appliedRevision, revision),
+          ready: true,
+          faulted: false,
+          lastAppliedAt: Date.now(),
+        };
+        return;
+      }
+
+      if (data.type === "error") {
+        const message = String(data.message || "MVP Studio processor error.");
+        if (!settled) failStartup(message);
+        else runtimeInfo = { ...runtimeInfo, faulted: true, lastError: message };
       }
     };
 
-    const transferable = wasmBytes.slice(0);
-    node.port.postMessage({ type: "init", wasmBytes: transferable }, [transferable]);
+    node.addEventListener("processorerror", () => {
+      const message = "MVP Studio AudioWorklet processor stopped unexpectedly.";
+      if (!settled) failStartup(message);
+      else runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
+    });
+
+    // Transfer a private copy so a failed/rebuilt node never detaches the cached bytes.
+    const initBytes = wasmBytes.slice(0);
+    node.port.postMessage({ type: "init", wasmBytes: initBytes }, [initBytes]);
   });
 }
 
 export function setMvpStudioState(node: AudioWorkletNode | null, state: MvpStudioState) {
-  if (!node) return;
-  node.port.postMessage({ type: "state", state });
-}
-
-export function resetMvpStudioNode(node: AudioWorkletNode | null) {
-  node?.port.postMessage({ type: "reset" });
+  if (!node) return 0;
+  const revision = ++nextStateRevision;
+  runtimeInfo = {
+    ...runtimeInfo,
+    requestedRevision: revision,
+    lastRequestedAt: Date.now(),
+  };
+  node.port.postMessage({ type: "state", revision, state });
+  return revision;
 }
 
 export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
   node?.port.postMessage({ type: "reset-loudness" });
 }
 
-export function getMvpStudioTelemetry() {
-  return { ...latestTelemetry };
+export function resetMvpStudio(node: AudioWorkletNode | null) {
+  node?.port.postMessage({ type: "reset" });
+}
+
+export function getMvpStudioTelemetry(): MvpStudioTelemetry {
+  return latestTelemetry;
+}
+
+export function getMvpStudioRuntimeInfo(): MvpStudioRuntimeInfo {
+  return { ...runtimeInfo };
 }
