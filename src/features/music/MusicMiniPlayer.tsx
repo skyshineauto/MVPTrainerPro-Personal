@@ -1447,11 +1447,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   const player = useMusicPlayer();
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
   const [eqOpen, setEqOpen] = useState(false);
-  const [dspTab, setDspTab] = useState<"eq" | "immersion" | "dynamics" | "output">(() => {
-    if (typeof window === "undefined") return "eq";
-    const saved = window.localStorage.getItem("mvp_music_dsp_control_tab_v1");
-    return saved === "immersion" || saved === "dynamics" || saved === "output" ? saved : "eq";
-  });
+  const [dspTab, setDspTab] = useState<"eq" | "immersion" | "dynamics" | "output">("output");
   const dspPanelRef = useRef<HTMLElement | null>(null);
   const dspTouchStartYRef = useRef<number | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
@@ -1875,9 +1871,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           data-profile={player.outputProfile}
           className={`tr-dspPlayerCornerDock ${eqOpen ? "is-active" : ""}`}
           onClick={() => {
-            if (!eqOpen && typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches) {
-              setDspTab("output");
-            }
+            if (!eqOpen) setDspTab("output");
             setEqOpen((current) => !current);
           }}
           aria-expanded={eqOpen}
@@ -2033,10 +2027,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>{player.eqTopology === "linear_phase" ? "LINEAR" : "MIN PHASE"}</span>
             </div>
             <nav className="tr-dspTabs" role="tablist" aria-label="DSP Control Center sections">
+              <button type="button" role="tab" aria-selected={dspTab === "output"} className={dspTab === "output" ? "is-active" : ""} onClick={() => setDspTab("output")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 8h4l5-4v16l-5-4H4V8Z"/><path d="M16 9c1.8 1.6 1.8 4.4 0 6M18.8 6.5c3.3 3 3.3 8 0 11"/></svg><span>OUTPUT</span></button>
               <button type="button" role="tab" aria-selected={dspTab === "eq"} className={dspTab === "eq" ? "is-active" : ""} onClick={() => setDspTab("eq")}><svg viewBox="0 0 24 24" aria-hidden><path d="M5 3v18M12 3v18M19 3v18M2 8h6M9 15h6M16 10h6" /></svg><span>EQ</span></button>
               <button type="button" role="tab" aria-selected={dspTab === "immersion"} className={dspTab === "immersion" ? "is-active" : ""} onClick={() => setDspTab("immersion")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 12c2.2-4 5-6 8-6s5.8 2 8 6c-2.2 4-5 6-8 6s-5.8-2-8-6Z"/><path d="M8 12c1.1-1.8 2.4-2.7 4-2.7s2.9.9 4 2.7c-1.1 1.8-2.4 2.7-4 2.7S9.1 13.8 8 12Z"/></svg><span>IMMERSION</span></button>
               <button type="button" role="tab" aria-selected={dspTab === "dynamics"} className={dspTab === "dynamics" ? "is-active" : ""} onClick={() => setDspTab("dynamics")}><svg viewBox="0 0 24 24" aria-hidden><path d="M2 12h3l2.2-6 3.4 12 2.8-9 2.7 7 2-4H22" /></svg><span>DYNAMICS</span></button>
-              <button type="button" role="tab" aria-selected={dspTab === "output"} className={dspTab === "output" ? "is-active" : ""} onClick={() => setDspTab("output")}><svg viewBox="0 0 24 24" aria-hidden><path d="M4 8h4l5-4v16l-5-4H4V8Z"/><path d="M16 9c1.8 1.6 1.8 4.4 0 6M18.8 6.5c3.3 3 3.3 8 0 11"/></svg><span>OUTPUT</span></button>
             </nav>
           </div>
           <div className="tr-outputProfilePanel" data-mobile-dsp-section="output">
@@ -2062,8 +2056,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span className="tr-outputProfileTelemetryActive" data-profile={player.outputProfile}><i><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>{MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</b></span>
               <span>SAFETY TRIM <b>{player.autoHeadroomDb > 0 ? `-${player.autoHeadroomDb.toFixed(1)} dB` : "READY"}</b></span>
               <span>PREAMP <b>{player.effectivePreampDb > 0 ? "+" : ""}{player.effectivePreampDb.toFixed(1)} dB</b></span>
-              <span>MULTIBAND <b>{player.multibandEnabled && player.dspEngineMode === "advanced_worklet" ? "ON" : "OFF"}</b></span>
-              <span>NORMALIZER <b>{player.normalizationEnabled && player.dspEngineMode === "advanced_worklet" ? `${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB` : "OFF"}</b></span>
+              <span>MULTIBAND <b>{player.multibandEnabled && player.outputProfile !== "reference" && !player.dspBypass && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? "ON" : "OFF"}</b></span>
+              <span>NORMALIZER <b>{player.normalizationEnabled && player.outputProfile !== "reference" && !player.dspBypass && (player.dspEngineMode === "studio_wasm" || player.dspEngineMode === "advanced_worklet") ? `${player.loudnessGainDb > 0 ? "+" : ""}${player.loudnessGainDb.toFixed(1)} dB` : "OFF"}</b></span>
               <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
             </div>
           </div>
@@ -2095,8 +2089,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
-              <input type="range" min="-12" max="12" step="0.5" value={Math.max(-12, Math.min(12, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
-              <div className="tr-preampTrimScale" aria-hidden="true"><span>-12 dB</span><span className="tr-preampTrimZero">0 dB</span><span>+12 dB</span></div>
+              <input type="range" min="-12" max="6" step="0.5" value={Math.max(-12, Math.min(6, player.preampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPreamp(Number(event.target.value)), true)} aria-label="Preamp trim in decibels" />
+              <div className="tr-preampTrimScale" aria-hidden="true"><span>-12 dB</span><span className="tr-preampTrimZero">0 dB</span><span>+6 dB</span></div>
             </div>
             <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => void runDspMutation(() => setMusicPreamp(0), true)}>RESET TO AUTO</button>
           </section>
@@ -10878,12 +10872,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             overflow-y:auto!important;
           }
 
-          /* Desktop tab order: OUTPUT first. DOM/mobile order is intentionally unchanged. */
-          .tr-dspControlCenter .tr-dspTabs button:nth-child(4){order:1!important}
-          .tr-dspControlCenter .tr-dspTabs button:nth-child(1){order:2!important}
-          .tr-dspControlCenter .tr-dspTabs button:nth-child(2){order:3!important}
-          .tr-dspControlCenter .tr-dspTabs button:nth-child(3){order:4!important}
-
+          /* Tab DOM order is OUTPUT / EQ / IMMERSION / DYNAMICS on desktop and mobile. */
           /* OUTPUT: device switching is the first control and gets full-size targets. */
           .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfilePanel{
             display:flex!important;
@@ -10953,6 +10942,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
         @keyframes trDspLauncherPulse{0%{filter:brightness(1);transform:scale(1)}45%{filter:brightness(1.55);transform:scale(1.055)}100%{filter:brightness(1);transform:scale(1)}}@keyframes trDspBackIn{from{opacity:0}to{opacity:1}}@keyframes trDspPanelIn{from{opacity:.2;transform:translateX(28px)}to{opacity:1;transform:none}}@keyframes trDspSectionIn{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}
         @media(max-width:760px){.tr-dspControlCenterBack{padding:0;align-items:flex-end;background:rgba(0,4,8,.68)}.tr-dspControlCenter.tr-audioEqPanel--pro7{width:100%!important;max-width:none!important;height:93dvh!important;max-height:93dvh!important;border-radius:22px 22px 0 0!important;border-left:0!important;border-right:0!important;border-bottom:0!important;padding:0 10px 20px!important;box-shadow:0 -22px 60px rgba(0,0,0,.58),0 0 34px rgba(45,201,242,.12)!important;animation:trDspSheetIn .24s cubic-bezier(.2,.8,.2,1) 1}.tr-dspControlCenter.tr-audioEqPanel--pro7:before{content:"";position:sticky;top:4px;z-index:40;display:block;width:46px;height:4px;margin:5px auto -1px;border-radius:99px;background:rgba(174,221,234,.34)}.tr-dspControlCenterHeader{top:0;margin:0 -10px 8px;padding:14px 12px 10px}.tr-dspControlCenterHeader strong{font-size:15px}.tr-dspControlCenter .tr-mobileDspWorkspace{top:72px!important}.tr-dspTabs button span{font-size:6.4px!important}.tr-intelligentTransitionsModes{grid-template-columns:repeat(2,minmax(0,1fr))}}@keyframes trDspSheetIn{from{opacity:.45;transform:translateY(36px)}to{opacity:1;transform:none}}
+
+        /* R9.2 DSP reliability: mobile EQ remains a first-class workspace and trim geometry matches -12..+6 dB. */
+        .tr-preampTrimControl input[type="range"]{box-sizing:border-box!important;margin:0!important}
+        .tr-preampTrimScale>.tr-preampTrimZero{left:66.6667%!important}
+        @media(max-width:760px){
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqHead,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-eqArchitecturePanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqScroll,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqFooter,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-dspProfileSave{display:flex!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-eqArchitecturePanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqScroll,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-dspProfileSave{display:grid!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqScroll{overflow-x:auto!important}
+        }
         @media(prefers-reduced-motion:reduce){.tr-dspControlCenterBack,.tr-dspControlCenter,.tr-dspControlCenter>[data-mobile-dsp-section],.tr-dspPlayerCornerDock.is-active{animation:none!important}}
 
 

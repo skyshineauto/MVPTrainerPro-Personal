@@ -909,6 +909,28 @@ export function ProgressPage() {
     };
   }, [weightAnalytics]);
 
+  const weightRangeLabel = weightTrendRange === "7d"
+    ? "7-Day"
+    : weightTrendRange === "30d"
+      ? "30-Day"
+      : weightTrendRange === "90d"
+        ? "90-Day"
+        : weightTrendRange === "program"
+          ? "Program"
+          : "All-Time";
+  const weightRollingLabel = weightTrendRange === "7d" ? "3-Day Trend" : weightTrendRange === "30d" ? "7-Day Average" : "14-Day Trend";
+  const weightInterpretation = (() => {
+    const change = weightAnalytics.rangeChange;
+    if (change == null || !weightAnalytics.visible.length) return "Add another weigh-in in this range to calculate a clear direction.";
+    const absolute = Math.abs(change);
+    if (absolute < 0.2) return `Weight is essentially stable across the ${weightRangeLabel.toLowerCase()} view.`;
+    const direction = change > 0 ? "increased" : "decreased";
+    const rate = weightAnalytics.rangeRate;
+    return rate != null
+      ? `Weight ${direction} ${absolute.toFixed(1)} lb across this ${weightRangeLabel.toLowerCase()} view, averaging ${rate >= 0 ? "+" : ""}${rate.toFixed(2)} lb per week.`
+      : `Weight ${direction} ${absolute.toFixed(1)} lb across this ${weightRangeLabel.toLowerCase()} view.`;
+  })();
+
   const performance = useMemo(() => {
     const comparable = exerciseTrends.filter((item) => item.sessions >= 2 && item.change != null && Number.isFinite(item.change));
     const strengthChange = comparable.length ? comparable.reduce((sum, item) => sum + Number(item.change), 0) / comparable.length : null;
@@ -1377,7 +1399,7 @@ export function ProgressPage() {
         <div className="prx-bodyNutritionGrid">
           <article className="is-weight prx-weightTrendCard">
             <header className="prx-weightTrendHeader">
-              <div><span>BODYWEIGHT</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB` : "NO WEIGHT DATA"}</strong></div>
+              <div><span>{weightRangeLabel.toUpperCase()} WEIGHT TREND</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB CURRENT` : "NO WEIGHT DATA"}</strong></div>
               <div className="prx-weightRange" role="group" aria-label="Bodyweight trend range">
                 {(["7d","30d","90d","program","all"] as WeightTrendRange[]).map((value) => (
                   <button key={value} type="button" className={weightTrendRange === value ? "is-active" : ""} onClick={() => { setWeightTrendRange(value); setSelectedWeightPoint(null); }}>
@@ -1395,10 +1417,12 @@ export function ProgressPage() {
               <div><span>RATE</span><b>{weightAnalytics.programRate != null ? `${weightAnalytics.programRate >= 0 ? "+" : ""}${weightAnalytics.programRate.toFixed(2)} LB/WK` : "—"}</b></div>
             </div>
             <div className="prx-weightRangeSummary">
-              <div><span>SELECTED RANGE AVG</span><strong>{weightAnalytics.rangeAverage != null ? `${formatNumber(weightAnalytics.rangeAverage,1)} LB` : "—"}</strong></div>
-              <div><span>RANGE CHANGE</span><strong>{weightAnalytics.rangeChange != null ? `${weightAnalytics.rangeChange >= 0 ? "+" : ""}${weightAnalytics.rangeChange.toFixed(1)} LB` : "—"}</strong></div>
-              <div><span>RANGE RATE</span><strong>{weightAnalytics.rangeRate != null ? `${weightAnalytics.rangeRate >= 0 ? "+" : ""}${weightAnalytics.rangeRate.toFixed(2)} LB/WK` : "—"}</strong></div>
+              <div><span>CURRENT</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB` : "—"}</strong></div>
+              <div><span>{weightRangeLabel.toUpperCase()} AVG</span><strong>{weightAnalytics.rangeAverage != null ? `${formatNumber(weightAnalytics.rangeAverage,1)} LB` : "—"}</strong></div>
+              <div><span>CHANGE</span><strong>{weightAnalytics.rangeChange != null ? `${weightAnalytics.rangeChange >= 0 ? "+" : ""}${weightAnalytics.rangeChange.toFixed(1)} LB` : "—"}</strong></div>
+              <div><span>WEEKLY RATE</span><strong>{weightAnalytics.rangeRate != null ? `${weightAnalytics.rangeRate >= 0 ? "+" : ""}${weightAnalytics.rangeRate.toFixed(2)} LB/WK` : "—"}</strong></div>
             </div>
+            <div className="prx-weightLegend" aria-label="Weight chart legend"><span className="is-daily"><i />DAILY WEIGHT</span><span className="is-trend"><i />{weightRollingLabel.toUpperCase()}</span></div>
             <div className="prx-weightChartWrap">
               {weightChart.raw.length ? (
                 <svg className="prx-weightChart" viewBox={`0 0 ${weightChart.width} ${weightChart.height}`} role="img" aria-label="Bodyweight trend chart">
@@ -1409,6 +1433,8 @@ export function ProgressPage() {
                   <text x="4" y={weightChart.height - 30} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)}</text>
                   {weightChart.raw.length > 1 ? <polyline className="prx-weightRawLine" points={weightChart.raw.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
                   {weightChart.trend.length > 1 ? <polyline className="prx-weightTrendLine" points={weightChart.trend.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
+                  {weightChart.raw[0] ? <g className="prx-weightEndpoint is-start"><text x={weightChart.raw[0].x + 7} y={Math.max(16, weightChart.raw[0].y - 10)}>START {formatNumber(weightChart.raw[0].weight,1)} LB</text></g> : null}
+                  {weightChart.raw.at(-1) ? <g className="prx-weightEndpoint is-current"><text x={weightChart.raw.at(-1)!.x - 7} y={Math.max(16, weightChart.raw.at(-1)!.y - 10)} textAnchor="end">CURRENT {formatNumber(weightChart.raw.at(-1)!.weight,1)} LB</text></g> : null}
                   {weightChart.raw.map((point, index) => {
                     const active = selectedWeightPoint?.date === point.date;
                     const latest = index === weightChart.raw.length - 1;
@@ -1423,6 +1449,7 @@ export function ProgressPage() {
               <span>{selectedWeightPoint ? `${formatNumber(selectedWeightPoint.weight,1)} LB • ${shortDate(selectedWeightPoint.date)}` : weightAnalytics.latest ? `LATEST • ${formatNumber(weightAnalytics.latest.weight,1)} LB • ${shortDate(weightAnalytics.latest.date)}` : "NO WEIGHT DATA"}</span>
               <strong>{weightAnalytics.visible.length} WEIGH-IN{weightAnalytics.visible.length === 1 ? "" : "S"}</strong>
             </div>
+            <div className="prx-weightInterpretation"><span>WHAT THIS MEANS</span><strong>{weightInterpretation}</strong></div>
             {bodyweightPoints.length ? <div className="prx-recentWeights"><span>RECENT</span>{bodyweightPoints.slice(-5).reverse().map((point)=><button type="button" key={point.date} onClick={() => setSelectedWeightPoint(point)}><b>{formatNumber(point.weight,1)}</b><small>{shortDate(point.date)}</small></button>)}</div> : null}
           </article>
           <article className="is-nutrition"><header><span>NUTRITION</span><strong>{performance.calorieDays || performance.proteinDays ? "TRACKING" : "NO DAILY LOGS"}</strong></header><div className="prx-miniMetrics"><div><span>CAL AVG</span><b>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</b></div><div><span>CAL TARGET HIT</span><b>{performance.calorieTarget && performance.calorieDays ? `${performance.calorieHit}/${performance.calorieDays}` : "—"}</b></div><div><span>PROTEIN AVG</span><b>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</b></div><div><span>PROTEIN TARGET HIT</span><b>{performance.proteinTarget && performance.proteinDays ? `${performance.proteinHit}/${performance.proteinDays}` : "—"}</b></div></div><p>{performance.calorieTarget && performance.calorieAverage != null ? `Calories are averaging ${Math.round(performance.calorieAverage-performance.calorieTarget)} kcal ${performance.calorieAverage >= performance.calorieTarget ? "above" : "below"} the current target.` : "Add calorie and protein entries to connect nutrition with weight and strength trends."}</p></article>
@@ -1651,11 +1678,11 @@ export function ProgressPage() {
         .prx-bodyNutritionGrid{grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr)!important}
         .prx-weightTrendCard{overflow:hidden}.prx-weightTrendHeader{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;gap:12px!important}.prx-weightTrendHeader>div:first-child{display:grid;gap:4px}.prx-weightRange{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}.prx-weightRange button{min-height:28px;padding:0 9px;border:1px solid rgba(102,187,215,.16);border-radius:7px;background:#07151b;color:#8fa8b2;font-size:7px;font-weight:1000;letter-spacing:.07em}.prx-weightRange button.is-active{border-color:rgba(72,213,141,.46);background:rgba(72,213,141,.12);color:#9af0c1;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 0 14px rgba(72,213,141,.06)}
         .prx-weightMetricGrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));margin-top:10px;border:1px solid rgba(150,174,184,.08);border-radius:8px;overflow:hidden}.prx-weightMetricGrid>div{min-width:0;padding:8px 7px;background:#071116}.prx-weightMetricGrid>div+div{border-left:1px solid rgba(150,174,184,.07)}.prx-weightMetricGrid span,.prx-weightRangeSummary span{display:block;color:#718892;font-size:6px;font-weight:900;letter-spacing:.04em}.prx-weightMetricGrid b{display:block;margin-top:4px;color:#f1f7f9;font-size:9px;white-space:normal;overflow-wrap:anywhere}
-        .prx-weightRangeSummary{margin-top:8px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.prx-weightRangeSummary>div{padding:7px 8px;border:1px solid rgba(72,213,141,.09);border-radius:7px;background:#081411}.prx-weightRangeSummary strong{display:block;margin-top:3px;color:#a5edc7;font-size:9px}
+        .prx-weightRangeSummary{margin-top:8px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.prx-weightRangeSummary>div{padding:7px 8px;border:1px solid rgba(72,213,141,.09);border-radius:7px;background:#081411}.prx-weightRangeSummary strong{display:block;margin-top:3px;color:#a5edc7;font-size:9px}
         .prx-weightChartWrap{margin-top:8px;min-height:174px;border:1px solid rgba(77,184,216,.10);border-radius:9px;background:linear-gradient(180deg,#061116,#050c10);overflow:hidden}.prx-weightChart{display:block;width:100%;height:190px;touch-action:manipulation}.prx-weightGridLine{stroke:rgba(135,180,197,.09);stroke-width:1}.prx-weightRawLine{fill:none;stroke:rgba(119,180,200,.30);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.prx-weightTrendLine{fill:none;stroke:#4bd98f;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 4px rgba(75,217,143,.18))}.prx-weightDot{fill:#173842;stroke:#5bcbe8;stroke-width:1.5;cursor:pointer;transition:r .12s ease,fill .12s ease}.prx-weightDot.is-latest{fill:#4bd98f;stroke:#b7f7d3;stroke-width:2}.prx-weightDot.is-active{fill:#fff;stroke:#4bd98f;stroke-width:2.5}.prx-weightAxisText,.prx-weightDateText{fill:#6f8992;font-size:10px;font-weight:800}.prx-weightEmpty{min-height:174px;display:grid;place-items:center;padding:18px;color:#839aa3;font-size:9px;text-align:center}
-        .prx-weightChartMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px 0}.prx-weightChartMeta span{color:#9ab0b8;font-size:8px;font-weight:850}.prx-weightChartMeta strong{color:#65dca0;font-size:7px;letter-spacing:.08em}.prx-recentWeights{margin-top:8px;display:flex;align-items:center;gap:5px;overflow:hidden}.prx-recentWeights>span{flex:0 0 auto;color:#6f8992;font-size:6px;font-weight:1000;letter-spacing:.1em}.prx-recentWeights button{min-width:0;flex:1;padding:5px 6px;border:1px solid rgba(72,213,141,.10);border-radius:6px;background:#0b1614;color:#a5edc7;text-align:left}.prx-recentWeights button b{display:block;font-size:8px}.prx-recentWeights button small{display:block;margin-top:2px;color:#688278;font-size:6px}
+        .prx-weightLegend{display:flex;align-items:center;gap:14px;margin:9px 2px -1px;color:#8fa7b0;font-size:7px;font-weight:950;letter-spacing:.06em}.prx-weightLegend span{display:inline-flex;align-items:center;gap:6px}.prx-weightLegend i{display:block;width:19px;height:3px;border-radius:99px;background:#4bd98f}.prx-weightLegend .is-daily i{height:2px;background:rgba(91,203,232,.58);box-shadow:6px 0 0 -1px #5bcbe8}.prx-weightEndpoint text{fill:#7f9aa4;font-size:8px;font-weight:1000;letter-spacing:.025em}.prx-weightEndpoint.is-current text{fill:#7de2aa}.prx-weightChartMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px 0}.prx-weightChartMeta span{color:#9ab0b8;font-size:8px;font-weight:850}.prx-weightChartMeta strong{color:#65dca0;font-size:7px;letter-spacing:.08em}.prx-weightInterpretation{margin-top:8px;padding:10px 11px;border:1px solid rgba(75,217,143,.14);border-radius:8px;background:linear-gradient(180deg,rgba(8,27,23,.86),rgba(5,17,15,.9));box-shadow:inset 3px 0 rgba(75,217,143,.75)}.prx-weightInterpretation span{display:block;color:#6adca0;font-size:7px;font-weight:1000;letter-spacing:.09em}.prx-weightInterpretation strong{display:block;margin-top:4px;color:#eaf7ef;font-size:10px;line-height:1.45}.prx-recentWeights{margin-top:8px;display:flex;align-items:center;gap:5px;overflow:hidden}.prx-recentWeights>span{flex:0 0 auto;color:#6f8992;font-size:6px;font-weight:1000;letter-spacing:.1em}.prx-recentWeights button{min-width:0;flex:1;padding:5px 6px;border:1px solid rgba(72,213,141,.10);border-radius:6px;background:#0b1614;color:#a5edc7;text-align:left}.prx-recentWeights button b{display:block;font-size:8px}.prx-recentWeights button small{display:block;margin-top:2px;color:#688278;font-size:6px}
         @media(max-width:1100px){.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-bodyNutritionGrid{grid-template-columns:1fr!important}.prx-weightMetricGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.prx-weightMetricGrid>div:nth-child(4){border-left:0}.prx-weightMetricGrid>div:nth-child(n+4){border-top:1px solid rgba(150,174,184,.07)}}
-        @media(max-width:650px){.prx-weightTrendHeader{display:grid!important}.prx-weightRange{justify-content:flex-start}.prx-weightRange button{flex:1;min-width:52px;min-height:32px;font-size:7.5px}.prx-weightMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.prx-weightMetricGrid>div:nth-child(odd){border-left:0}.prx-weightMetricGrid>div:nth-child(n+3){border-top:1px solid rgba(150,174,184,.07)}.prx-weightRangeSummary{grid-template-columns:1fr 1fr 1fr}.prx-weightChart{height:175px}.prx-weightChartMeta{align-items:flex-start;flex-direction:column;gap:3px}.prx-recentWeights{display:grid;grid-template-columns:auto repeat(2,minmax(0,1fr));overflow:visible}.prx-recentWeights button:nth-of-type(n+3){display:none}.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-kpis--performance article:last-child{grid-column:auto!important}}
+        @media(max-width:650px){.prx-weightTrendHeader{display:grid!important}.prx-weightRange{justify-content:flex-start}.prx-weightRange button{flex:1;min-width:52px;min-height:32px;font-size:7.5px}.prx-weightMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.prx-weightMetricGrid>div:nth-child(odd){border-left:0}.prx-weightMetricGrid>div:nth-child(n+3){border-top:1px solid rgba(150,174,184,.07)}.prx-weightRangeSummary{grid-template-columns:1fr 1fr}.prx-weightChart{height:175px}.prx-weightChartMeta{align-items:flex-start;flex-direction:column;gap:3px}.prx-recentWeights{display:grid;grid-template-columns:auto repeat(2,minmax(0,1fr));overflow:visible}.prx-recentWeights button:nth-of-type(n+3){display:none}.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-kpis--performance article:last-child{grid-column:auto!important}}
         @media(max-width:365px){.prx-kpis--performance{grid-template-columns:1fr!important}.prx-weightRangeSummary{grid-template-columns:1fr}.prx-weightMetricGrid{grid-template-columns:1fr}.prx-weightMetricGrid>div{border-left:0!important;border-top:1px solid rgba(150,174,184,.07)}.prx-weightMetricGrid>div:first-child{border-top:0}.prx-recentWeights{grid-template-columns:auto 1fr}.prx-recentWeights button:nth-of-type(n+2){display:none}}
 
         /* FINAL PROGRESS READABILITY / NO-BUNCHING PASS */
