@@ -5,6 +5,8 @@ import { supabase } from "../../lib/supabase";
 import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
 
 type Range = 30 | 90 | 180 | 365 | "all";
+type WeightTrendRange = "7d" | "30d" | "90d" | "program" | "all";
+type WeightPoint = { date: string; weight: number };
 type Tone = "blue" | "green" | "amber" | "red";
 
 type ProgramBlockRow = {
@@ -469,6 +471,8 @@ export function ProgressPage() {
   const [programs, setPrograms] = useState<ProgramView[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState<string>("all");
   const [range, setRange] = useState<Range>(30);
+  const [weightTrendRange, setWeightTrendRange] = useState<WeightTrendRange>("30d");
+  const [selectedWeightPoint, setSelectedWeightPoint] = useState<WeightPoint | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [historyCollapsed, setHistoryCollapsed] = useState<boolean>(() => {
     try { return window.localStorage.getItem("mvp_progress_history_collapsed") === "true"; } catch { return false; }
@@ -780,14 +784,130 @@ export function ProgressPage() {
     return dailyCheckIns.filter((row) => row.programId === selectedProgramId && inRange(`${row.date}T12:00:00`, range));
   }, [dailyCheckIns, selectedProgramId, range]);
 
-  const bodyweightPoints = useMemo(() => {
-    const points: Array<{ date: string; weight: number }> = [];
-    for (const row of scopedHistory) if ((row.bodyweightLb ?? 0) > 0) points.push({ date: row.completedAt, weight: Number(row.bodyweightLb) });
-    for (const row of programCheckIns) if ((row.bodyweightLb ?? 0) > 0) points.push({ date: `${row.date}T12:00:00`, weight: Number(row.bodyweightLb) });
-    const byDay = new Map<string, { date: string; weight: number }>();
-    points.sort((a, b) => ms(a.date) - ms(b.date)).forEach((point) => byDay.set(new Date(point.date).toISOString().slice(0,10), point));
+  const allProgramHistory = useMemo(() => {
+    return history.filter((row) => selectedProgramId === "all" || row.programId === selectedProgramId);
+  }, [history, selectedProgramId]);
+
+  const allProgramCheckIns = useMemo(() => {
+    return dailyCheckIns.filter((row) => selectedProgramId === "all" || row.programId === selectedProgramId);
+  }, [dailyCheckIns, selectedProgramId]);
+
+  const bodyweightPoints = useMemo<WeightPoint[]>(() => {
+    const points: WeightPoint[] = [];
+    for (const row of allProgramHistory) {
+      if ((row.bodyweightLb ?? 0) > 0) points.push({ date: row.completedAt, weight: Number(row.bodyweightLb) });
+    }
+    for (const row of allProgramCheckIns) {
+      if ((row.bodyweightLb ?? 0) > 0) points.push({ date: `${row.date}T12:00:00`, weight: Number(row.bodyweightLb) });
+    }
+    const byDay = new Map<string, WeightPoint>();
+    points
+      .filter((point) => Number.isFinite(ms(point.date)) && Number.isFinite(point.weight) && point.weight > 0)
+      .sort((a, b) => ms(a.date) - ms(b.date))
+      .forEach((point) => byDay.set(new Date(point.date).toISOString().slice(0,10), point));
     return [...byDay.values()].sort((a, b) => ms(a.date) - ms(b.date));
-  }, [scopedHistory, programCheckIns]);
+  }, [allProgramHistory, allProgramCheckIns]);
+
+  const weightAnalytics = useMemo(() => {
+    const latest = bodyweightPoints.at(-1) ?? null;
+    const first = bodyweightPoints[0] ?? null;
+    const anchorMs = latest ? ms(latest.date) : Date.now();
+    const averageForDays = (days: number) => {
+      const rows = bodyweightPoints.filter((point) => anchorMs - ms(point.date) <= days * 86400000);
+      return rows.length >= 2 ? rows.reduce((sum, point) => sum + point.weight, 0) / rows.length : null;
+    };
+    const avg7 = averageForDays(7);
+    const avg30 = averageForDays(30);
+    const avg90 = averageForDays(90);
+    const programStartMs = selectedProgram?.start_date ? ms(`${selectedProgram.start_date}T12:00:00`) : NaN;
+    const programPoints = Number.isFinite(programStartMs)
+      ? bodyweightPoints.filter((point) => ms(point.date) >= programStartMs)
+      : bodyweightPoints;
+    const programStart = programPoints[0] ?? first;
+    const programChange = latest && programStart && latest !== programStart ? latest.weight - programStart.weight : null;
+    const programWeeks = latest && programStart
+      ? Math.max(0, (ms(latest.date) - ms(programStart.date)) / 604800000)
+      : 0;
+    const programRate = programChange != null && programWeeks >= 0.2 ? programChange / programWeeks : null;
+
+    let visible = bodyweightPoints;
+    if (weightTrendRange === "7d" || weightTrendRange === "30d" || weightTrendRange === "90d") {
+      const days = weightTrendRange === "7d" ? 7 : weightTrendRange === "30d" ? 30 : 90;
+      visible = bodyweightPoints.filter((point) => anchorMs - ms(point.date) <= days * 86400000);
+    } else if (weightTrendRange === "program" && Number.isFinite(programStartMs)) {
+      visible = bodyweightPoints.filter((point) => ms(point.date) >= programStartMs);
+    }
+
+    const rangeAverage = visible.length >= 2
+      ? visible.reduce((sum, point) => sum + point.weight, 0) / visible.length
+      : null;
+    const rangeFirst = visible[0] ?? null;
+    const rangeLatest = visible.at(-1) ?? null;
+    const rangeChange = rangeFirst && rangeLatest && rangeFirst !== rangeLatest
+      ? rangeLatest.weight - rangeFirst.weight
+      : null;
+    const rangeWeeks = rangeFirst && rangeLatest
+      ? Math.max(0, (ms(rangeLatest.date) - ms(rangeFirst.date)) / 604800000)
+      : 0;
+    const rangeRate = rangeChange != null && rangeWeeks >= 0.2 ? rangeChange / rangeWeeks : null;
+    const rollingDays = weightTrendRange === "7d" ? 3 : weightTrendRange === "30d" ? 7 : 14;
+    const trend = visible.map((point, index) => {
+      const pointMs = ms(point.date);
+      const windowRows = visible.slice(0, index + 1).filter((candidate) => pointMs - ms(candidate.date) <= rollingDays * 86400000);
+      const weight = windowRows.reduce((sum, candidate) => sum + candidate.weight, 0) / Math.max(1, windowRows.length);
+      return { date: point.date, weight };
+    });
+
+    const weights = visible.map((point) => point.weight);
+    const minRaw = weights.length ? Math.min(...weights) : 0;
+    const maxRaw = weights.length ? Math.max(...weights) : 0;
+    const spread = Math.max(1, maxRaw - minRaw);
+    const chartMin = minRaw ? Math.floor((minRaw - Math.max(0.5, spread * 0.18)) * 2) / 2 : 0;
+    const chartMax = maxRaw ? Math.ceil((maxRaw + Math.max(0.5, spread * 0.18)) * 2) / 2 : 0;
+
+    return {
+      latest,
+      programStart,
+      avg7,
+      avg30,
+      avg90,
+      programChange,
+      programRate,
+      visible,
+      trend,
+      rangeAverage,
+      rangeChange,
+      rangeRate,
+      chartMin,
+      chartMax,
+    };
+  }, [bodyweightPoints, selectedProgram, weightTrendRange]);
+
+  const weightChart = useMemo(() => {
+    const width = 720;
+    const height = 210;
+    const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+    const points = weightAnalytics.visible;
+    if (!points.length || !(weightAnalytics.chartMax > weightAnalytics.chartMin)) {
+      return { width, height, raw: [] as Array<WeightPoint & { x: number; y: number }>, trend: [] as Array<WeightPoint & { x: number; y: number }> };
+    }
+    const firstMs = ms(points[0].date);
+    const lastMs = ms(points.at(-1)!.date);
+    const spanMs = Math.max(1, lastMs - firstMs);
+    const plotWidth = width - pad.left - pad.right;
+    const plotHeight = height - pad.top - pad.bottom;
+    const project = (point: WeightPoint) => ({
+      ...point,
+      x: pad.left + ((ms(point.date) - firstMs) / spanMs) * plotWidth,
+      y: pad.top + ((weightAnalytics.chartMax - point.weight) / (weightAnalytics.chartMax - weightAnalytics.chartMin)) * plotHeight,
+    });
+    return {
+      width,
+      height,
+      raw: points.map(project),
+      trend: weightAnalytics.trend.map(project),
+    };
+  }, [weightAnalytics]);
 
   const performance = useMemo(() => {
     const comparable = exerciseTrends.filter((item) => item.sessions >= 2 && item.change != null && Number.isFinite(item.change));
@@ -824,15 +944,11 @@ export function ProgressPage() {
       if (latest.best > priorBest * 1.005) newPrs += 1;
     });
 
-    const latestWeight = bodyweightPoints.at(-1)?.weight ?? null;
-    const startWeight = bodyweightPoints[0]?.weight ?? null;
-    const weightChange = latestWeight != null && startWeight != null && bodyweightPoints.length > 1 ? latestWeight - startWeight : null;
-    const latestDate = bodyweightPoints.at(-1)?.date;
-    const firstDate = bodyweightPoints[0]?.date;
-    const weeks = latestDate && firstDate ? Math.max(0.01, (ms(latestDate)-ms(firstDate))/604800000) : 0;
-    const weeklyWeightChange = weightChange != null && weeks > 0.2 ? weightChange / weeks : null;
-    const last7 = bodyweightPoints.filter((point) => Date.now() - ms(point.date) <= 7*86400000);
-    const avg7 = last7.length ? last7.reduce((sum,point)=>sum+point.weight,0)/last7.length : latestWeight;
+    const latestWeight = weightAnalytics.latest?.weight ?? null;
+    const startWeight = weightAnalytics.programStart?.weight ?? null;
+    const weightChange = weightAnalytics.programChange;
+    const weeklyWeightChange = weightAnalytics.programRate;
+    const avg7 = weightAnalytics.avg7;
 
     const calorieRows = programCheckIns.filter((row): row is DailyCheckIn & { calories: number } => row.calories != null && row.calories > 0);
     const proteinRows = programCheckIns.filter((row): row is DailyCheckIn & { proteinG: number } => row.proteinG != null && row.proteinG > 0);
@@ -864,7 +980,7 @@ export function ProgressPage() {
     const adherence = planned > 0 ? Math.min(100, (scopedHistory.length/planned)*100) : null;
 
     return { strengthChange, progressing, holding, needsAttention, avgRir, muscleRows, newPrs, latestWeight, startWeight, weightChange, weeklyWeightChange, avg7, calorieAverage, proteinAverage, recoveryAverage, dailyPainAverage, calorieTarget, proteinTarget, calorieDays: calorieRows.length, proteinDays: proteinRows.length, recoveryDays: recoveryRows.length, calorieHit, proteinHit, painAvg, painChange, planned, adherence };
-  }, [exerciseTrends, scopedHistory, bodyweightPoints, programCheckIns, scheduledSessions, selectedProgramId, range]);
+  }, [exerciseTrends, scopedHistory, weightAnalytics, programCheckIns, scheduledSessions, selectedProgramId, range]);
 
   async function saveDailyCheckIn() {
     if (selectedProgramId === "all") { setError("Choose a specific program before saving a daily check-in."); return; }
@@ -1232,6 +1348,7 @@ export function ProgressPage() {
         <article className="is-weight"><Icon name="trend" /><div><span>WEIGHT TREND</span><strong>{performance.weeklyWeightChange != null ? `${performance.weeklyWeightChange >= 0 ? "+" : ""}${performance.weeklyWeightChange.toFixed(2)} LB/WK` : "—"}</strong><small>{performance.weightChange != null ? `${performance.weightChange >= 0 ? "+" : ""}${performance.weightChange.toFixed(1)} lb in this view` : "Needs 2 weigh-ins"}</small></div></article>
         <article className="is-strength"><Icon name="trend" /><div><span>STRENGTH TREND</span><strong>{formatPct(performance.strengthChange)}</strong><small>{performance.progressing} progressing • {performance.holding} holding</small></div></article>
         <article className="is-adherence"><Icon name="program" /><div><span>ADHERENCE</span><strong>{performance.adherence != null ? `${Math.round(performance.adherence)}%` : "—"}</strong><small>{scopedHistory.length}{performance.planned ? ` / ${performance.planned}` : ""} completed</small></div></article>
+        <article className="is-time"><Icon name="time" /><div><span>TOTAL SESSION TIME</span><strong>{metrics.sessions ? formatDuration(metrics.seconds) : "—"}</strong><small>{metrics.sessions ? `${metrics.sessions} completed session${metrics.sessions === 1 ? "" : "s"}` : "Complete a session to begin"}</small></div></article>
         <article className="is-nutrition"><Icon name="sets" /><div><span>AVG CALORIES</span><strong>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</strong><small>{performance.calorieTarget ? `target ${formatNumber(performance.calorieTarget)}` : "Set calorie target"}</small></div></article>
         <article className="is-nutrition"><Icon name="sets" /><div><span>AVG PROTEIN</span><strong>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</strong><small>{performance.proteinTarget ? `target ${formatNumber(performance.proteinTarget)} g` : "Set protein target"}</small></div></article>
         <article className={`is-pain is-${toneForPain(performance.painAvg)}`}><Icon name="pain" /><div><span>PAIN TREND</span><strong>{performance.painAvg ? performance.painAvg.toFixed(1) : "0.0"}</strong><small>{performance.painChange == null ? "0–10 scale" : `${performance.painChange > 0 ? "+" : ""}${performance.painChange.toFixed(1)} vs earlier`}</small></div></article>
@@ -1258,7 +1375,56 @@ export function ProgressPage() {
           <button type="button" onClick={() => void saveDailyCheckIn()} disabled={selectedProgramId === "all"}>SAVE CHECK-IN</button>
         </div>
         <div className="prx-bodyNutritionGrid">
-          <article className="is-weight"><header><span>BODYWEIGHT</span><strong>{performance.latestWeight != null ? `${formatNumber(performance.latestWeight,1)} LB` : "NO WEIGHT DATA"}</strong></header><div className="prx-miniMetrics"><div><span>PROGRAM START</span><b>{performance.startWeight != null ? `${formatNumber(performance.startWeight,1)} LB` : "—"}</b></div><div><span>7-DAY AVG</span><b>{performance.avg7 != null ? `${formatNumber(performance.avg7,1)} LB` : "—"}</b></div><div><span>RATE</span><b>{performance.weeklyWeightChange != null ? `${performance.weeklyWeightChange >= 0 ? "+" : ""}${performance.weeklyWeightChange.toFixed(2)} LB/WK` : "—"}</b></div></div><div className="prx-weightPoints">{bodyweightPoints.slice(-7).map((point)=><span key={point.date}><b>{formatNumber(point.weight,1)}</b><small>{shortDate(point.date)}</small></span>)}</div></article>
+          <article className="is-weight prx-weightTrendCard">
+            <header className="prx-weightTrendHeader">
+              <div><span>BODYWEIGHT</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB` : "NO WEIGHT DATA"}</strong></div>
+              <div className="prx-weightRange" role="group" aria-label="Bodyweight trend range">
+                {(["7d","30d","90d","program","all"] as WeightTrendRange[]).map((value) => (
+                  <button key={value} type="button" className={weightTrendRange === value ? "is-active" : ""} onClick={() => { setWeightTrendRange(value); setSelectedWeightPoint(null); }}>
+                    {value === "7d" ? "7D" : value === "30d" ? "30D" : value === "90d" ? "90D" : value === "program" ? "PROGRAM" : "ALL"}
+                  </button>
+                ))}
+              </div>
+            </header>
+            <div className="prx-weightMetricGrid">
+              <div><span>PROGRAM START</span><b>{weightAnalytics.programStart ? `${formatNumber(weightAnalytics.programStart.weight,1)} LB` : "—"}</b></div>
+              <div><span>CHANGE</span><b>{weightAnalytics.programChange != null ? `${weightAnalytics.programChange >= 0 ? "+" : ""}${weightAnalytics.programChange.toFixed(1)} LB` : "—"}</b></div>
+              <div><span>7-DAY AVG</span><b>{weightAnalytics.avg7 != null ? `${formatNumber(weightAnalytics.avg7,1)} LB` : "—"}</b></div>
+              <div><span>30-DAY AVG</span><b>{weightAnalytics.avg30 != null ? `${formatNumber(weightAnalytics.avg30,1)} LB` : "—"}</b></div>
+              <div><span>90-DAY AVG</span><b>{weightAnalytics.avg90 != null ? `${formatNumber(weightAnalytics.avg90,1)} LB` : "—"}</b></div>
+              <div><span>RATE</span><b>{weightAnalytics.programRate != null ? `${weightAnalytics.programRate >= 0 ? "+" : ""}${weightAnalytics.programRate.toFixed(2)} LB/WK` : "—"}</b></div>
+            </div>
+            <div className="prx-weightRangeSummary">
+              <div><span>SELECTED RANGE AVG</span><strong>{weightAnalytics.rangeAverage != null ? `${formatNumber(weightAnalytics.rangeAverage,1)} LB` : "—"}</strong></div>
+              <div><span>RANGE CHANGE</span><strong>{weightAnalytics.rangeChange != null ? `${weightAnalytics.rangeChange >= 0 ? "+" : ""}${weightAnalytics.rangeChange.toFixed(1)} LB` : "—"}</strong></div>
+              <div><span>RANGE RATE</span><strong>{weightAnalytics.rangeRate != null ? `${weightAnalytics.rangeRate >= 0 ? "+" : ""}${weightAnalytics.rangeRate.toFixed(2)} LB/WK` : "—"}</strong></div>
+            </div>
+            <div className="prx-weightChartWrap">
+              {weightChart.raw.length ? (
+                <svg className="prx-weightChart" viewBox={`0 0 ${weightChart.width} ${weightChart.height}`} role="img" aria-label="Bodyweight trend chart">
+                  <line x1="48" x2={weightChart.width - 18} y1="18" y2="18" className="prx-weightGridLine" />
+                  <line x1="48" x2={weightChart.width - 18} y1={(weightChart.height - 16) / 2} y2={(weightChart.height - 16) / 2} className="prx-weightGridLine" />
+                  <line x1="48" x2={weightChart.width - 18} y1={weightChart.height - 34} y2={weightChart.height - 34} className="prx-weightGridLine" />
+                  <text x="4" y="22" className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMax,1)}</text>
+                  <text x="4" y={weightChart.height - 30} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)}</text>
+                  {weightChart.raw.length > 1 ? <polyline className="prx-weightRawLine" points={weightChart.raw.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
+                  {weightChart.trend.length > 1 ? <polyline className="prx-weightTrendLine" points={weightChart.trend.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
+                  {weightChart.raw.map((point, index) => {
+                    const active = selectedWeightPoint?.date === point.date;
+                    const latest = index === weightChart.raw.length - 1;
+                    return <circle key={point.date} cx={point.x} cy={point.y} r={active ? 6 : latest ? 5.2 : 3.7} className={`prx-weightDot ${active ? "is-active" : ""} ${latest ? "is-latest" : ""}`} onMouseEnter={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })} onClick={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })}><title>{`${formatNumber(point.weight,1)} lb • ${shortDate(point.date)}`}</title></circle>;
+                  })}
+                  <text x="48" y={weightChart.height - 9} className="prx-weightDateText">{shortDate(weightAnalytics.visible[0]?.date ?? "")}</text>
+                  <text x={weightChart.width - 18} y={weightChart.height - 9} textAnchor="end" className="prx-weightDateText">{shortDate(weightAnalytics.visible.at(-1)?.date ?? "")}</text>
+                </svg>
+              ) : <div className="prx-weightEmpty">Log at least one bodyweight entry to start the trend chart.</div>}
+            </div>
+            <div className="prx-weightChartMeta">
+              <span>{selectedWeightPoint ? `${formatNumber(selectedWeightPoint.weight,1)} LB • ${shortDate(selectedWeightPoint.date)}` : weightAnalytics.latest ? `LATEST • ${formatNumber(weightAnalytics.latest.weight,1)} LB • ${shortDate(weightAnalytics.latest.date)}` : "NO WEIGHT DATA"}</span>
+              <strong>{weightAnalytics.visible.length} WEIGH-IN{weightAnalytics.visible.length === 1 ? "" : "S"}</strong>
+            </div>
+            {bodyweightPoints.length ? <div className="prx-recentWeights"><span>RECENT</span>{bodyweightPoints.slice(-5).reverse().map((point)=><button type="button" key={point.date} onClick={() => setSelectedWeightPoint(point)}><b>{formatNumber(point.weight,1)}</b><small>{shortDate(point.date)}</small></button>)}</div> : null}
+          </article>
           <article className="is-nutrition"><header><span>NUTRITION</span><strong>{performance.calorieDays || performance.proteinDays ? "TRACKING" : "NO DAILY LOGS"}</strong></header><div className="prx-miniMetrics"><div><span>CAL AVG</span><b>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</b></div><div><span>CAL TARGET HIT</span><b>{performance.calorieTarget && performance.calorieDays ? `${performance.calorieHit}/${performance.calorieDays}` : "—"}</b></div><div><span>PROTEIN AVG</span><b>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</b></div><div><span>PROTEIN TARGET HIT</span><b>{performance.proteinTarget && performance.proteinDays ? `${performance.proteinHit}/${performance.proteinDays}` : "—"}</b></div></div><p>{performance.calorieTarget && performance.calorieAverage != null ? `Calories are averaging ${Math.round(performance.calorieAverage-performance.calorieTarget)} kcal ${performance.calorieAverage >= performance.calorieTarget ? "above" : "below"} the current target.` : "Add calorie and protein entries to connect nutrition with weight and strength trends."}</p></article>
         </div>
       </section>
@@ -1478,6 +1644,19 @@ export function ProgressPage() {
           .prx-historyMetrics{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px!important}.prx-historyMetrics span{min-width:0!important;white-space:normal!important}
         }
         @media(max-width:365px){.prx-kpis--performance{grid-template-columns:1fr!important}.prx-checkInGrid{grid-template-columns:1fr!important}.prx-muscleSetGrid{grid-template-columns:1fr!important}}
+
+        /* R9.1 PROGRESS TIME + BODYWEIGHT TREND */
+        .prx-kpis--performance{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+        .prx-kpis--performance article.is-time::before{background:#54c7f2}.prx-kpis--performance article.is-time svg{color:#65d7fb!important}
+        .prx-bodyNutritionGrid{grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr)!important}
+        .prx-weightTrendCard{overflow:hidden}.prx-weightTrendHeader{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;gap:12px!important}.prx-weightTrendHeader>div:first-child{display:grid;gap:4px}.prx-weightRange{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}.prx-weightRange button{min-height:28px;padding:0 9px;border:1px solid rgba(102,187,215,.16);border-radius:7px;background:#07151b;color:#8fa8b2;font-size:7px;font-weight:1000;letter-spacing:.07em}.prx-weightRange button.is-active{border-color:rgba(72,213,141,.46);background:rgba(72,213,141,.12);color:#9af0c1;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 0 14px rgba(72,213,141,.06)}
+        .prx-weightMetricGrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));margin-top:10px;border:1px solid rgba(150,174,184,.08);border-radius:8px;overflow:hidden}.prx-weightMetricGrid>div{min-width:0;padding:8px 7px;background:#071116}.prx-weightMetricGrid>div+div{border-left:1px solid rgba(150,174,184,.07)}.prx-weightMetricGrid span,.prx-weightRangeSummary span{display:block;color:#718892;font-size:6px;font-weight:900;letter-spacing:.04em}.prx-weightMetricGrid b{display:block;margin-top:4px;color:#f1f7f9;font-size:9px;white-space:normal;overflow-wrap:anywhere}
+        .prx-weightRangeSummary{margin-top:8px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.prx-weightRangeSummary>div{padding:7px 8px;border:1px solid rgba(72,213,141,.09);border-radius:7px;background:#081411}.prx-weightRangeSummary strong{display:block;margin-top:3px;color:#a5edc7;font-size:9px}
+        .prx-weightChartWrap{margin-top:8px;min-height:174px;border:1px solid rgba(77,184,216,.10);border-radius:9px;background:linear-gradient(180deg,#061116,#050c10);overflow:hidden}.prx-weightChart{display:block;width:100%;height:190px;touch-action:manipulation}.prx-weightGridLine{stroke:rgba(135,180,197,.09);stroke-width:1}.prx-weightRawLine{fill:none;stroke:rgba(119,180,200,.30);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.prx-weightTrendLine{fill:none;stroke:#4bd98f;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 4px rgba(75,217,143,.18))}.prx-weightDot{fill:#173842;stroke:#5bcbe8;stroke-width:1.5;cursor:pointer;transition:r .12s ease,fill .12s ease}.prx-weightDot.is-latest{fill:#4bd98f;stroke:#b7f7d3;stroke-width:2}.prx-weightDot.is-active{fill:#fff;stroke:#4bd98f;stroke-width:2.5}.prx-weightAxisText,.prx-weightDateText{fill:#6f8992;font-size:10px;font-weight:800}.prx-weightEmpty{min-height:174px;display:grid;place-items:center;padding:18px;color:#839aa3;font-size:9px;text-align:center}
+        .prx-weightChartMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px 0}.prx-weightChartMeta span{color:#9ab0b8;font-size:8px;font-weight:850}.prx-weightChartMeta strong{color:#65dca0;font-size:7px;letter-spacing:.08em}.prx-recentWeights{margin-top:8px;display:flex;align-items:center;gap:5px;overflow:hidden}.prx-recentWeights>span{flex:0 0 auto;color:#6f8992;font-size:6px;font-weight:1000;letter-spacing:.1em}.prx-recentWeights button{min-width:0;flex:1;padding:5px 6px;border:1px solid rgba(72,213,141,.10);border-radius:6px;background:#0b1614;color:#a5edc7;text-align:left}.prx-recentWeights button b{display:block;font-size:8px}.prx-recentWeights button small{display:block;margin-top:2px;color:#688278;font-size:6px}
+        @media(max-width:1100px){.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-bodyNutritionGrid{grid-template-columns:1fr!important}.prx-weightMetricGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.prx-weightMetricGrid>div:nth-child(4){border-left:0}.prx-weightMetricGrid>div:nth-child(n+4){border-top:1px solid rgba(150,174,184,.07)}}
+        @media(max-width:650px){.prx-weightTrendHeader{display:grid!important}.prx-weightRange{justify-content:flex-start}.prx-weightRange button{flex:1;min-width:52px;min-height:32px;font-size:7.5px}.prx-weightMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.prx-weightMetricGrid>div:nth-child(odd){border-left:0}.prx-weightMetricGrid>div:nth-child(n+3){border-top:1px solid rgba(150,174,184,.07)}.prx-weightRangeSummary{grid-template-columns:1fr 1fr 1fr}.prx-weightChart{height:175px}.prx-weightChartMeta{align-items:flex-start;flex-direction:column;gap:3px}.prx-recentWeights{display:grid;grid-template-columns:auto repeat(2,minmax(0,1fr));overflow:visible}.prx-recentWeights button:nth-of-type(n+3){display:none}.prx-kpis--performance{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-kpis--performance article:last-child{grid-column:auto!important}}
+        @media(max-width:365px){.prx-kpis--performance{grid-template-columns:1fr!important}.prx-weightRangeSummary{grid-template-columns:1fr}.prx-weightMetricGrid{grid-template-columns:1fr}.prx-weightMetricGrid>div{border-left:0!important;border-top:1px solid rgba(150,174,184,.07)}.prx-weightMetricGrid>div:first-child{border-top:0}.prx-recentWeights{grid-template-columns:auto 1fr}.prx-recentWeights button:nth-of-type(n+2){display:none}}
 
         /* FINAL PROGRESS READABILITY / NO-BUNCHING PASS */
         .prx-page,.prx-page *{min-width:0}
