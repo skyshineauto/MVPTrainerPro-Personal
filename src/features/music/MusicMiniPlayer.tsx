@@ -10616,6 +10616,247 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-dspControlCenter > [data-mobile-dsp-section]{animation:trDspSectionIn .16s ease-out 1}
         .tr-intelligentTransitions{margin:10px 0;padding:12px;border:1px solid rgba(91,193,222,.16);border-radius:12px;background:linear-gradient(180deg,rgba(10,27,35,.9),rgba(4,13,18,.94));display:grid;gap:10px}.tr-intelligentTransitionsCopy{display:grid;gap:3px}.tr-intelligentTransitionsCopy>span{color:#61dcfa;font-size:8px;font-weight:1000;letter-spacing:.12em}.tr-intelligentTransitionsCopy>strong{color:#f4fcff;font-size:13px;font-weight:950}.tr-intelligentTransitionsCopy>small{color:#829da7;font-size:9px;line-height:1.45}.tr-intelligentTransitionsModes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.tr-intelligentTransitionsModes button{min-height:38px;border-radius:9px;border:1px solid rgba(126,183,201,.17);background:rgba(255,255,255,.025);color:#8da8b1;font-size:8px;font-weight:1000;letter-spacing:.06em}.tr-intelligentTransitionsModes button.is-active{color:#fff;border-color:rgba(75,219,255,.88);background:linear-gradient(180deg,rgba(20,106,132,.82),rgba(7,49,64,.9));box-shadow:0 0 16px rgba(53,211,251,.16),inset 0 1px rgba(255,255,255,.10)}
         .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock.is-active{background:radial-gradient(100% 150% at 18% -12%,rgba(var(--dsp-corner-rgb),.34),transparent 52%),linear-gradient(180deg,rgba(14,48,61,.99),rgba(3,18,25,.995))!important;border-color:rgba(var(--dsp-corner-rgb),1)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 0 0 1px rgba(var(--dsp-corner-rgb),.28),0 0 24px rgba(var(--dsp-corner-rgb),.46),0 0 46px rgba(var(--dsp-corner-rgb),.18),0 8px 18px rgba(0,0,0,.42)!important;animation:trDspLauncherPulse .42s ease-out 1}.tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock.is-active .tr-dspStatusIcon{background:rgba(var(--dsp-corner-rgb),.20)!important;box-shadow:inset 0 1px rgba(255,255,255,.14),0 0 14px rgba(var(--dsp-corner-rgb),.60)!important}
+        /* MVP TRAINER V5 R9.0.2 - DESKTOP DSP CONTROL CENTER GEOMETRY ONLY
+           Mobile is intentionally untouched. The desktop drawer is a purpose-built
+           studio workspace instead of the legacy full-page EQ layout squeezed into 490px. */
+        @media(min-width:761px){
+          .tr-dspControlCenterBack{
+            padding:12px!important;
+            background:rgba(0,5,9,.42)!important;
+            backdrop-filter:blur(3px) saturate(1.04)!important;
+            -webkit-backdrop-filter:blur(3px) saturate(1.04)!important;
+          }
+          .tr-dspControlCenter.tr-audioEqPanel--pro7{
+            display:block!important;
+            grid-template:none!important;
+            align-content:initial!important;
+            width:clamp(580px,48vw,720px)!important;
+            max-width:calc(100vw - 24px)!important;
+            min-width:0!important;
+            height:calc(100dvh - 24px)!important;
+            max-height:calc(100dvh - 24px)!important;
+            padding:0 16px 18px!important;
+            overflow-y:auto!important;
+            overflow-x:hidden!important;
+            border-radius:18px!important;
+          }
+          .tr-dspControlCenterHeader{
+            position:sticky!important;
+            top:0!important;
+            z-index:40!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:0 -16px 8px!important;
+            padding:11px 16px 10px!important;
+            align-items:center!important;
+          }
+          .tr-dspControlCenterHeader>div{gap:1px!important}
+          .tr-dspControlCenterHeader small{font-size:7px!important;letter-spacing:.14em!important}
+          .tr-dspControlCenterHeader strong{font-size:15px!important;line-height:1.05!important}
+          .tr-dspControlCenterHeader span{font-size:7px!important;line-height:1.15!important}
+          .tr-dspControlCenterHeader>button{width:34px!important;height:34px!important;min-width:34px!important}
+
+          .tr-dspControlCenter .tr-mobileDspWorkspace{
+            display:block!important;
+            position:sticky!important;
+            top:63px!important;
+            z-index:34!important;
+            margin:0 0 10px!important;
+            padding:8px 0 9px!important;
+            border:0!important;
+            border-bottom:1px solid rgba(95,188,216,.12)!important;
+            border-radius:0!important;
+            background:rgba(3,14,20,.97)!important;
+            box-shadow:none!important;
+            backdrop-filter:blur(12px)!important;
+            -webkit-backdrop-filter:blur(12px)!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext{
+            min-width:0!important;
+            display:flex!important;
+            align-items:center!important;
+            flex-wrap:wrap!important;
+            gap:5px!important;
+            margin:0 0 7px!important;
+            padding:0!important;
+            overflow:visible!important;
+            white-space:normal!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext>span{
+            min-width:0!important;
+            max-width:none!important;
+            display:inline-flex!important;
+            align-items:center!important;
+            min-height:24px!important;
+            padding:0 8px!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            white-space:nowrap!important;
+            border:1px solid rgba(101,181,207,.13)!important;
+            border-radius:7px!important;
+            background:rgba(0,0,0,.18)!important;
+            color:#9eb8c1!important;
+            font-size:7px!important;
+            line-height:1!important;
+            font-weight:1000!important;
+            letter-spacing:.055em!important;
+            text-transform:uppercase!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext>span+span:before{display:none!important}
+          .tr-dspControlCenter .tr-mobileDspContext .tr-mobileDspContextEngine{color:#f1fbfe!important}
+          .tr-dspControlCenter .tr-mobileDspContextEngine>i{
+            display:inline-block!important;
+            width:5px!important;
+            height:5px!important;
+            margin-right:6px!important;
+            border-radius:50%!important;
+            background:#61e0ff!important;
+            box-shadow:0 0 8px rgba(79,218,255,.42)!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs{gap:6px!important;padding:4px!important}
+          .tr-dspControlCenter .tr-dspTabs button{height:42px!important;padding:4px 5px!important}
+          .tr-dspControlCenter .tr-dspTabs button span{font-size:7.2px!important}
+
+          .tr-dspControlCenter > [data-mobile-dsp-section]{
+            min-height:0!important;
+            height:auto!important;
+            max-height:none!important;
+          }
+
+          /* EQ */
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqHead{
+            display:grid!important;
+            grid-template-columns:minmax(0,1fr) auto!important;
+            grid-template-areas:"copy controls" "preset preset"!important;
+            gap:9px 12px!important;
+            align-items:end!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:2px 0 9px!important;
+            padding:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqHead>div:first-child{grid-area:copy!important;min-width:0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqHead>div:first-child>strong{display:block!important;color:#f5fbfe!important;font-size:15px!important;line-height:1.12!important;white-space:normal!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqHeadHint{display:block!important;margin-top:4px!important;max-width:520px!important;color:#839ca6!important;font-size:8px!important;line-height:1.4!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspAbControls{grid-area:controls!important;justify-content:flex-end!important;flex-wrap:nowrap!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspAbControls>*{white-space:nowrap!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset{
+            grid-area:preset!important;
+            width:100%!important;
+            max-width:none!important;
+            display:grid!important;
+            grid-template-columns:auto minmax(0,1fr)!important;
+            align-items:center!important;
+            gap:10px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset>span{font-size:7px!important;white-space:nowrap!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset select{width:100%!important;min-width:0!important;min-height:38px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitecturePanel{
+            grid-template-columns:minmax(0,1fr) auto!important;
+            gap:12px!important;
+            margin:7px 0 9px!important;
+            padding:10px 11px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureButtons{display:flex!important;gap:6px!important;flex-wrap:nowrap!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureButtons button{min-height:36px!important;white-space:nowrap!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqScroll{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            margin:6px 0 0!important;
+            padding:2px 0 8px!important;
+            overflow-x:auto!important;
+            overflow-y:hidden!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31{
+            grid-template-columns:repeat(31,48px)!important;
+            grid-auto-columns:48px!important;
+            gap:7px!important;
+            min-width:max-content!important;
+            width:max-content!important;
+            padding:0 4px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31 .tr-audioEqBand{width:48px!important;min-width:48px!important;max-width:48px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqFooter--pro7{margin:7px 0 0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqQuickActions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqQuickActions button{width:100%!important;min-width:0!important;min-height:40px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspProfileSave{margin-top:9px!important;padding-top:10px!important;align-items:center!important}
+
+          /* IMMERSION */
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor{
+            display:block!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:2px 0 0!important;
+            padding:14px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor.is-disabled{opacity:.68!important;filter:none!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor header{grid-template-columns:minmax(0,1fr) 190px!important;gap:12px!important;align-items:end!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor header strong{font-size:14px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneModes{margin-top:10px!important;gap:7px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneControls{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important;margin-top:10px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneControls label{min-width:0!important;padding:10px!important}
+
+          /* DYNAMICS */
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterPanel{
+            min-height:0!important;
+            height:auto!important;
+            margin:2px 0 10px!important;
+            padding:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterPanel>header{margin-bottom:9px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterGrid{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterGrid article{min-height:82px!important;height:auto!important;padding:10px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel{
+            grid-template-columns:repeat(3,minmax(0,1fr))!important;
+            grid-auto-rows:max-content!important;
+            align-items:start!important;
+            gap:8px!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel button{min-height:82px!important;height:auto!important;padding:11px!important;align-self:start!important}
+
+          /* OUTPUT */
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfilePanel{
+            grid-template-columns:minmax(0,1fr) 190px!important;
+            gap:10px 14px!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:2px 0 9px!important;
+            padding:13px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileSelect{width:100%!important;max-width:none!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices{grid-column:1/-1!important;display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important;min-width:0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices button{min-width:0!important;min-height:44px!important;padding:6px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry{grid-column:1/-1!important;display:flex!important;flex-wrap:wrap!important;gap:5px!important;min-width:0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry>span{min-width:0!important;max-width:100%!important;white-space:normal!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-sourceQualityPanel{
+            grid-template-columns:minmax(0,1fr) auto!important;
+            gap:12px!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:0 0 9px!important;
+            padding:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrim{
+            grid-template-columns:180px minmax(0,1fr) auto!important;
+            gap:12px!important;
+            min-height:0!important;
+            height:auto!important;
+            margin:0 0 9px!important;
+            padding:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrimControl{min-width:0!important;width:100%!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampAutoButton{white-space:nowrap!important;min-width:118px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitions{min-height:0!important;height:auto!important;margin:0 0 9px!important;padding:12px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitionsModes{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitionsModes button{min-width:0!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspEnginePanel{min-height:0!important;height:auto!important;margin:0!important;padding:11px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus>span{min-width:0!important;white-space:normal!important;line-height:1.25!important;justify-content:space-between!important}
+        }
         @keyframes trDspLauncherPulse{0%{filter:brightness(1);transform:scale(1)}45%{filter:brightness(1.55);transform:scale(1.055)}100%{filter:brightness(1);transform:scale(1)}}@keyframes trDspBackIn{from{opacity:0}to{opacity:1}}@keyframes trDspPanelIn{from{opacity:.2;transform:translateX(28px)}to{opacity:1;transform:none}}@keyframes trDspSectionIn{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}
         @media(max-width:760px){.tr-dspControlCenterBack{padding:0;align-items:flex-end;background:rgba(0,4,8,.68)}.tr-dspControlCenter.tr-audioEqPanel--pro7{width:100%!important;max-width:none!important;height:93dvh!important;max-height:93dvh!important;border-radius:22px 22px 0 0!important;border-left:0!important;border-right:0!important;border-bottom:0!important;padding:0 10px 20px!important;box-shadow:0 -22px 60px rgba(0,0,0,.58),0 0 34px rgba(45,201,242,.12)!important;animation:trDspSheetIn .24s cubic-bezier(.2,.8,.2,1) 1}.tr-dspControlCenter.tr-audioEqPanel--pro7:before{content:"";position:sticky;top:4px;z-index:40;display:block;width:46px;height:4px;margin:5px auto -1px;border-radius:99px;background:rgba(174,221,234,.34)}.tr-dspControlCenterHeader{top:0;margin:0 -10px 8px;padding:14px 12px 10px}.tr-dspControlCenterHeader strong{font-size:15px}.tr-dspControlCenter .tr-mobileDspWorkspace{top:72px!important}.tr-dspTabs button span{font-size:6.4px!important}.tr-intelligentTransitionsModes{grid-template-columns:repeat(2,minmax(0,1fr))}}@keyframes trDspSheetIn{from{opacity:.45;transform:translateY(36px)}to{opacity:1;transform:none}}
         @media(prefers-reduced-motion:reduce){.tr-dspControlCenterBack,.tr-dspControlCenter,.tr-dspControlCenter>[data-mobile-dsp-section],.tr-dspPlayerCornerDock.is-active{animation:none!important}}
