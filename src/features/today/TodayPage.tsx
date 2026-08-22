@@ -632,6 +632,10 @@ export function TodayPage() {
   }, [queue, activeSessionId, sessionById]);
 
   const nextSession = upcoming[0] ?? null;
+  const comingUp = useMemo(
+    () => activeSessionId ? upcoming : upcoming.filter((row) => row.id !== nextSession?.id),
+    [activeSessionId, upcoming, nextSession?.id]
+  );
   const activeSession = activeSessionId ? sessionById.get(activeSessionId) ?? null : null;
   const activeMeta = activeSessionId ? metaBySession.get(activeSessionId) ?? null : null;
   const nextMeta = nextSession ? metaBySession.get(nextSession.id) ?? null : null;
@@ -744,12 +748,12 @@ export function TodayPage() {
           <section className="trp-upcomingSection">
             <header className="trp-sectionHead">
               <div><span>UPCOMING TRAINING</span><h2>Coming Up</h2></div>
-              <small>{upcoming.length} scheduled</small>
+              <small>{comingUp.length} scheduled</small>
             </header>
 
-            {loading ? <div className="trp-loading">Loading training schedule…</div> : upcoming.length ? (
+            {loading ? <div className="trp-loading">Loading training schedule…</div> : comingUp.length ? (
               <div className="trp-upcomingGrid">
-                {upcoming.map((session, index) => {
+                {comingUp.map((session, index) => {
                   const meta = metaBySession.get(session.id) ?? null;
                   const label = splitLabel(formatSessionLabel({
                     sessionType: session.session_type ?? "Workout",
@@ -765,7 +769,7 @@ export function TodayPage() {
                           <span className="trp-sequence">{index === 0 ? "NEXT UP" : `UPCOMING ${index + 1}`}</span>
                           <div className={`trp-readiness is-${readiness.tone}`}><i />{readiness.label}</div>
                         </div>
-                        <div className="trp-sessionDate">{rollingScheduleDateLabel(referenceToday, index)}</div>
+                        <div className="trp-sessionDate">{rollingScheduleDateLabel(referenceToday, index + 1)}</div>
                       </div>
 
                       <div className="trp-sessionTitle">

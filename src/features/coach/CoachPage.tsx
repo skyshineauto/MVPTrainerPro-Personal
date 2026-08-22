@@ -2,6 +2,8 @@
 // MVP Trainer Pro - semantic program identity + clear coaching decisions + responsive pro UI
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
+import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
+import { analyzeProgression } from "../../lib/trainingIntelligence";
 import {
   COACH_TIPS,
   COACH_TIP_CATEGORIES,
@@ -18,7 +20,7 @@ type SymptomKey =
   | "elbow_wrist";
 type Mode = "goal" | "symptom";
 type Tone = "green" | "amber" | "red" | "blue" | "neutral";
-type Decision = "INCREASE" | "HOLD" | "REDUCE" | "REPEAT & ASSESS";
+type Decision = "INCREASE" | "HOLD" | "MONITOR" | "REDUCE" | "RECOVERY" | "BASELINE";
 
 type ProgramBlockRow = {
   id: string;
@@ -84,6 +86,7 @@ type ExerciseMeta = {
   name: string;
   primary_muscles: string[] | null;
   secondary_muscles: string[] | null;
+  equipment: string[] | null;
 };
 
 type WorkoutRow = {
@@ -119,16 +122,20 @@ type ExercisePoint = {
   workoutId: string;
   completedAt: string;
   workoutName: string;
+  exerciseId: string;
+  sets: WorkoutSetRow[];
   bestWeight: number;
   bestReps: number;
   bestE1RM: number;
   avgRir: number | null;
   pain: number | null;
+  difficulty: string | null;
   volume: number;
 };
 
 type ExerciseInsight = {
   id: string;
+  identityKey: string;
   name: string;
   muscles: string[];
   points: ExercisePoint[];
@@ -140,19 +147,29 @@ type ExerciseInsight = {
   decision: Decision;
   suggestedWeight: number | null;
   reason: string;
+  nextTarget: string;
+  lastSummary: string;
+  confidence: "LOW" | "MODERATE" | "HIGH";
+  confidenceDetail: string;
 };
 
 type NextExercise = {
   id: string;
+  identityKey: string;
   name: string;
   muscles: string[];
   sets: number;
   repMin: number;
   repMax: number;
   currentWeight: number;
+  currentPain: number | null;
   suggestedWeight: number | null;
   decision: Decision;
   reason: string;
+  nextTarget: string;
+  lastSummary: string;
+  confidence: "LOW" | "MODERATE" | "HIGH";
+  confidenceDetail: string;
 };
 
 type CoachRecommendation = {
@@ -294,13 +311,6 @@ function e1rm(weight: number, reps: number) {
   return reps === 1 ? weight : weight * (1 + reps / 30);
 }
 
-function progressionIncrement(weight: number) {
-  if (weight >= 200) return 10;
-  if (weight >= 30) return 5;
-  if (weight >= 10) return 2.5;
-  return 1;
-}
-
 function strengthChange(points: ExercisePoint[], days = 30) {
   const valid = points
     .filter((point) => point.bestE1RM > 0)
@@ -317,70 +327,40 @@ function strengthChange(points: ExercisePoint[], days = 30) {
 
 function coachingDecision(
   points: ExercisePoint[],
-  repMin?: number,
-  repMax?: number
-): Pick<ExerciseInsight, "decision" | "suggestedWeight" | "reason"> {
-  const latest = points.at(-1);
-  if (!latest) {
-    return {
-      decision: "REPEAT & ASSESS",
-      suggestedWeight: null,
-      reason: "No completed performance yet. Establish a clean baseline first.",
-    };
-  }
-
-  if ((latest.pain ?? 0) >= 3) {
-    return {
-      decision: "HOLD",
-      suggestedWeight: latest.bestWeight || null,
-      reason: `Pain was ${latest.pain}/10. Keep the load steady until the movement is comfortable again.`,
-    };
-  }
-
-  if (points.length < 2) {
-    return {
-      decision: "REPEAT & ASSESS",
-      suggestedWeight: latest.bestWeight || null,
-      reason: "One session is a baseline. Repeat the load and confirm the trend before progressing.",
-    };
-  }
-
-  const low = repMin && repMin > 0 ? repMin : 8;
-  const high = repMax && repMax >= low ? repMax : Math.max(low, 12);
-  const rir = latest.avgRir;
-
-  if (latest.bestReps >= high && (rir == null || rir >= 2)) {
-    const next = latest.bestWeight > 0
-      ? latest.bestWeight + progressionIncrement(latest.bestWeight)
-      : null;
-    return {
-      decision: "INCREASE",
-      suggestedWeight: next,
-      reason: `You reached the top of the ${low}–${high} rep range${rir == null ? "" : ` with ${rir.toFixed(1)} RIR`}.`,
-    };
-  }
-
-  if (latest.bestReps < low || (rir != null && rir <= 0)) {
-    const next = latest.bestWeight > 0
-      ? Math.max(progressionIncrement(latest.bestWeight), latest.bestWeight - progressionIncrement(latest.bestWeight))
-      : null;
-    return {
-      decision: "REDUCE",
-      suggestedWeight: next,
-      reason: `The last performance fell below the ${low}–${high} target or reached failure.`,
-    };
-  }
+  repMin = 8,
+  repMax = 12,
+  setsTarget = 3,
+  exercise?: ExerciseMeta | null,
+  goal?: string | null
+): Pick<ExerciseInsight, "decision" | "suggestedWeight" | "reason" | "nextTarget" | "lastSummary" | "confidence" | "confidenceDetail"> {
+  const analysis = analyzeProgression({
+    goal,
+    sessions: points.map((point) => ({
+      sets: point.sets,
+      pain: point.pain,
+      difficulty: point.difficulty,
+      completedAt: point.completedAt,
+    })),
+    repMin,
+    repMax,
+    setsTarget,
+    exercise,
+  });
 
   return {
-    decision: "HOLD",
-    suggestedWeight: latest.bestWeight || null,
-    reason: `The load is inside the ${low}–${high} target. Earn more clean reps before increasing.`,
+    decision: analysis.action,
+    suggestedWeight: analysis.suggestedWeight,
+    reason: analysis.reason,
+    nextTarget: analysis.nextTarget,
+    lastSummary: analysis.lastSummary,
+    confidence: analysis.confidence,
+    confidenceDetail: analysis.confidenceDetail,
   };
 }
 
 function decisionTone(decision: Decision): Tone {
   if (decision === "INCREASE") return "green";
-  if (decision === "REDUCE") return "red";
+  if (decision === "REDUCE" || decision === "RECOVERY") return "red";
   if (decision === "HOLD") return "blue";
   return "amber";
 }
@@ -654,7 +634,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       if (exerciseIds.length) {
         const { data, error } = await supabase
           .from("exercises")
-          .select("id,name,primary_muscles,secondary_muscles")
+          .select("id,name,primary_muscles,secondary_muscles,equipment")
           .in("id", exerciseIds);
         if (error) throw error;
         for (const row of (data ?? []) as ExerciseMeta[]) nextExerciseMap.set(row.id, row);
@@ -862,51 +842,66 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
 
   const exerciseInsights = useMemo<ExerciseInsight[]>(() => {
     const pointsMap = new Map<string, ExercisePoint[]>();
+    const identityMeta = new Map<string, { id: string; meta: ExerciseMeta | null }>();
+
     for (const row of workoutExercises) {
       const workout = workoutMap.get(row.workout_id);
       if (!workout) continue;
       const session = workout.scheduled_session_id ? scheduledMap.get(workout.scheduled_session_id) : null;
       const template = session?.template_id ? templateMap.get(session.template_id) : null;
-      const sets = (setsByWorkoutExercise.get(row.id) ?? []).filter((set) => set.reps > 0);
+      const sets = (setsByWorkoutExercise.get(row.id) ?? []).filter((set) => set.reps > 0 && set.weight > 0);
       if (!sets.length) continue;
+      const meta = exerciseMap.get(row.exercise_id) ?? null;
+      const identityKey = canonicalExerciseKey({
+        id: row.exercise_id,
+        name: meta?.name ?? "Exercise",
+        primary_muscles: meta?.primary_muscles ?? null,
+        equipment: meta?.equipment ?? null,
+      });
       const best = sets.slice().sort((a, b) => e1rm(b.weight, b.reps) - e1rm(a.weight, a.reps))[0];
       const rirValues = sets.map((set) => set.rir).filter((value): value is number => value != null && Number.isFinite(value));
       const point: ExercisePoint = {
         workoutId: workout.id,
         completedAt: workout.completed_at,
         workoutName: cleanWorkoutName(template?.name || session?.session_type),
+        exerciseId: row.exercise_id,
+        sets,
         bestWeight: num(best?.weight),
         bestReps: num(best?.reps),
         bestE1RM: e1rm(num(best?.weight), num(best?.reps)),
         avgRir: rirValues.length ? average(rirValues) : null,
         pain: row.pain == null ? null : num(row.pain),
+        difficulty: row.difficulty,
         volume: sets.reduce((sum, set) => sum + num(set.weight) * num(set.reps), 0),
       };
-      const list = pointsMap.get(row.exercise_id) ?? [];
+      const list = pointsMap.get(identityKey) ?? [];
       list.push(point);
-      pointsMap.set(row.exercise_id, list);
+      pointsMap.set(identityKey, list);
+      identityMeta.set(identityKey, { id: row.exercise_id, meta });
     }
 
-    return Array.from(pointsMap.entries()).map(([id, unsorted]) => {
+    return Array.from(pointsMap.entries()).map(([identityKey, unsorted]) => {
       const points = unsorted.slice().sort((a, b) => ms(a.completedAt) - ms(b.completedAt));
       const latest = points.at(-1)!;
-      const meta = exerciseMap.get(id);
+      const latestMeta = exerciseMap.get(latest.exerciseId) ?? identityMeta.get(identityKey)?.meta ?? null;
+      const decision = coachingDecision(points, 8, 12, 3, latestMeta, activeProgram?.goal);
       return {
-        id,
-        name: meta?.name ?? "Exercise",
-        muscles: Array.isArray(meta?.primary_muscles) ? unique(meta.primary_muscles.map(prettyMuscle)) : [],
+        id: latest.exerciseId,
+        identityKey,
+        name: latestMeta?.name ?? "Exercise",
+        muscles: Array.isArray(latestMeta?.primary_muscles) ? unique(latestMeta.primary_muscles.map(prettyMuscle)) : [],
         points,
         currentWeight: latest.bestWeight,
         currentReps: latest.bestReps,
         currentRir: latest.avgRir,
         currentPain: latest.pain,
         change30: strengthChange(points, 30),
-        ...coachingDecision(points),
+        ...decision,
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [exerciseMap, scheduledMap, setsByWorkoutExercise, templateMap, workoutExercises, workoutMap]);
+  }, [activeProgram?.goal, exerciseMap, scheduledMap, setsByWorkoutExercise, templateMap, workoutExercises, workoutMap]);
 
-  const insightMap = useMemo(() => new Map(exerciseInsights.map((row) => [row.id, row])), [exerciseInsights]);
+  const insightMap = useMemo(() => new Map(exerciseInsights.map((row) => [row.identityKey, row])), [exerciseInsights]);
   const completedScheduledIds = useMemo(
     () => new Set(activeWorkouts.map((row) => row.scheduled_session_id).filter((value): value is string => Boolean(value))),
     [activeWorkouts]
@@ -940,11 +935,25 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       .slice()
       .sort((a, b) => a.order_index - b.order_index)
       .map((row) => {
-        const meta = exerciseMap.get(row.exercise_id);
-        const insight = insightMap.get(row.exercise_id);
-        const decision = coachingDecision(insight?.points ?? [], row.rep_min, row.rep_max);
+        const meta = exerciseMap.get(row.exercise_id) ?? null;
+        const identityKey = canonicalExerciseKey({
+          id: row.exercise_id,
+          name: meta?.name ?? "Exercise",
+          primary_muscles: meta?.primary_muscles ?? null,
+          equipment: meta?.equipment ?? null,
+        });
+        const insight = insightMap.get(identityKey);
+        const decision = coachingDecision(
+          insight?.points ?? [],
+          row.rep_min,
+          row.rep_max,
+          num(row.sets, 3),
+          meta,
+          activeProgram?.goal
+        );
         return {
           id: row.exercise_id,
+          identityKey,
           name: meta?.name ?? insight?.name ?? "Exercise",
           muscles: Array.isArray(meta?.primary_muscles)
             ? unique(meta.primary_muscles.map(prettyMuscle))
@@ -953,46 +962,39 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           repMin: num(row.rep_min, 8),
           repMax: num(row.rep_max, 12),
           currentWeight: insight?.currentWeight ?? 0,
+          currentPain: insight?.currentPain ?? null,
           ...decision,
         };
       });
-  }, [exerciseMap, insightMap, nextScheduled, templateExercises]);
+  }, [activeProgram?.goal, exerciseMap, insightMap, nextScheduled, templateExercises]);
 
   const recommendations = useMemo<CoachRecommendation[]>(() => {
     const rows: CoachRecommendation[] = [];
-    const increase = nextWorkoutExercises.find((row) => row.decision === "INCREASE");
-    const reduce = nextWorkoutExercises.find((row) => row.decision === "REDUCE");
-    const hold = nextWorkoutExercises.find((row) => row.decision === "HOLD");
+    const priority = [...nextWorkoutExercises].sort((a, b) => {
+      const rank: Record<Decision, number> = { RECOVERY: 0, REDUCE: 1, INCREASE: 2, MONITOR: 3, HOLD: 4, BASELINE: 5 };
+      return rank[a.decision] - rank[b.decision];
+    });
+    const primary = priority[0] ?? null;
 
-    if (increase) {
+    if (primary) {
+      const action = primary.decision === "INCREASE" || primary.decision === "REDUCE"
+        ? `${formatWeight(primary.currentWeight)} → ${formatWeight(primary.suggestedWeight)}`
+        : primary.decision === "BASELINE"
+          ? "ESTABLISH WORKING LOAD"
+          : `TARGET LOAD • ${formatWeight(primary.suggestedWeight ?? primary.currentWeight)}`;
       rows.push({
-        id: `${activeProgram?.id ?? "no-program"}:increase-${increase.id}`,
+        id: `${activeProgram?.id ?? "no-program"}:primary-${primary.id}-${primary.decision}`,
         eyebrow: "PRIMARY ACTION",
-        title: `Increase ${increase.name}`,
-        body: increase.reason,
-        action: `${formatWeight(increase.currentWeight)} → ${formatWeight(increase.suggestedWeight)}`,
-        tone: "green",
-        exerciseId: increase.id,
-      });
-    } else if (reduce) {
-      rows.push({
-        id: `${activeProgram?.id ?? "no-program"}:reduce-${reduce.id}`,
-        eyebrow: "PRIMARY ACTION",
-        title: `Reduce ${reduce.name}`,
-        body: reduce.reason,
-        action: `${formatWeight(reduce.currentWeight)} → ${formatWeight(reduce.suggestedWeight)}`,
-        tone: "amber",
-        exerciseId: reduce.id,
-      });
-    } else if (hold) {
-      rows.push({
-        id: `${activeProgram?.id ?? "no-program"}:hold-${hold.id}`,
-        eyebrow: "PRIMARY ACTION",
-        title: `Hold ${hold.name}`,
-        body: hold.reason,
-        action: `NEXT SET • ${formatWeight(hold.suggestedWeight)}`,
-        tone: "blue",
-        exerciseId: hold.id,
+        title:
+          primary.decision === "INCREASE" ? `Increase ${primary.name}` :
+          primary.decision === "REDUCE" ? `Reduce ${primary.name}` :
+          primary.decision === "RECOVERY" ? `Recovery priority: ${primary.name}` :
+          primary.decision === "MONITOR" ? `Monitor ${primary.name}` :
+          primary.decision === "BASELINE" ? `Establish ${primary.name}` : `Hold ${primary.name}`,
+        body: primary.reason,
+        action,
+        tone: decisionTone(primary.decision),
+        exerciseId: primary.id,
       });
     }
 
@@ -1001,29 +1003,38 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       eyebrow: "NEXT WORKOUT",
       title: nextTemplate ? cleanWorkoutName(nextTemplate.name) : "Build the next trend",
       body: nextTemplate
-        ? `${nextWorkoutExercises.length} exercises ready inside ${activeProgramName}.`
+        ? `${nextWorkoutExercises.length} exercises analyzed from your active-program history.`
         : "No upcoming scheduled workout is waiting right now.",
       action: nextTemplate ? `${nextTemplate.estimated_minutes ?? "—"} MIN PLANNED` : "NO ACTION NEEDED",
       tone: "blue",
     });
 
-    const painSignal = exerciseInsights.find((row) => (row.currentPain ?? 0) >= 3);
+    const painSignal = nextWorkoutExercises.find((row) => row.decision === "RECOVERY" || (row.currentPain ?? 0) >= 3);
     rows.push({
       id: painSignal
         ? `${activeProgram?.id ?? "no-program"}:pain-${painSignal.id}`
         : `${activeProgram?.id ?? "no-program"}:recovery-clear`,
       eyebrow: "RECOVERY CHECK",
-      title: painSignal ? `Hold progression on ${painSignal.name}` : "Pain signal is controlled",
+      title: painSignal ? `Review ${painSignal.name}` : "Next workout is recovery-clear",
       body: painSignal
-        ? `Latest pain was ${painSignal.currentPain}/10. Progression stays paused on that movement.`
-        : "No elevated exercise-pain signal is currently forcing a load reduction.",
-      action: painSignal ? "HOLD & REASSESS" : "PROGRESSION AVAILABLE",
+        ? painSignal.reason
+        : `No elevated pain signal is currently restricting an exercise in ${nextTemplate ? cleanWorkoutName(nextTemplate.name) : "the next workout"}.`,
+      action: painSignal ? "HOLD PROGRESSION" : "READY TO PROGRESS",
       tone: painSignal ? "amber" : "green",
       exerciseId: painSignal?.id,
     });
 
     return rows.slice(0, 3);
-  }, [activeProgram?.id, activeProgramName, exerciseInsights, nextTemplate, nextWorkoutExercises]);
+  }, [activeProgram?.id, nextTemplate, nextWorkoutExercises]);
+
+  const nextWorkoutIdentityKeys = useMemo(
+    () => new Set(nextWorkoutExercises.map((row) => row.identityKey)),
+    [nextWorkoutExercises]
+  );
+  const programWatchlist = useMemo(
+    () => exerciseInsights.filter((row) => (row.currentPain ?? 0) >= 3 && !nextWorkoutIdentityKeys.has(row.identityKey)).slice(0, 6),
+    [exerciseInsights, nextWorkoutIdentityKeys]
+  );
 
   useEffect(() => {
     const key = coachHistoryKey(activeProgram?.id);
@@ -1180,9 +1191,16 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
                     <strong>
                       {exercise.decision === "INCREASE" || exercise.decision === "REDUCE"
                         ? `${formatWeight(exercise.currentWeight)} → ${formatWeight(exercise.suggestedWeight)}`
-                        : `NEXT SET • ${formatWeight(exercise.suggestedWeight)}`}
+                        : exercise.decision === "BASELINE"
+                          ? "ESTABLISH WORKING LOAD"
+                          : `TARGET LOAD • ${formatWeight(exercise.suggestedWeight ?? exercise.currentWeight)}`}
                     </strong>
                     <small>{exercise.reason}</small>
+                    <div className="co-decisionEvidence">
+                      <span>LAST • {exercise.lastSummary}</span>
+                      <span>NEXT TARGET • {exercise.nextTarget}</span>
+                      <span>{exercise.confidenceDetail.toUpperCase()} • {exercise.confidence} CONFIDENCE</span>
+                    </div>
                   </div>
                   <button type="button" onClick={() => navigate(`/library/${exercise.id}`)}>DETAILS</button>
                 </article>
@@ -1191,6 +1209,21 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           </>
         ) : <div className="co-empty">No upcoming scheduled workout. Your current program remains intact.</div>}
       </section>
+
+      {programWatchlist.length ? (
+        <section className="co-surface co-section co-section--watchlist">
+          <SectionTitle title="Program Watchlist" subtitle="Issues remembered from the active program that are not part of your next workout." />
+          <div className="co-watchlistRows">
+            {programWatchlist.map((exercise) => (
+              <article key={exercise.identityKey}>
+                <div><strong>{exercise.name}</strong><span>Latest pain {exercise.currentPain ?? 0}/10</span></div>
+                <b>REMEMBERED • NOT IN NEXT WORKOUT</b>
+                <button type="button" onClick={() => navigate(`/library/${exercise.id}`)}>DETAILS</button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="co-surface co-section co-section--review">
         <SectionTitle title="Program Review" subtitle={activeProgramName} />
@@ -1303,7 +1336,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-hero{padding:25px 27px;display:flex;align-items:center;justify-content:space-between;gap:22px}.co-kicker,.co-sectionTitleText p,.co-heroStatus span,.co-briefTop span,.co-reviewGrid span,.co-assessment span,.co-programControl span,.co-featuredTip>div>span,.co-tipEvidence span,.co-nextWorkoutHead span{color:#83b2c2;font-size:10px;font-weight:900;letter-spacing:.115em;text-transform:uppercase}.co-hero h1{margin:4px 0 4px;font-size:clamp(34px,5vw,58px);line-height:.96;letter-spacing:-.05em}.co-programName{font-size:clamp(21px,3vw,32px);font-weight:1000}.co-programMetaLine{margin-top:7px;color:#86dfff;font-size:13px;font-weight:850}.co-heroStatus{min-width:250px;padding:15px 17px;border:1px solid rgba(89,216,255,.19);border-radius:14px;background:rgba(10,33,44,.72)}.co-heroStatus strong{display:block;margin:5px 0;color:#fff;font-size:19px}.co-heroStatus small{color:#b7ccd5;font-size:12px}.co-error{padding:12px 14px;border:1px solid rgba(255,116,122,.32);border-radius:12px;background:rgba(115,30,35,.2);color:#ffd4d6;font-weight:800}.co-toast{position:fixed;z-index:10050;right:18px;bottom:88px;width:min(440px,calc(100vw - 36px));display:flex;align-items:center;justify-content:space-between;gap:15px;padding:13px 15px;border:1px solid rgba(89,216,255,.36);border-radius:12px;background:#09171e;box-shadow:0 20px 55px rgba(0,0,0,.6);font-size:13px;font-weight:850}.co-toast.is-err{border-color:rgba(255,116,122,.4);background:#1c0d10}.co-toast button{border:0;background:transparent;color:#86e4ff;font-weight:1000}
         .co-section{padding:22px}.co-sectionTitle{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:18px}.co-sectionTitleText{display:flex;gap:11px;min-width:0}.co-sectionAccent{width:4px;height:42px;border-radius:4px;background:linear-gradient(#8fe8ff,#189fd6)}.co-sectionTitle h2{margin:0;font-size:clamp(23px,3vw,31px);line-height:1;font-weight:1000;letter-spacing:-.035em}.co-sectionTitleText p{margin:7px 0 0;letter-spacing:.02em;text-transform:none;font-size:12px;line-height:1.45}.co-sectionRight button,.co-primaryAction{min-height:42px;padding:0 15px;border:1px solid rgba(89,216,255,.34);border-radius:10px;background:rgba(32,126,160,.18);font-size:11px;font-weight:950;letter-spacing:.05em}
         .co-briefingGrid{display:grid;grid-template-columns:1.28fr 1fr 1fr;gap:10px}.co-briefCard{min-height:210px;display:flex;flex-direction:column;padding:17px;border:1px solid rgba(139,202,226,.11);border-left:3px solid var(--c);border-radius:14px;background:linear-gradient(110deg,rgba(38,125,158,.12),transparent 72%)}.co-briefCard.is-green{border-left-color:var(--g)}.co-briefCard.is-amber{border-left-color:var(--a)}.co-briefCard.is-lead{background:linear-gradient(120deg,rgba(31,139,179,.19),rgba(6,15,21,.15))}.co-briefTop{display:flex;align-items:center;justify-content:space-between}.co-briefTop i{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}.co-briefCard h3{margin:14px 0 8px;font-size:20px;line-height:1.12}.co-briefCard p{margin:0;color:#c0d2da;font-size:13px;line-height:1.5}.co-briefAction{margin-top:auto;padding-top:15px;color:#fff;font-size:16px;font-weight:1000}.co-briefCard button{margin-top:10px;align-self:flex-start;border:0;background:transparent;color:#7fe1ff;font-size:10px;font-weight:1000;letter-spacing:.07em}
-        .co-nextWorkoutHead{display:grid;grid-template-columns:1fr 170px;gap:10px;margin-bottom:10px}.co-nextWorkoutHead>div{padding:15px 16px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nextWorkoutHead strong{display:block;margin:5px 0;font-size:22px}.co-nextWorkoutHead small{color:#a9c0ca;font-size:11px}.co-decisionRows{display:grid;gap:8px}.co-decisionRow{display:grid;grid-template-columns:minmax(190px,.85fr) minmax(0,1.55fr) 86px;gap:14px;align-items:center;padding:14px 15px;border:1px solid rgba(136,198,221,.11);border-left:3px solid #6e91a0;border-radius:12px;background:rgba(255,255,255,.018)}.co-decisionRow.is-green{border-left-color:var(--g)}.co-decisionRow.is-blue{border-left-color:var(--c)}.co-decisionRow.is-amber{border-left-color:var(--a)}.co-decisionExercise strong{display:block;font-size:15px}.co-decisionExercise span,.co-decisionCommand small{display:block;margin-top:4px;color:#9db6c0;font-size:11px;line-height:1.4}.co-decisionCommand>span{display:block;color:#8edfff;font-size:10px;font-weight:1000;letter-spacing:.11em}.co-decisionCommand>strong{display:block;margin-top:4px;color:#fff;font-size:20px;line-height:1.1}.co-decisionRow.is-green .co-decisionCommand>strong{color:#9ef3bf}.co-decisionRow.is-amber .co-decisionCommand>strong{color:#ffd195}.co-decisionRow>button{height:38px;border:1px solid rgba(120,194,220,.18);border-radius:9px;background:#0a171e;font-size:9px;font-weight:950}
+        .co-nextWorkoutHead{display:grid;grid-template-columns:1fr 170px;gap:10px;margin-bottom:10px}.co-nextWorkoutHead>div{padding:15px 16px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nextWorkoutHead strong{display:block;margin:5px 0;font-size:22px}.co-nextWorkoutHead small{color:#a9c0ca;font-size:11px}.co-decisionRows{display:grid;gap:8px}.co-decisionRow{display:grid;grid-template-columns:minmax(190px,.85fr) minmax(0,1.55fr) 86px;gap:14px;align-items:center;padding:14px 15px;border:1px solid rgba(136,198,221,.11);border-left:3px solid #6e91a0;border-radius:12px;background:rgba(255,255,255,.018)}.co-decisionRow.is-green{border-left-color:var(--g)}.co-decisionRow.is-blue{border-left-color:var(--c)}.co-decisionRow.is-amber{border-left-color:var(--a)}.co-decisionExercise strong{display:block;font-size:15px}.co-decisionExercise span,.co-decisionCommand small{display:block;margin-top:4px;color:#9db6c0;font-size:11px;line-height:1.4}.co-decisionCommand>span{display:block;color:#8edfff;font-size:10px;font-weight:1000;letter-spacing:.11em}.co-decisionCommand>strong{display:block;margin-top:4px;color:#fff;font-size:20px;line-height:1.1}.co-decisionEvidence{display:grid;gap:3px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)}.co-decisionEvidence span{color:#8fa8b2!important;font-size:9px!important;font-weight:850;letter-spacing:.025em}.co-watchlistRows{display:grid;gap:7px}.co-watchlistRows article{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(240,178,88,.14);border-left:3px solid var(--a);border-radius:11px;background:rgba(240,178,88,.035)}.co-watchlistRows article div{display:grid;gap:3px}.co-watchlistRows article strong{font-size:14px}.co-watchlistRows article span{color:#9eb2ba;font-size:11px}.co-watchlistRows article b{color:#f2c57e;font-size:9px;letter-spacing:.06em}.co-watchlistRows article button{min-height:36px;padding:0 11px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0a141a;font-size:10px;font-weight:950}.co-decisionRow.is-green .co-decisionCommand>strong{color:#9ef3bf}.co-decisionRow.is-amber .co-decisionCommand>strong{color:#ffd195}.co-decisionRow>button{height:38px;border:1px solid rgba(120,194,220,.18);border-radius:9px;background:#0a171e;font-size:9px;font-weight:950}
         .co-reviewGrid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid rgba(138,198,221,.11);border-radius:13px;overflow:hidden}.co-reviewGrid article{min-height:92px;padding:16px;background:rgba(255,255,255,.015)}.co-reviewGrid article+article{border-left:1px solid rgba(138,198,221,.09)}.co-reviewGrid strong{display:block;margin-top:9px;font-size:20px}.co-overall.is-green strong{color:#8ceab0}.co-overall.is-amber strong{color:#f4c27d}.co-assessment{margin-top:10px;padding:15px 16px;border-left:3px solid var(--c);background:linear-gradient(90deg,rgba(45,141,177,.12),transparent)}.co-assessment p{margin:6px 0 0;color:#d2e2e8;font-size:13px;line-height:1.55}
         .co-nutritionGrid{display:grid;grid-template-columns:220px 220px minmax(0,1fr);gap:9px}.co-nutritionGrid article{padding:15px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nutritionGrid span{color:#83aebb;font-size:9px;font-weight:950;letter-spacing:.11em}.co-nutritionGrid strong{display:block;margin-top:7px;font-size:17px}.co-nutritionAdvice strong{font-size:13px;line-height:1.45}
         .co-tipTabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:5px}.co-tipTabs button{flex:0 0 auto;min-height:37px;padding:0 11px;border:1px solid rgba(126,189,212,.13);border-radius:9px;background:#08151c;color:#a9c2cb;font-size:9px;font-weight:950}.co-tipTabs button.is-active{border-color:rgba(89,216,255,.42);background:rgba(35,130,166,.2);color:#fff}.co-featuredTip{display:grid;grid-template-columns:minmax(0,1.35fr) 1fr 1fr auto;gap:12px;align-items:center;margin-top:10px;padding:17px;border:1px solid rgba(133,198,222,.12);border-radius:13px;background:linear-gradient(115deg,rgba(35,119,151,.1),transparent 72%)}.co-featuredTip h3{margin:6px 0;font-size:19px}.co-featuredTip p{margin:0;color:#bdd1d9;font-size:12px;line-height:1.5}.co-tipEvidence{padding-left:12px;border-left:1px solid rgba(136,197,220,.1)}.co-tipEvidence strong{display:block;margin-top:6px;font-size:12px;line-height:1.45}.co-featuredTip>button{height:40px;padding:0 13px;border:1px solid rgba(89,216,255,.22);border-radius:9px;background:#0a1820;font-size:9px;font-weight:950}
@@ -1349,6 +1382,8 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           .co-nutritionGrid{grid-template-columns:1fr!important}.co-programControl{padding:13px!important}.co-programControl strong{font-size:19px!important}.co-controlButtons{grid-template-columns:1fr!important}
           .co-manageRows article{grid-template-columns:28px minmax(0,1fr)!important}.co-manageRows article>button,.co-manageRows article>b{grid-column:2!important;width:100%!important}
           .co-primaryAction,.co-sectionRight button{width:100%!important;min-height:43px!important;font-size:12px!important}
+          .co-watchlistRows article{grid-template-columns:1fr!important}.co-watchlistRows article button{width:100%!important}
+          .co-decisionEvidence span{font-size:10px!important;line-height:1.35!important}
         }
 
         /* AUG 9 FLAGSHIP SEMANTIC SURFACE PASS */
@@ -1363,7 +1398,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-section::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:2px;border-radius:99px;background:rgba(126,220,255,.34);pointer-events:none}
         .co-section--brief::before{background:var(--violet)!important}.co-section--brief .co-sectionAccent{background:var(--violet)!important}
         .co-section--next::before{background:var(--c)!important}.co-section--next .co-sectionAccent{background:var(--c)!important}
-        .co-section--review::before{background:var(--g)!important}.co-section--review .co-sectionAccent{background:var(--g)!important}
+        .co-section--watchlist::before{background:var(--a)!important}.co-section--watchlist .co-sectionAccent{background:var(--a)!important}.co-section--review::before{background:var(--g)!important}.co-section--review .co-sectionAccent{background:var(--g)!important}
         .co-section--nutrition::before{background:var(--a)!important}.co-section--nutrition .co-sectionAccent{background:var(--a)!important}
         .co-section--tips::before{background:var(--violet)!important}.co-section--tips .co-sectionAccent{background:var(--violet)!important}
         .co-section--history::before{background:#8ba0aa!important}.co-section--history .co-sectionAccent{background:#8ba0aa!important}

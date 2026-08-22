@@ -28,6 +28,7 @@ import {
   type SymptomKey,
 } from "../../lib/sessionLabel";
 import { sameCanonicalExercise, type CanonicalExerciseDescriptor } from "../../lib/exerciseIdentity";
+import { analyzeLiveSet, analyzeProgression } from "../../lib/trainingIntelligence";
 
 import { getMusicPlayerSnapshot } from "../../lib/musicPlayer";
 import {
@@ -1225,27 +1226,6 @@ function effortLabel(rir: number | null | undefined, effortKey?: string | null) 
   return effortOption(rir, effortKey)?.label ?? "Not rated";
 }
 
-function usableRir(rir: number | null | undefined) {
-  if (rir == null) return null;
-  const value = Number(rir);
-  return Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function loadIncrementForExercise(exercise: any, currentWeight: number) {
-  const text = [
-    exercise?.name,
-    ...(Array.isArray(exercise?.equipment) ? exercise.equipment : []),
-    ...(Array.isArray(exercise?.primary_muscles) ? exercise.primary_muscles : []),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (/leg press|hack squat|squat|deadlift|hip thrust|calf press/.test(text)) return 10;
-  if (/barbell/.test(text) && currentWeight >= 95) return 10;
-  return 5;
-}
-
 function confidenceForSessions(sessions: number) {
   if (sessions >= 5) return { level: "HIGH" as const, detail: `${sessions} sessions analyzed`, score: 5 };
   if (sessions >= 2) return { level: "MODERATE" as const, detail: `${sessions} sessions analyzed`, score: 3 };
@@ -1283,22 +1263,6 @@ function estimatedOneRepMax(weight: number, reps: number) {
 function roundToIncrement(value: number, increment = 5) {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.max(increment, Math.round(value / increment) * increment);
-}
-
-function roundDownToIncrement(value: number, increment = 5) {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.max(increment, Math.floor(value / increment) * increment);
-}
-
-function primaryWorkingWeight(sets: PreviousSetRow[]) {
-  const valid = sets.filter((set) => set.weight > 0 && set.reps > 0);
-  if (!valid.length) return 0;
-
-  const counts = new Map<number, number>();
-  for (const set of valid) counts.set(set.weight, (counts.get(set.weight) ?? 0) + 1);
-
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? valid[0].weight;
 }
 
 async function loadExerciseHistoryStats(params: {
@@ -1904,7 +1868,8 @@ function progressionGuidance(
   repMin: number,
   repMax: number,
   setsTarget: number,
-  exercise: any
+  exercise: any,
+  goal?: string | null
 ): ProgressionGuidance {
   const confidence = confidenceForSessions(history.sessions);
   const bestSetSummary =
@@ -1912,188 +1877,68 @@ function progressionGuidance(
       ? `${formatLoggedWeight(history.bestSetWeight)} lb × ${history.bestSetReps}`
       : "No data yet";
 
-  if (!previous?.sets.length) {
-    return {
-      tone: "first",
-      decision: "BASELINE",
-      title: "Establish your baseline",
-      action: "CHOOSE A CONTROLLED STARTING WEIGHT",
-      why: "No completed performance exists for this exact exercise. Log clean working sets so the coach can calculate a precise load change next time.",
-      target: `${setsTarget} sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
-      lastSummary: "No data yet",
-      bestSetSummary,
-      trend: "Baseline",
-      suggestedWeight: null,
-      exactChange: "FIRST SESSION",
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
+  const analysis = analyzeProgression({
+    goal,
+    sessions: previous?.sets?.length
+      ? [{ sets: previous.sets, pain: previous.pain, difficulty: previous.difficulty, completedAt: previous.completedAt }]
+      : [],
+    repMin,
+    repMax,
+    setsTarget,
+    exercise,
+    usableSessionCount: history.sessions,
+  });
 
-  const validSets = previous.sets.filter((set) => set.reps > 0 && set.weight > 0);
-  if (!validSets.length) {
-    return {
-      tone: "first",
-      decision: "BASELINE",
-      title: "Build the first usable performance",
-      action: "LOG EVERY WORKING SET",
-      why: "The previous session did not contain complete weight-and-rep data.",
-      target: `${setsTarget} sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
-      lastSummary: "Previous data incomplete",
-      bestSetSummary,
-      trend: "Baseline",
-      suggestedWeight: null,
-      exactChange: "NO LOAD DECISION",
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
+  const decision: CoachDecision =
+    analysis.action === "INCREASE" ? "PROGRESS" :
+    analysis.action === "REDUCE" || analysis.action === "RECOVERY" ? "DELOAD" :
+    analysis.action === "MONITOR" ? "MONITOR" :
+    analysis.action === "BASELINE" ? "BASELINE" : "HOLD";
 
-  const workingWeight = primaryWorkingWeight(validSets);
-  const increment = loadIncrementForExercise(exercise, workingWeight);
-  const totalReps = validSets.reduce((sum, set) => sum + set.reps, 0);
-  const allAtLeastMinimum = validSets.length >= setsTarget && validSets.every((set) => set.reps >= repMin);
-  const allReachedTop = validSets.length >= setsTarget && validSets.every((set) => set.reps >= repMax);
-  const belowMinimum = validSets.filter((set) => set.reps < repMin).length;
-  const usableEfforts = validSets
-    .map((set) => usableRir(set.rir))
-    .filter((value): value is number => value != null);
-  const averageRir = usableEfforts.length
-    ? usableEfforts.reduce((sum, value) => sum + value, 0) / usableEfforts.length
-    : null;
-  const firstRir = usableRir(validSets[0]?.rir);
-  const finalRir = usableRir(validSets[validSets.length - 1]?.rir);
-  const pain = Number(previous.pain ?? 0);
-  const tooHard = previous.difficulty === "too_hard";
-  const lastSummary = `${formatLoggedWeight(workingWeight)} lb • ${validSets
-    .map((set) => set.reps)
-    .join(" / ")} reps`;
-  const previousBestE1rm = Math.max(
-    0,
-    ...validSets.map((set) => estimatedOneRepMax(set.weight, set.reps))
-  );
-  const trend =
-    history.sessions <= 1
-      ? "Building"
-      : previousBestE1rm >= history.bestEstimated1RM * 0.985
-      ? "Improving"
-      : "Steady";
+  const suggested = analysis.suggestedWeight;
+  const current = analysis.currentWeight;
+  const delta = suggested != null && current != null ? suggested - current : 0;
+  const tone: ProgressionGuidance["tone"] =
+    decision === "PROGRESS" ? "increase" :
+    decision === "DELOAD" ? "review" :
+    decision === "BASELINE" ? "first" : "repeat";
 
-  if (pain >= 7) {
-    const reduced = roundDownToIncrement(workingWeight * 0.9, increment);
-    const change = Math.max(0, workingWeight - reduced);
-    return {
-      tone: "review",
-      decision: "DELOAD",
-      title: "Pain overrides progression",
-      action: reduced > 0 ? `REDUCE TO ${formatLoggedWeight(reduced)} LB` : "STOP OR SWAP THE EXERCISE",
-      why: `The last performance recorded pain ${pain}/10. Reduce the load or use a pain-free variation before progressing.`,
-      target: `${setsTarget} controlled sets × ${repMin}-${repMax} reps • Rest 60 seconds`,
-      lastSummary,
-      bestSetSummary,
-      trend: "Needs review",
-      suggestedWeight: reduced || null,
-      exactChange: change > 0 ? `−${formatLoggedWeight(change)} LB` : "PAIN-FIRST ADJUSTMENT",
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
-
-  const majorFailure =
-    belowMinimum >= Math.max(1, Math.ceil(validSets.length / 2)) ||
-    (firstRir != null && firstRir <= 1 && belowMinimum > 0);
-
-  if (majorFailure || tooHard || pain >= 3) {
-    const reductionRate = majorFailure || pain >= 5 ? 0.9 : 0.95;
-    const reduced = roundDownToIncrement(workingWeight * reductionRate, increment);
-    const change = Math.max(increment, workingWeight - reduced);
-    return {
-      tone: "review",
-      decision: "DELOAD",
-      title: "Reduce the load and restore clean reps",
-      action: `REDUCE TO ${formatLoggedWeight(reduced)} LB`,
-      why:
-        pain >= 3
-          ? `The last performance recorded pain ${pain}/10.`
-          : tooHard
-          ? "The last performance was marked too hard."
-          : `${belowMinimum} working set${belowMinimum === 1 ? "" : "s"} fell below the programmed rep range.`,
-      target: `${setsTarget} sets × ${repMin}-${Math.min(repMax, repMin + 2)} reps • Rest 60 seconds`,
-      lastSummary,
-      bestSetSummary,
-      trend: "Reduce and rebuild",
-      suggestedWeight: reduced,
-      exactChange: `−${formatLoggedWeight(change)} LB`,
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
-
-  if (allReachedTop && (finalRir == null || finalRir >= 2) && (averageRir == null || averageRir >= 2)) {
-    const suggested = roundToIncrement(workingWeight + increment, increment);
-    return {
-      tone: "increase",
-      decision: "PROGRESS",
-      title: "Ready to progress",
-      action: `INCREASE TO ${formatLoggedWeight(suggested)} LB`,
-      why: `All ${setsTarget} working sets reached the top of the ${repMin}-${repMax} range without finishing near maximum effort.`,
-      target: `${setsTarget} sets × ${repMin}-${Math.min(repMax, repMin + 2)} reps • Rest 60 seconds`,
-      lastSummary,
-      bestSetSummary,
-      trend,
-      suggestedWeight: suggested,
-      exactChange: `+${formatLoggedWeight(increment)} LB`,
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
-
-  if (allAtLeastMinimum && finalRir != null && finalRir <= 1) {
-    return {
-      tone: "repeat",
-      decision: "HOLD",
-      title: "Good working weight",
-      action: `HOLD AT ${formatLoggedWeight(workingWeight)} LB`,
-      why: "You completed the programmed work, but the final set was very hard. Keep the load and improve total reps or control before increasing.",
-      target: `Add 1-2 total clean reps across ${setsTarget} sets • Rest 60 seconds`,
-      lastSummary,
-      bestSetSummary,
-      trend: "Building capacity",
-      suggestedWeight: workingWeight,
-      exactChange: "NO LOAD CHANGE",
-      confidence: confidence.level,
-      confidenceDetail: confidence.detail,
-      confidenceScore: confidence.score,
-    };
-  }
-
-  const nextRepGoal = totalReps + Math.max(1, Math.min(2, setsTarget));
   return {
-    tone: "repeat",
-    decision: averageRir != null && averageRir <= 1 ? "MONITOR" : "HOLD",
-    title: "Own the current weight",
-    action: `HOLD AT ${formatLoggedWeight(workingWeight)} LB`,
-    why: "The current load still has productive reps available before a weight increase is justified.",
-    target: `Aim for ${nextRepGoal} total reps across ${setsTarget} sets • Rest 60 seconds`,
-    lastSummary,
+    tone,
+    decision,
+    title:
+      analysis.action === "INCREASE" ? "Ready to progress" :
+      analysis.action === "REDUCE" ? "Reduce and rebuild quality reps" :
+      analysis.action === "RECOVERY" ? "Recovery overrides progression" :
+      analysis.action === "MONITOR" ? "Monitor this working load" :
+      analysis.action === "HOLD" ? "Own the current weight" :
+      "Establish your baseline",
+    action:
+      analysis.action === "INCREASE" && suggested ? `INCREASE TO ${formatLoggedWeight(suggested)} LB` :
+      analysis.action === "REDUCE" && suggested ? `REDUCE TO ${formatLoggedWeight(suggested)} LB` :
+      analysis.action === "RECOVERY" ? (suggested ? `HOLD / REDUCE TO ${formatLoggedWeight(suggested)} LB` : "STOP OR SWAP THE EXERCISE") :
+      analysis.action === "HOLD" || analysis.action === "MONITOR" ? `HOLD AT ${formatLoggedWeight(current ?? 0)} LB` :
+      "CHOOSE A CONTROLLED STARTING WEIGHT",
+    why: analysis.reason,
+    target: `${analysis.nextTarget} • Rest 60 seconds`,
+    lastSummary: analysis.lastSummary,
     bestSetSummary,
-    trend,
-    suggestedWeight: workingWeight,
-    exactChange: "NO LOAD CHANGE",
+    trend: history.sessions <= 1 ? "Building" : analysis.action === "INCREASE" ? "Improving" : analysis.action === "REDUCE" || analysis.action === "RECOVERY" ? "Needs review" : "Building capacity",
+    suggestedWeight: suggested,
+    exactChange:
+      delta > 0 ? `+${formatLoggedWeight(delta)} LB` :
+      delta < 0 ? `−${formatLoggedWeight(Math.abs(delta))} LB` :
+      analysis.action === "BASELINE" ? "FIRST SESSION" : "NO LOAD CHANGE",
     confidence: confidence.level,
     confidenceDetail: confidence.detail,
     confidenceScore: confidence.score,
   };
+
 }
 
 type LiveSetAdvice = {
   status: string;
-  tone: "good" | "hold" | "monitor" | "reduce";
+  tone: "good" | "hold" | "monitor" | "reduce" | "increase";
   summary: string;
   nextInstruction: string;
   nextWeight: number;
@@ -2111,58 +1956,18 @@ function buildLiveSetAdvice(params: {
   const weight = Number(set.weight ?? 0);
   const reps = Number(set.reps ?? 0);
   const selectedEffort = effortOption(set.rir, set.effort_key);
-  const rir = selectedEffort?.rir;
-  const increment = loadIncrementForExercise(exercise, weight);
+  const rir = selectedEffort?.rir ?? null;
   const summary = `${formatLoggedWeight(weight)} lb × ${reps} reps • ${effortLabel(set.rir, set.effort_key)}`;
-
-  if (rir === 0) {
-    const reduced = roundDownToIncrement(weight * 0.95, increment);
-    return {
-      status: "MAXIMUM EFFORT",
-      tone: "reduce",
-      summary,
-      nextInstruction: `Reduce to ${formatLoggedWeight(reduced)} lb and target ${repMin}-${Math.min(repMax, repMin + 1)} clean reps. Rest 60 seconds.`,
-      nextWeight: reduced,
-    };
-  }
-
-  if (rir === 1) {
-    return {
-      status: "VERY HARD",
-      tone: "monitor",
-      summary,
-      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and target ${repMin}-${Math.min(repMax, reps)} clean reps. Rest 60 seconds.`,
-      nextWeight: weight,
-    };
-  }
-
-  if (rir === 2) {
-    return {
-      status: "TARGET REACHED",
-      tone: "good",
-      summary,
-      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and target ${Math.max(repMin, reps - 1)}-${Math.min(repMax, reps)} clean reps. Rest 60 seconds.`,
-      nextWeight: weight,
-    };
-  }
-
-  if (rir != null && rir >= 3) {
-    return {
-      status: "CONTROLLED SET",
-      tone: "good",
-      summary,
-      nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and aim for ${Math.min(repMax, reps + 1)} clean reps. Rest 60 seconds.`,
-      nextWeight: weight,
-    };
-  }
+  const result = analyzeLiveSet({ set: { weight, reps, rir }, exercise, repMin, repMax });
 
   return {
-    status: "EFFORT NOT RATED",
-    tone: "hold",
+    status: result.status,
+    tone: result.tone,
     summary,
-    nextInstruction: `Keep ${formatLoggedWeight(weight)} lb and stay inside ${repMin}-${repMax} clean reps. Rest 60 seconds.`,
-    nextWeight: weight,
+    nextInstruction: `${result.instruction} Rest 60 seconds.`,
+    nextWeight: result.nextWeight,
   };
+
 }
 
 async function buildUserUploadMediaMap(exerciseIds: string[]): Promise<Record<string, MediaPack>> {
@@ -4779,6 +4584,7 @@ export function WorkoutPlayerPage({ params }: any) {
             workoutExercise={current}
             item={currentRunnerItem}
             programBlockId={programBlockId}
+            goal={goal}
             onChanged={reloadWorkoutExercisesKeepIndex}
             onExerciseCompleted={handleExerciseCompleted}
             showToast={showToast}
@@ -7221,6 +7027,7 @@ function ExerciseRunner({
   workoutExercise,
   item,
   programBlockId,
+  goal,
   onChanged,
   onExerciseCompleted,
   showToast,
@@ -7232,6 +7039,7 @@ function ExerciseRunner({
   workoutExercise: WorkoutExerciseRow;
   item: any;
   programBlockId: string | null;
+  goal: string | null;
   onChanged: () => Promise<WorkoutExerciseRow[]>;
   onExerciseCompleted: (workoutExerciseId: string) => Promise<void>;
   showToast: (msg: string, tone?: ToastTone) => void;
@@ -7435,7 +7243,7 @@ function ExerciseRunner({
           .map((row) => Number(row.set_index));
         setCompletedSetIndexes(Array.from(new Set([...storedCompleted, ...databaseCompleted])).sort((a, b) => a - b));
 
-        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget, item).suggestedWeight;
+        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget, item, goal).suggestedWeight;
         const firstWeight = filled.find((row) => Number(row.weight) > 0)?.weight ?? 0;
         setCalculatorWeight(Number(firstWeight || suggestedStart || history.bestWeight || 0));
       } catch (error: any) {
@@ -7493,7 +7301,7 @@ function ExerciseRunner({
     return () => {
       cancelled = true;
     };
-  }, [weId, exerciseId, workoutExercise.workout_id, programBlockId, setsTarget, timed]);
+  }, [weId, exerciseId, workoutExercise.workout_id, programBlockId, setsTarget, timed, goal]);
 
   const allSetsLogged = useMemo(() => {
     if (timed) return true;
@@ -7507,8 +7315,8 @@ function ExerciseRunner({
   }, [sets, timed, completedSetIndexes]);
 
   const previousGuidance = useMemo(
-    () => progressionGuidance(previousPerformance, historyStats, repMin, repMax, setsTarget, item),
-    [previousPerformance, historyStats, repMin, repMax, setsTarget, item]
+    () => progressionGuidance(previousPerformance, historyStats, repMin, repMax, setsTarget, item, goal),
+    [previousPerformance, historyStats, repMin, repMax, setsTarget, item, goal]
   );
 
   const completedSets = useMemo(
@@ -9511,7 +9319,7 @@ const unlock = async () => {
 }
 .tr-liveSetReview.is-good{border-color:rgba(68,231,150,.28);background:linear-gradient(180deg,rgba(40,205,130,.085),rgba(0,0,0,.15));}
 .tr-liveSetReview.is-monitor{border-color:rgba(228,198,120,.30);background:linear-gradient(180deg,rgba(205,165,65,.075),rgba(0,0,0,.15));}
-.tr-liveSetReview.is-reduce{border-color:rgba(255,102,120,.32);background:linear-gradient(180deg,rgba(225,64,84,.08),rgba(0,0,0,.15));}
+.tr-liveSetReview.is-increase{border-color:rgba(92,227,161,.36)!important;box-shadow:inset 3px 0 #5ce3a1}.tr-liveSetReview.is-increase .tr-liveSetReviewHead strong{color:#9ff0bd}.tr-liveSetReview.is-reduce{border-color:rgba(255,102,120,.32);background:linear-gradient(180deg,rgba(225,64,84,.08),rgba(0,0,0,.15));}
 .tr-liveSetReviewHead{display:flex;align-items:center;justify-content:space-between;gap:12px;color:rgba(173,204,218,.68);font-size:9px;font-weight:1050;letter-spacing:.13em;}
 .tr-liveSetReviewHead strong{color:rgba(235,250,255,.95);font-size:9px;}
 .tr-liveSetReviewResult{margin-top:9px;color:rgba(250,253,255,.98);font-size:17px;font-weight:1100;}

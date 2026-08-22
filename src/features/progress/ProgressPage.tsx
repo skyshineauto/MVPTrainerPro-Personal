@@ -884,9 +884,9 @@ export function ProgressPage() {
   }, [bodyweightPoints, selectedProgram, weightTrendRange]);
 
   const weightChart = useMemo(() => {
-    const width = 720;
-    const height = 210;
-    const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+    const width = 800;
+    const height = 280;
+    const pad = { left: 54, right: 24, top: 26, bottom: 42 };
     const points = weightAnalytics.visible;
     if (!points.length || !(weightAnalytics.chartMax > weightAnalytics.chartMin)) {
       return { width, height, raw: [] as Array<WeightPoint & { x: number; y: number }>, trend: [] as Array<WeightPoint & { x: number; y: number }> };
@@ -1408,29 +1408,28 @@ export function ProgressPage() {
                 ))}
               </div>
             </header>
-            <div className="prx-weightMetricGrid">
-              <div><span>PROGRAM START</span><b>{weightAnalytics.programStart ? `${formatNumber(weightAnalytics.programStart.weight,1)} LB` : "—"}</b></div>
-              <div><span>CHANGE</span><b>{weightAnalytics.programChange != null ? `${weightAnalytics.programChange >= 0 ? "+" : ""}${weightAnalytics.programChange.toFixed(1)} LB` : "—"}</b></div>
+            <div className="prx-weightPrimaryMetrics">
+              <div><span>CURRENT</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB` : "—"}</strong></div>
+              <div><span>CHANGE</span><strong>{weightAnalytics.rangeChange != null ? `${weightAnalytics.rangeChange >= 0 ? "+" : ""}${weightAnalytics.rangeChange.toFixed(1)} LB` : "—"}</strong></div>
+              <div><span>{weightRangeLabel.toUpperCase()} AVG</span><strong>{weightAnalytics.rangeAverage != null ? `${formatNumber(weightAnalytics.rangeAverage,1)} LB` : "—"}</strong></div>
+              <div><span>RATE</span><strong>{weightAnalytics.rangeRate != null ? `${weightAnalytics.rangeRate >= 0 ? "+" : ""}${weightAnalytics.rangeRate.toFixed(2)} LB/WK` : "—"}</strong></div>
+            </div>
+            <div className="prx-weightSecondaryMetrics">
               <div><span>7-DAY AVG</span><b>{weightAnalytics.avg7 != null ? `${formatNumber(weightAnalytics.avg7,1)} LB` : "—"}</b></div>
               <div><span>30-DAY AVG</span><b>{weightAnalytics.avg30 != null ? `${formatNumber(weightAnalytics.avg30,1)} LB` : "—"}</b></div>
               <div><span>90-DAY AVG</span><b>{weightAnalytics.avg90 != null ? `${formatNumber(weightAnalytics.avg90,1)} LB` : "—"}</b></div>
-              <div><span>RATE</span><b>{weightAnalytics.programRate != null ? `${weightAnalytics.programRate >= 0 ? "+" : ""}${weightAnalytics.programRate.toFixed(2)} LB/WK` : "—"}</b></div>
-            </div>
-            <div className="prx-weightRangeSummary">
-              <div><span>CURRENT</span><strong>{weightAnalytics.latest ? `${formatNumber(weightAnalytics.latest.weight,1)} LB` : "—"}</strong></div>
-              <div><span>{weightRangeLabel.toUpperCase()} AVG</span><strong>{weightAnalytics.rangeAverage != null ? `${formatNumber(weightAnalytics.rangeAverage,1)} LB` : "—"}</strong></div>
-              <div><span>CHANGE</span><strong>{weightAnalytics.rangeChange != null ? `${weightAnalytics.rangeChange >= 0 ? "+" : ""}${weightAnalytics.rangeChange.toFixed(1)} LB` : "—"}</strong></div>
-              <div><span>WEEKLY RATE</span><strong>{weightAnalytics.rangeRate != null ? `${weightAnalytics.rangeRate >= 0 ? "+" : ""}${weightAnalytics.rangeRate.toFixed(2)} LB/WK` : "—"}</strong></div>
+              <div><span>PROGRAM START</span><b>{weightAnalytics.programStart ? `${formatNumber(weightAnalytics.programStart.weight,1)} LB` : "—"}</b></div>
             </div>
             <div className="prx-weightLegend" aria-label="Weight chart legend"><span className="is-daily"><i />DAILY WEIGHT</span><span className="is-trend"><i />{weightRollingLabel.toUpperCase()}</span></div>
             <div className="prx-weightChartWrap">
               {weightChart.raw.length ? (
                 <svg className="prx-weightChart" viewBox={`0 0 ${weightChart.width} ${weightChart.height}`} role="img" aria-label="Bodyweight trend chart">
-                  <line x1="48" x2={weightChart.width - 18} y1="18" y2="18" className="prx-weightGridLine" />
-                  <line x1="48" x2={weightChart.width - 18} y1={(weightChart.height - 16) / 2} y2={(weightChart.height - 16) / 2} className="prx-weightGridLine" />
-                  <line x1="48" x2={weightChart.width - 18} y1={weightChart.height - 34} y2={weightChart.height - 34} className="prx-weightGridLine" />
-                  <text x="4" y="22" className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMax,1)}</text>
-                  <text x="4" y={weightChart.height - 30} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)}</text>
+                  <line x1="54" x2={weightChart.width - 24} y1="26" y2="26" className="prx-weightGridLine" />
+                  <line x1="54" x2={weightChart.width - 24} y1={(weightChart.height - 16) / 2} y2={(weightChart.height - 16) / 2} className="prx-weightGridLine" />
+                  <line x1="54" x2={weightChart.width - 24} y1={weightChart.height - 42} y2={weightChart.height - 42} className="prx-weightGridLine" />
+                  <text x="5" y="31" className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMax,1)} LB</text>
+                  <text x="5" y={(weightChart.height - 16) / 2 + 4} className="prx-weightAxisText">{formatNumber((weightAnalytics.chartMax + weightAnalytics.chartMin) / 2,1)} LB</text>
+                  <text x="5" y={weightChart.height - 38} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)} LB</text>
                   {weightChart.raw.length > 1 ? <polyline className="prx-weightRawLine" points={weightChart.raw.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
                   {weightChart.trend.length > 1 ? <polyline className="prx-weightTrendLine" points={weightChart.trend.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
                   {weightChart.raw[0] ? <g className="prx-weightEndpoint is-start"><text x={weightChart.raw[0].x + 7} y={Math.max(16, weightChart.raw[0].y - 10)}>START {formatNumber(weightChart.raw[0].weight,1)} LB</text></g> : null}
@@ -1440,8 +1439,8 @@ export function ProgressPage() {
                     const latest = index === weightChart.raw.length - 1;
                     return <circle key={point.date} cx={point.x} cy={point.y} r={active ? 6 : latest ? 5.2 : 3.7} className={`prx-weightDot ${active ? "is-active" : ""} ${latest ? "is-latest" : ""}`} onMouseEnter={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })} onClick={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })}><title>{`${formatNumber(point.weight,1)} lb • ${shortDate(point.date)}`}</title></circle>;
                   })}
-                  <text x="48" y={weightChart.height - 9} className="prx-weightDateText">{shortDate(weightAnalytics.visible[0]?.date ?? "")}</text>
-                  <text x={weightChart.width - 18} y={weightChart.height - 9} textAnchor="end" className="prx-weightDateText">{shortDate(weightAnalytics.visible.at(-1)?.date ?? "")}</text>
+                  <text x="54" y={weightChart.height - 10} className="prx-weightDateText">{shortDate(weightAnalytics.visible[0]?.date ?? "")}</text>
+                  <text x={weightChart.width - 24} y={weightChart.height - 10} textAnchor="end" className="prx-weightDateText">{shortDate(weightAnalytics.visible.at(-1)?.date ?? "")}</text>
                 </svg>
               ) : <div className="prx-weightEmpty">Log at least one bodyweight entry to start the trend chart.</div>}
             </div>
@@ -1706,6 +1705,37 @@ export function ProgressPage() {
           .prx-heroText{min-width:180px!important;align-self:end!important}
           .prx-hero h1{white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;hyphens:none!important}
           .prx-controls{justify-self:end!important;width:min(100%,520px)!important;grid-template-columns:minmax(280px,1fr) minmax(150px,180px)!important}
+        }
+
+        /* R9.3 WEIGHT TREND READABILITY */
+        .prx-weightTrendCard{padding:16px!important;background:linear-gradient(180deg,#081116,#050b0f)!important}
+        .prx-weightTrendHeader>div:first-child span{font-size:9px!important;letter-spacing:.12em!important;color:#7bcfa5!important}
+        .prx-weightTrendHeader>div:first-child strong{font-size:24px!important;line-height:1.05!important;color:#f6fbf8!important}
+        .prx-weightRange{gap:6px!important}.prx-weightRange button{min-height:34px!important;padding:0 11px!important;font-size:8px!important}
+        .prx-weightPrimaryMetrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:13px}
+        .prx-weightPrimaryMetrics>div{min-width:0;padding:12px 11px;border:1px solid rgba(75,217,143,.13);border-radius:9px;background:linear-gradient(180deg,rgba(75,217,143,.055),rgba(255,255,255,.012))}
+        .prx-weightPrimaryMetrics span,.prx-weightSecondaryMetrics span{display:block;color:#758c95;font-size:7px;font-weight:1000;letter-spacing:.08em}
+        .prx-weightPrimaryMetrics strong{display:block;margin-top:5px;color:#f4fbf7;font-size:18px;line-height:1.05;font-variant-numeric:tabular-nums}
+        .prx-weightPrimaryMetrics>div:first-child strong{color:#92efbb;font-size:21px}
+        .prx-weightSecondaryMetrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:7px;border:1px solid rgba(150,174,184,.075);border-radius:9px;overflow:hidden}
+        .prx-weightSecondaryMetrics>div{min-width:0;padding:8px 9px;background:#071116}.prx-weightSecondaryMetrics>div+div{border-left:1px solid rgba(150,174,184,.065)}
+        .prx-weightSecondaryMetrics b{display:block;margin-top:4px;color:#cbd9de;font-size:10px;font-variant-numeric:tabular-nums}
+        .prx-weightLegend{margin:13px 2px 5px!important;font-size:8px!important}.prx-weightLegend i{width:25px!important}.prx-weightLegend .is-trend i{height:4px!important}
+        .prx-weightChartWrap{margin-top:0!important;min-height:260px!important;border-radius:11px!important;background:linear-gradient(180deg,#061318,#040a0e)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+        .prx-weightChart{height:280px!important}.prx-weightGridLine{stroke:rgba(150,190,204,.12)!important}.prx-weightRawLine{stroke:rgba(91,203,232,.42)!important;stroke-width:1.4!important}.prx-weightTrendLine{stroke-width:4!important;filter:drop-shadow(0 0 6px rgba(75,217,143,.24))!important}
+        .prx-weightDot{r:4px}.prx-weightAxisText,.prx-weightDateText{font-size:10px!important;fill:#8299a2!important}.prx-weightEndpoint text{font-size:9px!important}
+        .prx-weightChartMeta{padding-top:8px!important}.prx-weightChartMeta span{font-size:9px!important}.prx-weightChartMeta strong{font-size:8px!important}
+        .prx-weightInterpretation{margin-top:10px!important;padding:11px 12px!important}.prx-weightInterpretation span{font-size:8px!important}.prx-weightInterpretation strong{font-size:11px!important;line-height:1.5!important}
+        .prx-recentWeights{overflow-x:auto!important;padding-bottom:2px}.prx-recentWeights button{flex:0 0 92px!important}.prx-recentWeights button b{font-size:10px!important}.prx-recentWeights button small{font-size:7px!important}
+        @media(max-width:700px){
+          .prx-weightTrendCard{padding:13px 10px!important}
+          .prx-weightTrendHeader{gap:10px!important}.prx-weightTrendHeader>div:first-child strong{font-size:22px!important}
+          .prx-weightRange{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;width:100%!important}.prx-weightRange button{min-width:0!important;padding:0 4px!important;font-size:7.5px!important}
+          .prx-weightPrimaryMetrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-weightPrimaryMetrics>div{padding:11px 9px!important}.prx-weightPrimaryMetrics strong{font-size:17px!important}.prx-weightPrimaryMetrics>div:first-child strong{font-size:20px!important}
+          .prx-weightSecondaryMetrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}.prx-weightSecondaryMetrics>div:nth-child(odd){border-left:0!important}.prx-weightSecondaryMetrics>div:nth-child(n+3){border-top:1px solid rgba(150,174,184,.065)!important}
+          .prx-weightLegend{gap:11px!important;flex-wrap:wrap!important}.prx-weightChartWrap{min-height:232px!important}.prx-weightChart{height:245px!important;min-width:0!important}
+          .prx-weightEndpoint text{font-size:8px!important}.prx-weightAxisText,.prx-weightDateText{font-size:9px!important}
+          .prx-recentWeights{display:flex!important;overflow-x:auto!important}.prx-recentWeights>span{position:sticky;left:0;background:#081116;padding-right:5px;z-index:1}.prx-recentWeights button{display:block!important;flex:0 0 88px!important}
         }
       `}</style>
     </main>
