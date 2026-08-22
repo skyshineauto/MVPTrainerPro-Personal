@@ -10957,6 +10957,481 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-dspProfileSave{display:grid!important}
           .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqScroll{overflow-x:auto!important}
         }
+
+
+        /* MVP TRAINER V5 R9.2.2 - AUTHORITATIVE MOBILE DSP LAYOUT
+           This is intentionally the final mobile override. Older desktop/mobile
+           generations above may not override these rules. */
+        @media(max-width:760px){
+          .tr-dspControlCenter.tr-audioEqPanel--pro7{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            overflow-x:hidden!important;
+            padding-left:12px!important;
+            padding-right:12px!important;
+            box-sizing:border-box!important;
+          }
+          .tr-dspControlCenter *{box-sizing:border-box}
+          .tr-dspControlCenter .tr-mobileDspWorkspace{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            padding:8px 0 9px!important;
+            overflow:visible!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext{
+            display:flex!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:4px!important;
+            overflow-x:auto!important;
+            overflow-y:hidden!important;
+            padding:0 0 6px!important;
+            scrollbar-width:none!important;
+            -webkit-overflow-scrolling:touch!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext::-webkit-scrollbar{display:none!important}
+          .tr-dspControlCenter .tr-mobileDspContext>span{
+            flex:0 0 auto!important;
+            max-width:none!important;
+            white-space:nowrap!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs{
+            width:100%!important;
+            grid-template-columns:repeat(4,minmax(0,1fr))!important;
+            gap:5px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:52px!important;
+            height:52px!important;
+            padding:5px 2px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button span{
+            width:100%!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            font-size:6.7px!important;
+            letter-spacing:.035em!important;
+          }
+
+          /* EQ: one clear vertical mobile flow. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqHead{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            grid-template-areas:"copy" "controls" "preset"!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            gap:10px!important;
+            margin:4px 0 10px!important;
+            padding:0!important;
+            align-items:stretch!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqHead>div:first-child{
+            grid-area:copy!important;
+            width:100%!important;
+            min-width:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqHead>div:first-child>strong{
+            display:block!important;
+            max-width:100%!important;
+            font-size:16px!important;
+            line-height:1.18!important;
+            white-space:normal!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqHeadHint{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            margin-top:5px!important;
+            font-size:8.5px!important;
+            line-height:1.45!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspAbControls{
+            grid-area:controls!important;
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:8px!important;
+            justify-content:stretch!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspAbControls>*{
+            width:100%!important;
+            min-width:0!important;
+            max-width:none!important;
+            height:46px!important;
+            min-height:46px!important;
+            padding:0 9px!important;
+            overflow:hidden!important;
+            white-space:nowrap!important;
+            text-overflow:ellipsis!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspBypassButton{
+            font-size:7.5px!important;
+            letter-spacing:.035em!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset{
+            grid-area:preset!important;
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            gap:6px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset>span{
+            width:100%!important;
+            white-space:normal!important;
+            font-size:7.5px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqPreset select{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            height:50px!important;
+            min-height:50px!important;
+            padding:0 42px 0 14px!important;
+            font-size:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-eqArchitecturePanel{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            gap:12px!important;
+            margin:0 0 12px!important;
+            padding:13px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureCopy{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureCopy strong,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureCopy small{
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureButtons{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureButtons button{
+            width:100%!important;
+            min-width:0!important;
+            max-width:none!important;
+            min-height:46px!important;
+            padding:6px!important;
+            white-space:normal!important;
+            line-height:1.15!important;
+            font-size:7.5px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqScroll{
+            display:block!important;
+            position:relative!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            height:212px!important;
+            min-height:212px!important;
+            max-height:212px!important;
+            margin:2px 0 10px!important;
+            padding:5px 0 9px!important;
+            overflow-x:auto!important;
+            overflow-y:hidden!important;
+            overscroll-behavior-x:contain!important;
+            -webkit-overflow-scrolling:touch!important;
+            scrollbar-width:thin!important;
+            touch-action:pan-x!important;
+            contain:layout paint!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31{
+            display:grid!important;
+            position:relative!important;
+            grid-template-columns:repeat(31,50px)!important;
+            grid-auto-columns:50px!important;
+            grid-template-rows:196px!important;
+            gap:6px!important;
+            width:max-content!important;
+            min-width:max-content!important;
+            height:196px!important;
+            min-height:196px!important;
+            margin:0!important;
+            padding:0 6px!important;
+            align-items:stretch!important;
+            visibility:visible!important;
+            opacity:1!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31 .tr-audioEqBand{
+            display:grid!important;
+            position:relative!important;
+            width:50px!important;
+            min-width:50px!important;
+            max-width:50px!important;
+            height:194px!important;
+            min-height:194px!important;
+            grid-template-rows:26px 146px 18px!important;
+            padding:2px 1px!important;
+            overflow:visible!important;
+            visibility:visible!important;
+            opacity:1!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31 .tr-audioEqSliderShell{
+            display:block!important;
+            position:relative!important;
+            width:50px!important;
+            min-width:50px!important;
+            max-width:50px!important;
+            height:146px!important;
+            min-height:146px!important;
+            overflow:visible!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31 .tr-audioEqSliderShell input[type="range"]{
+            display:block!important;
+            position:absolute!important;
+            left:50%!important;
+            top:50%!important;
+            width:132px!important;
+            min-width:132px!important;
+            max-width:132px!important;
+            height:24px!important;
+            margin:0!important;
+            transform:translate(-50%,-50%) rotate(-90deg)!important;
+            transform-origin:center!important;
+            visibility:visible!important;
+            opacity:1!important;
+            touch-action:none!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqGain{
+            display:block!important;
+            font-size:9px!important;
+            line-height:1!important;
+            visibility:visible!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqFrequency,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBand>span:last-child{
+            display:block!important;
+            font-size:8px!important;
+            line-height:1!important;
+            visibility:visible!important;
+            white-space:nowrap!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-audioEqFooter{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            margin:0 0 10px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqQuickActions{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqQuickActions button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:50px!important;
+            padding:8px!important;
+            white-space:normal!important;
+            font-size:9px!important;
+            line-height:1.15!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"]>.tr-dspProfileSave{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            gap:10px!important;
+            margin:0!important;
+            padding:12px 0 4px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspProfileSaveStatus,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspProfileSaveActions{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspProfileSaveActions{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            justify-content:stretch!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspProfileSaveActions button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:52px!important;
+            white-space:normal!important;
+          }
+
+          /* OUTPUT: no clipped profile, source, trim or transition controls. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfilePanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-sourceQualityPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrim,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitions,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspEnginePanel{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:58px!important;
+            white-space:normal!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-sourceQualityPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrim{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            gap:10px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-sourceQualityCopy,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampTrimControl{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-preampAutoButton{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+            min-height:46px!important;
+            white-space:normal!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            gap:6px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry>span,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus>span{
+            min-width:0!important;
+            max-width:100%!important;
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitionsModes{
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-intelligentTransitionsModes button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:46px!important;
+          }
+
+          /* IMMERSION: modes and every slider get a full, readable mobile target. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            padding:12px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneProcessor header{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:9px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneModes{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneModes button{
+            width:100%!important;
+            min-width:0!important;
+            min-height:46px!important;
+            padding:7px!important;
+            white-space:normal!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneControls{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            width:100%!important;
+            min-width:0!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneControls label{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneControls input[type="range"]{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+
+          /* DYNAMICS: cards stay inside the sheet at phone width. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterPanel,
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel{
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterGrid{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            width:100%!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterGrid article{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel{
+            display:grid!important;
+            grid-template-columns:1fr!important;
+            gap:8px!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioProcessingPanel button{
+            width:100%!important;
+            min-width:0!important;
+            max-width:100%!important;
+            min-height:70px!important;
+          }
+        }
+        @media(max-width:390px){
+          .tr-dspControlCenter .tr-dspTabs button span{font-size:6.1px!important}
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-dspAbControls,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-eqArchitectureButtons,
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqQuickActions,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileChoices,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-outputProfileTelemetry,
+          .tr-dspControlCenter[data-mobile-dsp-tab="output"] .tr-dspProofStatus,
+          .tr-dspControlCenter[data-mobile-dsp-tab="immersion"] .tr-headphoneModes,
+          .tr-dspControlCenter[data-mobile-dsp-tab="dynamics"] .tr-studioMeterGrid{
+            grid-template-columns:1fr!important;
+          }
+        }
+
         @media(prefers-reduced-motion:reduce){.tr-dspControlCenterBack,.tr-dspControlCenter,.tr-dspControlCenter>[data-mobile-dsp-section],.tr-dspPlayerCornerDock.is-active{animation:none!important}}
 
 
