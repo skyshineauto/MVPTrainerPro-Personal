@@ -140,6 +140,13 @@ type ExerciseInsight = {
   muscles: string[];
   points: ExercisePoint[];
   currentWeight: number;
+  repPlan: string;
+  rirTarget: string;
+  ifTooEasy: string;
+  ifTooHard: string;
+  progressWhen: string;
+  exerciseDirective: string;
+  exerciseReason: string;
   currentReps: number;
   currentRir: number | null;
   currentPain: number | null;
@@ -162,6 +169,13 @@ type NextExercise = {
   repMin: number;
   repMax: number;
   currentWeight: number;
+  repPlan: string;
+  rirTarget: string;
+  ifTooEasy: string;
+  ifTooHard: string;
+  progressWhen: string;
+  exerciseDirective: string;
+  exerciseReason: string;
   currentPain: number | null;
   suggestedWeight: number | null;
   decision: Decision;
@@ -332,7 +346,7 @@ function coachingDecision(
   setsTarget = 3,
   exercise?: ExerciseMeta | null,
   goal?: string | null
-): Pick<ExerciseInsight, "decision" | "suggestedWeight" | "reason" | "nextTarget" | "lastSummary" | "confidence" | "confidenceDetail"> {
+): Pick<ExerciseInsight, "decision" | "currentWeight" | "suggestedWeight" | "reason" | "nextTarget" | "lastSummary" | "confidence" | "confidenceDetail" | "repPlan" | "rirTarget" | "ifTooEasy" | "ifTooHard" | "progressWhen" | "exerciseDirective" | "exerciseReason"> {
   const analysis = analyzeProgression({
     goal,
     sessions: points.map((point) => ({
@@ -349,12 +363,20 @@ function coachingDecision(
 
   return {
     decision: analysis.action,
+    currentWeight: analysis.currentWeight ?? 0,
     suggestedWeight: analysis.suggestedWeight,
     reason: analysis.reason,
     nextTarget: analysis.nextTarget,
     lastSummary: analysis.lastSummary,
     confidence: analysis.confidence,
     confidenceDetail: analysis.confidenceDetail,
+    repPlan: analysis.repPlan,
+    rirTarget: analysis.rirTarget,
+    ifTooEasy: analysis.ifTooEasy,
+    ifTooHard: analysis.ifTooHard,
+    progressWhen: analysis.progressWhen,
+    exerciseDirective: analysis.exerciseDirective,
+    exerciseReason: analysis.exerciseReason,
   };
 }
 
@@ -891,7 +913,6 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         name: latestMeta?.name ?? "Exercise",
         muscles: Array.isArray(latestMeta?.primary_muscles) ? unique(latestMeta.primary_muscles.map(prettyMuscle)) : [],
         points,
-        currentWeight: latest.bestWeight,
         currentReps: latest.bestReps,
         currentRir: latest.avgRir,
         currentPain: latest.pain,
@@ -961,7 +982,6 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           sets: num(row.sets, 3),
           repMin: num(row.rep_min, 8),
           repMax: num(row.rep_max, 12),
-          currentWeight: insight?.currentWeight ?? 0,
           currentPain: insight?.currentPain ?? null,
           ...decision,
         };
@@ -969,72 +989,53 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
   }, [activeProgram?.goal, exerciseMap, insightMap, nextScheduled, templateExercises]);
 
   const recommendations = useMemo<CoachRecommendation[]>(() => {
+    const progressions = nextWorkoutExercises.filter((row) => row.decision === "INCREASE");
+    const corrections = nextWorkoutExercises.filter((row) => row.decision === "REDUCE" || row.decision === "RECOVERY");
+    const repBuilders = nextWorkoutExercises.filter((row) => row.decision === "HOLD" || row.decision === "MONITOR");
+    const swapReviews = nextWorkoutExercises.filter((row) => row.exerciseDirective === "SWAP REVIEW" || row.exerciseDirective === "PAUSE");
+    const sessionName = nextTemplate ? cleanWorkoutName(nextTemplate.name) : "Next workout";
     const rows: CoachRecommendation[] = [];
+
+    rows.push({
+      id: `${activeProgram?.id ?? "no-program"}:game-plan:${nextScheduled?.id ?? "none"}`,
+      eyebrow: "TODAY'S GAME PLAN",
+      title: nextTemplate ? sessionName : "No workout waiting",
+      body: nextTemplate
+        ? `${progressions.length} progression opportunit${progressions.length === 1 ? "y" : "ies"} • ${repBuilders.length} rep-building movement${repBuilders.length === 1 ? "" : "s"} • ${corrections.length} load/recovery correction${corrections.length === 1 ? "" : "s"}${swapReviews.length ? ` • ${swapReviews.length} exercise review${swapReviews.length === 1 ? "" : "s"}` : ""}.`
+        : "There is no pending scheduled workout to coach right now.",
+      action: nextTemplate ? "PLAN READY • LIVE COACHING ACTIVE IN WORKOUT" : "NO ACTION NEEDED",
+      tone: corrections.length || swapReviews.length ? "amber" : progressions.length ? "green" : "blue",
+    });
+
     const priority = [...nextWorkoutExercises].sort((a, b) => {
       const rank: Record<Decision, number> = { RECOVERY: 0, REDUCE: 1, INCREASE: 2, MONITOR: 3, HOLD: 4, BASELINE: 5 };
       return rank[a.decision] - rank[b.decision];
-    });
-    const primary = priority[0] ?? null;
-
-    if (primary) {
-      const action = primary.decision === "INCREASE" || primary.decision === "REDUCE"
-        ? `${formatWeight(primary.currentWeight)} → ${formatWeight(primary.suggestedWeight)}`
-        : primary.decision === "BASELINE"
-          ? "ESTABLISH WORKING LOAD"
-          : `TARGET LOAD • ${formatWeight(primary.suggestedWeight ?? primary.currentWeight)}`;
+    })[0] ?? null;
+    if (priority) {
       rows.push({
-        id: `${activeProgram?.id ?? "no-program"}:primary-${primary.id}-${primary.decision}`,
-        eyebrow: "PRIMARY ACTION",
-        title:
-          primary.decision === "INCREASE" ? `Increase ${primary.name}` :
-          primary.decision === "REDUCE" ? `Reduce ${primary.name}` :
-          primary.decision === "RECOVERY" ? `Recovery priority: ${primary.name}` :
-          primary.decision === "MONITOR" ? `Monitor ${primary.name}` :
-          primary.decision === "BASELINE" ? `Establish ${primary.name}` : `Hold ${primary.name}`,
-        body: primary.reason,
-        action,
-        tone: decisionTone(primary.decision),
-        exerciseId: primary.id,
+        id: `${activeProgram?.id ?? "no-program"}:priority-${priority.id}-${priority.decision}`,
+        eyebrow: "COACH PRIORITY",
+        title: priority.exerciseDirective === "PAUSE" ? `Pause ${priority.name}` : priority.exerciseDirective === "SWAP REVIEW" ? `Review ${priority.name}` : `${priority.name} • ${priority.decision}`,
+        body: `${priority.reason} ${priority.exerciseReason}`,
+        action: priority.decision === "BASELINE" ? "ESTABLISH WORKING LOAD" : `START • ${formatWeight(priority.suggestedWeight ?? priority.currentWeight)} • ${priority.repPlan}`,
+        tone: decisionTone(priority.decision),
+        exerciseId: priority.id,
       });
     }
 
-    rows.push({
-      id: `${activeProgram?.id ?? "no-program"}:next-workout`,
-      eyebrow: "NEXT WORKOUT",
-      title: nextTemplate ? cleanWorkoutName(nextTemplate.name) : "Build the next trend",
-      body: nextTemplate
-        ? `${nextWorkoutExercises.length} exercises analyzed from your active-program history.`
-        : "No upcoming scheduled workout is waiting right now.",
-      action: nextTemplate ? `${nextTemplate.estimated_minutes ?? "—"} MIN PLANNED` : "NO ACTION NEEDED",
-      tone: "blue",
-    });
-
     const painSignal = nextWorkoutExercises.find((row) => row.decision === "RECOVERY" || (row.currentPain ?? 0) >= 3);
     rows.push({
-      id: painSignal
-        ? `${activeProgram?.id ?? "no-program"}:pain-${painSignal.id}`
-        : `${activeProgram?.id ?? "no-program"}:recovery-clear`,
-      eyebrow: "RECOVERY CHECK",
-      title: painSignal ? `Review ${painSignal.name}` : "Next workout is recovery-clear",
-      body: painSignal
-        ? painSignal.reason
-        : `No elevated pain signal is currently restricting an exercise in ${nextTemplate ? cleanWorkoutName(nextTemplate.name) : "the next workout"}.`,
-      action: painSignal ? "HOLD PROGRESSION" : "READY TO PROGRESS",
+      id: painSignal ? `${activeProgram?.id ?? "no-program"}:pain-${painSignal.id}` : `${activeProgram?.id ?? "no-program"}:recovery-clear`,
+      eyebrow: "RECOVERY",
+      title: painSignal ? `Reassess ${painSignal.name}` : "No active restriction in this workout",
+      body: painSignal ? painSignal.reason : "No next-workout exercise currently carries an elevated pain restriction. Historical issues stay remembered silently and resurface only when relevant.",
+      action: painSignal ? "PAIN OVERRIDES PROGRESSION" : "TRAIN AS PLANNED",
       tone: painSignal ? "amber" : "green",
       exerciseId: painSignal?.id,
     });
 
     return rows.slice(0, 3);
-  }, [activeProgram?.id, nextTemplate, nextWorkoutExercises]);
-
-  const nextWorkoutIdentityKeys = useMemo(
-    () => new Set(nextWorkoutExercises.map((row) => row.identityKey)),
-    [nextWorkoutExercises]
-  );
-  const programWatchlist = useMemo(
-    () => exerciseInsights.filter((row) => (row.currentPain ?? 0) >= 3 && !nextWorkoutIdentityKeys.has(row.identityKey)).slice(0, 6),
-    [exerciseInsights, nextWorkoutIdentityKeys]
-  );
+  }, [activeProgram?.id, nextScheduled?.id, nextTemplate, nextWorkoutExercises]);
 
   useEffect(() => {
     const key = coachHistoryKey(activeProgram?.id);
@@ -1187,18 +1188,19 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
                     <span>{exercise.sets} sets • {exercise.repMin}–{exercise.repMax} reps{exercise.muscles.length ? ` • ${exercise.muscles.join(" / ")}` : ""}</span>
                   </div>
                   <div className="co-decisionCommand">
-                    <span>{exercise.decision}</span>
-                    <strong>
-                      {exercise.decision === "INCREASE" || exercise.decision === "REDUCE"
-                        ? `${formatWeight(exercise.currentWeight)} → ${formatWeight(exercise.suggestedWeight)}`
-                        : exercise.decision === "BASELINE"
-                          ? "ESTABLISH WORKING LOAD"
-                          : `TARGET LOAD • ${formatWeight(exercise.suggestedWeight ?? exercise.currentWeight)}`}
-                    </strong>
+                    <span>{exercise.exerciseDirective} • {exercise.decision}</span>
+                    <strong>{exercise.decision === "BASELINE" ? "ESTABLISH WORKING LOAD" : `START • ${formatWeight(exercise.suggestedWeight ?? exercise.currentWeight)}`}</strong>
+                    <div className="co-prescriptionGrid">
+                      <div><span>TODAY'S TARGET</span><b>{exercise.repPlan}</b></div>
+                      <div><span>EFFORT</span><b>{exercise.rirTarget}</b></div>
+                    </div>
                     <small>{exercise.reason}</small>
                     <div className="co-decisionEvidence">
                       <span>LAST • {exercise.lastSummary}</span>
-                      <span>NEXT TARGET • {exercise.nextTarget}</span>
+                      <span>IF TOO EASY • {exercise.ifTooEasy}</span>
+                      <span>IF TOO HARD • {exercise.ifTooHard}</span>
+                      <span>WHEN TO INCREASE • {exercise.progressWhen}</span>
+                      <span>EXERCISE STATUS • {exercise.exerciseReason}</span>
                       <span>{exercise.confidenceDetail.toUpperCase()} • {exercise.confidence} CONFIDENCE</span>
                     </div>
                   </div>
@@ -1210,20 +1212,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         ) : <div className="co-empty">No upcoming scheduled workout. Your current program remains intact.</div>}
       </section>
 
-      {programWatchlist.length ? (
-        <section className="co-surface co-section co-section--watchlist">
-          <SectionTitle title="Program Watchlist" subtitle="Issues remembered from the active program that are not part of your next workout." />
-          <div className="co-watchlistRows">
-            {programWatchlist.map((exercise) => (
-              <article key={exercise.identityKey}>
-                <div><strong>{exercise.name}</strong><span>Latest pain {exercise.currentPain ?? 0}/10</span></div>
-                <b>REMEMBERED • NOT IN NEXT WORKOUT</b>
-                <button type="button" onClick={() => navigate(`/library/${exercise.id}`)}>DETAILS</button>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
+
 
       <section className="co-surface co-section co-section--review">
         <SectionTitle title="Program Review" subtitle={activeProgramName} />
@@ -1426,7 +1415,16 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           .co-sectionTitle h2,.co-briefCard h3,.co-programName,.co-nextWorkoutHead strong,.co-decisionExercise strong,.co-decisionCommand strong{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;word-break:normal!important;overflow-wrap:anywhere!important}
           .co-decisionExercise span,.co-decisionCommand small,.co-sectionTitleText p{white-space:normal!important;overflow:visible!important}
         }
-      `}</style>
+              /* R9.4 ADAPTIVE COACH PRESCRIPTIONS */
+        .co-prescriptionGrid{display:grid;grid-template-columns:1fr 1.25fr;gap:8px;margin:10px 0}
+        .co-prescriptionGrid>div{padding:9px 10px;border:1px solid rgba(102,200,230,.12);border-radius:9px;background:rgba(4,15,20,.62)}
+        .co-prescriptionGrid span{display:block;color:#738f99;font-size:7px;font-weight:1000;letter-spacing:.09em}
+        .co-prescriptionGrid b{display:block;margin-top:4px;color:#edf8fb;font-size:11px;line-height:1.35}
+        .co-decisionEvidence{gap:6px!important}
+        .co-decisionEvidence span{line-height:1.45!important}
+        @media(max-width:700px){.co-prescriptionGrid{grid-template-columns:1fr}.co-prescriptionGrid b{font-size:10px}}
+      `}
+</style>
     </div>
   );
 }

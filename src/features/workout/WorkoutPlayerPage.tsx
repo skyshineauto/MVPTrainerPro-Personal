@@ -1194,6 +1194,12 @@ type ProgressionGuidance = {
   confidence: "LOW" | "MODERATE" | "HIGH";
   confidenceDetail: string;
   confidenceScore: number;
+  rirTarget: string;
+  ifTooEasy: string;
+  ifTooHard: string;
+  progressWhen: string;
+  exerciseDirective: string;
+  exerciseReason: string;
 };
 
 type EffortOption = {
@@ -1920,7 +1926,7 @@ function progressionGuidance(
       analysis.action === "HOLD" || analysis.action === "MONITOR" ? `HOLD AT ${formatLoggedWeight(current ?? 0)} LB` :
       "CHOOSE A CONTROLLED STARTING WEIGHT",
     why: analysis.reason,
-    target: `${analysis.nextTarget} • Rest 60 seconds`,
+    target: analysis.nextTarget,
     lastSummary: analysis.lastSummary,
     bestSetSummary,
     trend: history.sessions <= 1 ? "Building" : analysis.action === "INCREASE" ? "Improving" : analysis.action === "REDUCE" || analysis.action === "RECOVERY" ? "Needs review" : "Building capacity",
@@ -1932,6 +1938,12 @@ function progressionGuidance(
     confidence: confidence.level,
     confidenceDetail: confidence.detail,
     confidenceScore: confidence.score,
+    rirTarget: analysis.rirTarget,
+    ifTooEasy: analysis.ifTooEasy,
+    ifTooHard: analysis.ifTooHard,
+    progressWhen: analysis.progressWhen,
+    exerciseDirective: analysis.exerciseDirective,
+    exerciseReason: analysis.exerciseReason,
   };
 
 }
@@ -7935,8 +7947,12 @@ const unlock = async () => {
                               <strong>{previousGuidance.exactChange}</strong>
                             </div>
                             <div>
-                              <span>REP TARGET</span>
+                              <span>TODAY'S TARGET</span>
                               <strong>{previousGuidance.target}</strong>
+                            </div>
+                            <div>
+                              <span>EFFORT TARGET</span>
+                              <strong>{previousGuidance.rirTarget}</strong>
                             </div>
                           </div>
                         </div>
@@ -7959,6 +7975,12 @@ const unlock = async () => {
                         <div className="tr-proCoachReason">
                           <div className="tr-kicker">WHY THIS TARGET</div>
                           <p>{previousGuidance.why}</p>
+                          <div className="tr-liveRules">
+                            <div><span>IF TOO EASY</span><strong>{previousGuidance.ifTooEasy}</strong></div>
+                            <div><span>IF TOO HARD</span><strong>{previousGuidance.ifTooHard}</strong></div>
+                            <div><span>WHEN TO INCREASE</span><strong>{previousGuidance.progressWhen}</strong></div>
+                            <div><span>EXERCISE STATUS</span><strong>{previousGuidance.exerciseDirective} • {previousGuidance.exerciseReason}</strong></div>
+                          </div>
                           {previousPerformance ? (
                             <small>
                               {formatPreviousDate(previousPerformance.completedAt)} • {previousPerformance.templateName}
@@ -10031,7 +10053,15 @@ const unlock = async () => {
   .tr-recoveryReadyState{min-height:330px;padding:34px 18px;}
 }
 
-`}</style>
+/* R9.4 LIVE ADAPTIVE COACH */
+.tr-proCoachHeroPrescription{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+.tr-liveRules{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.tr-liveRules>div{padding:10px 11px;border:1px solid rgba(105,202,229,.11);border-radius:10px;background:rgba(4,14,19,.55)}
+.tr-liveRules span{display:block;color:rgba(147,184,198,.72);font-size:8px;font-weight:1000;letter-spacing:.09em}
+.tr-liveRules strong{display:block;margin-top:5px;color:rgba(238,249,252,.94);font-size:10px;line-height:1.45}
+@media(max-width:720px){.tr-proCoachHeroPrescription{grid-template-columns:1fr!important}.tr-liveRules{grid-template-columns:1fr}.tr-liveRules strong{font-size:9px}}
+      `}
+</style>
       </Card>
     </>
   );

@@ -884,9 +884,9 @@ export function ProgressPage() {
   }, [bodyweightPoints, selectedProgram, weightTrendRange]);
 
   const weightChart = useMemo(() => {
-    const width = 800;
-    const height = 280;
-    const pad = { left: 54, right: 24, top: 26, bottom: 42 };
+    const width = 1000;
+    const height = 360;
+    const pad = { left: 76, right: 34, top: 42, bottom: 58 };
     const points = weightAnalytics.visible;
     if (!points.length || !(weightAnalytics.chartMax > weightAnalytics.chartMin)) {
       return { width, height, raw: [] as Array<WeightPoint & { x: number; y: number }>, trend: [] as Array<WeightPoint & { x: number; y: number }> };
@@ -1424,12 +1424,12 @@ export function ProgressPage() {
             <div className="prx-weightChartWrap">
               {weightChart.raw.length ? (
                 <svg className="prx-weightChart" viewBox={`0 0 ${weightChart.width} ${weightChart.height}`} role="img" aria-label="Bodyweight trend chart">
-                  <line x1="54" x2={weightChart.width - 24} y1="26" y2="26" className="prx-weightGridLine" />
-                  <line x1="54" x2={weightChart.width - 24} y1={(weightChart.height - 16) / 2} y2={(weightChart.height - 16) / 2} className="prx-weightGridLine" />
-                  <line x1="54" x2={weightChart.width - 24} y1={weightChart.height - 42} y2={weightChart.height - 42} className="prx-weightGridLine" />
-                  <text x="5" y="31" className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMax,1)} LB</text>
-                  <text x="5" y={(weightChart.height - 16) / 2 + 4} className="prx-weightAxisText">{formatNumber((weightAnalytics.chartMax + weightAnalytics.chartMin) / 2,1)} LB</text>
-                  <text x="5" y={weightChart.height - 38} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)} LB</text>
+                  <line x1="76" x2={weightChart.width - 34} y1="42" y2="42" className="prx-weightGridLine" />
+                  <line x1="76" x2={weightChart.width - 34} y1={weightChart.height / 2} y2={weightChart.height / 2} className="prx-weightGridLine" />
+                  <line x1="76" x2={weightChart.width - 34} y1={weightChart.height - 58} y2={weightChart.height - 58} className="prx-weightGridLine" />
+                  <text x="8" y="47" className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMax,1)} LB</text>
+                  <text x="8" y={weightChart.height / 2 + 5} className="prx-weightAxisText">{formatNumber((weightAnalytics.chartMax + weightAnalytics.chartMin) / 2,1)} LB</text>
+                  <text x="8" y={weightChart.height - 53} className="prx-weightAxisText">{formatNumber(weightAnalytics.chartMin,1)} LB</text>
                   {weightChart.raw.length > 1 ? <polyline className="prx-weightRawLine" points={weightChart.raw.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
                   {weightChart.trend.length > 1 ? <polyline className="prx-weightTrendLine" points={weightChart.trend.map((point) => `${point.x},${point.y}`).join(" ")} /> : null}
                   {weightChart.raw[0] ? <g className="prx-weightEndpoint is-start"><text x={weightChart.raw[0].x + 7} y={Math.max(16, weightChart.raw[0].y - 10)}>START {formatNumber(weightChart.raw[0].weight,1)} LB</text></g> : null}
@@ -1439,17 +1439,14 @@ export function ProgressPage() {
                     const latest = index === weightChart.raw.length - 1;
                     return <circle key={point.date} cx={point.x} cy={point.y} r={active ? 6 : latest ? 5.2 : 3.7} className={`prx-weightDot ${active ? "is-active" : ""} ${latest ? "is-latest" : ""}`} onMouseEnter={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })} onClick={() => setSelectedWeightPoint({ date: point.date, weight: point.weight })}><title>{`${formatNumber(point.weight,1)} lb • ${shortDate(point.date)}`}</title></circle>;
                   })}
-                  <text x="54" y={weightChart.height - 10} className="prx-weightDateText">{shortDate(weightAnalytics.visible[0]?.date ?? "")}</text>
-                  <text x={weightChart.width - 24} y={weightChart.height - 10} textAnchor="end" className="prx-weightDateText">{shortDate(weightAnalytics.visible.at(-1)?.date ?? "")}</text>
+                  <text x="76" y={weightChart.height - 18} className="prx-weightDateText">{shortDate(weightAnalytics.visible[0]?.date ?? "")}</text>
+                  <text x={weightChart.width / 2} y={weightChart.height - 18} textAnchor="middle" className="prx-weightDateText">{shortDate(weightAnalytics.visible[Math.floor((weightAnalytics.visible.length - 1) / 2)]?.date ?? "")}</text>
+                  <text x={weightChart.width - 34} y={weightChart.height - 18} textAnchor="end" className="prx-weightDateText">{shortDate(weightAnalytics.visible.at(-1)?.date ?? "")}</text>
                 </svg>
               ) : <div className="prx-weightEmpty">Log at least one bodyweight entry to start the trend chart.</div>}
             </div>
-            <div className="prx-weightChartMeta">
-              <span>{selectedWeightPoint ? `${formatNumber(selectedWeightPoint.weight,1)} LB • ${shortDate(selectedWeightPoint.date)}` : weightAnalytics.latest ? `LATEST • ${formatNumber(weightAnalytics.latest.weight,1)} LB • ${shortDate(weightAnalytics.latest.date)}` : "NO WEIGHT DATA"}</span>
-              <strong>{weightAnalytics.visible.length} WEIGH-IN{weightAnalytics.visible.length === 1 ? "" : "S"}</strong>
-            </div>
+            {selectedWeightPoint ? <div className="prx-weightSelected"><strong>{formatNumber(selectedWeightPoint.weight,1)} LB</strong><span>{shortDate(selectedWeightPoint.date)}</span></div> : null}
             <div className="prx-weightInterpretation"><span>WHAT THIS MEANS</span><strong>{weightInterpretation}</strong></div>
-            {bodyweightPoints.length ? <div className="prx-recentWeights"><span>RECENT</span>{bodyweightPoints.slice(-5).reverse().map((point)=><button type="button" key={point.date} onClick={() => setSelectedWeightPoint(point)}><b>{formatNumber(point.weight,1)}</b><small>{shortDate(point.date)}</small></button>)}</div> : null}
           </article>
           <article className="is-nutrition"><header><span>NUTRITION</span><strong>{performance.calorieDays || performance.proteinDays ? "TRACKING" : "NO DAILY LOGS"}</strong></header><div className="prx-miniMetrics"><div><span>CAL AVG</span><b>{performance.calorieAverage != null ? formatNumber(performance.calorieAverage) : "—"}</b></div><div><span>CAL TARGET HIT</span><b>{performance.calorieTarget && performance.calorieDays ? `${performance.calorieHit}/${performance.calorieDays}` : "—"}</b></div><div><span>PROTEIN AVG</span><b>{performance.proteinAverage != null ? `${formatNumber(performance.proteinAverage)} G` : "—"}</b></div><div><span>PROTEIN TARGET HIT</span><b>{performance.proteinTarget && performance.proteinDays ? `${performance.proteinHit}/${performance.proteinDays}` : "—"}</b></div></div><p>{performance.calorieTarget && performance.calorieAverage != null ? `Calories are averaging ${Math.round(performance.calorieAverage-performance.calorieTarget)} kcal ${performance.calorieAverage >= performance.calorieTarget ? "above" : "below"} the current target.` : "Add calorie and protein entries to connect nutrition with weight and strength trends."}</p></article>
         </div>
@@ -1737,7 +1734,25 @@ export function ProgressPage() {
           .prx-weightEndpoint text{font-size:8px!important}.prx-weightAxisText,.prx-weightDateText{font-size:9px!important}
           .prx-recentWeights{display:flex!important;overflow-x:auto!important}.prx-recentWeights>span{position:sticky;left:0;background:#081116;padding-right:5px;z-index:1}.prx-recentWeights button{display:block!important;flex:0 0 88px!important}
         }
-      `}</style>
+              /* R9.4 LARGE READABLE BODYWEIGHT CHART */
+        .prx-weightChartWrap{min-height:350px!important}
+        .prx-weightChart{height:360px!important}
+        .prx-weightAxisText,.prx-weightDateText{font-size:14px!important;font-weight:950!important;fill:#a9bec6!important}
+        .prx-weightEndpoint text{font-size:13px!important;font-weight:1100!important}
+        .prx-weightRawLine{stroke-width:2!important;opacity:.72}.prx-weightTrendLine{stroke-width:6!important}
+        .prx-weightDot{stroke-width:2.2!important}
+        .prx-weightSelected{display:inline-flex;align-items:baseline;gap:8px;margin-top:9px;padding:8px 11px;border:1px solid rgba(75,217,143,.16);border-radius:9px;background:#071411}
+        .prx-weightSelected strong{font-size:14px;color:#a6f2c6}.prx-weightSelected span{font-size:10px;color:#8fa4ac}
+        @media(max-width:700px){
+          .prx-weightChartWrap{min-height:290px!important;margin-left:-3px!important;margin-right:-3px!important}
+          .prx-weightChart{height:300px!important}
+          .prx-weightAxisText,.prx-weightDateText{font-size:12px!important}
+          .prx-weightEndpoint text{font-size:11px!important}
+          .prx-weightTrendLine{stroke-width:5!important}.prx-weightRawLine{stroke-width:1.8!important}
+          .prx-weightLegend{font-size:9px!important}
+        }
+      `}
+</style>
     </main>
   );
 }

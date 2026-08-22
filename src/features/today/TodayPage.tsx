@@ -290,7 +290,7 @@ function readinessFor(meta: SessionMeta | null, history: HistorySignal[]) : Read
   }
 
   void target;
-  return { label: "READY TO TRAIN", tone: "ready", detail: "No recent recovery flag is blocking this workout." };
+  return { label: "READY TO TRAIN", tone: "ready", detail: "" };
 }
 
 function MuscleStrip({ muscles }: { muscles: MuscleFocus[] }) {
@@ -723,7 +723,6 @@ export function TodayPage() {
               </div>
             </div>
 
-            {!activeSessionId ? <p className="trp-readinessCopy">{primaryReadiness.detail}</p> : null}
 
             <div className="trp-primaryActions">
               <button
