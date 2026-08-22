@@ -97,6 +97,7 @@ type SongSort =
   | "energy_high"
   | "energy_low";
 type EnergyFilter = "all" | MusicEnergyLevel;
+type LibraryView = "list" | "grid";
 type PageSize = 12 | 24 | 48;
 type DetailMode = "edit" | "info_results" | "artwork_results";
 type DetailSaveState = "idle" | "searching" | "saving" | "changed" | "error";
@@ -209,6 +210,15 @@ function albumLabel(track: MusicTrack) { return track.album?.trim() || "Unknown 
 function energyRank(level: MusicEnergyLevel) { return level === "high" ? 3 : level === "medium" ? 2 : 1; }
 function highRotationScore(track: MusicTrack) {
   return track.completed_play_count * 3 + track.play_count * 1.4 + (track.favorite ? 18 : 0) - track.skip_count * 2.7 - (track.play_less ? 35 : 0);
+}
+function compareLibraryText(left: string | null | undefined, right: string | null | undefined) {
+  return String(left || "").trim().localeCompare(String(right || "").trim(), undefined, { sensitivity: "base", numeric: true });
+}
+function compareSongTitle(a: MusicTrack, b: MusicTrack) {
+  return compareLibraryText(a.title, b.title) || compareLibraryText(artistLabel(a), artistLabel(b)) || a.sort_order - b.sort_order;
+}
+function compareSongTitleDescending(a: MusicTrack, b: MusicTrack) {
+  return compareLibraryText(b.title, a.title) || compareLibraryText(artistLabel(a), artistLabel(b)) || a.sort_order - b.sort_order;
 }
 function songSortLabel(sort: SongSort) {
   const labels: Record<SongSort, string> = {
@@ -513,6 +523,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [songSearch, setSongSearch] = useState("");
   const [songSort, setSongSort] = useState<SongSort>("library");
+  const [libraryView, setLibraryView] = useState<LibraryView>("list");
   const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
   const [healthFilter, setHealthFilter] = useState<LibraryHealth>("all");
   const [pageSize, setPageSize] = useState<PageSize>(24);
@@ -715,22 +726,22 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       return true;
     });
     return [...next].sort((a, b) => {
-      if (songSort === "recently_added") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      if (songSort === "title_asc") return a.title.localeCompare(b.title);
-      if (songSort === "title_desc") return b.title.localeCompare(a.title);
-      if (songSort === "artist_asc") return artistLabel(a).localeCompare(artistLabel(b));
-      if (songSort === "artist_desc") return artistLabel(b).localeCompare(artistLabel(a));
-      if (songSort === "album_asc") return albumLabel(a).localeCompare(albumLabel(b));
-      if (songSort === "most_played") return b.play_count - a.play_count;
-      if (songSort === "recently_played") return new Date(b.last_played_at || 0).getTime() - new Date(a.last_played_at || 0).getTime();
-      if (songSort === "high_rotation") return highRotationScore(b) - highRotationScore(a);
-      if (songSort === "least_played") return a.play_count - b.play_count;
-      if (songSort === "most_skipped") return b.skip_count - a.skip_count;
-      if (songSort === "longest") return Number(b.duration_seconds || 0) - Number(a.duration_seconds || 0);
-      if (songSort === "shortest") return Number(a.duration_seconds || 0) - Number(b.duration_seconds || 0);
-      if (songSort === "energy_high") return energyRank(b.energy_level) - energyRank(a.energy_level);
-      if (songSort === "energy_low") return energyRank(a.energy_level) - energyRank(b.energy_level);
-      return a.sort_order - b.sort_order;
+      if (songSort === "recently_added") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || compareSongTitle(a, b);
+      if (songSort === "title_asc") return compareSongTitle(a, b);
+      if (songSort === "title_desc") return compareSongTitleDescending(a, b);
+      if (songSort === "artist_asc") return compareLibraryText(artistLabel(a), artistLabel(b)) || compareSongTitle(a, b);
+      if (songSort === "artist_desc") return compareLibraryText(artistLabel(b), artistLabel(a)) || compareSongTitle(a, b);
+      if (songSort === "album_asc") return compareLibraryText(albumLabel(a), albumLabel(b)) || compareLibraryText(artistLabel(a), artistLabel(b)) || compareSongTitle(a, b);
+      if (songSort === "most_played") return Number(b.play_count || 0) - Number(a.play_count || 0) || Number(b.completed_play_count || 0) - Number(a.completed_play_count || 0) || compareSongTitle(a, b);
+      if (songSort === "recently_played") return new Date(b.last_played_at || 0).getTime() - new Date(a.last_played_at || 0).getTime() || compareSongTitle(a, b);
+      if (songSort === "high_rotation") return highRotationScore(b) - highRotationScore(a) || compareSongTitle(a, b);
+      if (songSort === "least_played") return Number(a.play_count || 0) - Number(b.play_count || 0) || Number(a.completed_play_count || 0) - Number(b.completed_play_count || 0) || compareSongTitle(a, b);
+      if (songSort === "most_skipped") return Number(b.skip_count || 0) - Number(a.skip_count || 0) || compareSongTitle(a, b);
+      if (songSort === "longest") return Number(b.duration_seconds || 0) - Number(a.duration_seconds || 0) || compareSongTitle(a, b);
+      if (songSort === "shortest") return Number(a.duration_seconds || 0) - Number(b.duration_seconds || 0) || compareSongTitle(a, b);
+      if (songSort === "energy_high") return energyRank(b.energy_level) - energyRank(a.energy_level) || compareSongTitle(a, b);
+      if (songSort === "energy_low") return energyRank(a.energy_level) - energyRank(b.energy_level) || compareSongTitle(a, b);
+      return a.sort_order - b.sort_order || compareSongTitle(a, b);
     });
   }, [tracks, songSearch, songSort, energyFilter, healthFilter, reviewItems, resolvedArtworkIds]);
 
@@ -1762,11 +1773,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
-          <div className="tr10-table">
+          <div className={`tr10-table ${libraryView === "grid" ? "is-grid" : "is-list"}`}>
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
-              <span>TRACK</span><span>TIME</span><span>ENERGY</span><span>ACTIONS</span>
+              <span>TRACK</span><span>TIME</span><span>ENERGY</span>
+              <span className="tr10-actionsHead">ACTIONS<button type="button" className="tr10-viewToggle" onClick={() => setLibraryView((current) => current === "list" ? "grid" : "list")} aria-label={libraryView === "list" ? "Switch song library to grid view" : "Switch song library to list view"} title={libraryView === "list" ? "Grid view" : "List view"}>{libraryView === "list" ? "▦" : "▤"}</button></span>
             </div>
+            <div className="tr10-mobileViewBar"><span>ACTIONS</span><button type="button" className="tr10-viewToggle" onClick={() => setLibraryView((current) => current === "list" ? "grid" : "list")} aria-label={libraryView === "list" ? "Switch song library to grid view" : "Switch song library to list view"} title={libraryView === "list" ? "Grid view" : "List view"}>{libraryView === "list" ? "▦" : "▤"}</button></div>
             {loading ? <div className="tr10-empty">Loading your music…</div> : null}
             {!loading && !pagedTracks.length ? <div className="tr10-empty">No songs match this view.</div> : null}
             {pagedTracks.map((track) => {
@@ -3077,6 +3090,53 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-collectionSong{grid-template-columns:24px 34px 42px minmax(0,1fr);grid-template-areas:"num play art text" ". duration duration duration" "actions actions actions actions";gap:7px;min-height:0;padding:9px 8px}.tr10-collectionSongNumber{grid-area:num}.tr10-collectionSongPlay{grid-area:play;width:32px;height:32px}.tr10-collectionSong>.tr10-art--row{grid-area:art;width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important}.tr10-collectionSongText{grid-area:text}.tr10-collectionSongText strong{font-size:12px;white-space:normal}.tr10-collectionSongText span{font-size:8px;white-space:normal}.tr10-collectionSongDuration{grid-area:duration;justify-self:start;text-align:left;font-size:8px}.tr10-collectionSongActions{grid-area:actions;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.tr10-collectionSongActions button{width:100%;height:32px;padding:0 3px;font-size:6.5px;white-space:normal;line-height:1.05}
         }
         @media(max-width:390px){.tr10-collectionSongActions{grid-template-columns:repeat(2,minmax(0,1fr))}.tr10-collectionDetailIdentity h2{font-size:18px}.tr10-collectionOpen h3{font-size:13px}}
+
+        /* MVP_TRAINER_V5_R9_5_LIBRARY_SORT_VIEW: deterministic sorting + list/grid switch */
+        .tr10-actionsHead{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:8px!important;white-space:nowrap!important}
+        .tr10-viewToggle{width:30px!important;min-width:30px!important;height:28px!important;padding:0!important;display:grid!important;place-items:center!important;border:1px solid rgba(77,202,240,.28)!important;border-radius:7px!important;background:linear-gradient(180deg,#0a2834,#061820)!important;color:#e9faff!important;font-size:17px!important;line-height:1!important;font-weight:900!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+        .tr10-viewToggle:hover{border-color:rgba(77,216,255,.58)!important;background:#0b3443!important}
+        .tr10-mobileViewBar{display:none}
+
+        .tr10-table.is-grid{padding:10px!important;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:9px!important;background:#040b0f!important}
+        .tr10-table.is-grid>.tr10-tableHead,.tr10-table.is-grid>.tr10-mobileViewBar,.tr10-table.is-grid>.tr10-empty{grid-column:1/-1!important}
+        .tr10-table.is-grid>.tr10-tableHead{display:grid!important;margin:-10px -10px 0!important}
+        .tr10-table.is-grid>.tr10-row{display:grid!important;grid-template-columns:1fr auto!important;grid-template-rows:auto auto auto!important;gap:8px!important;min-width:0!important;min-height:0!important;padding:9px!important;overflow:hidden!important;border:1px solid rgba(83,164,192,.14)!important;border-radius:11px!important;background:linear-gradient(180deg,#08161d,#040c10)!important}
+        .tr10-table.is-grid>.tr10-row:hover{border-color:rgba(78,204,243,.28)!important;background:linear-gradient(180deg,#0a2029,#050e13)!important}
+        .tr10-table.is-grid>.tr10-row.is-current{box-shadow:inset 0 0 0 1px rgba(59,210,250,.55),0 0 20px rgba(47,187,229,.09)!important}
+        .tr10-table.is-grid .tr10-orderCell{display:none!important}
+        .tr10-table.is-grid .tr10-check{grid-column:2!important;grid-row:1!important;z-index:4!important;align-self:start!important;justify-self:end!important;margin:3px!important;padding:0!important}
+        .tr10-table.is-grid .tr10-check input{width:18px!important;height:18px!important}
+        .tr10-table.is-grid .tr10-trackCell{grid-column:1/-1!important;grid-row:1!important;display:grid!important;grid-template-columns:1fr!important;grid-template-rows:auto auto!important;gap:8px!important;overflow:visible!important}
+        .tr10-table.is-grid .tr10-trackCell>.tr10-art--row{grid-column:1!important;grid-row:1!important;width:100%!important;min-width:0!important;max-width:none!important;height:auto!important;min-height:0!important;max-height:none!important;aspect-ratio:1/1!important;border-radius:9px!important}
+        .tr10-table.is-grid .tr10-trackCell>.tr10-play{grid-column:1!important;grid-row:1!important;z-index:3!important;align-self:center!important;justify-self:center!important;width:46px!important;height:46px!important;min-width:46px!important;border-radius:999px!important;font-size:14px!important;box-shadow:0 8px 22px rgba(0,0,0,.42)!important}
+        .tr10-table.is-grid .tr10-trackText{grid-column:1!important;grid-row:2!important;min-width:0!important;overflow:hidden!important}
+        .tr10-table.is-grid .tr10-trackText strong{font-size:11px!important;line-height:1.18!important;color:#fff!important}
+        .tr10-table.is-grid .tr10-trackText span{font-size:8px!important;color:#a4bac3!important}
+        .tr10-table.is-grid .tr10-trackText small{display:none!important}
+        .tr10-table.is-grid .tr10-trackCell>.tr10-healthBadge{grid-column:1!important;grid-row:1!important;z-index:3!important;align-self:end!important;justify-self:start!important;margin:7px!important}
+        .tr10-table.is-grid>.tr10-row>.tr10-duration{grid-column:1!important;grid-row:2!important;align-self:center!important;justify-self:start!important;font-size:8px!important;color:#9db3bc!important}
+        .tr10-table.is-grid>.tr10-row>.tr10-energy{grid-column:2!important;grid-row:2!important;align-self:center!important;justify-self:end!important;width:78px!important;min-width:78px!important;max-width:78px!important}
+        .tr10-table.is-grid .tr10-actions{grid-column:1/-1!important;grid-row:3!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important;width:100%!important}
+        .tr10-table.is-grid .tr10-actions button{width:100%!important;min-width:0!important;height:31px!important;min-height:31px!important;padding:0 4px!important;font-size:6.5px!important;white-space:normal!important;line-height:1.05!important;overflow:hidden!important}
+        .tr10-table.is-grid .tr10-likeAction,.tr10-table.is-grid .tr10-lessAction{font-size:10px!important}
+        .tr10-table.is-grid .tr10-likeAction span,.tr10-table.is-grid .tr10-lessAction span{display:none!important}
+
+        @media(max-width:1050px){.tr10-table.is-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}}
+        @media(max-width:820px){.tr10-table.is-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+        @media(max-width:650px){
+          .tr10-table.is-list>.tr10-mobileViewBar{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:8px!important;min-height:36px!important;padding:4px 8px!important;border-bottom:1px solid rgba(83,151,176,.10)!important;background:#050b0f!important;color:#7e99a4!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.1em!important}
+          .tr10-table.is-list>.tr10-mobileViewBar .tr10-viewToggle{width:32px!important;min-width:32px!important;height:30px!important}
+          .tr10-table.is-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;padding:7px!important;gap:7px!important}
+          .tr10-table.is-grid>.tr10-tableHead{display:none!important}
+          .tr10-table.is-grid>.tr10-mobileViewBar{display:flex!important;grid-column:1/-1!important;align-items:center!important;justify-content:flex-end!important;gap:8px!important;min-height:36px!important;padding:4px 1px 7px!important;color:#7e99a4!important;font-size:7px!important;font-weight:1000!important;letter-spacing:.1em!important}
+          .tr10-table.is-grid>.tr10-mobileViewBar .tr10-viewToggle{width:34px!important;min-width:34px!important;height:32px!important}
+          .tr10-table.is-grid>.tr10-row{padding:7px!important;gap:7px!important}
+          .tr10-table.is-grid .tr10-trackText strong{font-size:12px!important}
+          .tr10-table.is-grid .tr10-trackText span{font-size:8.5px!important}
+          .tr10-table.is-grid .tr10-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .tr10-table.is-grid .tr10-actions button{height:34px!important;min-height:34px!important;font-size:7px!important}
+        }
+        @media(max-width:360px){.tr10-table.is-grid{grid-template-columns:1fr!important}}
 
       `}</style>
     </main>
