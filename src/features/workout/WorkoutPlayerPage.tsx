@@ -2583,43 +2583,6 @@ function cardioBrowseOrIlike() {
   return buildNameOrIlike(terms);
 }
 
-function prettyMuscle(m: string) {
-  const x = String(m || "").toLowerCase();
-  if (x === "abs") return "Core";
-  if (x === "back") return "Back";
-  if (x === "chest") return "Chest";
-  if (x === "shoulders") return "Shoulders";
-  if (x === "arms") return "Arms";
-  if (x === "legs") return "Legs";
-  if (x === "quads") return "Quads";
-  if (x === "calves") return "Calves";
-  return x ? x.charAt(0).toUpperCase() + x.slice(1) : "Full Body";
-}
-
-function resolveFocusLabel(item: any, timed: boolean) {
-  if (timed) return "Cardio";
-  const muscles = Array.isArray(item?.primary_muscles)
-    ? item.primary_muscles.filter(Boolean).map((m: string) => prettyMuscle(m))
-    : [];
-  if (!muscles.length) return "Full Body";
-  if (muscles.length === 1) return muscles[0];
-  if (muscles.length === 2) return `${muscles[0]} + ${muscles[1]}`;
-  return `${muscles[0]} + More`;
-}
-
-function targetLabelFromPrescription(pres: any, timed: boolean) {
-  if (timed) return `${durationMinutes(pres)} min`;
-  const sets = Number(pres?.sets ?? 3);
-  const repMin = Number(pres?.rep_min ?? 8);
-  const repMax = Number(pres?.rep_max ?? 12);
-  return `${sets} × ${repMin}-${repMax}`;
-}
-
-function restOrDurationLabel(pres: any, timed: boolean) {
-  if (timed) return `${durationMinutes(pres)} min target`;
-  return `${Number(pres?.rest_seconds ?? 90)}s rest`;
-}
-
 function friendlyPainState(pain: number) {
   if (pain <= 2) return "Clear";
   if (pain <= 6) return "Watch";
@@ -3176,7 +3139,7 @@ export function WorkoutPlayerPage({ params }: any) {
   const [gateWeight, setGateWeight] = useState<string>("");
 
   const [startedWeight, setStartedWeight] = useState<number | null>(null);
-  const [proteinTarget, setProteinTarget] = useState<number | null>(null);
+  const [, setProteinTarget] = useState<number | null>(null);
   const [sessionIntelligence, setSessionIntelligence] =
     useState<SessionIntelligence>(EMPTY_SESSION_INTELLIGENCE);
 
@@ -3245,8 +3208,6 @@ export function WorkoutPlayerPage({ params }: any) {
     );
   }, [activeIdx, items.length, doneCount]);
 
-  const atFirst = activeIdx === 0;
-  const atLast = activeIdx === Math.max(0, items.length - 1);
   const sessionComplete = items.length > 0 && doneCount === items.length;
 
   useEffect(() => {
@@ -3691,6 +3652,13 @@ export function WorkoutPlayerPage({ params }: any) {
         localStorage.removeItem("mvp_paused_at_iso");
         localStorage.setItem("mvp_paused_total_seconds", "0");
       } catch {}
+
+      // Enter workout-focus mode only after the workout has actually started.
+      window.dispatchEvent(
+        new CustomEvent("mvp:music-player-compact-request", {
+          detail: { compact: true, reason: "workout-active" },
+        })
+      );
 
       if (!workoutStartAlertPlayedRef.current) {
         workoutStartAlertPlayedRef.current = true;
@@ -4179,28 +4147,9 @@ export function WorkoutPlayerPage({ params }: any) {
     };
   }, [current, rpcMediaMap, userUploadMap]);
 
-  const currentPrescription = current?.prescription_snapshot ?? {};
-  const currentTimed = isTimed(currentPrescription);
   const currentExerciseName =
     current?.exercise?.name ?? current?.exercise?.title ?? "Not set";
-  const currentTarget = targetLabelFromPrescription(currentPrescription, currentTimed);
-  const currentFocus = currentRunnerItem
-    ? resolveFocusLabel(currentRunnerItem, currentTimed)
-    : "Full Body";
-  const currentRest = restOrDurationLabel(currentPrescription, currentTimed);
-  const previousExercise = activeIdx > 0 ? items[activeIdx - 1] : null;
-  const previousExerciseName =
-    previousExercise?.exercise?.name ??
-    previousExercise?.exercise?.title ??
-    "Start of workout";
-  const nextExercise = activeIdx < items.length - 1 ? items[activeIdx + 1] : null;
-  const nextExerciseName =
-    nextExercise?.exercise?.name ??
-    nextExercise?.exercise?.title ??
-    "End of workout";
-  const nextIncompleteIndex = items.findIndex(
-    (row, index) => index > activeIdx && !row.completed_at
-  );
+  const currentIcon = current ? resolveRowIcon(current.exercise || {}) : { icon: null, alt: "Exercise" };
   const sessionShortLabel = sessionLabel.split("•")[0]?.trim() || sessionLabel;
   const lastSession = sessionIntelligence.lastSameSession;
   const lastSessionAgo =
@@ -4211,13 +4160,6 @@ export function WorkoutPlayerPage({ params }: any) {
         : lastSession.daysAgo === 1
           ? "1 DAY AGO"
           : `${lastSession.daysAgo} DAYS AGO`;
-  const weightTrend = sessionIntelligence.weightTrend30;
-  const weightTrendText =
-    weightTrend == null
-      ? "30-DAY TREND BUILDING"
-      : Math.abs(weightTrend) < 0.05
-        ? "STABLE OVER 30 DAYS"
-        : `${weightTrend > 0 ? "+" : ""}${weightTrend.toFixed(1)} LB OVER 30 DAYS`;
   const volumeDelta = lastSession?.volumeDelta ?? null;
   const volumeDeltaText =
     volumeDelta == null
@@ -4225,21 +4167,20 @@ export function WorkoutPlayerPage({ params }: any) {
       : volumeDelta === 0
         ? `MATCHED PREVIOUS ${sessionShortLabel.toUpperCase()} VOLUME`
         : `${volumeDelta > 0 ? "+" : ""}${Math.round(volumeDelta).toLocaleString()} LB VS PREVIOUS ${sessionShortLabel.toUpperCase()}`;
-  const weekCompletionText = String(sessionIntelligence.week.completedWorkouts);
-  const weekTrainingTime =
-    sessionIntelligence.week.trainingMinutes > 0
-      ? formatMinutesCompact(sessionIntelligence.week.trainingMinutes)
-      : "0 MIN";
-  const progressRatio = items.length ? Math.min(1, doneCount / items.length) : 0;
-  const progressPercent = Math.round(progressRatio * 100);
-  const currentProgressStart = items.length
-    ? Math.min(100, (doneCount / items.length) * 100)
-    : 0;
-  const currentProgressWidth =
-    items.length && doneCount < items.length ? 100 / items.length : 0;
-
-  const prev = () => setActiveIdx((i) => Math.max(i - 1, 0));
-  const next = () => setActiveIdx((i) => Math.min(i + 1, Math.max(0, items.length - 1)));
+  const agendaRows = items
+    .map((row, index) => ({
+      row,
+      index,
+      name: row.exercise?.name ?? row.exercise?.title ?? `Exercise ${index + 1}`,
+      icon: resolveRowIcon(row.exercise || {}),
+    }))
+    .filter((entry) => entry.index !== activeIdx);
+  const completedAgenda = agendaRows.filter((entry) => Boolean(entry.row.completed_at));
+  const remainingAgenda = agendaRows.filter((entry) => !entry.row.completed_at);
+  const remainingCount = Math.max(0, items.length - doneCount);
+  const sessionIntelSummary = lastSession
+    ? `LAST ${sessionShortLabel.toUpperCase()} • ${lastSessionAgo} • ${formatMinutesCompact(lastSession.durationMinutes)} • ${lastSession.completedSets}/${lastSession.plannedSets} SETS • ${formatVolumeLb(lastSession.volume)}`
+    : `LAST ${sessionShortLabel.toUpperCase()} • BUILDING YOUR FIRST PERFORMANCE BENCHMARK`;
 
   const endWorkoutNow = () => {
     setCompleteOverlayOpen(false);
@@ -4312,283 +4253,92 @@ export function WorkoutPlayerPage({ params }: any) {
         totalExercises={items.length}
       />
 
-      <div className="tr-workoutCheckinCard">
-        <Card
-          title="Session Check-in"
-          tone="blue"
-          right={<div className="tr-checkinContext">{sessionLabel} • TODAY</div>}
-        >
-          <div className="tr-sessionIntel">
-            <div className="tr-sessionIntelPrimary">
-              <div className="tr-sessionIntelMetric is-weight">
-                <div className="tr-kicker">BODY WEIGHT</div>
-                <strong>
-                  {startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}
-                </strong>
-                <span
-                  className={`tr-sessionIntelTrend ${
-                    weightTrend != null && weightTrend > 0
-                      ? "is-positive"
-                      : weightTrend != null && weightTrend < 0
-                        ? "is-negative"
-                        : ""
-                  }`}
-                >
-                  {weightTrendText}
-                </span>
-              </div>
-
-              <div className="tr-sessionIntelMetric is-protein">
-                <div className="tr-kicker">PROTEIN TARGET</div>
-                <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
-                <span>DAILY MUSCLE-GAIN TARGET</span>
-              </div>
-
-              <div className="tr-sessionIntelMetric is-last">
-                <div className="tr-kicker">LAST {sessionShortLabel.toUpperCase()}</div>
-                <strong>{lastSessionAgo}</strong>
-                <span>{lastSession ? compactDate(lastSession.completedAt) : "COMPLETE ONE TO BUILD HISTORY"}</span>
-              </div>
-            </div>
-
-            <div className="tr-sessionIntelPerformance">
-              <div className="tr-sessionIntelPerformanceHead">
-                <div>
-                  <div className="tr-kicker">PREVIOUS {sessionShortLabel.toUpperCase()}</div>
-                  <strong>{lastSession ? "PERFORMANCE BENCHMARK" : "NO COMPLETED BENCHMARK YET"}</strong>
-                </div>
-                {lastSession ? (
-                  <span className="tr-sessionIntelDate">{compactDate(lastSession.completedAt)}</span>
-                ) : null}
-              </div>
-
-              <div className="tr-sessionIntelPerformanceGrid">
-                <div>
-                  <strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong>
-                  <span>SESSION TIME</span>
-                </div>
-                <div>
-                  <strong>
-                    {lastSession
-                      ? `${lastSession.completedSets} / ${lastSession.plannedSets}`
-                      : "—"}
-                  </strong>
-                  <span>SETS COMPLETED</span>
-                </div>
-                <div>
-                  <strong>{formatVolumeLb(lastSession?.volume)}</strong>
-                  <span>TRAINING VOLUME</span>
-                </div>
-              </div>
-
-              <div
-                className={`tr-sessionIntelDelta ${
-                  volumeDelta != null && volumeDelta > 0
-                    ? "is-positive"
-                    : volumeDelta != null && volumeDelta < 0
-                      ? "is-negative"
-                      : ""
-                }`}
-              >
-                {lastSession ? volumeDeltaText : "COMPLETE THIS SESSION TO CREATE YOUR FIRST BENCHMARK"}
-              </div>
-            </div>
-
-            <div className="tr-sessionIntelWeek">
-              <div className="tr-sessionIntelWeekCopy">
-                <div className="tr-kicker">THIS WEEK</div>
-                <strong>{weekCompletionText}</strong>
-                <span>WORKOUTS COMPLETED</span>
-              </div>
-
-              <div className="tr-sessionIntelWeekDivider" aria-hidden="true">
-                <span />
-              </div>
-
-              <div className="tr-sessionIntelWeekTime">
-                <strong>{weekTrainingTime}</strong>
-                <span>TRAINED THIS WEEK</span>
-              </div>
-            </div>
+      <details className="tr-sessionIntelCompact">
+        <summary>
+          <span className="tr-sessionIntelCompactMark" aria-hidden="true">◫</span>
+          <span className="tr-sessionIntelCompactCopy">
+            <small>SESSION INTEL</small>
+            <strong>{sessionIntelSummary}</strong>
+          </span>
+          <span className="tr-sessionIntelCompactChevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div className="tr-sessionIntelCompactDetails">
+          <div>
+            <span>PREVIOUS {sessionShortLabel.toUpperCase()}</span>
+            <strong>{lastSession ? compactDate(lastSession.completedAt) : "NO BENCHMARK"}</strong>
           </div>
-        </Card>
-      </div>
-
-      <div className="tr-workoutSessionCard">
-        <Card
-          title={sessionLabel}
-          tone="blue"
-          right={
-            <button
-              type="button"
-              className="tr-seg is-active tr-sessionEditButton"
-              onClick={() => setEditing(true)}
-            >
-              Edit
-            </button>
-          }
-        >
-          <div className="tr-sessionNavConsole">
-            <button
-              type="button"
-              className="tr-sessionNavButton is-prev"
-              onClick={prev}
-              disabled={atFirst}
-              aria-label={atFirst ? "Start of workout" : `Previous exercise: ${previousExerciseName}`}
-            >
-              <span className="tr-sessionNavArrow" aria-hidden="true">←</span>
-              <span className="tr-sessionNavCopy">
-                {!atFirst ? <small>PREVIOUS</small> : null}
-                <strong>{atFirst ? "START OF WORKOUT" : previousExerciseName}</strong>
-              </span>
-            </button>
-
-            <div className="tr-sessionCurrentPanel">
-              <div className="tr-sessionCurrentTopline">
-                <span>EXERCISE {items.length ? activeIdx + 1 : 0} OF {items.length}</span>
-                <span
-                  className={`tr-sessionCurrentState ${
-                    current?.completed_at ? "is-complete" : "is-current"
-                  }`}
-                >
-                  {current?.completed_at ? "COMPLETED" : "CURRENT"}
-                </span>
-              </div>
-
-              <strong className="tr-sessionCurrentName">{currentExerciseName}</strong>
-
-              <div className="tr-sessionCurrentMeta" aria-label="Exercise prescription">
-                <span>{currentTarget}</span>
-                <span>{currentFocus}</span>
-                <span>{currentRest}</span>
-              </div>
-
-            </div>
-
-            <button
-              type="button"
-              className="tr-sessionNavButton is-next"
-              onClick={next}
-              disabled={atLast}
-              aria-label={atLast ? "End of workout" : `Next exercise: ${nextExerciseName}`}
-            >
-              <span className="tr-sessionNavCopy">
-                {!atLast ? <small>NEXT</small> : null}
-                <strong>{atLast ? "END OF WORKOUT" : nextExerciseName}</strong>
-              </span>
-              <span className="tr-sessionNavArrow" aria-hidden="true">→</span>
-            </button>
+          <div>
+            <span>SESSION TIME</span>
+            <strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong>
           </div>
+          <div>
+            <span>SETS</span>
+            <strong>{lastSession ? `${lastSession.completedSets}/${lastSession.plannedSets}` : "—"}</strong>
+          </div>
+          <div>
+            <span>VOLUME</span>
+            <strong>{formatVolumeLb(lastSession?.volume)}</strong>
+          </div>
+          <p>{lastSession ? volumeDeltaText : "Complete this session to create your first benchmark."}</p>
+        </div>
+      </details>
 
-          <section className="tr-exerciseProgressPanel" aria-label="Exercise progress">
-            <div className="tr-exerciseProgressHeader">
-              <div className="tr-exerciseProgressTitle">
-                <div className="tr-kicker">EXERCISE PROGRESS</div>
-                <strong>WORKOUT ROADMAP</strong>
-              </div>
+      <section className="tr-sessionNavigatorShell" aria-label={`${sessionLabel} exercise navigator`}>
+        <header className="tr-sessionNavigatorHead">
+          <div>
+            <span>WORKOUT NAVIGATOR</span>
+            <strong>{sessionLabel}</strong>
+          </div>
+          <div className="tr-sessionNavigatorHeadActions">
+            <span>{doneCount} DONE • {remainingCount} LEFT</span>
+            <button type="button" onClick={() => setEditing(true)}>EDIT</button>
+          </div>
+        </header>
 
-              <div
-                className="tr-exerciseProgressCount"
-                style={{ "--tr-progress": progressRatio } as any}
-                aria-label={`${doneCount} of ${items.length} completed`}
-              >
-                <div className="tr-exerciseProgressCountValue">
-                  <strong className="tr-exerciseProgressDone">{doneCount}</strong>
-                  <span className="tr-exerciseProgressTotal">/{items.length}</span>
-                </div>
-                <span className="tr-exerciseProgressCountLabel">COMPLETED</span>
-              </div>
+        <div className="tr-sessionAgendaLayout">
+          <article className={`tr-currentExerciseCard ${current?.completed_at ? "is-complete" : "is-current"}`}>
+            <div className="tr-currentExerciseLighting" aria-hidden="true" />
+            <div className="tr-currentExerciseIcon">
+              {currentIcon.icon ? <img src={currentIcon.icon} alt={currentIcon.alt} /> : <span aria-hidden="true">◆</span>}
             </div>
-
-            <div
-              className="tr-exerciseProgressRail"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={items.length || 1}
-              aria-valuenow={doneCount}
-              aria-label={`${doneCount} of ${items.length} exercises completed`}
-            >
-              <span
-                className="tr-exerciseProgressRailFill"
-                style={{ width: `${progressPercent}%` }}
-              />
-              {currentProgressWidth > 0 ? (
-                <span
-                  className="tr-exerciseProgressRailCurrent"
-                  style={{
-                    left: `${currentProgressStart}%`,
-                    width: `${currentProgressWidth}%`,
-                  }}
-                />
-              ) : null}
-              <span
-                className="tr-exerciseProgressRailCheckpoints"
-                aria-hidden="true"
-              >
-                {items.slice(0, -1).map((row, index) => (
-                  <i
-                    key={row.id}
-                    style={{ left: `${((index + 1) / items.length) * 100}%` }}
-                  />
-                ))}
-              </span>
-              {doneCount > 0 && doneCount < items.length ? (
-                <span
-                  className="tr-exerciseProgressRailEdge"
-                  style={{ left: `${progressPercent}%` }}
-                  aria-hidden="true"
-                />
-              ) : null}
+            <div className="tr-currentExerciseCopy">
+              <span>{current?.completed_at ? "SELECTED • COMPLETED" : "CURRENT EXERCISE"}</span>
+              <div className="tr-currentExerciseNumber">{String(activeIdx + 1).padStart(2, "0")}</div>
+              <strong>{currentExerciseName}</strong>
             </div>
+          </article>
 
-            <div className="tr-exerciseProgressGrid">
-              {items.map((row, index) => {
-                const isSelected = index === activeIdx;
-                const status = row.completed_at
-                  ? "complete"
-                  : isSelected
-                    ? "current"
-                    : index === nextIncompleteIndex
-                      ? "next"
-                      : "remaining";
-                const statusLabel =
-                  status === "complete"
-                    ? "COMPLETED"
-                    : status === "current"
-                      ? "CURRENT"
-                      : status === "next"
-                        ? "UP NEXT"
-                        : "REMAINING";
-                const exerciseName =
-                  row.exercise?.name ??
-                  row.exercise?.title ??
-                  `Exercise ${index + 1}`;
-
-                return (
-                  <button
-                    key={row.id}
-                    type="button"
-                    className={`tr-exerciseProgressCard is-${status} ${
-                      isSelected ? "is-selected" : ""
-                    } ${isSelected || status === "next" ? "is-mobile-priority" : ""}`}
-                    onClick={() => setActiveIdx(index)}
-                    aria-current={isSelected ? "step" : undefined}
-                  >
-                    <span className="tr-exerciseProgressNumber">
-                      {row.completed_at ? "✓" : String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="tr-exerciseProgressText">
-                      <strong>{exerciseName}</strong>
-                      <small>{statusLabel}</small>
-                    </span>
+          <aside className="tr-sessionAgendaPanel" aria-label="Done and remaining exercises">
+            <div className="tr-sessionAgendaHeader">
+              <span>SESSION AGENDA</span>
+              <strong>{doneCount}/{items.length} COMPLETE</strong>
+            </div>
+            <div className="tr-sessionAgendaScroller">
+              <section className="tr-sessionAgendaGroup is-remaining">
+                <div className="tr-sessionAgendaGroupTitle"><span>REMAINING</span><b>{remainingAgenda.length}</b></div>
+                {remainingAgenda.length ? remainingAgenda.map((entry) => (
+                  <button key={entry.row.id} type="button" onClick={() => setActiveIdx(entry.index)} aria-label={`Go to ${entry.name}`}>
+                    <span className="tr-sessionAgendaIcon">{entry.icon.icon ? <img src={entry.icon.icon} alt="" /> : <i aria-hidden>◆</i>}</span>
+                    <span className="tr-sessionAgendaRowCopy"><small>{String(entry.index + 1).padStart(2, "0")}</small><strong>{entry.name}</strong></span>
+                    <span className="tr-sessionAgendaArrow" aria-hidden="true">›</span>
                   </button>
-                );
-              })}
-            </div>
+                )) : <div className="tr-sessionAgendaEmpty">ALL REMAINING WORK COMPLETE</div>}
+              </section>
 
-          </section>
-        </Card>
-      </div>
+              <section className="tr-sessionAgendaGroup is-done">
+                <div className="tr-sessionAgendaGroupTitle"><span>DONE</span><b>{completedAgenda.length}</b></div>
+                {completedAgenda.length ? completedAgenda.map((entry) => (
+                  <button key={entry.row.id} type="button" onClick={() => setActiveIdx(entry.index)} aria-label={`Review completed exercise ${entry.name}`}>
+                    <span className="tr-sessionAgendaIcon is-done">{entry.icon.icon ? <img src={entry.icon.icon} alt="" /> : <i aria-hidden>◆</i>}<em aria-hidden>✓</em></span>
+                    <span className="tr-sessionAgendaRowCopy"><small>{String(entry.index + 1).padStart(2, "0")}</small><strong>{entry.name}</strong></span>
+                    <span className="tr-sessionAgendaArrow" aria-hidden="true">›</span>
+                  </button>
+                )) : <div className="tr-sessionAgendaEmpty">NOTHING COMPLETED YET</div>}
+              </section>
+            </div>
+          </aside>
+        </div>
+      </section>
 
       {current && currentRunnerItem ? (
         <div className="tr-activeExerciseRunner" data-ui-rev="active-console-v2">
@@ -7029,6 +6779,41 @@ function EditSessionPanel(props: {
 
       <style>{`
         .tr-chipRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+        /* R12.5 — mobile-first Session Intel + Current / Done / Remaining navigator */
+        .tr-sessionIntelCompact{
+          position:relative;overflow:hidden;border:1px solid rgba(100,183,214,.20);border-radius:12px;
+          background:linear-gradient(112deg,rgba(10,21,28,.98),rgba(4,9,13,.995) 62%,rgba(8,17,22,.99));
+          box-shadow:0 9px 25px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.055);margin:0;
+        }
+        .tr-sessionIntelCompact summary{list-style:none;min-height:50px;padding:7px 10px;display:grid;grid-template-columns:28px minmax(0,1fr) 24px;align-items:center;gap:8px;cursor:pointer;user-select:none}
+        .tr-sessionIntelCompact summary::-webkit-details-marker{display:none}.tr-sessionIntelCompactMark{width:27px;height:27px;display:grid;place-items:center;border:1px solid rgba(95,207,243,.26);border-radius:8px;color:#aeeeff;background:linear-gradient(180deg,rgba(19,71,88,.34),rgba(5,22,30,.48));font-size:12px;box-shadow:inset 0 1px rgba(255,255,255,.06)}
+        .tr-sessionIntelCompactCopy{min-width:0;display:grid;gap:3px}.tr-sessionIntelCompactCopy small{color:rgba(119,206,235,.72);font-size:6.5px;font-weight:950;letter-spacing:.16em}.tr-sessionIntelCompactCopy strong{min-width:0;color:rgba(235,244,248,.86);font-size:9px;line-height:1.2;font-weight:820;letter-spacing:.005em;white-space:normal;overflow-wrap:anywhere}.tr-sessionIntelCompactChevron{justify-self:end;color:rgba(182,213,224,.58);font-size:14px;transition:transform .18s ease}.tr-sessionIntelCompact[open] .tr-sessionIntelCompactChevron{transform:rotate(180deg)}
+        .tr-sessionIntelCompactDetails{padding:8px 10px 10px;border-top:1px solid rgba(137,197,217,.10);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.tr-sessionIntelCompactDetails>div{min-width:0;padding:7px 8px;border-left:1px solid rgba(104,186,214,.11)}.tr-sessionIntelCompactDetails>div:first-child{border-left:0}.tr-sessionIntelCompactDetails span{display:block;color:rgba(147,184,198,.55);font-size:6px;font-weight:900;letter-spacing:.11em}.tr-sessionIntelCompactDetails strong{display:block;margin-top:3px;color:#f1f8fb;font-size:11px;font-weight:900;white-space:normal;overflow-wrap:anywhere}.tr-sessionIntelCompactDetails p{grid-column:1/-1;margin:0;padding-top:6px;border-top:1px solid rgba(137,197,217,.08);color:rgba(169,205,216,.66);font-size:7px;font-weight:800;letter-spacing:.035em}
+
+        .tr-sessionNavigatorShell{position:relative;overflow:hidden;border:1px solid rgba(107,187,216,.20);border-radius:14px;background:linear-gradient(118deg,rgba(11,21,28,.99),rgba(4,8,12,.998) 58%,rgba(8,17,22,.994));box-shadow:0 13px 34px rgba(0,0,0,.29),inset 0 1px rgba(255,255,255,.06);isolation:isolate}
+        .tr-sessionNavigatorShell::before{content:"";position:absolute;z-index:-1;inset:0;background:radial-gradient(420px 120px at 18% -20%,rgba(58,195,242,.105),transparent 70%),linear-gradient(110deg,transparent 0 34%,rgba(255,255,255,.018) 49%,transparent 65%);pointer-events:none}.tr-sessionNavigatorShell::after{content:"";position:absolute;left:4%;right:4%;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(95,213,248,.25),rgba(230,250,255,.45),rgba(95,213,248,.25),transparent);pointer-events:none}
+        .tr-sessionNavigatorHead{min-height:38px;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(126,190,213,.10)}.tr-sessionNavigatorHead>div:first-child{min-width:0;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.tr-sessionNavigatorHead>div:first-child span{color:rgba(102,208,242,.70);font-size:6.3px;font-weight:950;letter-spacing:.16em}.tr-sessionNavigatorHead>div:first-child strong{min-width:0;color:#f5fbfd;font-size:11px;font-weight:920;letter-spacing:.02em;overflow-wrap:anywhere}.tr-sessionNavigatorHeadActions{display:flex;align-items:center;gap:7px;flex:0 0 auto}.tr-sessionNavigatorHeadActions>span{color:rgba(166,201,213,.62);font-size:6.5px;font-weight:900;letter-spacing:.08em;white-space:nowrap}.tr-sessionNavigatorHeadActions button{min-height:27px;padding:0 8px;border:1px solid rgba(98,201,239,.25);border-radius:7px;background:linear-gradient(180deg,rgba(17,52,66,.55),rgba(4,18,24,.72));color:#c9f2ff;font-size:6.8px;font-weight:950;letter-spacing:.08em;cursor:pointer}
+        .tr-sessionAgendaLayout{display:grid;grid-template-columns:minmax(0,1.16fr) minmax(0,.84fr);height:118px;min-height:0;gap:0}
+        .tr-currentExerciseCard{position:relative;min-width:0;height:100%;min-height:0;padding:13px 15px;display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;gap:12px;overflow:hidden;border-right:1px solid rgba(104,190,220,.13);background:radial-gradient(330px 160px at 18% 35%,rgba(42,193,244,.11),transparent 70%),linear-gradient(135deg,rgba(12,31,41,.72),rgba(5,12,17,.72));isolation:isolate}
+        .tr-currentExerciseCard::before{content:"";position:absolute;left:0;top:10%;bottom:10%;width:2px;background:linear-gradient(180deg,transparent,#50d6ff 23%,#d2f7ff 50%,#50d6ff 77%,transparent);box-shadow:0 0 15px rgba(67,210,251,.40)}.tr-currentExerciseLighting{position:absolute;z-index:-1;inset:0;pointer-events:none;background:linear-gradient(112deg,transparent 0 22%,rgba(255,255,255,.024) 43%,transparent 62%)}
+        .tr-currentExerciseIcon{width:56px;height:56px;display:grid;place-items:center;border:1px solid rgba(111,218,249,.27);border-radius:15px;background:radial-gradient(circle at 50% 32%,rgba(110,225,255,.13),transparent 63%),linear-gradient(180deg,rgba(15,43,54,.78),rgba(4,15,21,.92));box-shadow:inset 0 1px rgba(255,255,255,.07),0 9px 20px rgba(0,0,0,.24),0 0 22px rgba(63,202,243,.08)}.tr-currentExerciseIcon img{width:34px;height:34px;object-fit:contain;filter:drop-shadow(0 4px 7px rgba(0,0,0,.38)) saturate(1.10)}.tr-currentExerciseIcon>span{color:#bcefff;font-size:19px}
+        .tr-currentExerciseCopy{min-width:0;display:grid;align-content:center;gap:5px}.tr-currentExerciseCopy>span{color:rgba(97,215,250,.76);font-size:6.5px;font-weight:950;letter-spacing:.17em}.tr-currentExerciseNumber{color:rgba(206,236,246,.52);font-size:8px;font-weight:900;letter-spacing:.12em}.tr-currentExerciseCopy>strong{max-width:100%;color:#fbfeff;font-size:clamp(17px,2vw,23px);line-height:1.06;font-weight:980;letter-spacing:-.025em;white-space:normal;overflow-wrap:anywhere;text-shadow:0 2px 12px rgba(0,0,0,.34)}.tr-currentExerciseCard.is-complete::before{background:linear-gradient(180deg,transparent,#59dda5 24%,#b9f5d6 50%,#59dda5 76%,transparent);box-shadow:0 0 15px rgba(74,220,157,.34)}.tr-currentExerciseCard.is-complete .tr-currentExerciseCopy>span{color:rgba(104,231,167,.80)}
+        .tr-sessionAgendaPanel{min-width:0;height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);background:linear-gradient(180deg,rgba(7,14,19,.68),rgba(3,8,11,.82))}.tr-sessionAgendaHeader{min-height:32px;padding:6px 8px;display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px solid rgba(120,186,210,.09)}.tr-sessionAgendaHeader span{color:rgba(172,209,222,.60);font-size:6px;font-weight:950;letter-spacing:.14em}.tr-sessionAgendaHeader strong{color:rgba(221,239,245,.75);font-size:6.5px;font-weight:920;white-space:nowrap}.tr-sessionAgendaScroller{min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(75,174,208,.25) transparent;padding:5px 6px 6px;display:grid;gap:7px}.tr-sessionAgendaScroller::-webkit-scrollbar{width:4px}.tr-sessionAgendaScroller::-webkit-scrollbar-thumb{background:rgba(75,174,208,.22);border-radius:99px}
+        .tr-sessionAgendaGroup{display:grid;gap:3px}.tr-sessionAgendaGroupTitle{min-height:17px;display:flex;align-items:center;justify-content:space-between;padding:0 4px}.tr-sessionAgendaGroupTitle span{font-size:5.8px;font-weight:950;letter-spacing:.14em}.tr-sessionAgendaGroupTitle b{font-size:6px;font-weight:950}.tr-sessionAgendaGroup.is-remaining .tr-sessionAgendaGroupTitle{color:rgba(126,213,239,.66)}.tr-sessionAgendaGroup.is-done .tr-sessionAgendaGroupTitle{color:rgba(105,220,161,.63)}
+        .tr-sessionAgendaGroup button{width:100%;min-width:0;min-height:33px;padding:4px 5px;display:grid;grid-template-columns:27px minmax(0,1fr) 13px;align-items:center;gap:5px;border:1px solid rgba(118,181,204,.10);border-radius:8px;background:linear-gradient(180deg,rgba(17,27,33,.60),rgba(5,11,15,.70));color:inherit;text-align:left;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.025);transition:border-color .14s ease,background .14s ease,transform .14s ease}.tr-sessionAgendaGroup.is-remaining button{border-color:rgba(95,195,229,.13)}.tr-sessionAgendaGroup.is-done button{opacity:.66;border-color:rgba(86,210,150,.11);background:linear-gradient(180deg,rgba(11,25,23,.55),rgba(4,11,12,.68))}.tr-sessionAgendaIcon{position:relative;width:26px;height:26px;display:grid;place-items:center;border:1px solid rgba(111,192,220,.14);border-radius:7px;background:rgba(5,17,23,.78)}.tr-sessionAgendaIcon img{width:17px;height:17px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}.tr-sessionAgendaIcon i{font-size:10px;font-style:normal}.tr-sessionAgendaIcon em{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;display:grid;place-items:center;border-radius:50%;background:#1e8d61;color:#edfff6;font-size:7px;font-style:normal;font-weight:1000;box-shadow:0 0 0 2px #07110f}.tr-sessionAgendaRowCopy{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:4px}.tr-sessionAgendaRowCopy small{color:rgba(129,180,198,.48);font-size:5.8px;font-weight:900;line-height:1.25}.tr-sessionAgendaRowCopy strong{min-width:0;color:rgba(238,247,250,.90);font-size:8px;line-height:1.15;font-weight:860;white-space:normal;overflow-wrap:anywhere}.tr-sessionAgendaGroup.is-done .tr-sessionAgendaRowCopy strong{color:rgba(190,220,210,.72)}.tr-sessionAgendaArrow{justify-self:end;color:rgba(133,211,237,.62);font-size:13px;line-height:1}.tr-sessionAgendaGroup.is-done .tr-sessionAgendaArrow{color:rgba(105,211,158,.50)}.tr-sessionAgendaEmpty{padding:6px;color:rgba(132,163,175,.43);font-size:6px;font-weight:850;letter-spacing:.08em}
+        @media(hover:hover) and (pointer:fine){.tr-sessionAgendaGroup button:hover,.tr-sessionAgendaGroup button:focus-visible{transform:translateX(-1px);border-color:rgba(98,209,244,.30);background:linear-gradient(180deg,rgba(18,43,53,.68),rgba(5,18,24,.78))}.tr-sessionNavigatorHeadActions button:hover{border-color:rgba(105,216,250,.44)}}
+        @media(max-width:650px){
+          .tr-sessionIntelCompact summary{min-height:52px;padding:6px 8px;grid-template-columns:26px minmax(0,1fr) 18px;gap:6px}.tr-sessionIntelCompactMark{width:25px;height:25px;border-radius:7px}.tr-sessionIntelCompactCopy small{font-size:6.4px}.tr-sessionIntelCompactCopy strong{font-size:8.5px;line-height:1.22}.tr-sessionIntelCompactDetails{grid-template-columns:repeat(2,minmax(0,1fr));padding:7px 8px 8px;gap:5px}.tr-sessionIntelCompactDetails>div:nth-child(3){border-left:0}.tr-sessionIntelCompactDetails strong{font-size:10px}
+          .tr-sessionNavigatorShell{border-radius:12px}.tr-sessionNavigatorHead{min-height:34px;padding:5px 7px;gap:6px}.tr-sessionNavigatorHead>div:first-child{gap:4px}.tr-sessionNavigatorHead>div:first-child span{font-size:6px}.tr-sessionNavigatorHead>div:first-child strong{font-size:9.6px}.tr-sessionNavigatorHeadActions{gap:4px}.tr-sessionNavigatorHeadActions>span{font-size:6.2px}.tr-sessionNavigatorHeadActions button{min-height:27px;padding:0 7px;font-size:6.6px}
+          .tr-sessionAgendaLayout{grid-template-columns:minmax(0,1.06fr) minmax(0,.94fr);height:132px;min-height:0}.tr-currentExerciseCard{height:100%;min-height:0;padding:9px 8px;grid-template-columns:45px minmax(0,1fr);gap:7px}.tr-currentExerciseIcon{width:44px;height:44px;border-radius:12px}.tr-currentExerciseIcon img{width:27px;height:27px}.tr-currentExerciseCopy{gap:4px}.tr-currentExerciseCopy>span{font-size:6px;letter-spacing:.10em}.tr-currentExerciseNumber{font-size:7.2px}.tr-currentExerciseCopy>strong{font-size:clamp(13px,4.25vw,17px);line-height:1.06}
+          .tr-sessionAgendaPanel{height:100%;min-height:0}.tr-sessionAgendaHeader{min-height:27px;padding:4px 5px}.tr-sessionAgendaHeader span{font-size:5.9px}.tr-sessionAgendaHeader strong{font-size:6.1px}.tr-sessionAgendaScroller{max-height:none;padding:4px;gap:5px}.tr-sessionAgendaGroup{gap:2px}.tr-sessionAgendaGroupTitle{min-height:14px;padding:0 2px}.tr-sessionAgendaGroupTitle span,.tr-sessionAgendaGroupTitle b{font-size:5.8px}.tr-sessionAgendaGroup button{min-height:29px;padding:3px;grid-template-columns:23px minmax(0,1fr) 9px;gap:3px;border-radius:7px}.tr-sessionAgendaIcon{width:22px;height:22px;border-radius:6px}.tr-sessionAgendaIcon img{width:15px;height:15px}.tr-sessionAgendaIcon em{width:10px;height:10px;font-size:6px}.tr-sessionAgendaRowCopy{gap:3px}.tr-sessionAgendaRowCopy small{font-size:5.8px}.tr-sessionAgendaRowCopy strong{font-size:7.8px;line-height:1.14}.tr-sessionAgendaArrow{font-size:11px}
+        }
+        @media(max-width:390px){
+          .tr-sessionNavigatorHeadActions>span{display:none}.tr-sessionAgendaLayout{grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr)}.tr-currentExerciseCard{padding-left:7px;padding-right:6px;grid-template-columns:39px minmax(0,1fr);gap:5px}.tr-currentExerciseIcon{width:38px;height:38px}.tr-currentExerciseIcon img{width:24px;height:24px}.tr-currentExerciseCopy>strong{font-size:13px}.tr-sessionAgendaRowCopy strong{font-size:7.4px}.tr-sessionAgendaGroup button{grid-template-columns:21px minmax(0,1fr) 8px}.tr-sessionAgendaIcon{width:20px;height:20px}.tr-sessionAgendaIcon img{width:14px;height:14px}
+        }
+        @media(prefers-reduced-motion:reduce){.tr-sessionAgendaGroup button,.tr-sessionIntelCompactChevron{transition:none!important}}
+
       `}</style>
     </div>,
     document.body

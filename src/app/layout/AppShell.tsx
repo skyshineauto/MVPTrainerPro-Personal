@@ -353,9 +353,10 @@ function PerformanceCoreIcon({ state }: { state: PerformanceCoreState }) {
   return (
     <span className={`tr-performanceCoreIcon is-${state}`} aria-hidden="true">
       <svg viewBox="0 0 48 48" role="presentation">
-        <path className="tr-performanceCoreFrame" d="M24 3.5 39.8 12.6v18.8L24 44.5 8.2 35.4V12.6L24 3.5Z" />
-        <path className="tr-performanceCorePulse" d="M10.5 25h8.1l3.6-10.4 4.8 18.1 4-10.2h6.5" />
-        <circle className="tr-performanceCoreNode" cx="24" cy="24" r="3.2" />
+        <path className="tr-performanceCoreFrame" d="M24 3.8 39.5 12.8v18.4L24 40.2 8.5 31.2V12.8L24 3.8Z" />
+        <path className="tr-performanceCoreWing" d="m11.8 24 8.2-8.1 4 4 4-4 8.2 8.1-8.2 8.1-4-4-4 4L11.8 24Z" />
+        <path className="tr-performanceCoreVector" d="M15 24h18M24 14.8V33" />
+        <path className="tr-performanceCoreNode" d="m24 19.3 4.7 4.7-4.7 4.7-4.7-4.7 4.7-4.7Z" />
       </svg>
     </span>
   );
@@ -462,9 +463,16 @@ function SessionTrajectory({
         context.lineWidth = Math.max(1, height * 0.055);
         context.strokeStyle = "rgba(116,153,171,.23)";
         context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
-        context.strokeStyle = propsRef.current.paused ? "rgba(244,176,74,.92)" : "rgba(91,216,255,.96)";
+        const activeGradient = context.createLinearGradient(0, 0, Math.max(1, width), 0);
+        const avgRatio = metrics.averagePosition > 0 ? metrics.averagePosition : 0.8;
+        activeGradient.addColorStop(0, "rgba(70,225,255,.98)");
+        activeGradient.addColorStop(Math.max(0.12, Math.min(0.34, avgRatio * 0.34)), "rgba(72,145,255,.98)");
+        activeGradient.addColorStop(Math.max(0.26, Math.min(0.62, avgRatio * 0.70)), "rgba(220,248,255,.98)");
+        activeGradient.addColorStop(Math.max(0.42, Math.min(0.86, avgRatio)), "rgba(255,220,151,.98)");
+        activeGradient.addColorStop(1, "rgba(255,166,77,.98)");
+        context.strokeStyle = activeGradient;
         context.beginPath(); context.moveTo(0, y); context.lineTo(nodeX, y); context.stroke();
-        context.fillStyle = propsRef.current.paused ? "rgba(255,193,91,.98)" : "rgba(215,249,255,.98)";
+        context.fillStyle = propsRef.current.paused ? "rgba(255,193,91,.98)" : "rgba(235,252,255,.99)";
         context.beginPath(); context.arc(nodeX, y, Math.max(2, height * 0.11), 0, Math.PI * 2); context.fill();
         if (avgX >= 0) {
           context.strokeStyle = "rgba(231,242,247,.62)";
@@ -519,11 +527,24 @@ function SessionTrajectory({
         float nearGlow = 1.0 - smoothstep(1.0, 5.4, dy);
         float surfaceGlow = 1.0 - smoothstep(1.0, 11.0, dy);
 
-        vec3 futureColor = vec3(0.28, 0.40, 0.47);
-        vec3 cool = vec3(0.22, 0.72, 1.0);
-        vec3 hot = vec3(0.38, 1.0, 0.77);
-        vec3 activeColor = mix(cool, hot, clamp(xNorm * 0.72, 0.0, 0.72));
-        activeColor = mix(activeColor, vec3(1.0, 0.61, 0.20), u_paused);
+        vec3 futureColor = vec3(0.22, 0.34, 0.42);
+        vec3 cyan = vec3(0.19, 0.88, 1.0);
+        vec3 blue = vec3(0.25, 0.50, 1.0);
+        vec3 ice = vec3(0.84, 0.97, 1.0);
+        vec3 gold = vec3(1.0, 0.82, 0.50);
+        vec3 amber = vec3(1.0, 0.55, 0.18);
+        float avgPoint = u_average > 0.0 ? u_average : 0.80;
+        float phase = xNorm / max(0.08, avgPoint);
+        vec3 activeColor;
+        if (phase < 0.34) {
+          activeColor = mix(cyan, blue, smoothstep(0.0, 0.34, phase));
+        } else if (phase < 0.72) {
+          activeColor = mix(blue, ice, smoothstep(0.34, 0.72, phase));
+        } else if (phase < 1.0) {
+          activeColor = mix(ice, gold, smoothstep(0.72, 1.0, phase));
+        } else {
+          activeColor = mix(gold, amber, smoothstep(1.0, 1.30, min(phase, 1.30)));
+        }
 
         float futureAlpha = core * 0.17 + nearGlow * 0.035;
         float completedAlpha = beforeNode * (core * 0.93 + nearGlow * 0.22 + surfaceGlow * 0.055);
@@ -637,17 +658,23 @@ function SessionTrajectory({
   }, []);
 
   const averageMinutes = averageSeconds ? Math.max(1, Math.round(averageSeconds / 60)) : null;
-  const overAverageMinutes = averageSeconds && elapsedSeconds > averageSeconds
-    ? Math.max(1, Math.floor((elapsedSeconds - averageSeconds) / 60))
-    : null;
+  const trajectory = sessionTrajectoryMetrics(elapsedSeconds, averageSeconds);
+  const averageLeft = trajectory.averagePosition >= 0 ? trajectory.averagePosition * 100 : 50;
 
   return (
     <div className={`tr-sessionTrajectory ${paused ? "is-paused" : "is-active"}`}>
       <canvas ref={canvasRef} className="tr-sessionTrajectoryCanvas" aria-hidden="true" />
-      <div className="tr-sessionTrajectoryMeta" aria-live="off">
-        <span>{averageMinutes ? `AVG ${averageMinutes} MIN` : "LEARNING YOUR SESSION PACE"}</span>
-        {overAverageMinutes ? <strong>+{overAverageMinutes} MIN VS AVG</strong> : null}
-      </div>
+      {averageMinutes ? (
+        <span
+          className="tr-sessionTrajectoryAverage"
+          style={{ left: `${averageLeft}%` }}
+          aria-label={`Average comparable session ${averageMinutes} minutes`}
+        >
+          AVG {averageMinutes} MIN
+        </span>
+      ) : (
+        <span className="tr-sessionTrajectoryLearning">LEARNING SESSION PACE</span>
+      )}
     </div>
   );
 }
@@ -1513,8 +1540,121 @@ const HUD_FORCE_CSS = `
   .tr-performanceHudSurface,
   .tr-performanceStart,
   .tr-performanceControl{transition:none!important}
-  .tr-performanceCoreIcon.is-active .tr-performanceCorePulse{animation:none!important}
 }
+
+/* R12.5 PRECISION PERFORMANCE HUD — authoritative rendering */
+.tr-performanceHudSurface{
+  min-height:100px;
+  padding:11px 16px 8px;
+  border-radius:14px 14px 8px 8px;
+  border-color:rgba(132,210,238,.31);
+  background:
+    radial-gradient(650px 115px at 50% -26%,rgba(84,211,255,.17),transparent 66%),
+    radial-gradient(280px 100px at 4% 100%,rgba(51,139,186,.09),transparent 72%),
+    linear-gradient(118deg,rgba(17,29,37,.985),rgba(5,10,14,.995) 56%,rgba(8,17,23,.99));
+  box-shadow:
+    0 15px 42px rgba(0,0,0,.40),
+    0 1px 0 rgba(118,220,255,.13),
+    inset 0 1px 0 rgba(255,255,255,.09),
+    inset 0 -14px 28px rgba(0,0,0,.24),
+    inset 0 0 48px rgba(42,153,197,.035);
+  backdrop-filter:blur(18px) saturate(1.12);
+  -webkit-backdrop-filter:blur(18px) saturate(1.12);
+}
+.tr-performanceHudSurface::before{
+  display:block!important;
+  opacity:1;
+  background:
+    linear-gradient(112deg,transparent 0 25%,rgba(255,255,255,.026) 42%,transparent 56%),
+    radial-gradient(500px 70px at 50% 0,rgba(207,245,255,.055),transparent 72%),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.006) 0 1px,transparent 1px 6px);
+}
+.tr-performanceHudSurface::after{
+  left:4%;right:4%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(95,210,246,.28) 18%,rgba(238,252,255,.58) 50%,rgba(95,210,246,.28) 82%,transparent);
+  box-shadow:0 0 15px rgba(67,197,239,.14);
+}
+.tr-performanceHudSurface.is-active,
+.tr-performanceHudSurface.is-paused{
+  min-height:72px;
+  padding:7px 12px 5px;
+  border-radius:12px 12px 7px 7px;
+  box-shadow:
+    0 12px 32px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 -12px 24px rgba(0,0,0,.22),
+    0 0 0 1px rgba(49,165,204,.035);
+}
+.tr-performanceHudSurface.is-active{
+  border-color:rgba(76,203,241,.36);
+  background:
+    radial-gradient(390px 78px at 35% 8%,rgba(53,198,247,.15),transparent 70%),
+    linear-gradient(112deg,rgba(11,23,31,.995),rgba(4,8,12,.998) 58%,rgba(7,15,20,.995));
+}
+.tr-performanceHudSurface.is-paused{
+  border-color:rgba(244,177,76,.34);
+  background:
+    radial-gradient(390px 78px at 35% 8%,rgba(244,164,62,.12),transparent 70%),
+    linear-gradient(112deg,rgba(24,20,14,.995),rgba(7,8,9,.998) 58%,rgba(16,13,9,.995));
+}
+.tr-performanceCoreIcon{width:36px;height:36px;filter:drop-shadow(0 5px 11px rgba(44,176,221,.20))}
+.tr-performanceCoreIcon::before{inset:5px;background:radial-gradient(circle,rgba(88,213,255,.16),transparent 70%)}
+.tr-performanceCoreFrame{fill:rgba(7,15,20,.55);stroke:rgba(196,240,253,.67);stroke-width:1.15}
+.tr-performanceCoreWing{fill:rgba(77,191,229,.08);stroke:rgba(136,225,252,.76);stroke-width:1.15;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.tr-performanceCoreVector{fill:none;stroke:rgba(221,249,255,.54);stroke-width:.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.tr-performanceCoreNode{fill:rgba(229,251,255,.95);stroke:rgba(87,215,252,.92);stroke-width:1;vector-effect:non-scaling-stroke}
+.tr-performanceCoreIcon.is-active{filter:drop-shadow(0 0 10px rgba(75,225,186,.24))}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreFrame{stroke:rgba(122,244,205,.68)}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreWing{fill:rgba(82,230,184,.08);stroke:rgba(125,245,207,.84);animation:tr-performanceCoreBreathe 2.4s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreVector{stroke:rgba(217,255,239,.66)}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreNode{fill:#effff7;stroke:#77efbd}
+.tr-performanceCoreIcon.is-paused{filter:drop-shadow(0 0 9px rgba(255,184,80,.20))}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreFrame{stroke:rgba(255,202,119,.68)}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreWing{fill:rgba(255,183,78,.07);stroke:rgba(255,199,111,.80)}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreVector{stroke:rgba(255,230,188,.58)}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreNode{fill:#fff4df;stroke:#ffc36c}
+@keyframes tr-performanceCoreBreathe{0%,100%{opacity:.78}50%{opacity:1}}
+.tr-performanceReadyMain{min-height:51px;grid-template-columns:minmax(150px,.72fr) minmax(280px,1.42fr) minmax(155px,.72fr);gap:14px}
+.tr-performanceReadyDate{font-size:clamp(12px,1.18vw,15px);font-weight:780;color:rgba(245,250,252,.94)}
+.tr-performanceReadyTime{font-size:clamp(25px,2.45vw,32px);color:#f7fbfd;text-shadow:0 0 24px rgba(102,216,255,.09)}
+.tr-performanceStart{min-width:150px;min-height:38px;border-radius:10px;border-color:rgba(80,207,248,.48);background:linear-gradient(180deg,rgba(17,113,154,.35),rgba(5,41,59,.46));box-shadow:inset 0 1px rgba(236,252,255,.12),0 8px 18px rgba(0,0,0,.25),0 0 20px rgba(65,203,246,.08)}
+.tr-performanceReadyFooter{min-height:25px;margin-top:4px;padding-top:6px;gap:12px}
+.tr-performanceMetric>strong{font-size:13px}.tr-performanceMetric>span{font-size:7px}.tr-performanceMetric>small{font-size:6px}
+.tr-performanceActiveMain{min-height:39px;grid-template-columns:minmax(116px,.72fr) minmax(126px,auto) minmax(190px,1fr) auto;gap:10px}
+.tr-performanceHudSurface.is-active .tr-performanceCoreIcon,.tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:31px;height:31px}
+.tr-performanceTimer{font-size:28px;font-weight:820;letter-spacing:.018em;text-shadow:0 0 23px rgba(95,220,255,.12)}
+.tr-performanceTimerBlock>span{font-size:6.2px;letter-spacing:.17em}.tr-performanceDate{font-size:10px;color:rgba(230,240,244,.76);overflow:visible;text-overflow:clip}
+.tr-performanceControl{min-height:30px;padding:0 9px;border-radius:8px;background:linear-gradient(180deg,rgba(20,39,49,.78),rgba(5,12,16,.90));box-shadow:inset 0 1px rgba(255,255,255,.06),0 5px 12px rgba(0,0,0,.22)}
+.tr-sessionTrajectory{height:25px;margin-top:-1px;overflow:visible}
+.tr-sessionTrajectory::before{top:9px;background:linear-gradient(90deg,rgba(68,124,149,.09),rgba(119,174,194,.19),rgba(68,124,149,.09))}
+.tr-sessionTrajectoryCanvas{height:18px}
+.tr-sessionTrajectoryAverage,.tr-sessionTrajectoryLearning{
+  position:absolute;bottom:0;transform:translateX(-50%);white-space:nowrap;color:rgba(210,226,233,.67);font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;font-size:6.2px;line-height:1;font-weight:900;letter-spacing:.11em;text-transform:uppercase;text-shadow:0 1px 0 rgba(0,0,0,.7);pointer-events:none
+}
+.tr-sessionTrajectoryLearning{left:50%;color:rgba(153,181,193,.48)}
+.tr-sessionTrajectory.is-paused .tr-sessionTrajectoryAverage{color:rgba(255,214,149,.74)}
+
+@media(max-width:650px){
+  .tr-performanceHudShell,.tr-performanceHudShell.tr-hudPanel{margin-bottom:7px!important}
+  .tr-performanceHudSurface{min-height:108px;padding:8px 9px 6px;border-radius:12px 12px 7px 7px}
+  .tr-performanceReadyMain{min-height:66px;grid-template-columns:minmax(0,.72fr) minmax(132px,1fr) auto;grid-template-areas:"state clock action";gap:7px;align-items:center}
+  .tr-performanceReadyMain>.tr-performanceStateBlock{grid-area:state}.tr-performanceReadyMain>.tr-performanceClockBlock{grid-area:clock}.tr-performanceReadyMain>.tr-performanceReadyAction{grid-area:action}
+  .tr-performanceCoreIcon{width:29px;height:29px}.tr-performanceStateBlock{gap:6px}.tr-performanceStateText>span{font-size:5.8px}.tr-performanceStateText>strong{font-size:11.5px}
+  .tr-performanceReadyDate{font-size:clamp(8.8px,2.55vw,10.5px);white-space:normal;line-height:1.08}.tr-performanceReadyTime{font-size:clamp(21px,6.4vw,27px)}
+  .tr-performanceStart{min-width:0;min-height:34px;padding:0 8px;border-radius:9px;font-size:8px;letter-spacing:.045em}.tr-performanceStartMark{font-size:9px}
+  .tr-performanceReadyFooter{min-height:24px;margin-top:2px;padding-top:5px;gap:7px}.tr-performanceMetric{gap:3px}.tr-performanceMetric>span{font-size:6.4px}.tr-performanceMetric>strong{font-size:12px}.tr-performanceMetric>small{display:none}.tr-performanceMetricDivider{height:12px}.tr-performanceDormantRail{display:none}
+  .tr-performanceHudSurface.is-active,.tr-performanceHudSurface.is-paused{min-height:82px;padding:6px 8px 4px;border-radius:11px 11px 6px 6px}
+  .tr-performanceActiveMain{min-height:49px;grid-template-columns:minmax(88px,.72fr) auto;grid-template-areas:"state timer" "date actions";gap:3px 7px}
+  .tr-performanceActiveMain>.tr-performanceStateBlock{grid-area:state}.tr-performanceActiveMain>.tr-performanceTimerBlock{grid-area:timer;justify-self:end}.tr-performanceActiveMain>.tr-performanceDate{grid-area:date;justify-self:start;text-align:left;white-space:normal;font-size:clamp(7.8px,2.45vw,9.5px);line-height:1.1}.tr-performanceActiveMain>.tr-performanceActions{grid-area:actions;justify-self:end}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,.tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:25px;height:25px}.tr-performanceHudSurface.is-active .tr-performanceStateText>span,.tr-performanceHudSurface.is-paused .tr-performanceStateText>span{display:none}.tr-performanceHudSurface.is-active .tr-performanceStateText>strong,.tr-performanceHudSurface.is-paused .tr-performanceStateText>strong{font-size:10.5px}
+  .tr-performanceTimer{font-size:clamp(22px,6.5vw,26px)}.tr-performanceTimerBlock>span{font-size:6.2px}.tr-performanceControl{min-height:28px;padding:0 7px;font-size:7.4px;gap:3px;border-radius:7px}.tr-performanceControl>span{font-size:7.8px}
+  .tr-sessionTrajectory{height:23px}.tr-sessionTrajectoryCanvas{height:15px}.tr-sessionTrajectoryAverage,.tr-sessionTrajectoryLearning{font-size:6.2px;letter-spacing:.07em}
+}
+@media(max-width:390px){
+  .tr-performanceHudSurface{padding-left:7px;padding-right:7px}.tr-performanceReadyMain{grid-template-columns:minmax(75px,.66fr) minmax(118px,1fr) auto;gap:5px}.tr-performanceReadyDate{font-size:8.4px}.tr-performanceReadyTime{font-size:21px}.tr-performanceStart{padding:0 6px;font-size:7.5px}.tr-performanceMetric>span{display:none}.tr-performanceMetric>strong{font-size:11.5px}
+  .tr-performanceActiveMain{grid-template-columns:minmax(78px,.72fr) auto;gap:3px 5px}.tr-performanceDate{font-size:8.2px!important}.tr-performanceControl{padding:0 5px;font-size:7px}
+}
+@media(prefers-reduced-motion:reduce){.tr-performanceCoreIcon.is-active .tr-performanceCoreWing{animation:none!important}}
 
 `;
 
@@ -2757,6 +2897,8 @@ export function AppShell({
     lsDel(LS.pausedAt);
     setHud({ ...hud, isPaused: false });
     window.dispatchEvent(new Event(WORKOUT_PAUSE_STATE_EVENT));
+
+    window.dispatchEvent(new CustomEvent("mvp:music-player-compact-request", { detail: { compact: true, reason: "workout-resume" } }));
 
     if (shouldResumeMusic) {
       void playMusic().catch((error) => {
