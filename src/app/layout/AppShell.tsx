@@ -2501,6 +2501,308 @@ const HUD_FORCE_CSS = `
   .tr-sessionTrajectoryAverage{font-size:6.2px!important}
 }
 
+
+/* =====================================================================
+   MVP TRAINER R12.5B.3 — HUD FINAL PRECISION / STATEMENT CORE PASS
+   Desktop date moves to the center-right lane so the true-centered timer
+   can grow. Mobile keeps the date below the timer with a small air gap.
+   Geometry remains compact; rendering, brand energy, controls and Core
+   presence are refined without touching workout or music architecture.
+   ===================================================================== */
+
+/* Brand/material refinement. */
+.tr-performanceHudSurface.is-ready{
+  border-color:rgba(61,184,232,.34);
+  background:
+    radial-gradient(410px 110px at 50% -6%,rgba(45,173,226,.16),transparent 70%),
+    radial-gradient(170px 78px at 6% 33%,rgba(45,183,233,.075),transparent 74%),
+    radial-gradient(145px 66px at 94% 17%,rgba(255,151,55,.038),transparent 76%),
+    linear-gradient(180deg,rgba(8,20,28,.995),rgba(3,8,11,.999));
+  box-shadow:0 13px 34px rgba(0,0,0,.37),0 0 25px rgba(43,177,226,.045),inset 0 1px 0 rgba(240,252,255,.11),inset 0 -1px 0 rgba(32,123,159,.07);
+}
+.tr-performanceHudSurface.is-active{
+  border-color:rgba(79,218,251,.56);
+  background:
+    radial-gradient(470px 120px at 50% -8%,rgba(42,188,244,.245),transparent 69%),
+    radial-gradient(250px 100px at 8% 35%,rgba(86,244,176,.145),transparent 73%),
+    radial-gradient(210px 78px at 93% 8%,rgba(255,151,55,.042),transparent 77%),
+    linear-gradient(180deg,rgba(7,22,31,.999),rgba(2,7,10,.999));
+  box-shadow:
+    0 16px 40px rgba(0,0,0,.44),
+    0 0 42px rgba(38,184,239,.10),
+    0 0 28px rgba(83,241,173,.052),
+    inset 0 1px 0 rgba(247,254,255,.18),
+    inset 0 -1px 0 rgba(43,143,183,.09),
+    inset 0 0 36px rgba(39,165,211,.045);
+}
+.tr-performanceHudSurface.is-active::before{
+  background:
+    radial-gradient(470px 125px at 50% 15%,rgba(126,232,255,.115),transparent 72%),
+    linear-gradient(104deg,transparent 0 27%,rgba(255,255,255,.012) 34%,rgba(211,248,255,.135) 44%,rgba(77,224,255,.030) 51%,transparent 62% 100%),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.005) 0 1px,transparent 1px 8px);
+  background-size:100% 100%,270% 100%,100% 100%;
+  animation:tr-b3GlassTravel 7.2s cubic-bezier(.22,.72,.22,1) infinite;
+}
+.tr-performanceHudSurface.is-active::after{
+  background:linear-gradient(90deg,transparent 0 3%,rgba(48,190,241,.29) 21%,rgba(228,252,255,.92) 47%,rgba(88,244,181,.31) 67%,rgba(255,154,57,.10) 84%,transparent 97% 100%);
+  background-size:220% 100%;
+  box-shadow:0 0 15px rgba(69,211,250,.22);
+  animation:tr-b3EdgeTravel 7.5s ease-in-out infinite;
+}
+.tr-performanceHudSurface.is-paused{
+  border-color:rgba(255,169,64,.50);
+  background:
+    radial-gradient(450px 115px at 50% -8%,rgba(41,145,194,.13),transparent 70%),
+    radial-gradient(260px 98px at 8% 36%,rgba(255,154,49,.18),transparent 73%),
+    radial-gradient(170px 70px at 92% 13%,rgba(42,151,199,.035),transparent 76%),
+    linear-gradient(180deg,rgba(24,18,10,.999),rgba(6,8,9,.999));
+  box-shadow:0 16px 39px rgba(0,0,0,.43),0 0 31px rgba(240,151,48,.073),inset 0 1px 0 rgba(255,244,218,.14),inset 0 -1px 0 rgba(169,102,26,.085);
+}
+@keyframes tr-b3GlassTravel{0%,12%{background-position:0 0,-150% 0,0 0}55%{background-position:0 0,18% 0,0 0}88%,100%{background-position:0 0,150% 0,0 0}}
+@keyframes tr-b3EdgeTravel{0%,14%{background-position:112% 0;opacity:.56}48%{opacity:1}88%,100%{background-position:-12% 0;opacity:.58}}
+
+/* Performance Core: no orbit/ring. Power travels through the internal geometry. */
+.tr-performanceCoreRing{display:none!important}
+.tr-performanceCoreIcon{
+  width:42px!important;
+  height:42px!important;
+  color:var(--mvp-blue);
+  filter:drop-shadow(0 6px 13px rgba(18,133,187,.30));
+  isolation:isolate;
+}
+.tr-performanceCoreIcon::before{
+  inset:-4px;
+  border-radius:50%;
+  transform:none!important;
+  filter:blur(.3px);
+}
+.tr-performanceCoreIcon::after{
+  content:"";
+  position:absolute;
+  z-index:3;
+  right:1px;
+  top:7px;
+  width:11px;
+  height:2px;
+  border-radius:999px;
+  transform:rotate(-34deg);
+  transform-origin:center;
+  background:linear-gradient(90deg,transparent,rgba(255,155,57,.95),rgba(255,201,129,.88),transparent);
+  box-shadow:0 0 6px rgba(255,155,57,.26);
+  opacity:.78;
+  pointer-events:none;
+}
+.tr-performanceCoreIcon svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.42)) drop-shadow(0 0 5px rgba(49,185,234,.20))}
+.tr-performanceCoreFrame{
+  fill:rgba(5,25,36,.90)!important;
+  stroke:rgba(64,194,241,.98)!important;
+  stroke-width:1.65!important;
+  filter:drop-shadow(0 0 3px rgba(46,185,237,.27));
+}
+.tr-performanceCorePulse{
+  fill:rgba(34,150,203,.18)!important;
+  stroke:rgba(218,248,255,.97)!important;
+  stroke-width:1.25!important;
+  stroke-linejoin:round;
+  transform-origin:24px 24px;
+}
+.tr-performanceCoreBlade{
+  fill:rgba(31,145,196,.21)!important;
+  stroke:rgba(102,210,247,.84)!important;
+  stroke-width:1.05!important;
+  transform-origin:24px 24px;
+}
+.tr-performanceCoreNode{
+  fill:#f7fdff!important;
+  stroke:#ff9b39!important;
+  stroke-width:1.25!important;
+  transform-origin:24px 24px;
+  filter:drop-shadow(0 0 3px rgba(255,155,57,.36));
+}
+.tr-performanceCoreIcon.is-ready::before{background:radial-gradient(circle,rgba(71,194,240,.25) 0 15%,rgba(35,137,187,.09) 36%,transparent 72%);animation:tr-b3CoreReady 5.8s ease-in-out infinite}
+.tr-performanceCoreIcon.is-ready .tr-performanceCorePulse{animation:tr-b3CoreReadyInner 5.2s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active{
+  filter:drop-shadow(0 0 12px rgba(83,242,174,.40)) drop-shadow(0 6px 13px rgba(26,151,207,.22));
+}
+.tr-performanceCoreIcon.is-active::before{
+  background:radial-gradient(circle,rgba(126,255,206,.42) 0 14%,rgba(80,239,177,.20) 32%,rgba(40,182,230,.09) 53%,transparent 76%);
+  animation:tr-b3CoreActiveAura 3.3s ease-in-out infinite;
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreFrame{stroke:rgba(69,196,241,.99)!important;fill:rgba(4,27,38,.94)!important}
+.tr-performanceCoreIcon.is-active .tr-performanceCorePulse{
+  fill:rgba(93,241,182,.25)!important;
+  stroke:#d4ffec!important;
+  stroke-dasharray:7 5;
+  filter:drop-shadow(0 0 4px rgba(83,242,174,.54));
+  animation:tr-b3CoreEnergyPath 2.4s linear infinite,tr-b3CoreInnerBreath 3.0s ease-in-out infinite;
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreBlade{fill:rgba(73,224,171,.25)!important;stroke:rgba(178,255,226,.94)!important;filter:drop-shadow(0 0 2px rgba(83,242,174,.28))}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreBladeA{animation:tr-b3SegmentA 3.0s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreBladeB{animation:tr-b3SegmentB 3.0s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreBladeC{animation:tr-b3SegmentC 3.0s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreNode{fill:#f9fff9!important;stroke:#61f0a8!important;filter:drop-shadow(0 0 5px rgba(91,245,180,.78));animation:tr-b3CoreNodeCharge 2.25s ease-in-out infinite}
+.tr-performanceCoreIcon.is-active::after{opacity:1;box-shadow:0 0 8px rgba(255,155,57,.34)}
+.tr-performanceCoreIcon.is-paused{filter:drop-shadow(0 0 10px rgba(255,158,52,.31)) drop-shadow(0 6px 11px rgba(30,120,163,.12))}
+.tr-performanceCoreIcon.is-paused::before{background:radial-gradient(circle,rgba(255,195,101,.27) 0 16%,rgba(255,147,40,.13) 36%,rgba(36,143,196,.04) 56%,transparent 75%);animation:tr-b3CorePausedAura 6.8s ease-in-out infinite}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreFrame{stroke:rgba(56,177,223,.83)!important;fill:rgba(17,23,27,.92)!important}
+.tr-performanceCoreIcon.is-paused .tr-performanceCorePulse{stroke:#ffdaa4!important;fill:rgba(255,160,56,.20)!important;stroke-dasharray:none;animation:none!important;filter:none}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreBlade{stroke:rgba(255,205,136,.82)!important;fill:rgba(255,154,54,.18)!important;animation:none!important;filter:none}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreNode{fill:#fff4df!important;stroke:#ff9b39!important;animation:tr-b3PausedNode 6.6s ease-in-out infinite;filter:drop-shadow(0 0 4px rgba(255,155,57,.40))}
+@keyframes tr-b3CoreReady{0%,100%{opacity:.55;transform:scale(.96)}50%{opacity:.82;transform:scale(1.025)}}
+@keyframes tr-b3CoreReadyInner{0%,100%{opacity:.72;filter:brightness(.95)}50%{opacity:.98;filter:brightness(1.16)}}
+@keyframes tr-b3CoreActiveAura{0%,100%{opacity:.68;transform:scale(.95)}50%{opacity:1;transform:scale(1.075)}}
+@keyframes tr-b3CoreEnergyPath{to{stroke-dashoffset:-36}}
+@keyframes tr-b3CoreInnerBreath{0%,100%{opacity:.76}50%{opacity:1}}
+@keyframes tr-b3SegmentA{0%,16%,100%{opacity:.42;transform:translate3d(0,0,0)}28%,46%{opacity:1;transform:translate3d(-.35px,-.35px,0);filter:brightness(1.42)}}
+@keyframes tr-b3SegmentB{0%,34%,100%{opacity:.42;transform:translate3d(0,0,0)}46%,64%{opacity:1;transform:translate3d(.35px,-.35px,0);filter:brightness(1.42)}}
+@keyframes tr-b3SegmentC{0%,52%,100%{opacity:.42;transform:translate3d(0,0,0)}64%,82%{opacity:1;transform:translate3d(0,.35px,0);filter:brightness(1.42)}}
+@keyframes tr-b3CoreNodeCharge{0%,100%{transform:scale(.90);opacity:.86}46%{transform:scale(1.30);opacity:1}68%{transform:scale(1.03);opacity:.94}}
+@keyframes tr-b3CorePausedAura{0%,100%{opacity:.48;transform:scale(.97)}50%{opacity:.65;transform:scale(1.015)}}
+@keyframes tr-b3PausedNode{0%,100%{transform:scale(.96);opacity:.80}50%{transform:scale(1.08);opacity:.92}}
+
+/* Stronger timer/labels and hardware-like controls. */
+.tr-performanceTimer{
+  color:#fff!important;
+  font-weight:800!important;
+  font-variation-settings:"wght" 800!important;
+  letter-spacing:.012em!important;
+  text-shadow:0 1px 0 rgba(255,255,255,.13),0 8px 20px rgba(0,0,0,.45)!important;
+}
+.tr-performanceTimerBlock>span{
+  color:rgba(235,250,255,.97)!important;
+  font-weight:820!important;
+  letter-spacing:.105em!important;
+  text-shadow:0 1px 0 rgba(0,0,0,.82),0 0 8px rgba(87,211,248,.09)!important;
+}
+.is-paused .tr-performanceTimerBlock>span{color:rgba(255,236,202,.96)!important}
+.tr-performanceControl{
+  min-height:32px;
+  min-width:68px;
+  padding:0 12px;
+  border-radius:6px!important;
+  font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif!important;
+  font-size:9.1px!important;
+  font-weight:800!important;
+  font-variation-settings:"wght" 800!important;
+  letter-spacing:.065em!important;
+  background:linear-gradient(180deg,rgba(23,46,57,.84),rgba(5,13,18,.95))!important;
+  box-shadow:inset 0 1px 0 rgba(249,254,255,.11),inset 0 -1px 0 rgba(0,0,0,.26),0 7px 17px rgba(0,0,0,.27)!important;
+}
+.tr-performanceControl.is-pause{border-color:rgba(87,236,174,.47)!important;color:#e4fff1!important;box-shadow:inset 0 1px 0 rgba(243,255,250,.12),0 7px 17px rgba(0,0,0,.27),0 0 15px rgba(82,239,174,.055)!important}
+.tr-performanceControl.is-resume{border-color:rgba(88,236,171,.53)!important;color:#e0ffed!important;background:linear-gradient(180deg,rgba(22,68,52,.76),rgba(5,23,17,.95))!important}
+.tr-performanceControl.is-end{border-color:rgba(239,103,109,.31)!important;color:#ffd0d2!important;background:linear-gradient(180deg,rgba(60,26,29,.63),rgba(18,7,9,.91))!important}
+
+/* Benchmark remains fixed and centered below its notch, but more legible. */
+.tr-sessionTrajectoryAverage{
+  color:#ffd58d!important;
+  font-size:8px!important;
+  font-weight:850!important;
+  letter-spacing:.065em!important;
+  text-shadow:0 1px 0 rgba(0,0,0,.92),0 0 10px rgba(255,178,70,.23)!important;
+}
+.is-paused .tr-sessionTrajectoryAverage{color:#ffc16f!important;text-shadow:0 1px 0 rgba(0,0,0,.92),0 0 10px rgba(255,156,57,.22)!important}
+.tr-sessionTrajectoryCanvas{
+  filter:drop-shadow(0 1px 3px rgba(62,203,247,.24)) drop-shadow(0 0 6px rgba(72,220,255,.09)) drop-shadow(0 0 4px rgba(83,241,174,.055))!important;
+  mix-blend-mode:screen;
+}
+.is-paused .tr-sessionTrajectoryCanvas{filter:drop-shadow(0 1px 3px rgba(241,157,54,.20)) drop-shadow(0 0 5px rgba(255,176,70,.08))!important}
+
+/* DESKTOP: date gets its own center-right lane. Timer can become a hero. */
+@media(min-width:901px){
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{padding:5px 11px 4px}
+  .tr-performanceActiveMain{min-height:50px}
+  .tr-performanceActiveMain>.tr-performanceStateBlock{left:0;top:4px}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:42px!important;height:42px!important}
+  .tr-performanceActiveMain>.tr-performanceTimerBlock{
+    left:50%;
+    top:-1px;
+    min-width:192px;
+    transform:translateX(-50%);
+    justify-items:center;
+  }
+  .tr-performanceTimer{font-size:38px!important;line-height:.91!important}
+  .tr-performanceTimerBlock>span{font-size:8px!important;margin-top:1px}
+  .tr-performanceActiveMain>.tr-performanceDate{
+    left:68%;
+    top:13px;
+    width:max-content;
+    max-width:23%;
+    transform:translateX(-50%);
+    text-align:center;
+    color:rgba(232,244,248,.91);
+    font-size:11px;
+    font-weight:720;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .tr-performanceActiveMain>.tr-performanceActions{right:0;top:5px;gap:18px}
+  .tr-sessionTrajectory{height:29px}
+  .tr-sessionTrajectoryCanvas{height:19px}
+}
+
+/* Mid-width/tablet keeps the safe mobile-style center stack. */
+@media(min-width:721px) and (max-width:900px){
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{padding:5px 9px 4px}
+  .tr-performanceActiveMain{min-height:52px}
+  .tr-performanceActiveMain>.tr-performanceTimerBlock{left:50%;top:0;min-width:154px;transform:translateX(-50%);justify-items:center}
+  .tr-performanceTimer{font-size:29px!important}
+  .tr-performanceTimerBlock>span{font-size:7px!important}
+  .tr-performanceActiveMain>.tr-performanceDate{left:50%;top:38px;max-width:54%;transform:translateX(-50%);font-size:9.5px;text-align:center}
+  .tr-performanceActiveMain>.tr-performanceActions{right:0;top:4px;gap:12px}
+  .tr-performanceControl{min-width:58px;padding:0 9px;font-size:8px!important}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:37px!important;height:37px!important}
+}
+
+/* MOBILE: timer remains centered; date stays below and gets a small air gap. */
+@media(max-width:720px){
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{min-height:84px;padding:5px 8px 4px}
+  .tr-performanceActiveMain{min-height:52px}
+  .tr-performanceActiveMain>.tr-performanceStateBlock{left:0;top:4px}
+  .tr-performanceActiveMain>.tr-performanceTimerBlock{left:50%;top:0;min-width:134px;transform:translateX(-50%);justify-items:center}
+  .tr-performanceTimer{font-size:clamp(24px,7vw,27px)!important;line-height:.94!important}
+  .tr-performanceTimerBlock>span{font-size:6.8px!important;letter-spacing:.095em!important}
+  .tr-performanceActiveMain>.tr-performanceDate{
+    left:50%;
+    top:39px;
+    max-width:58%;
+    transform:translateX(-50%);
+    font-size:clamp(8.7px,2.55vw,10px);
+    text-align:center;
+    color:rgba(232,244,248,.90);
+  }
+  .tr-performanceActiveMain>.tr-performanceActions{right:0;top:3px;gap:12px}
+  .tr-performanceControl{min-width:49px;min-height:30px;padding:0 7px;font-size:7.3px!important;gap:4px}
+  .tr-performanceControl>span{font-size:8px}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:35px!important;height:35px!important}
+  .tr-sessionTrajectory{height:27px}
+  .tr-sessionTrajectoryCanvas{height:18px}
+  .tr-sessionTrajectoryAverage{font-size:7px!important;letter-spacing:.052em!important}
+}
+@media(max-width:430px){
+  .tr-performanceActiveMain>.tr-performanceStateBlock{transform:scale(.93);transform-origin:left center}
+  .tr-performanceActiveMain>.tr-performanceActions{gap:9px}
+  .tr-performanceControl{min-width:46px;padding:0 6px;font-size:6.9px!important}
+  .tr-performanceActiveMain>.tr-performanceDate{top:39px;max-width:56%;font-size:8.6px}
+}
+@media(max-width:380px){
+  .tr-performanceActiveMain>.tr-performanceStateBlock{transform:scale(.89);transform-origin:left center}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:33px!important;height:33px!important}
+  .tr-performanceTimer{font-size:23.5px!important}
+  .tr-performanceActiveMain>.tr-performanceActions{gap:6px}
+  .tr-performanceControl{min-width:43px;padding:0 5px;font-size:6.5px!important}
+  .tr-performanceControl>span{font-size:7px}
+  .tr-performanceActiveMain>.tr-performanceDate{font-size:8.1px;max-width:52%}
+  .tr-sessionTrajectoryAverage{font-size:6.5px!important}
+}
+
 @media(prefers-reduced-motion:reduce){
   .tr-performanceHudSurface::before,
   .tr-performanceHudSurface::after,
