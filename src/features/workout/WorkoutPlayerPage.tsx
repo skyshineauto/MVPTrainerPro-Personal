@@ -4412,7 +4412,7 @@ export function WorkoutPlayerPage({ params }: any) {
                 aria-label={sessionIntelExpanded ? "Minimize Session Check-in" : "Maximize Session Check-in"}
                 title={sessionIntelExpanded ? "Minimize Session Check-in" : "Maximize Session Check-in"}
               >
-                <span aria-hidden="true">{sessionIntelExpanded ? "⌃" : "⌄"}</span>
+                <span aria-hidden="true" className={sessionIntelExpanded ? "is-up" : "is-down"} />
               </button>
             </div>
           }
@@ -6864,7 +6864,13 @@ export function WorkoutPlayerPage({ params }: any) {
           transition:color .16s ease,filter .16s ease;
         }
         .tr-siToggle:hover{color:#fff;filter:drop-shadow(0 0 8px rgba(54,210,255,.62))}
-        .tr-siToggle span{display:block;font-size:24px;line-height:1;font-weight:650;transform:none;text-shadow:0 0 12px rgba(46,209,255,.40)}
+        .tr-siToggle span{
+          display:block;width:10px;height:10px;box-sizing:border-box;
+          border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+          filter:drop-shadow(0 0 7px rgba(46,209,255,.42));transform-origin:50% 50%;
+        }
+        .tr-siToggle span.is-up{transform:translateY(2px) rotate(225deg)}
+        .tr-siToggle span.is-down{transform:translateY(-2px) rotate(45deg)}
 
         .tr-siVisualAsset{display:block;max-width:100%;height:auto;object-fit:contain;pointer-events:none;user-select:none}
         .tr-siVisualBody{filter:saturate(1.08) contrast(1.03) drop-shadow(0 0 17px rgba(28,153,255,.34))}
@@ -6982,7 +6988,7 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-siShell .tr-card-head{min-height:45px}
           .tr-siShell.is-compact .tr-card-head{min-height:37px}
           .tr-siHeaderRight{gap:6px}.tr-siHeaderRight .tr-checkinContext{max-width:47vw;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-          .tr-siToggle{width:24px;height:24px}.tr-siToggle span{font-size:21px}
+          .tr-siToggle{width:24px;height:24px}.tr-siToggle span{width:9px;height:9px;border-right-width:2px;border-bottom-width:2px}
 
           /* Mobile expanded: three image/text rows on ONE surface, thin etched separators only. */
           .tr-siPrimaryRow{grid-template-columns:1fr;min-height:0}
