@@ -1,8 +1,8 @@
 import type { MusicTrack } from "./musicStorage";
 import { supabase } from "./supabase";
 
-export type MusicDiscoveryCategory = "new_upcoming" | "same_era" | "hidden_era";
-export type MusicDiscoveryType = "new_artist" | "new_release" | "modern_match" | "era_match" | "hidden_gem";
+export type MusicDiscoveryCategory = "artist_catalog" | "new_upcoming" | "same_era" | "hidden_era";
+export type MusicDiscoveryType = "artist_catalog" | "new_artist" | "new_release" | "modern_match" | "era_match" | "hidden_gem";
 
 export type MusicDiscoveryRecommendation = {
   id: string;
@@ -175,12 +175,13 @@ function yearFromTrack(track: MusicTrack) {
 }
 
 function safeCategory(value: unknown): MusicDiscoveryCategory {
-  if (value === "new_upcoming" || value === "hidden_era") return value;
+  if (value === "artist_catalog" || value === "new_upcoming" || value === "same_era" || value === "hidden_era") return value;
   return "same_era";
 }
 
 function safeDiscoveryType(value: unknown, category: MusicDiscoveryCategory): MusicDiscoveryType {
-  if (value === "new_artist" || value === "new_release" || value === "modern_match" || value === "era_match" || value === "hidden_gem") return value;
+  if (value === "artist_catalog" || value === "new_artist" || value === "new_release" || value === "modern_match" || value === "era_match" || value === "hidden_gem") return value;
+  if (category === "artist_catalog") return "artist_catalog";
   if (category === "new_upcoming") return "new_release";
   if (category === "hidden_era") return "hidden_gem";
   return "era_match";
@@ -214,93 +215,55 @@ function sanitizeRecommendation(value: unknown): MusicDiscoveryRecommendation | 
 }
 
 function discoveryCategoryType(item: MusicDiscoveryRecommendation, category: MusicDiscoveryCategory): MusicDiscoveryType {
+  if (category === "artist_catalog") return "artist_catalog";
   if (category === "new_upcoming") {
-    return item.discoveryType === "new_artist" ? "new_artist" : "new_release";
+    if (item.discoveryType === "new_artist") return "new_artist";
+    if (item.discoveryType === "modern_match") return "modern_match";
+    return "new_release";
   }
   if (category === "hidden_era") return "hidden_gem";
-  return item.discoveryType === "modern_match" ? "modern_match" : "era_match";
+  return "era_match";
 }
 
 function rebalanceDiscoveryLanes(
   recommendations: MusicDiscoveryRecommendation[],
   seedYear: number | null,
+  seedArtist: string,
 ): MusicDiscoveryRecommendation[] {
   if (!recommendations.length) return recommendations;
 
   const currentYear = new Date().getFullYear();
-  const strictCurrentStart = currentYear - 1;
-  const currentFallbackYear = currentYear - 2;
   const maxKnownYear = currentYear + 1;
-  const assigned = new Map<string, MusicDiscoveryCategory>();
-  const available = recommendations.map((item, index) => ({ item, index }));
-
-  // New & Current is truly current: normally this year or the previous year.
-  for (const { item } of available) {
-    if (item.year != null && item.year >= strictCurrentStart && item.year <= maxKnownYear) {
-      assigned.set(item.id, "new_upcoming");
-    }
-  }
-
-  // Allow at most one two-year-old release as a fallback when the truly-current lane is thin.
-  const strictCurrentCount = [...assigned.values()].filter((category) => category === "new_upcoming").length;
-  if (strictCurrentCount < 3) {
-    const fallback = available.find(({ item }) =>
-      !assigned.has(item.id) &&
-      item.year === currentFallbackYear &&
-      item.category === "new_upcoming" &&
-      (item.discoveryType === "new_release" || item.discoveryType === "new_artist" || item.discoveryType === "modern_match")
-    );
-    if (fallback) assigned.set(fallback.item.id, "new_upcoming");
-  }
-
-  if (seedYear != null) {
-    const currentSeed = seedYear >= currentYear - 2;
-    const primaryMin = currentSeed ? seedYear - 3 : seedYear - 2;
-    const primaryMax = currentSeed ? maxKnownYear : seedYear + 2;
-
-    for (const { item } of available) {
-      if (assigned.has(item.id) || item.year == null) continue;
-      if (item.year >= primaryMin && item.year <= primaryMax) assigned.set(item.id, "same_era");
-    }
-
-    // If same-era is still sparse, widen gradually instead of leaving an empty lane.
-    let sameEraCount = [...assigned.values()].filter((category) => category === "same_era").length;
-    if (sameEraCount < 3) {
-      const wider = available
-        .filter(({ item }) => !assigned.has(item.id) && item.year != null)
-        .map((entry) => ({ ...entry, distance: Math.abs(Number(entry.item.year) - seedYear) }))
-        .filter((entry) => entry.distance <= 6)
-        .sort((a, b) => a.distance - b.distance || a.index - b.index);
-      for (const entry of wider) {
-        if (sameEraCount >= 3) break;
-        assigned.set(entry.item.id, "same_era");
-        sameEraCount += 1;
-      }
-    }
-  }
-
-  // Undated provider results keep a verified provider lane only when we cannot classify by year.
-  for (const { item } of available) {
-    if (assigned.has(item.id)) continue;
-    if (item.year == null && item.category === "new_upcoming" && (item.discoveryType === "new_release" || item.discoveryType === "new_artist")) {
-      assigned.set(item.id, "new_upcoming");
-      continue;
-    }
-    if (item.year == null && item.category === "same_era" && seedYear != null) {
-      assigned.set(item.id, "same_era");
-      continue;
-    }
-    assigned.set(item.id, "hidden_era");
-  }
+  const seedArtistKey = normalized(seedArtist);
+  const primaryMin = seedYear == null ? null : seedYear >= currentYear - 2 ? seedYear - 2 : seedYear - 2;
+  const primaryMax = seedYear == null ? null : seedYear >= currentYear - 2 ? maxKnownYear : seedYear + 2;
+  const fallbackMin = seedYear == null ? null : seedYear >= currentYear - 2 ? seedYear - 3 : seedYear - 3;
+  const fallbackMax = seedYear == null ? null : seedYear >= currentYear - 2 ? maxKnownYear : seedYear + 3;
 
   return recommendations.map((item) => {
-    const category = assigned.get(item.id) ?? item.category;
-    if (category === item.category) return item;
-    return {
-      ...item,
-      category,
-      discoveryType: discoveryCategoryType(item, category),
-    };
+    let category = item.category;
+
+    // Same-artist discoveries always live in their dedicated full-career lane.
+    if (seedArtistKey && normalized(item.artist) === seedArtistKey) {
+      category = "artist_catalog";
+    } else if (item.category === "new_upcoming") {
+      // Keep true current results. A two-year-old song is accepted only when the server
+      // explicitly selected it as an exceptional current match. Older material is never padded in.
+      if (item.year != null && item.year < currentYear - 2) {
+        category = seedYear != null && fallbackMin != null && fallbackMax != null && item.year >= fallbackMin && item.year <= fallbackMax
+          ? "same_era"
+          : "hidden_era";
+      }
+    } else if (item.category === "same_era" && item.year != null && seedYear != null) {
+      // Modern seeds: primary 2024-2026 style window for a 2026 seed, fallback only to 2023.
+      // Do not widen to 2022 merely to fill the lane.
+      if (primaryMin != null && primaryMax != null && item.year >= primaryMin && item.year <= primaryMax) category = "same_era";
+      else if (fallbackMin != null && fallbackMax != null && item.year >= fallbackMin && item.year <= fallbackMax) category = "same_era";
+      else category = "hidden_era";
+    }
+
+    const discoveryType = discoveryCategoryType(item, category);
+    return category === item.category && discoveryType === item.discoveryType ? item : { ...item, category, discoveryType };
   });
 }
 
@@ -316,6 +279,7 @@ function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
       ? row.recommendations.map(sanitizeRecommendation).filter((item): item is MusicDiscoveryRecommendation => Boolean(item))
       : [],
     seedYear,
+    clean(row.trackArtist) || "Unknown Artist",
   );
   return {
     id,

@@ -77,7 +77,7 @@ type DraftMap = Record<string, { title: string; artist: string; album: string; r
 type PlaylistTrackMap = Record<string, string[]>;
 type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "intelligence" | "discover";
 type DiscoverySort = "newest" | "oldest" | "artist" | "most";
-type DiscoveryFilter = "all" | "new_current" | "same_era" | "hidden" | "unowned";
+type DiscoveryFilter = "all" | "artist_catalog" | "new_current" | "same_era" | "hidden" | "unowned";
 type DiscoveryView = "archive" | "saved";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
@@ -300,12 +300,14 @@ function buildDraftMap(rows: MusicTrack[]): DraftMap {
 
 
 const DISCOVERY_SECTIONS: Array<{ key: MusicDiscoveryCategory; title: string; subtitle: string; tone: string }> = [
-  { key: "new_upcoming", title: "New & Current", subtitle: "New artists plus new releases from established related artists", tone: "new" },
-  { key: "same_era", title: "Similar From That Era", subtitle: "Popular, essential, and overlooked matches from the seed song's era", tone: "era" },
-  { key: "hidden_era", title: "Hidden Gems Across Eras", subtitle: "Deeper new-to-you tracks from any era that genuinely fit the seed sound", tone: "hidden" },
+  { key: "artist_catalog", title: "More From This Artist", subtitle: "Popular and seed-matched songs from this artist's full career", tone: "artist" },
+  { key: "new_upcoming", title: "New & Current", subtitle: "Current releases that genuinely match the seed song and artist style", tone: "new" },
+  { key: "same_era", title: "Similar From That Era", subtitle: "Strong stylistic matches close to the seed song's release era", tone: "era" },
+  { key: "hidden_era", title: "Hidden Gems Across Eras", subtitle: "Deeper new-to-you tracks from other eras that still fit the seed sound", tone: "hidden" },
 ];
 
 function filterDiscoveryRecommendations(items: MusicDiscoveryRecommendation[], filter: DiscoveryFilter) {
+  if (filter === "artist_catalog") return items.filter((item) => item.category === "artist_catalog");
   if (filter === "new_current") return items.filter((item) => item.category === "new_upcoming");
   if (filter === "same_era") return items.filter((item) => item.category === "same_era");
   if (filter === "hidden") return items.filter((item) => item.category === "hidden_era");
@@ -314,6 +316,7 @@ function filterDiscoveryRecommendations(items: MusicDiscoveryRecommendation[], f
 }
 
 function discoverySectionsForFilter(filter: DiscoveryFilter) {
+  if (filter === "artist_catalog") return DISCOVERY_SECTIONS.filter((section) => section.key === "artist_catalog");
   if (filter === "new_current") return DISCOVERY_SECTIONS.filter((section) => section.key === "new_upcoming");
   if (filter === "same_era") return DISCOVERY_SECTIONS.filter((section) => section.key === "same_era");
   if (filter === "hidden") return DISCOVERY_SECTIONS.filter((section) => section.key === "hidden_era");
@@ -348,6 +351,7 @@ function formatDiscoveryDate(value: number) {
   return `${dateText} • ${timeText}`;
 }
 function discoveryTypeLabel(item: MusicDiscoveryRecommendation | MusicDiscoverySavedSong) {
+  if (item.discoveryType === "artist_catalog") return "ARTIST CATALOG";
   if (item.discoveryType === "new_artist") return "NEW ARTIST";
   if (item.discoveryType === "new_release") return "NEW RELEASE";
   if (item.discoveryType === "modern_match") return "MODERN MATCH";
@@ -1926,14 +1930,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </section>
 
           <header className="tr10-discoverHead">
-            <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "New & Current, same-era essentials, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
-            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? "5 SONGS PER PAGE" : `${discoverySeeds.length} SAVED SEED${discoverySeeds.length === 1 ? "" : "S"} • 3 CURATED LANES`}</small></div>
+            <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "More from the seed artist, genuinely similar current music, same-era matches, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
+            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? "5 SONGS PER PAGE" : `${discoverySeeds.length} SAVED SEED${discoverySeeds.length === 1 ? "" : "S"} • 4 CURATED LANES`}</small></div>
           </header>
 
           {(discoverySeeds.length || savedDiscoverySongs.length) ? <div className="tr10-discoverArchiveTools">
             <label className="tr10-discoverSearch"><span>{discoveryView === "saved" ? "SEARCH SAVED SONGS" : "SEARCH ARCHIVE"}</span><input value={discoverySearch} onChange={(event) => setDiscoverySearch(event.target.value)} placeholder={discoveryView === "saved" ? "Song, artist, or source" : "Song, artist, or recommendation"} /></label>
             <label><span>SORT</span><select value={discoverySort} onChange={(event) => setDiscoverySort(event.target.value as DiscoverySort)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="artist">Artist A–Z</option>{discoveryView === "archive" ? <option value="most">Most discoveries</option> : null}</select></label>
-            <label><span>FILTER</span><select value={discoveryFilter} disabled={discoveryView === "saved"} onChange={(event) => setDiscoveryFilter(event.target.value as DiscoveryFilter)}><option value="all">{discoveryView === "saved" ? "Saved songs" : "All discoveries"}</option><option value="new_current">Has New & Current</option><option value="same_era">Has Same-Era Matches</option><option value="hidden">Has Hidden Gems</option><option value="unowned">Has New-to-You Tracks</option></select></label>
+            <label><span>FILTER</span><select value={discoveryFilter} disabled={discoveryView === "saved"} onChange={(event) => setDiscoveryFilter(event.target.value as DiscoveryFilter)}><option value="all">{discoveryView === "saved" ? "Saved songs" : "All discoveries"}</option><option value="artist_catalog">Has More From Artist</option><option value="new_current">Has New & Current</option><option value="same_era">Has Same-Era Matches</option><option value="hidden">Has Hidden Gems</option><option value="unowned">Has New-to-You Tracks</option></select></label>
             <button type="button" className={`tr10-savedSongsButton ${discoveryView === "saved" ? "is-active" : ""}`} aria-pressed={discoveryView === "saved"} onClick={() => setDiscoveryView((current) => current === "saved" ? "archive" : "saved")}>Saved Songs</button>
           </div> : null}
 
@@ -1976,9 +1980,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                     const items = visible.filter((item) => item.category === section.key);
                     const laneKey = discoveryLaneKey(seed.id, section.key);
                     const laneExpanded = expandedDiscoveryLaneIds.has(laneKey);
+                    const sectionTitle = section.key === "artist_catalog" ? `More From ${seed.trackArtist}` : section.title;
                     return <section className={`tr10-discoverCategory is-${section.tone} ${laneExpanded ? "is-expanded" : "is-collapsed"}`} key={section.key}>
                       <button type="button" className="tr10-discoverCategoryToggle" onClick={() => toggleDiscoveryLane(seed.id, section.key)} aria-expanded={laneExpanded}>
-                        <div><span>{section.title}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
+                        <div><span>{sectionTitle}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
                       </button>
                       {laneExpanded ? (items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} saved={savedDiscoverySongIds.has(item.id)} saving={savingRecommendationId === item.id} onPreview={toggleDiscoveryPreview} onSave={(recommendation) => void saveDiscoveryRecommendation(seed, recommendation)} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to refresh and widen this lane.</div>) : null}
                     </section>;
@@ -3177,6 +3182,27 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         }
         @media(max-width:360px){.tr10-table.is-grid{grid-template-columns:1fr!important}}
 
+
+
+        /* MVP TRAINER R12.2 REDISCOVER DEPTH + ARTIST CATALOG */
+        .tr10-discover{background:radial-gradient(circle at 50% 0%,rgba(41,117,144,.055),transparent 34%),linear-gradient(180deg,#03090d 0%,#020609 100%)!important;border-radius:14px!important}
+        .tr10-discoverSeed{background:linear-gradient(180deg,#071116 0%,#04090c 100%)!important;border-color:rgba(127,184,203,.16)!important;box-shadow:0 12px 32px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.025)!important}
+        .tr10-discoverSections{background:linear-gradient(180deg,rgba(2,7,10,.94),rgba(2,6,9,.99))!important}
+        .tr10-discoverCategory{background:#050b0f!important;border:1px solid rgba(128,181,198,.12)!important;box-shadow:inset 0 1px rgba(255,255,255,.025),0 7px 18px rgba(0,0,0,.20)!important;overflow:hidden!important}
+        .tr10-discoverCategoryToggle{background:linear-gradient(180deg,#0b151a,#071015)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),inset 0 -1px rgba(0,0,0,.65)!important}
+        .tr10-discoverCategory.is-artist{border-top:2px solid #eef7fb!important}.tr10-discoverCategory.is-artist .tr10-discoverCategoryToggle span{color:#f4fbff!important;text-shadow:0 0 12px rgba(218,239,248,.22)!important}.tr10-discoverCategory.is-artist .tr10-discoverCategoryToggle b{border:1px solid rgba(225,241,248,.24)!important;background:linear-gradient(180deg,#202b30,#11191d)!important;color:#fff!important;box-shadow:0 0 12px rgba(219,239,247,.10)!important}
+        .tr10-discoverType.is-artist_catalog{color:#f2f9fc!important;background:linear-gradient(180deg,rgba(228,241,247,.15),rgba(174,202,213,.07))!important;border:1px solid rgba(224,241,248,.18)!important;box-shadow:inset 0 1px rgba(255,255,255,.08)!important}
+        .tr10-discoverCategory .tr10-discoverGrid{background:linear-gradient(180deg,#03080b,#020608)!important}
+        .tr10-discoverGrid article{position:relative!important;background:linear-gradient(155deg,#122028 0%,#0c171d 48%,#081116 100%)!important;border:1px solid rgba(157,204,220,.22)!important;box-shadow:0 10px 24px rgba(0,0,0,.38),0 2px 7px rgba(0,0,0,.30),inset 0 1px rgba(255,255,255,.075),inset 1px 0 rgba(255,255,255,.025)!important;overflow:hidden!important;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease!important}
+        .tr10-discoverGrid article::before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(221,242,249,.20),transparent);pointer-events:none}
+        .tr10-discoverGrid article:hover{transform:translateY(-2px)!important;border-color:rgba(140,211,234,.34)!important;box-shadow:0 15px 31px rgba(0,0,0,.46),0 4px 11px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.10)!important}
+        .tr10-discoverGrid article>img,.tr10-discoverArt{position:relative!important;z-index:1!important;border:1px solid rgba(210,236,245,.16)!important;box-shadow:0 8px 18px rgba(0,0,0,.38),0 0 18px rgba(91,184,218,.07),inset 0 1px rgba(255,255,255,.07)!important}
+        .tr10-discoverGrid article>div,.tr10-discoverGrid article footer{position:relative!important;z-index:1!important}
+        .tr10-discoverGrid article strong{color:#fff!important;text-shadow:0 1px 1px rgba(0,0,0,.58)!important}.tr10-discoverGrid article span{color:#c4d6dd!important}.tr10-discoverGrid article p{color:#8faab4!important}
+        .tr10-discoverGrid article footer button,.tr10-discoverGrid article footer b,.tr10-previewUnavailable,.tr10-storeLink{background:linear-gradient(180deg,#12222a,#091318)!important;border-color:rgba(145,197,214,.20)!important;box-shadow:0 4px 9px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.055)!important}
+        .tr10-discoverGrid article footer button:hover,.tr10-storeLink:hover{transform:translateY(-1px);border-color:rgba(113,210,242,.38)!important;box-shadow:0 7px 13px rgba(0,0,0,.30),inset 0 1px rgba(255,255,255,.075)!important}
+        .tr10-discoverGrid article.is-owned{opacity:.82!important;background:linear-gradient(155deg,#101b20,#091116)!important}
+        @media(max-width:650px){.tr10-discoverGrid article:hover{transform:none!important}.tr10-discover{border-radius:11px!important}.tr10-discoverCategory .tr10-discoverGrid{padding:7px!important}.tr10-discoverGrid article{box-shadow:0 8px 17px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.07)!important}}
       `}</style>
     </main>
   );
