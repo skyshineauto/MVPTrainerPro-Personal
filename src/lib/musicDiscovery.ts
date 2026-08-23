@@ -121,6 +121,8 @@ const SAVED_SONGS_STORAGE_KEY = "mvp_music_discovery_saved_songs_v1";
 const SAVED_SONGS_DELETED_KEY = "mvp_music_discovery_saved_songs_deleted_v1";
 const DELETED_TTL_MS = 30 * 86400000;
 const EVENT = "mvp:music-discovery-changed";
+export const MUSIC_REDISCOVER_FOCUS_EVENT = "mvp:music-rediscover-focus";
+const MUSIC_REDISCOVER_FOCUS_STORAGE_KEY = "mvp_music_rediscover_focus_v1";
 const CLOUD_TABLE = "music_discovery_seeds";
 const HISTORY_TABLE = "music_discovery_history";
 const SAVED_SONGS_TABLE = "music_discovery_saved_songs";
@@ -211,22 +213,117 @@ function sanitizeRecommendation(value: unknown): MusicDiscoveryRecommendation | 
   };
 }
 
+function discoveryCategoryType(item: MusicDiscoveryRecommendation, category: MusicDiscoveryCategory): MusicDiscoveryType {
+  if (category === "new_upcoming") {
+    return item.discoveryType === "new_artist" ? "new_artist" : "new_release";
+  }
+  if (category === "hidden_era") return "hidden_gem";
+  return item.discoveryType === "modern_match" ? "modern_match" : "era_match";
+}
+
+function rebalanceDiscoveryLanes(
+  recommendations: MusicDiscoveryRecommendation[],
+  seedYear: number | null,
+): MusicDiscoveryRecommendation[] {
+  if (!recommendations.length) return recommendations;
+
+  const currentYear = new Date().getFullYear();
+  const strictCurrentStart = currentYear - 1;
+  const currentFallbackYear = currentYear - 2;
+  const maxKnownYear = currentYear + 1;
+  const assigned = new Map<string, MusicDiscoveryCategory>();
+  const available = recommendations.map((item, index) => ({ item, index }));
+
+  // New & Current is truly current: normally this year or the previous year.
+  for (const { item } of available) {
+    if (item.year != null && item.year >= strictCurrentStart && item.year <= maxKnownYear) {
+      assigned.set(item.id, "new_upcoming");
+    }
+  }
+
+  // Allow at most one two-year-old release as a fallback when the truly-current lane is thin.
+  const strictCurrentCount = [...assigned.values()].filter((category) => category === "new_upcoming").length;
+  if (strictCurrentCount < 3) {
+    const fallback = available.find(({ item }) =>
+      !assigned.has(item.id) &&
+      item.year === currentFallbackYear &&
+      item.category === "new_upcoming" &&
+      (item.discoveryType === "new_release" || item.discoveryType === "new_artist" || item.discoveryType === "modern_match")
+    );
+    if (fallback) assigned.set(fallback.item.id, "new_upcoming");
+  }
+
+  if (seedYear != null) {
+    const currentSeed = seedYear >= currentYear - 2;
+    const primaryMin = currentSeed ? seedYear - 3 : seedYear - 2;
+    const primaryMax = currentSeed ? maxKnownYear : seedYear + 2;
+
+    for (const { item } of available) {
+      if (assigned.has(item.id) || item.year == null) continue;
+      if (item.year >= primaryMin && item.year <= primaryMax) assigned.set(item.id, "same_era");
+    }
+
+    // If same-era is still sparse, widen gradually instead of leaving an empty lane.
+    let sameEraCount = [...assigned.values()].filter((category) => category === "same_era").length;
+    if (sameEraCount < 3) {
+      const wider = available
+        .filter(({ item }) => !assigned.has(item.id) && item.year != null)
+        .map((entry) => ({ ...entry, distance: Math.abs(Number(entry.item.year) - seedYear) }))
+        .filter((entry) => entry.distance <= 6)
+        .sort((a, b) => a.distance - b.distance || a.index - b.index);
+      for (const entry of wider) {
+        if (sameEraCount >= 3) break;
+        assigned.set(entry.item.id, "same_era");
+        sameEraCount += 1;
+      }
+    }
+  }
+
+  // Undated provider results keep a verified provider lane only when we cannot classify by year.
+  for (const { item } of available) {
+    if (assigned.has(item.id)) continue;
+    if (item.year == null && item.category === "new_upcoming" && (item.discoveryType === "new_release" || item.discoveryType === "new_artist")) {
+      assigned.set(item.id, "new_upcoming");
+      continue;
+    }
+    if (item.year == null && item.category === "same_era" && seedYear != null) {
+      assigned.set(item.id, "same_era");
+      continue;
+    }
+    assigned.set(item.id, "hidden_era");
+  }
+
+  return recommendations.map((item) => {
+    const category = assigned.get(item.id) ?? item.category;
+    if (category === item.category) return item;
+    return {
+      ...item,
+      category,
+      discoveryType: discoveryCategoryType(item, category),
+    };
+  });
+}
+
 function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<MusicDiscoverySeed>;
   const trackId = clean(row.trackId);
   const id = clean(row.id) || (trackId ? `seed:${trackId}` : "");
   if (!id || !trackId) return null;
-  const recommendations = Array.isArray(row.recommendations)
-    ? row.recommendations.map(sanitizeRecommendation).filter((item): item is MusicDiscoveryRecommendation => Boolean(item))
-    : [];
+  const seedYear = Number(row.seedYear) >= 1900 ? Number(row.seedYear) : null;
+  const recommendations = rebalanceDiscoveryLanes(
+    Array.isArray(row.recommendations)
+      ? row.recommendations.map(sanitizeRecommendation).filter((item): item is MusicDiscoveryRecommendation => Boolean(item))
+      : [],
+    seedYear,
+  );
   return {
     id,
     trackId,
     trackTitle: clean(row.trackTitle) || "Current Song",
     trackArtist: clean(row.trackArtist) || "Unknown Artist",
     artworkUrl: clean(row.artworkUrl) || null,
-    seedYear: Number(row.seedYear) >= 1900 ? Number(row.seedYear) : null,
+    seedYear,
     createdAt: Number(row.createdAt) || Date.now(),
     refreshedAt: Number(row.refreshedAt) || Date.now(),
     recommendations,
@@ -629,6 +726,24 @@ export function getDiscoverPreferenceBoost(track: MusicTrack) {
     else if (trackGenre && normalized(signal.genre) === trackGenre) boost += 2.5 * strength;
   }
   return Math.min(32, boost);
+}
+
+export function requestMusicRediscoverFocus(seedId: string) {
+  const cleanSeedId = clean(seedId);
+  if (!cleanSeedId || typeof window === "undefined") return;
+  try { window.sessionStorage.setItem(MUSIC_REDISCOVER_FOCUS_STORAGE_KEY, cleanSeedId); } catch { /* Optional navigation handoff. */ }
+  window.dispatchEvent(new CustomEvent(MUSIC_REDISCOVER_FOCUS_EVENT, { detail: { seedId: cleanSeedId } }));
+}
+
+export function consumeMusicRediscoverFocus() {
+  if (typeof window === "undefined") return null;
+  try {
+    const seedId = clean(window.sessionStorage.getItem(MUSIC_REDISCOVER_FOCUS_STORAGE_KEY));
+    if (seedId) window.sessionStorage.removeItem(MUSIC_REDISCOVER_FOCUS_STORAGE_KEY);
+    return seedId || null;
+  } catch {
+    return null;
+  }
 }
 
 export function listMusicDiscoverySeeds() {

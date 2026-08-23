@@ -102,7 +102,7 @@ import {
   type MusicDspEngineMode,
   type MusicTransitionMode,
 } from "../../lib/musicPlayer";
-import { discoverMoreFromTrack } from "../../lib/musicDiscovery";
+import { discoverMoreFromTrack, requestMusicRediscoverFocus } from "../../lib/musicDiscovery";
 import {
   getActiveRadioMode,
   isAdaptiveRadioName,
@@ -1933,7 +1933,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             if (!track) return;
             setDiscoverMessage("SEARCHING…");
             void discoverMoreFromTrack(track, player.libraryTracks)
-              .then(() => { setDiscoverMessage("✓ REDISCOVERED"); window.setTimeout(() => setDiscoverMessage(""), 2200); })
+              .then((seed) => {
+                setDiscoverMessage("✓ REDISCOVERED");
+                if (seed?.id) {
+                  requestMusicRediscoverFocus(seed.id);
+                  navigate("/music");
+                }
+                window.setTimeout(() => setDiscoverMessage(""), 2200);
+              })
               .catch(() => { setDiscoverMessage("REDISCOVER RETRY"); window.setTimeout(() => setDiscoverMessage(""), 2200); });
           }} aria-label="Rediscover music" aria-busy={Boolean(discoverMessage)}><span className="tr-heroPrefIcon"><PlayerIcon name="discover" /></span><span className="tr-heroPrefLabel">REDISCOVER</span></button>
         </div>

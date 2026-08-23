@@ -56,6 +56,8 @@ import {
   getDiscoverPreferenceBoost,
   listMusicDiscoverySavedSongs,
   listMusicDiscoverySeeds,
+  MUSIC_REDISCOVER_FOCUS_EVENT,
+  consumeMusicRediscoverFocus,
   refreshDiscoveryLibraryFlags,
   removeDiscoverySeed,
   removeMusicDiscoverySavedSong,
@@ -798,6 +800,20 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   useEffect(() => {
     refreshDiscoveryLibraryFlags(tracks);
   }, [tracks]);
+  useEffect(() => {
+    const openPendingRediscover = (event?: Event) => {
+      const eventSeedId = event instanceof CustomEvent ? String(event.detail?.seedId || "").trim() : "";
+      const storedSeedId = consumeMusicRediscoverFocus();
+      const pendingSeedId = eventSeedId || storedSeedId;
+      if (!pendingSeedId) return;
+      // The discovery change event may land a few milliseconds before state refresh.
+      setDiscoverySeeds(listMusicDiscoverySeeds());
+      openRediscoverSeed(pendingSeedId);
+    };
+    openPendingRediscover();
+    window.addEventListener(MUSIC_REDISCOVER_FOCUS_EVENT, openPendingRediscover as EventListener);
+    return () => window.removeEventListener(MUSIC_REDISCOVER_FOCUS_EVENT, openPendingRediscover as EventListener);
+  }, []);
 
   function replaceTrackLocally(updated: MusicTrack) {
     setTracks((current) => { const next = current.map((track) => track.id === updated.id ? updated : track); replaceMusicLibrary(next); return next; });
@@ -1637,6 +1653,29 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       return next;
     });
   }
+  function openRediscoverSeed(seedId: string) {
+    if (!seedId) return;
+    setTab("discover");
+    setCollectionDetail(null);
+    setDiscoveryView("archive");
+    setDiscoverySearch("");
+    setDiscoverySort("newest");
+    setDiscoveryFilter("all");
+    setExpandedDiscoverySeedIds((current) => new Set([...current, seedId]));
+    setExpandedDiscoveryLaneIds((current) => new Set([
+      ...current,
+      discoveryLaneKey(seedId, "new_upcoming"),
+      discoveryLaneKey(seedId, "same_era"),
+      discoveryLaneKey(seedId, "hidden_era"),
+    ]));
+
+    window.setTimeout(() => {
+      const target = [...document.querySelectorAll<HTMLElement>("[data-rediscover-seed-id]")]
+        .find((element) => element.dataset.rediscoverSeedId === seedId);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 140);
+  }
+
   function stopDiscoveryPreview() {
     if (previewStopTimerRef.current != null) {
       window.clearTimeout(previewStopTimerRef.current);
@@ -1914,7 +1953,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item)=>!item.dismissed), discoveryFilter);
               const seedExpanded = expandedDiscoverySeedIds.has(seed.id);
               const wasRefreshed = seed.refreshedAt - seed.createdAt > 60000;
-              return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} key={seed.id}>
+              return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} data-rediscover-seed-id={seed.id} key={seed.id}>
                 <header className="tr10-discoverSeedHead">
                   <button type="button" className="tr10-discoverSeedToggle" onClick={() => toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
                     <div className="tr10-discoverSeedIdentity"><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p><time>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</time></div>
