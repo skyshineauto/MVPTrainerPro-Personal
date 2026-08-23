@@ -541,12 +541,16 @@ function SessionTrajectory({
         vec3 futureColor = vec3(0.26, 0.37, 0.44);
         float avgPos = u_average >= 0.05 ? u_average : 0.80;
         float phase = xNorm / max(avgPos, 0.08);
-        vec3 activeColor = trajectoryColor(phase);
+        vec3 pausedGold = vec3(1.00, 0.65, 0.24);
+        vec3 activeColor = mix(trajectoryColor(phase), pausedGold, u_paused * 0.78);
 
         float futureAlpha = core * 0.17 + nearGlow * 0.035;
         float completedAlpha = beforeNode * (core * 0.93 + nearGlow * 0.22 + surfaceGlow * 0.055);
         float flow = (0.5 + 0.5 * sin(p.x * 0.041 - u_time * 2.6));
         completedAlpha += beforeNode * core * flow * 0.055 * u_active * (1.0 - u_paused);
+        float filament = pow(0.5 + 0.5 * sin(p.x * 0.068 - u_time * 4.4), 12.0)
+          * beforeNode * core * u_active * (1.0 - u_paused);
+        float underLight = beforeNode * surfaceGlow * 0.042;
 
         float behind = max(0.0, nodeX - p.x);
         float trail = step(p.x, nodeX) * exp(-behind / max(38.0, w * 0.055)) * nearGlow;
@@ -576,7 +580,9 @@ function SessionTrajectory({
         vec3 color = futureColor * futureAlpha;
         float alpha = futureAlpha;
         color += activeColor * completedAlpha;
-        alpha = max(alpha, completedAlpha);
+        color += mix(activeColor, vec3(0.92, 0.99, 1.0), 0.42) * filament * 0.34;
+        color += activeColor * underLight;
+        alpha = max(alpha, max(completedAlpha, max(filament * 0.34, underLight)));
         float nodePhase = clamp(u_progress, 0.0, 1.0) / max(avgPos, 0.08);
         vec3 nodeColor = mix(trajectoryColor(nodePhase), vec3(1.0, 0.76, 0.34), u_paused);
         color += nodeColor * nodeEnergy;
@@ -1833,9 +1839,277 @@ const HUD_FORCE_CSS = `
   .tr-performanceControl{padding:0 6px;font-size:6.5px}
 }
 
+
+/* =====================================================================
+   MVP TRAINER R12.5B.1 — LIVE INSTRUMENT RENDERING POLISH
+   Same HUD layout. Adds premium state animation, richer material lighting,
+   animated Performance Core, and stronger trajectory/timer rendering.
+   ===================================================================== */
+.tr-performanceHudSurface{
+  background:
+    radial-gradient(640px 150px at 50% -40%,rgba(116,224,255,.19),transparent 68%),
+    radial-gradient(360px 130px at 7% 108%,rgba(39,145,188,.105),transparent 72%),
+    linear-gradient(180deg,rgba(15,29,38,.995),rgba(4,9,13,.999));
+  box-shadow:
+    0 20px 48px rgba(0,0,0,.42),
+    0 0 34px rgba(55,189,235,.045),
+    inset 0 1px 0 rgba(244,253,255,.13),
+    inset 0 -1px 0 rgba(44,144,183,.085),
+    inset 0 0 0 1px rgba(172,232,251,.032);
+}
+.tr-performanceHudSurface::before{
+  background:
+    radial-gradient(430px 116px at 48% 18%,rgba(147,234,255,.072),transparent 70%),
+    linear-gradient(108deg,transparent 0 31%,rgba(255,255,255,.016) 39%,rgba(217,248,255,.075) 47%,rgba(108,217,250,.022) 52%,transparent 62% 100%),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.006) 0 1px,transparent 1px 7px);
+  background-size:100% 100%,245% 100%,100% 100%;
+  animation:tr-hudGlassSweep 9.6s cubic-bezier(.22,.68,.26,1) infinite;
+}
+.tr-performanceHudSurface::after{
+  background:linear-gradient(90deg,transparent 0 7%,rgba(119,221,253,.24) 26%,rgba(247,254,255,.78) 50%,rgba(119,221,253,.24) 74%,transparent 93% 100%);
+  background-size:185% 100%;
+  animation:tr-hudEdgeTravel 7.2s ease-in-out infinite;
+  box-shadow:0 0 12px rgba(93,213,250,.15);
+}
+.tr-performanceHudSurface.is-active{
+  border-color:rgba(133,230,255,.43);
+  background:
+    radial-gradient(420px 94px at 42% 7%,rgba(82,215,255,.19),transparent 70%),
+    radial-gradient(270px 90px at 7% 30%,rgba(61,238,174,.055),transparent 72%),
+    linear-gradient(180deg,rgba(9,23,31,.997),rgba(3,8,11,.999));
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.39),
+    0 0 34px rgba(54,204,248,.055),
+    inset 0 1px 0 rgba(242,253,255,.12),
+    inset 0 -1px 0 rgba(48,152,190,.07),
+    inset 0 0 26px rgba(49,175,219,.028);
+}
+.tr-performanceHudSurface.is-active::before{
+  opacity:1;
+  animation:tr-hudGlassSweepActive 6.8s cubic-bezier(.2,.72,.25,1) infinite;
+}
+.tr-performanceHudSurface.is-paused{
+  border-color:rgba(255,194,97,.40);
+  background:
+    radial-gradient(420px 94px at 42% 7%,rgba(255,182,64,.14),transparent 70%),
+    radial-gradient(260px 88px at 7% 30%,rgba(255,205,111,.035),transparent 72%),
+    linear-gradient(180deg,rgba(24,18,10,.997),rgba(7,8,8,.999));
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.39),
+    0 0 28px rgba(232,153,50,.045),
+    inset 0 1px 0 rgba(255,240,205,.105),
+    inset 0 -1px 0 rgba(172,108,30,.07),
+    inset 0 0 24px rgba(210,132,35,.024);
+}
+.tr-performanceHudSurface.is-paused::before{
+  opacity:.78;
+  animation:tr-hudPausedHold 12s ease-in-out infinite;
+}
+.tr-performanceHudSurface.is-paused::after{
+  background:linear-gradient(90deg,transparent 0 8%,rgba(255,190,93,.20) 28%,rgba(255,236,191,.68) 50%,rgba(255,190,93,.20) 72%,transparent 92% 100%);
+  background-size:160% 100%;
+  animation:tr-hudEdgeTravelPaused 11s ease-in-out infinite;
+  box-shadow:0 0 11px rgba(244,171,71,.12);
+}
+@keyframes tr-hudGlassSweep{
+  0%,14%{background-position:0 0,-138% 0,0 0}
+  66%,100%{background-position:0 0,138% 0,0 0}
+}
+@keyframes tr-hudGlassSweepActive{
+  0%,10%{background-position:0 0,-145% 0,0 0}
+  62%,100%{background-position:0 0,145% 0,0 0}
+}
+@keyframes tr-hudPausedHold{
+  0%,100%{background-position:0 0,-38% 0,0 0;opacity:.68}
+  50%{background-position:0 0,38% 0,0 0;opacity:.82}
+}
+@keyframes tr-hudEdgeTravel{
+  0%,12%{background-position:105% 0;opacity:.54}
+  55%{opacity:.92}
+  88%,100%{background-position:-5% 0;opacity:.54}
+}
+@keyframes tr-hudEdgeTravelPaused{
+  0%,100%{background-position:82% 0;opacity:.52}
+  50%{background-position:18% 0;opacity:.78}
+}
+
+.tr-performanceCoreIcon{
+  overflow:visible;
+  filter:drop-shadow(0 4px 10px rgba(76,198,238,.18));
+}
+.tr-performanceCoreIcon::before{
+  inset:2px;
+  background:radial-gradient(circle,rgba(156,237,255,.22) 0 12%,rgba(89,207,244,.095) 30%,rgba(41,132,172,.024) 52%,transparent 72%);
+  transform:scale(.88);
+}
+.tr-performanceCoreIcon svg{
+  filter:drop-shadow(0 0 3px rgba(168,237,255,.11));
+}
+.tr-performanceCoreFrame,
+.tr-performanceCorePulse,
+.tr-performanceCoreBlade,
+.tr-performanceCoreNode{
+  transform-box:fill-box;
+  transform-origin:center;
+}
+.tr-performanceCoreIcon.is-ready::before{
+  animation:tr-coreReadyAura 5.8s ease-in-out infinite;
+}
+.tr-performanceCoreIcon.is-ready .tr-performanceCorePulse{
+  stroke-dasharray:9 7;
+  animation:tr-coreReadyTrace 6.2s linear infinite;
+}
+.tr-performanceCoreIcon.is-active{
+  filter:drop-shadow(0 0 8px rgba(94,239,190,.24)) drop-shadow(0 4px 9px rgba(42,153,193,.14));
+}
+.tr-performanceCoreIcon.is-active::before{
+  background:radial-gradient(circle,rgba(180,255,228,.32) 0 9%,rgba(91,240,185,.15) 28%,rgba(55,197,236,.055) 48%,transparent 73%);
+  animation:tr-coreActiveAura 3.15s ease-in-out infinite;
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreFrame{
+  stroke:rgba(173,255,226,.88);
+  stroke-dasharray:8 3;
+  animation:tr-coreFrameTravel 4.4s linear infinite;
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCorePulse{
+  fill:rgba(84,229,179,.16);
+  stroke:#adffda;
+  stroke-dasharray:10 5;
+  animation:tr-corePulseTravel 1.75s linear infinite,tr-corePulseBreath 3.1s ease-in-out infinite;
+  filter:drop-shadow(0 0 2.5px rgba(111,250,198,.38));
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreBlade{
+  fill:rgba(132,252,210,.29);
+  stroke:rgba(189,255,232,.88);
+  animation:tr-coreBladeDrive 2.75s cubic-bezier(.3,.1,.25,1) infinite;
+}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreNode{
+  fill:#f8fff9;
+  stroke:#8dffca;
+  animation:tr-coreNodeCharge 2.15s ease-in-out infinite;
+  filter:drop-shadow(0 0 3px rgba(126,255,204,.62));
+}
+.tr-performanceCoreIcon.is-paused{
+  filter:drop-shadow(0 0 7px rgba(255,184,79,.22)) drop-shadow(0 4px 8px rgba(142,90,24,.10));
+}
+.tr-performanceCoreIcon.is-paused::before{
+  background:radial-gradient(circle,rgba(255,220,157,.20) 0 10%,rgba(255,178,62,.10) 30%,transparent 70%);
+  animation:tr-corePausedAura 6.8s ease-in-out infinite;
+}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreFrame{stroke:rgba(255,213,144,.78)}
+.tr-performanceCoreIcon.is-paused .tr-performanceCorePulse{stroke:#ffd393;fill:rgba(255,181,75,.13);animation:none;filter:none}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreBlade{stroke:rgba(255,218,161,.78);fill:rgba(255,190,87,.20);animation:none}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreNode{
+  fill:#fff5df;stroke:#ffc873;
+  animation:tr-corePausedNode 6.8s ease-in-out infinite;
+  filter:drop-shadow(0 0 2px rgba(255,185,76,.34));
+}
+@keyframes tr-coreReadyAura{0%,100%{transform:scale(.86);opacity:.55}50%{transform:scale(1.03);opacity:.84}}
+@keyframes tr-coreReadyTrace{to{stroke-dashoffset:-32}}
+@keyframes tr-coreActiveAura{0%,100%{transform:scale(.86);opacity:.60}45%{transform:scale(1.08);opacity:1}70%{transform:scale(.98);opacity:.78}}
+@keyframes tr-coreFrameTravel{to{stroke-dashoffset:-44}}
+@keyframes tr-corePulseTravel{to{stroke-dashoffset:-30}}
+@keyframes tr-corePulseBreath{0%,100%{opacity:.78}50%{opacity:1}}
+@keyframes tr-coreBladeDrive{0%,100%{transform:translate3d(0,0,0) rotate(0deg);opacity:.78}45%{transform:translate3d(.35px,-.45px,0) rotate(2deg);opacity:1}72%{transform:translate3d(-.25px,.2px,0) rotate(-1deg);opacity:.88}}
+@keyframes tr-coreNodeCharge{0%,100%{transform:scale(.92);opacity:.82}45%{transform:scale(1.28);opacity:1}68%{transform:scale(1.03);opacity:.92}}
+@keyframes tr-corePausedAura{0%,100%{transform:scale(.92);opacity:.45}50%{transform:scale(1.01);opacity:.64}}
+@keyframes tr-corePausedNode{0%,100%{transform:scale(.96);opacity:.76}50%{transform:scale(1.08);opacity:.90}}
+
+.tr-performanceTimerBlock{overflow:visible}
+.tr-performanceTimerBlock::before{
+  width:188px;height:64px;
+  background:radial-gradient(ellipse,rgba(138,232,255,.17),rgba(77,184,229,.05) 42%,transparent 72%);
+  filter:blur(2.5px);
+  opacity:.88;
+}
+.tr-performanceTimerBlock::after{
+  content:"";
+  position:absolute;
+  z-index:1;
+  pointer-events:none;
+  left:4%;right:4%;top:2px;height:42%;
+  opacity:.42;
+  background:linear-gradient(104deg,transparent 0 34%,rgba(255,255,255,.14) 45%,rgba(196,245,255,.05) 51%,transparent 61% 100%);
+  background-size:235% 100%;
+  mix-blend-mode:screen;
+  animation:tr-timerSpecular 6.3s ease-in-out infinite;
+}
+.is-paused .tr-performanceTimerBlock::before{
+  background:radial-gradient(ellipse,rgba(255,205,120,.14),rgba(217,139,39,.04) 44%,transparent 72%);
+}
+.is-paused .tr-performanceTimerBlock::after{animation:none;opacity:.18}
+.tr-performanceTimer{
+  position:relative;z-index:2;
+  color:#fcfeff;
+  text-shadow:0 1px 0 rgba(255,255,255,.10),0 6px 15px rgba(0,0,0,.34);
+}
+.is-paused .tr-performanceTimer{color:#fff2d9;text-shadow:0 1px 0 rgba(255,255,255,.08),0 6px 15px rgba(0,0,0,.34)}
+@keyframes tr-timerSpecular{0%,15%{background-position:128% 0;opacity:.18}52%{opacity:.48}76%,100%{background-position:-28% 0;opacity:.18}}
+
+.tr-sessionTrajectory{
+  height:28px;
+  padding-bottom:1px;
+}
+.tr-sessionTrajectory::before{
+  top:8px;
+  background:linear-gradient(90deg,rgba(83,137,158,.055),rgba(141,208,232,.18),rgba(83,137,158,.055));
+  box-shadow:0 1px 7px rgba(64,171,213,.035);
+}
+.tr-sessionTrajectoryCanvas{
+  height:19px;
+  filter:drop-shadow(0 1px 3px rgba(65,201,244,.13));
+}
+.tr-sessionTrajectoryAverage,
+.tr-sessionTrajectoryLearning{
+  bottom:0;
+  font-size:7.1px;
+  letter-spacing:.085em;
+  color:rgba(219,238,244,.78);
+  text-shadow:0 1px 0 rgba(0,0,0,.72),0 0 7px rgba(114,201,229,.07);
+}
+.is-paused .tr-sessionTrajectoryCanvas{filter:drop-shadow(0 1px 3px rgba(239,166,66,.11))}
+
+@media(max-width:720px){
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{
+    min-height:80px;
+    padding:5px 8px 3px;
+  }
+  .tr-performanceActiveMain{
+    min-height:45px;
+    gap:2px 6px;
+  }
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:28px;height:28px}
+  .tr-performanceTimerBlock::before{width:146px;height:48px;left:57%}
+  .tr-performanceTimerBlock::after{left:0;right:0;height:38%}
+  .tr-performanceTimer{font-size:clamp(23px,6.9vw,26px)}
+  .tr-performanceActiveMain>.tr-performanceDate{font-size:clamp(8.7px,2.6vw,10px);color:rgba(228,240,244,.82)}
+  .tr-sessionTrajectory{height:26px}
+  .tr-sessionTrajectoryCanvas{height:18px}
+  .tr-sessionTrajectoryAverage,
+  .tr-sessionTrajectoryLearning{font-size:6.25px;letter-spacing:.07em}
+}
+
+@media(max-width:390px){
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{min-height:79px}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:27px;height:27px}
+  .tr-performanceTimer{font-size:clamp(22.5px,6.8vw,25px)}
+  .tr-sessionTrajectoryAverage,
+  .tr-sessionTrajectoryLearning{font-size:6px}
+}
+
 @media(prefers-reduced-motion:reduce){
-  .tr-performanceHudSurface::before{animation:none!important}
-  .tr-performanceCoreIcon.is-active .tr-performanceCorePulse{animation:none!important}
+  .tr-performanceHudSurface::before,
+  .tr-performanceHudSurface::after,
+  .tr-performanceTimerBlock::after,
+  .tr-performanceCoreIcon::before,
+  .tr-performanceCoreFrame,
+  .tr-performanceCorePulse,
+  .tr-performanceCoreBlade,
+  .tr-performanceCoreNode{animation:none!important}
 }
 
 `;
@@ -3227,7 +3501,7 @@ export function AppShell({
   const weatherCity = weatherLocation?.displayName?.toUpperCase() || "LOCATION";
   const weatherTempTone = temperatureToneClass(weather?.temperatureF);
   const weatherFeelsTone = temperatureToneClass(weather?.apparentTemperatureF);
-  const showHeaderWorkoutAction = hud.mode === "active" && (hud.isPaused || !isWorkoutSession);
+  const showHeaderWorkoutAction = hud.mode === "active" && !hud.isPaused && !isWorkoutSession;
   const headerWorkoutLabel = hud.mode === "active"
     ? hud.isPaused
       ? "RESUME"
