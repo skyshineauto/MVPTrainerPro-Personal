@@ -2064,8 +2064,31 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <span>{player.eqTopology === "linear_phase" ? "LINEAR" : "MIN PHASE"}</span>
             </div>
             <nav className="tr-dspTabs" role="tablist" aria-label="DSP Control Center sections">
-              {(["output","eq","tone","dynamics","space","smart","meter"] as const).map((tab) => (
-                <button key={tab} type="button" role="tab" aria-selected={dspTab === tab} className={dspTab === tab ? "is-active" : ""} onClick={() => setDspTab(tab)}><span>{tab.toUpperCase()}</span></button>
+              {([
+                { key: "output", label: "Output", hint: "Device • Gain", icon: "speaker" },
+                { key: "eq", label: "EQ", hint: "31-Band • Parametric", icon: "equalizer" },
+                { key: "tone", label: "Tone", hint: "Bass • Clarity", icon: "melodic" },
+                { key: "dynamics", label: "Dynamics", hint: "Punch • Control", icon: "harder" },
+                { key: "space", label: "Space", hint: "Width • Depth", icon: "headphones" },
+                { key: "smart", label: "Smart", hint: "Adaptive • Auto", icon: "discover" },
+                { key: "meter", label: "Meter", hint: "Live Telemetry", icon: "match" },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={dspTab === tab.key}
+                  className={dspTab === tab.key ? "is-active" : ""}
+                  onClick={() => setDspTab(tab.key)}
+                >
+                  <span className="tr-dspTabShell">
+                    <i className="tr-dspTabIcon" aria-hidden><PlayerIcon name={tab.icon} /></i>
+                    <span className="tr-dspTabCopy">
+                      <b>{tab.label}</b>
+                      <small>{tab.hint}</small>
+                    </span>
+                  </span>
+                </button>
               ))}
             </nav>
           </div>
@@ -2278,12 +2301,12 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
           <section className="tr-v10ProcessorCard" data-mobile-dsp-section="eq">
             <header><div><small>SURGICAL EQ</small><strong>6-Band Parametric EQ</strong><p>Bell, shelves, pass filters and notch control inside the same WASM engine.</p></div><button type="button" className={player.parametricEnabled ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicParametricEnabled(!player.parametricEnabled))}>{player.parametricEnabled ? "ON" : "OFF"}</button></header>
-            <div className="tr-v10ParametricGrid">{player.parametricBands.map((band, index) => <article key={index}>
-              <div><b>BAND {index + 1}</b><input type="checkbox" checked={band.enabled} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{enabled:e.target.checked}))}/></div>
+            <div className="tr-v10ParametricGrid">{player.parametricBands.map((band, index) => <article key={index} className={band.enabled ? "is-enabled" : ""}>
+              <div className="tr-v10ParametricBandHead"><b>BAND {index + 1}</b><button type="button" className={`tr-v10ParametricBandToggle ${band.enabled ? "is-active" : ""}`} aria-pressed={band.enabled} onClick={() => void runDspMutation(() => setMusicParametricBand(index,{enabled:!band.enabled}))}>{band.enabled ? "ON" : "OFF"}</button></div>
               <label><span>TYPE</span><select value={band.type} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{type:e.target.value as typeof band.type}))}><option value="bell">BELL</option><option value="low_shelf">LOW SHELF</option><option value="high_shelf">HIGH SHELF</option><option value="high_pass">HPF</option><option value="low_pass">LPF</option><option value="notch">NOTCH</option></select></label>
               <label><span>FREQ <b>{Math.round(band.frequency)} Hz</b></span><input type="range" min="20" max="20000" step="10" value={band.frequency} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{frequency:Number(e.target.value)}))}/></label>
               <label><span>GAIN <b>{band.gainDb > 0 ? "+" : ""}{band.gainDb.toFixed(1)} dB</b></span><input type="range" min="-12" max="12" step="0.5" value={band.gainDb} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{gainDb:Number(e.target.value)}))}/></label>
-              <label><span>Q <b>{band.q.toFixed(2)}</b></span><input type="range" min="0.15" max="12" step="0.05" value={band.q} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{q:Number(e.target.value)}))}/></label>
+              <label className="tr-v10ParametricQ"><span>Q / WIDTH <b>{band.q.toFixed(2)}</b></span><input type="range" min="0.15" max="12" step="0.05" value={band.q} onChange={(e) => void runDspMutation(() => setMusicParametricBand(index,{q:Number(e.target.value)}))}/><small><i>WIDE</i><i>NARROW</i></small></label>
             </article>)}</div>
           </section>
           <div className="tr-audioEqScroll" aria-label="31 band user offset equalizer" data-mobile-dsp-section="eq">
@@ -11528,9 +11551,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         @media(prefers-reduced-motion:reduce){.tr-dspControlCenterBack,.tr-dspControlCenter,.tr-dspControlCenter>[data-mobile-dsp-section],.tr-dspPlayerCornerDock.is-active{animation:none!important}}
 
         /* MVP TRAINER R10 - ADVANCED DSP CONTROL CENTER */
-        .tr-dspTabs{display:flex!important;gap:6px!important;overflow-x:auto!important;scrollbar-width:none!important;padding:8px!important}
+        .tr-dspTabs{display:flex!important;gap:8px!important;overflow-x:auto!important;scrollbar-width:none!important;padding:8px!important;scroll-snap-type:x proximity!important}
         .tr-dspTabs::-webkit-scrollbar{display:none}
-        .tr-dspTabs button{flex:1 0 auto!important;min-width:92px!important;height:44px!important;padding:0 14px!important;border-radius:12px!important;font-size:11px!important;font-weight:900!important;letter-spacing:.08em!important}
+        .tr-dspTabs button{flex:1 0 auto!important;min-width:134px!important;min-height:58px!important;padding:0!important;border-radius:16px!important;border:1px solid rgba(110,199,255,.12)!important;background:linear-gradient(180deg,rgba(10,18,26,.96),rgba(6,11,17,.98))!important;color:#d7e9f6!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 10px 26px rgba(0,0,0,.22)!important;scroll-snap-align:start!important;transition:transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease!important}
+        .tr-dspTabs button:hover{border-color:rgba(93,191,255,.34)!important;background:linear-gradient(180deg,rgba(14,25,35,.98),rgba(8,15,24,.99))!important;transform:translateY(-1px)!important}
+        .tr-dspTabs button.is-active{border-color:rgba(86,201,255,.68)!important;background:linear-gradient(180deg,rgba(17,57,85,.98),rgba(10,29,44,.99))!important;box-shadow:0 0 0 1px rgba(62,177,255,.18),0 18px 36px rgba(0,0,0,.30),0 0 22px rgba(46,179,255,.18),inset 0 1px 0 rgba(188,236,255,.12)!important}
+        .tr-dspTabs button:active{transform:translateY(0)!important}
+        .tr-dspTabs button .tr-dspTabShell{display:flex!important;align-items:center!important;gap:10px!important;width:100%!important;height:100%!important;padding:10px 12px!important}
+        .tr-dspTabs button .tr-dspTabIcon{display:grid!important;place-items:center!important;flex:0 0 36px!important;width:36px!important;height:36px!important;border-radius:12px!important;border:1px solid rgba(122,209,255,.14)!important;background:linear-gradient(180deg,rgba(17,31,43,.98),rgba(8,15,23,.98))!important;color:#78d8ff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important}
+        .tr-dspTabs button.is-active .tr-dspTabIcon{border-color:rgba(110,221,255,.44)!important;background:linear-gradient(180deg,rgba(21,84,122,.98),rgba(9,43,68,.98))!important;color:#dff8ff!important;box-shadow:0 0 16px rgba(57,194,255,.25),inset 0 1px 0 rgba(214,245,255,.14)!important}
+        .tr-dspTabs button .tr-dspTabIcon svg{width:18px!important;height:18px!important}
+        .tr-dspTabs button .tr-dspTabCopy{display:flex!important;flex-direction:column!important;align-items:flex-start!important;justify-content:center!important;min-width:0!important;gap:2px!important}
+        .tr-dspTabs button .tr-dspTabCopy b{font-size:11px!important;line-height:1!important;font-weight:900!important;letter-spacing:.10em!important;text-transform:uppercase!important;color:#f3f9fd!important}
+        .tr-dspTabs button .tr-dspTabCopy small{font-size:9px!important;line-height:1.1!important;font-weight:800!important;letter-spacing:.06em!important;text-transform:uppercase!important;color:#7690a5!important;white-space:nowrap!important}
+        .tr-dspTabs button.is-active .tr-dspTabCopy small{color:#b9ebff!important}
         .tr-v10ProcessorStack{display:grid;gap:14px}
         .tr-v10ProcessorCard,.tr-v10MeterDeck{border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:18px;background:linear-gradient(180deg,rgba(15,22,31,.96),rgba(7,11,17,.98));box-shadow:0 18px 48px rgba(0,0,0,.28)}
         .tr-v10ProcessorCard>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:16px}
@@ -11538,13 +11572,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-v10ProcessorCard header>button,.tr-v10InlineToggle button{border:1px solid rgba(255,255,255,.12);background:#111a23;color:#91a4b5;border-radius:999px;padding:9px 14px;font-weight:900;font-size:10px;letter-spacing:.08em}.tr-v10ProcessorCard header>button.is-active,.tr-v10InlineToggle button.is-active{background:#0b3353;color:#7bd4ff;border-color:#2a9fea;box-shadow:0 0 18px rgba(48,169,255,.22)}
         .tr-v10Sliders{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.tr-v10Sliders label,.tr-v10SmartAmount{display:grid;gap:8px}.tr-v10Sliders label>span,.tr-v10SmartAmount>span{display:flex;justify-content:space-between;color:#9fb0bf;font-size:10px;font-weight:900;letter-spacing:.08em}.tr-v10Sliders b,.tr-v10SmartAmount b{color:#ff9a3e}.tr-v10Sliders input,.tr-v10SmartAmount input,.tr-v10OutputReserve>input,.tr-v10DynamicsRestore input{width:100%;accent-color:#36aef3}
         .tr-v10InlineToggle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:#8ea1b3;font-size:11px}.tr-v10InlineToggle b{color:#fff}
-        .tr-v10ParametricGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.tr-v10ParametricGrid article{border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;background:rgba(0,0,0,.2)}.tr-v10ParametricGrid article>div{display:flex;justify-content:space-between;color:#e8f2f8;font-size:10px}.tr-v10ParametricGrid label{display:grid;gap:5px;margin-top:9px}.tr-v10ParametricGrid label span{display:flex;justify-content:space-between;font-size:9px;color:#8196a8;font-weight:900}.tr-v10ParametricGrid select{height:34px;background:#0b1118;color:#dce7ef;border:1px solid rgba(255,255,255,.1);border-radius:8px}.tr-v10ParametricGrid input[type=range]{width:100%;accent-color:#ff8d2c}
+        .tr-v10ParametricGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.tr-v10ParametricGrid article{border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;background:rgba(0,0,0,.2);transition:border-color .18s ease,box-shadow .18s ease,background .18s ease}.tr-v10ParametricGrid article.is-enabled{border-color:rgba(78,190,255,.34);background:linear-gradient(180deg,rgba(10,31,46,.44),rgba(0,0,0,.22));box-shadow:0 0 0 1px rgba(64,177,246,.08),0 0 22px rgba(37,151,220,.08)}.tr-v10ParametricBandHead{display:flex;align-items:center;justify-content:space-between;color:#e8f2f8;font-size:10px}.tr-v10ParametricBandToggle{min-width:46px;height:25px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.11);background:#111820;color:#718597;font-size:9px;font-weight:900;letter-spacing:.08em;cursor:pointer}.tr-v10ParametricBandToggle.is-active{border-color:rgba(83,205,255,.52);background:linear-gradient(180deg,#155a84,#0b3a59);color:#e6f9ff;box-shadow:0 0 14px rgba(55,190,255,.20)}.tr-v10ParametricGrid label{display:grid;gap:5px;margin-top:9px}.tr-v10ParametricGrid label span{display:flex;justify-content:space-between;font-size:9px;color:#8196a8;font-weight:900}.tr-v10ParametricGrid select{height:34px;background:#0b1118;color:#dce7ef;border:1px solid rgba(255,255,255,.1);border-radius:8px}.tr-v10ParametricGrid input[type=range]{width:100%;accent-color:#ff8d2c}.tr-v10ParametricQ small{display:flex;justify-content:space-between;margin-top:-1px;color:#5f7486;font-size:7px;font-weight:900;letter-spacing:.09em}.tr-v10ParametricQ small i{font-style:normal}
         .tr-v10SmartActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.tr-v10SmartActions button{border:1px solid rgba(104,190,255,.24);background:rgba(30,98,150,.12);color:#dff4ff;border-radius:10px;padding:10px 12px;font-size:10px;font-weight:900;letter-spacing:.06em}.tr-v10SmartActions button:disabled{opacity:.35;cursor:not-allowed}.tr-v10SmartActions button:not(:disabled):hover{background:rgba(47,137,205,.22)}
         .tr-v10SmartReadout,.tr-v10MeterGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}.tr-v10SmartReadout span,.tr-v10MeterGrid span{display:flex;justify-content:space-between;padding:11px 12px;border-radius:11px;background:rgba(255,255,255,.04);color:#8196a8;font-size:10px;font-weight:900}.tr-v10SmartReadout b,.tr-v10MeterGrid b{color:#eaf4fb}.tr-v10MeterDeck>div:first-child small{display:block;color:#6f879a;font-weight:900;letter-spacing:.14em}.tr-v10MeterDeck>div:first-child strong{display:block;margin-top:4px;color:#7bd4ff;font-size:18px}
         .tr-v10HeadphoneAdvanced{margin-top:16px;padding-top:15px;border-top:1px solid rgba(255,255,255,.08)}
         .tr-dspControlCenter[data-mobile-dsp-tab="output"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="output"]),.tr-dspControlCenter[data-mobile-dsp-tab="eq"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="eq"]),.tr-dspControlCenter[data-mobile-dsp-tab="tone"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="tone"]),.tr-dspControlCenter[data-mobile-dsp-tab="dynamics"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="dynamics"]),.tr-dspControlCenter[data-mobile-dsp-tab="space"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="space"]),.tr-dspControlCenter[data-mobile-dsp-tab="smart"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="smart"]),.tr-dspControlCenter[data-mobile-dsp-tab="meter"]>[data-mobile-dsp-section]:not([data-mobile-dsp-section="meter"]){display:none!important}
-        @media(max-width:760px){.tr-dspTabs{position:sticky;top:0;z-index:8;background:rgba(5,9,14,.96);margin:0 -8px;padding:8px 8px 10px!important}.tr-dspTabs button{min-width:78px!important;height:42px!important;font-size:9px!important;padding:0 10px!important}.tr-v10ProcessorCard,.tr-v10MeterDeck{padding:14px;border-radius:15px}.tr-v10Sliders{grid-template-columns:1fr}.tr-v10ParametricGrid{grid-template-columns:1fr 1fr}.tr-v10SmartReadout,.tr-v10MeterGrid{grid-template-columns:1fr}.tr-v10ProcessorCard header strong{font-size:16px}.tr-v10ProcessorCard>header{gap:10px}.tr-v10InlineToggle{align-items:flex-start;flex-direction:column}.tr-v10OutputReserve>input{height:30px}.tr-v10ParametricGrid article{padding:10px}}
-        @media(max-width:430px){.tr-v10ParametricGrid{grid-template-columns:1fr}.tr-dspTabs button{min-width:74px!important}}
+        @media(max-width:760px){.tr-dspTabs{position:sticky;top:0;z-index:8;background:linear-gradient(180deg,rgba(5,9,14,.98),rgba(5,9,14,.9))!important;backdrop-filter:blur(12px);margin:0 -8px;padding:8px 8px 10px!important;border-bottom:1px solid rgba(122,209,255,.10)!important}.tr-dspTabs button{min-width:118px!important;min-height:54px!important}.tr-dspTabs button .tr-dspTabShell{padding:9px 10px!important;gap:9px!important}.tr-dspTabs button .tr-dspTabIcon{width:32px!important;height:32px!important;flex-basis:32px!important;border-radius:11px!important}.tr-dspTabs button .tr-dspTabIcon svg{width:16px!important;height:16px!important}.tr-dspTabs button .tr-dspTabCopy b{font-size:10px!important}.tr-dspTabs button .tr-dspTabCopy small{font-size:8px!important}.tr-v10ProcessorCard,.tr-v10MeterDeck{padding:14px;border-radius:15px}.tr-v10Sliders{grid-template-columns:1fr}.tr-v10ParametricGrid{grid-template-columns:1fr 1fr}.tr-v10SmartReadout,.tr-v10MeterGrid{grid-template-columns:1fr}.tr-v10ProcessorCard header strong{font-size:16px}.tr-v10ProcessorCard>header{gap:10px}.tr-v10InlineToggle{align-items:flex-start;flex-direction:column}.tr-v10OutputReserve>input{height:30px}.tr-v10ParametricGrid article{padding:10px}}
+        @media(max-width:430px){.tr-v10ParametricGrid{grid-template-columns:1fr}.tr-dspTabs button{min-width:112px!important;min-height:52px!important}.tr-dspTabs button .tr-dspTabCopy b{font-size:9px!important}.tr-dspTabs button .tr-dspTabCopy small{font-size:7.3px!important}}
 
       `}
 </style>
