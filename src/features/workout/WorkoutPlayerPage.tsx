@@ -6810,7 +6810,7 @@ export function WorkoutPlayerPage({ params }: any) {
 
 
         /* ============================================================
-           R12.5C.2 — SESSION CHECK-IN / SESSION INTEL
+           R12.5C.4 — SESSION CHECK-IN / SESSION INTEL
            Exact mockup direction: premium one-surface instrument panel,
            user-supplied hologram / shaker / chrono assets, standalone chevron,
            chrono + dumbbell + load benchmark icons, and a real weekly rail.
@@ -6845,15 +6845,17 @@ export function WorkoutPlayerPage({ params }: any) {
         .tr-siShell.is-compact .tr-card-head{min-height:40px}
         .tr-siShell .tr-card-body{padding:0!important}
 
-        .tr-siHeaderRight{display:flex;align-items:center;justify-content:flex-end;gap:12px;min-width:0}
+        .tr-siShell .tr-card-head{align-items:center!important}
+        .tr-siShell .tr-card-title,.tr-siShell .tr-card-right{align-self:center!important}
+        .tr-siHeaderRight{display:flex;align-items:center;justify-content:flex-end;align-self:center;height:100%;gap:12px;min-width:0}
         .tr-siToggle{
           appearance:none;border:0!important;background:transparent!important;
-          width:28px;height:34px;display:grid;place-items:center;padding:0;
+          width:28px;height:28px;display:grid;place-items:center;align-self:center;margin:0;padding:0;
           color:#b9efff;cursor:pointer;box-shadow:none!important;border-radius:0!important;
-          transition:color .16s ease,transform .16s ease,filter .16s ease;
+          transition:color .16s ease,filter .16s ease;
         }
-        .tr-siToggle:hover{color:#fff;transform:translateY(-1px);filter:drop-shadow(0 0 8px rgba(54,210,255,.62))}
-        .tr-siToggle span{font-size:25px;line-height:1;font-weight:650;transform:translateY(-1px);text-shadow:0 0 12px rgba(46,209,255,.40)}
+        .tr-siToggle:hover{color:#fff;filter:drop-shadow(0 0 8px rgba(54,210,255,.62))}
+        .tr-siToggle span{display:block;font-size:24px;line-height:1;font-weight:650;transform:none;text-shadow:0 0 12px rgba(46,209,255,.40)}
 
         .tr-siVisualAsset{display:block;max-width:100%;height:auto;object-fit:contain;pointer-events:none;user-select:none}
         .tr-siVisualBody{filter:saturate(1.08) contrast(1.03) drop-shadow(0 0 17px rgba(28,153,255,.34))}
@@ -6969,7 +6971,7 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-siShell .tr-card-head{min-height:45px}
           .tr-siShell.is-compact .tr-card-head{min-height:37px}
           .tr-siHeaderRight{gap:6px}.tr-siHeaderRight .tr-checkinContext{max-width:47vw;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-          .tr-siToggle{width:24px;height:30px}.tr-siToggle span{font-size:22px}
+          .tr-siToggle{width:24px;height:24px}.tr-siToggle span{font-size:21px}
 
           /* Mobile expanded: three image/text rows on ONE surface, thin etched separators only. */
           .tr-siPrimaryRow{grid-template-columns:1fr;min-height:0}
@@ -6992,21 +6994,21 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-siWeekStrip{min-height:51px;gap:8px;padding:7px 12px}.tr-siWeekStat strong{font-size:18px}.tr-siWeekStat>span,.tr-siWeekStat>small{font-size:5.7px}.tr-siWeekRail{gap:0;padding:0 4px}.tr-siWeekTrack,.tr-siWeekFill{left:4px;right:4px}.tr-siWeekRail i{width:5px;height:5px}
 
           /* Mobile minimized: compact but all four zones remain visible. */
-          .tr-siCompact{min-height:78px;grid-template-columns:.72fr .68fr .90fr 1.70fr;padding:3px 4px 6px}
-          .tr-siCompactMetric{gap:3px;padding:4px 3px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:23px minmax(0,1fr)}
-          .tr-siCompactVisual{height:38px}.tr-siCompactVisual.is-body .tr-siVisualBody{width:27px;height:39px;object-fit:contain;object-position:center center}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:34px;max-width:23px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:32px;max-width:32px}
-          .tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.8px;letter-spacing:.055em;line-height:1.12;white-space:normal;overflow:visible;text-overflow:clip}.tr-siCompactCopy strong{font-size:10.6px;white-space:nowrap;overflow:visible;text-overflow:clip}.tr-siCompactCopy>span{font-size:4.45px;letter-spacing:.025em;line-height:1.12;white-space:normal;overflow:visible;text-overflow:clip}
-          .tr-siCompactMetric.is-performance{gap:3px}.tr-siCompactPerformance{gap:2px;justify-content:space-between;overflow:visible}.tr-siCompactPerformance>span{gap:1px;flex:0 1 auto}.tr-siCompactPerformance strong{font-size:7.8px;letter-spacing:-.02em}.tr-siCompactPerformance em{font-size:5.2px}.tr-siCompactPerformance b{width:14px;height:14px;flex-basis:14px}.tr-siMiniClock .tr-siVisualChrono{width:14px;height:14px}.tr-siMiniDumbbell img{width:17px;max-height:13px}.tr-siMiniVolume .tr-siVolumeMark{width:14px;height:14px}
+          .tr-siCompact{min-height:76px;grid-template-columns:.66fr .62fr .84fr 1.88fr;padding:3px 3px 5px}
+          .tr-siCompactMetric{gap:2px;padding:4px 2px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:20px minmax(0,1fr)}
+          .tr-siCompactVisual{height:34px}.tr-siCompactVisual.is-body .tr-siVisualBody{width:22px;height:34px;object-fit:contain;object-position:center center}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:29px;max-width:20px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:27px;max-width:27px}
+          .tr-siCompactCopy{gap:2px}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.45px;letter-spacing:.045em;line-height:1.08;white-space:normal;overflow:visible;text-overflow:clip}.tr-siCompactCopy strong{font-size:9.4px;line-height:.98;white-space:nowrap;overflow:visible;text-overflow:clip}.tr-siCompactMetric.is-last .tr-siCompactCopy strong{font-size:8.2px;letter-spacing:-.04em}.tr-siCompactCopy>span{font-size:4.05px;letter-spacing:.015em;line-height:1.08;white-space:normal;overflow:visible;text-overflow:clip}
+          .tr-siCompactMetric.is-performance{gap:2px;padding-left:3px}.tr-siCompactPerformance{gap:2px;justify-content:space-between;overflow:visible}.tr-siCompactPerformance>span{gap:1px;flex:0 1 auto}.tr-siCompactPerformance strong{font-size:7.35px;letter-spacing:-.025em}.tr-siCompactPerformance em{font-size:4.8px}.tr-siCompactPerformance b{width:12px;height:12px;flex-basis:12px}.tr-siMiniClock .tr-siVisualChrono{width:12px;height:12px}.tr-siMiniDumbbell img{width:14px;max-height:11px}.tr-siMiniVolume .tr-siVolumeMark{width:12px;height:12px}
         }
 
         @media (max-width:420px){
           .tr-siHeaderRight .tr-checkinContext{max-width:40vw}
           .tr-siFeature{grid-template-columns:95px minmax(0,1fr);min-height:108px;padding:7px 10px;gap:9px}.tr-siFeatureVisual,.tr-siFeatureVisual.is-body{height:98px}.tr-siFeatureVisual.is-body .tr-siVisualBody{height:100px;width:90px}.tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:98px;max-width:67px}.tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:89px;max-width:89px}.tr-siFeatureCopy strong{font-size:28px}.tr-siFeature.is-last .tr-siFeatureCopy strong{font-size:26px}
-          .tr-siCompact{min-height:80px;grid-template-columns:.70fr .66fr .88fr 1.76fr}.tr-siCompactMetric{padding-left:2px;padding-right:2px}.tr-siCompactCopy strong{font-size:10px;overflow:visible;text-overflow:clip}.tr-siCompactPerformance strong{font-size:7.45px}
+          .tr-siCompact{min-height:76px;grid-template-columns:.64fr .59fr .82fr 1.95fr;padding-left:2px;padding-right:2px}.tr-siCompactMetric{padding-left:1px;padding-right:1px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:19px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:21px;height:32px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:27px;max-width:18px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:25px;max-width:25px}.tr-siCompactCopy strong{font-size:8.9px;overflow:visible;text-overflow:clip}.tr-siCompactMetric.is-last .tr-siCompactCopy strong{font-size:7.65px}.tr-siCompactPerformance strong{font-size:6.95px}.tr-siCompactPerformance b{width:11px;height:11px;flex-basis:11px}.tr-siMiniClock .tr-siVisualChrono{width:11px;height:11px}.tr-siMiniDumbbell img{width:13px;max-height:10px}.tr-siMiniVolume .tr-siVolumeMark{width:11px;height:11px}
         }
 
         @media (max-width:365px){
-          .tr-siCompact{min-height:84px;grid-template-columns:.68fr .64fr .86fr 1.82fr;padding-left:2px;padding-right:2px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:20px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:23px;height:35px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:30px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:28px}.tr-siCompactCopy strong{font-size:9.1px;overflow:visible;text-overflow:clip}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.15px;letter-spacing:.035em}.tr-siCompactCopy>span{font-size:4px;line-height:1.08}.tr-siCompactPerformance strong{font-size:6.75px}.tr-siCompactPerformance b{width:12px;height:12px;flex-basis:12px}.tr-siMiniClock .tr-siVisualChrono{width:12px;height:12px}.tr-siMiniDumbbell img{width:14px;max-height:11px}.tr-siMiniVolume .tr-siVolumeMark{width:12px;height:12px}.tr-siCompactPerformance em{font-size:4.5px}
+          .tr-siCompact{min-height:78px;grid-template-columns:.62fr .57fr .80fr 2.01fr;padding-left:1px;padding-right:1px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:17px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:19px;height:30px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:25px;max-width:17px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:23px;max-width:23px}.tr-siCompactCopy strong{font-size:8.25px;overflow:visible;text-overflow:clip}.tr-siCompactMetric.is-last .tr-siCompactCopy strong{font-size:7.05px;letter-spacing:-.045em}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:3.85px;letter-spacing:.025em}.tr-siCompactCopy>span{font-size:3.7px;line-height:1.05}.tr-siCompactPerformance strong{font-size:6.45px}.tr-siCompactPerformance b{width:10px;height:10px;flex-basis:10px}.tr-siMiniClock .tr-siVisualChrono{width:10px;height:10px}.tr-siMiniDumbbell img{width:12px;max-height:9px}.tr-siMiniVolume .tr-siVolumeMark{width:10px;height:10px}.tr-siCompactPerformance em{font-size:4.1px}
         }
 
         @media (prefers-reduced-motion:reduce){
