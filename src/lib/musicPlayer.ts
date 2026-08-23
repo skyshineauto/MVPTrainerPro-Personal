@@ -835,6 +835,11 @@ let timeSaveTimer = 0;
 let recordedPlayToken = "";
 let transportQueue: Promise<void> = Promise.resolve();
 let playbackIntent = false;
+let mediaErrorRecoveryInFlight = false;
+let lastMediaErrorRecoveryAt = 0;
+let lastMediaErrorRecoveryTrackId = "";
+let suppressNextRecoveredPlayCount = false;
+const MEDIA_ERROR_AUTO_RETRY_COOLDOWN_MS = 20_000;
 let lastDspStatus: MusicDspStatus = "recovering";
 let lastHeadroom = -1;
 let lastEffectivePreamp = Number.NaN;
@@ -2296,7 +2301,10 @@ function ensureAudioElement() {
     configureMediaSession();
     const trackId = audio.dataset.trackId;
     const token = trackId ? `${trackId}:${audio.currentSrc || audio.src}` : "";
-    if (trackId && token !== recordedPlayToken) {
+    if (suppressNextRecoveredPlayCount && trackId === state.currentTrack?.id) {
+      suppressNextRecoveredPlayCount = false;
+      recordedPlayToken = token;
+    } else if (trackId && token !== recordedPlayToken) {
       recordedPlayToken = token;
       void recordMusicTrackPlayed(trackId).catch(() => undefined);
     }
@@ -2331,7 +2339,46 @@ function ensureAudioElement() {
     void handleTrackEnded();
   });
   audio.addEventListener("error", () => {
-    if (!state.loading) emit({ playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
+    if (audio !== audioElement || state.loading) return;
+    const track = state.currentTrack;
+    const now = Date.now();
+    const recentlyRetriedSameTrack = Boolean(
+      track &&
+      lastMediaErrorRecoveryTrackId === track.id &&
+      now - lastMediaErrorRecoveryAt < MEDIA_ERROR_AUTO_RETRY_COOLDOWN_MS
+    );
+
+    if (!playbackIntent || !track || mediaErrorRecoveryInFlight || recentlyRetriedSameTrack) {
+      emit({ playing: false, loading: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
+      return;
+    }
+
+    mediaErrorRecoveryInFlight = true;
+    lastMediaErrorRecoveryAt = now;
+    lastMediaErrorRecoveryTrackId = track.id;
+    const resumeAt = Math.max(0, Number(audio.currentTime || state.currentTime || 0));
+    emit({ playing: false, loading: true, error: null });
+
+    void (async () => {
+      try {
+        // A track that played and then errors is commonly a stale/expired signed R2 URL
+        // or a transient media fetch failure. Force a fresh URL, preserve position, and
+        // recover once automatically instead of making the user press Retry.
+        signedUrlCache.delete(track.id);
+        clearMusicUrlCache(track.id);
+        await loadTrack(track, resumeAt);
+        if (!playbackIntent || state.currentTrack?.id !== track.id) return;
+        suppressNextRecoveredPlayCount = true;
+        const recoveredAudio = ensureAudioElement();
+        await recoveredAudio.play();
+        emit({ loading: false, playing: true, error: null });
+      } catch {
+        suppressNextRecoveredPlayCount = false;
+        emit({ loading: false, playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
+      } finally {
+        mediaErrorRecoveryInFlight = false;
+      }
+    })();
   });
   audioElement = audio;
   return audio;

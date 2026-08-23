@@ -11620,6 +11620,79 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-dspTabs button .tr-dspTabCopy small{font-size:4.9px!important;letter-spacing:0!important}
         }
 
+        /* MVP TRAINER R10.4 - MOBILE TAB LABEL RESTORE ONLY */
+        @media(max-width:760px){
+          .tr-dspControlCenter .tr-dspTabs button{
+            height:98px!important;
+            min-height:98px!important;
+            overflow:visible!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabShell{
+            display:flex!important;
+            width:100%!important;
+            height:100%!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            gap:6px!important;
+            padding:8px 3px!important;
+            overflow:visible!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon{
+            flex:0 0 34px!important;
+            width:34px!important;
+            height:34px!important;
+            border-radius:11px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button.is-active .tr-dspTabIcon{
+            box-shadow:0 0 13px currentColor,inset 0 1px 0 rgba(255,255,255,.12)!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy{
+            display:flex!important;
+            width:100%!important;
+            max-width:100%!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            gap:3px!important;
+            overflow:visible!important;
+            text-align:center!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy b{
+            display:block!important;
+            width:auto!important;
+            max-width:100%!important;
+            color:#fff!important;
+            font-size:8.8px!important;
+            line-height:1!important;
+            font-weight:950!important;
+            letter-spacing:.035em!important;
+            white-space:nowrap!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy small{
+            display:block!important;
+            width:auto!important;
+            max-width:100%!important;
+            color:#7892a5!important;
+            font-size:5.6px!important;
+            line-height:1!important;
+            font-weight:850!important;
+            letter-spacing:.01em!important;
+            white-space:nowrap!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button.is-active .tr-dspTabCopy small{color:#a8c7d7!important}
+        }
+        @media(max-width:430px){
+          .tr-dspControlCenter .tr-dspTabs button{height:94px!important;min-height:94px!important}
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon{width:32px!important;height:32px!important;flex-basis:32px!important}
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy b{font-size:8.2px!important;letter-spacing:.02em!important}
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy small{font-size:5px!important;letter-spacing:0!important}
+        }
+
       `}
 
 
