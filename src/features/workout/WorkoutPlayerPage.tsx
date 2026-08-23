@@ -3163,13 +3163,12 @@ function SessionCompleteOverlay({
 function SessionBodyHologram() {
   return (
     <img
-      className="tr-siPhoto tr-siBodyPhoto"
-      src="https://images.unsplash.com/photo-1752911681648-3bd4732048d6?auto=format&fit=crop&w=1200&q=82"
+      className="tr-siVisualAsset tr-siVisualBody"
+      src="/session-intel/mvp-body-hologram.png"
       alt=""
       aria-hidden="true"
-      loading="lazy"
+      loading="eager"
       decoding="async"
-      onError={(event) => { event.currentTarget.style.display = "none"; }}
     />
   );
 }
@@ -3177,13 +3176,12 @@ function SessionBodyHologram() {
 function SessionProteinCore() {
   return (
     <img
-      className="tr-siPhoto tr-siProteinPhoto"
-      src="https://images.unsplash.com/photo-1775199603318-7f8a9a63b40d?auto=format&fit=crop&w=1000&q=82"
+      className="tr-siVisualAsset tr-siVisualProtein"
+      src="/session-intel/mvp-shaker.png"
       alt=""
       aria-hidden="true"
-      loading="lazy"
+      loading="eager"
       decoding="async"
-      onError={(event) => { event.currentTarget.style.display = "none"; }}
     />
   );
 }
@@ -3191,14 +3189,36 @@ function SessionProteinCore() {
 function SessionHistoryDial() {
   return (
     <img
-      className="tr-siPhoto tr-siHistoryPhoto"
-      src="https://images.unsplash.com/photo-1704265586142-db3e17d0dea0?auto=format&fit=crop&w=1000&q=82"
+      className="tr-siVisualAsset tr-siVisualChrono"
+      src="/session-intel/mvp-chrono.png"
       alt=""
       aria-hidden="true"
-      loading="lazy"
+      loading="eager"
       decoding="async"
-      onError={(event) => { event.currentTarget.style.display = "none"; }}
     />
+  );
+}
+
+function SessionVolumeMark() {
+  return (
+    <svg className="tr-siVolumeMark" viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <linearGradient id="trSiVolumeShell" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#79efff" />
+          <stop offset=".52" stopColor="#1d8cff" />
+          <stop offset="1" stopColor="#ff9b32" />
+        </linearGradient>
+        <radialGradient id="trSiVolumeCore" cx="50%" cy="42%" r="62%">
+          <stop offset="0" stopColor="#17374a" />
+          <stop offset="1" stopColor="#05090d" />
+        </radialGradient>
+      </defs>
+      <path d="M20 6h24l14 14v24L44 58H20L6 44V20L20 6Z" fill="rgba(8,17,24,.96)" stroke="url(#trSiVolumeShell)" strokeWidth="2" />
+      <path d="M23 13h18l10 10v18L41 51H23L13 41V23l10-10Z" fill="url(#trSiVolumeCore)" stroke="rgba(180,233,255,.28)" />
+      <circle cx="32" cy="32" r="10" fill="none" stroke="rgba(116,229,255,.75)" strokeWidth="3" />
+      <circle cx="32" cy="32" r="4" fill="#ffad42" />
+      <path d="M32 18v5M32 41v5M18 32h5M41 32h5" stroke="rgba(231,250,255,.78)" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -4386,81 +4406,73 @@ export function WorkoutPlayerPage({ params }: any) {
         >
           {sessionIntelExpanded ? (
             <div className="tr-siMax">
-              <section className="tr-siHeroMetric is-weight">
-                <SessionBodyHologram />
-                <div className="tr-siHeroShade" aria-hidden="true" />
-                <div className="tr-siHeroCopy">
-                  <span>BODY WEIGHT</span>
-                  <strong>{startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}</strong>
-                  <small
-                    className={`tr-siTrend ${
-                      weightTrend != null && weightTrend > 0
-                        ? "is-positive"
-                        : weightTrend != null && weightTrend < 0
-                          ? "is-negative"
-                          : ""
-                    }`}
-                  >
-                    {weightTrendText}
-                  </small>
-                </div>
-              </section>
-
-              <section className="tr-siHeroMetric is-protein">
-                <SessionProteinCore />
-                <div className="tr-siHeroShade" aria-hidden="true" />
-                <div className="tr-siHeroCopy">
-                  <span>PROTEIN TARGET</span>
-                  <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
-                  <small>DAILY MUSCLE-GAIN TARGET</small>
-                </div>
-              </section>
-
-              <section className="tr-siHeroMetric is-last">
-                <SessionHistoryDial />
-                <div className="tr-siHeroShade" aria-hidden="true" />
-                <div className="tr-siHeroCopy">
-                  <span>LAST {sessionShortLabel.toUpperCase()}</span>
-                  <strong>{lastSessionAgo}</strong>
-                  <small>{lastSession ? compactDate(lastSession.completedAt) : "COMPLETE ONE TO BUILD HISTORY"}</small>
-                </div>
-              </section>
-
-              <section className="tr-siPerformance">
-                <div className="tr-siPerformanceHead">
-                  <div>
-                    <span>PREVIOUS {sessionShortLabel.toUpperCase()}</span>
-                    <strong>{lastSession ? "PERFORMANCE BENCHMARK" : "NO COMPLETED BENCHMARK YET"}</strong>
+              <div className="tr-siPrimaryRow">
+                <section className="tr-siFeature is-weight">
+                  <div className="tr-siFeatureVisual is-body"><SessionBodyHologram /></div>
+                  <div className="tr-siFeatureCopy">
+                    <span>BODY WEIGHT</span>
+                    <strong>{startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}</strong>
+                    <small
+                      className={`tr-siTrend ${
+                        weightTrend != null && weightTrend > 0
+                          ? "is-positive"
+                          : weightTrend != null && weightTrend < 0
+                            ? "is-negative"
+                            : ""
+                      }`}
+                    >
+                      {weightTrendText}
+                    </small>
                   </div>
-                  {lastSession ? <b>{compactDate(lastSession.completedAt)}</b> : null}
+                </section>
+
+                <section className="tr-siFeature is-protein">
+                  <div className="tr-siFeatureVisual is-shaker"><SessionProteinCore /></div>
+                  <div className="tr-siFeatureCopy">
+                    <span>PROTEIN TARGET</span>
+                    <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
+                    <small>DAILY MUSCLE-GAIN TARGET</small>
+                  </div>
+                </section>
+
+                <section className="tr-siFeature is-last">
+                  <div className="tr-siFeatureVisual is-chrono"><SessionHistoryDial /></div>
+                  <div className="tr-siFeatureCopy">
+                    <span>LAST {sessionShortLabel.toUpperCase()}</span>
+                    <strong>{lastSessionAgo}</strong>
+                    <small>{lastSession ? compactDate(lastSession.completedAt) : "COMPLETE ONE TO BUILD HISTORY"}</small>
+                  </div>
+                </section>
+              </div>
+
+              <section className="tr-siBenchmark">
+                <div className="tr-siBenchmarkTitle">
+                  <span>PREVIOUS {sessionShortLabel.toUpperCase()}</span>
+                  <strong>{lastSession ? "PERFORMANCE BENCHMARK" : "NO COMPLETED BENCHMARK YET"}</strong>
                 </div>
 
-                <div className="tr-siPerformanceGrid">
-                  <div className="tr-siPerfMetric is-time">
-                    <div className="tr-siPerfVisual tr-siTimeline" aria-hidden="true">
-                      <i /><i /><i /><i /><i /><i /><i /><i /><i />
-                    </div>
-                    <div className="tr-siPerfValue">
+                <div className="tr-siBenchmarkMetrics">
+                  <div className="tr-siBenchMetric is-time">
+                    <div className="tr-siBenchIcon tr-siBenchClock"><SessionHistoryDial /></div>
+                    <div className="tr-siBenchCopy">
                       <strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong>
                       <span>SESSION TIME</span>
                     </div>
                   </div>
 
-                  <div className="tr-siPerfMetric is-sets">
-                    <div className="tr-siSetCells" aria-hidden="true">
-                      {Array.from({ length: Math.min(18, Math.max(6, lastSession?.plannedSets ?? 6)) }).map((_, index) => (
-                        <i key={index} className={lastSession && index < lastSession.completedSets ? "is-done" : ""} />
-                      ))}
+                  <div className="tr-siBenchMetric is-sets">
+                    <div className="tr-siBenchIcon tr-siBenchDumbbell">
+                      <img src={icoDumbbell} alt="" aria-hidden="true" />
                     </div>
-                    <div className="tr-siPerfValue">
+                    <div className="tr-siBenchCopy">
                       <strong>{lastSession ? `${lastSession.completedSets} / ${lastSession.plannedSets}` : "—"}</strong>
                       <span>SETS COMPLETED</span>
                     </div>
                   </div>
 
-                  <div className="tr-siPerfMetric is-volume">
-                    <div className="tr-siVolumeBars" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-                    <div className="tr-siPerfValue">
+                  <div className="tr-siBenchMetric is-volume">
+                    <div className="tr-siBenchIcon tr-siBenchVolume"><SessionVolumeMark /></div>
+                    <div className="tr-siBenchCopy">
                       <strong>{formatVolumeLb(lastSession?.volume)}</strong>
                       <span>TRAINING VOLUME</span>
                     </div>
@@ -4479,19 +4491,21 @@ export function WorkoutPlayerPage({ params }: any) {
               </section>
 
               <section className="tr-siWeekStrip">
-                <div>
+                <div className="tr-siWeekStat is-left">
                   <span>THIS WEEK</span>
                   <strong>{weekCompletionText}</strong>
                   <small>WORKOUTS COMPLETED</small>
                 </div>
                 <div className="tr-siWeekRail" aria-hidden="true">
-                  <i className={Number(weekCompletionText) > 0 ? "is-live" : ""} />
-                  <i className={Number(weekCompletionText) > 1 ? "is-live" : ""} />
-                  <i className={Number(weekCompletionText) > 2 ? "is-live" : ""} />
-                  <i className={Number(weekCompletionText) > 3 ? "is-live" : ""} />
-                  <i className={Number(weekCompletionText) > 4 ? "is-live" : ""} />
+                  <span className="tr-siWeekTrack" />
+                  <span
+                    className="tr-siWeekFill"
+                    style={{ width: `${Math.min(100, Math.max(4, Number(weekCompletionText) * 20))}%` }}
+                  />
+                  <i className="is-start" />
+                  <i /><i /><i /><i /><i className="is-end" />
                 </div>
-                <div className="tr-siWeekTime">
+                <div className="tr-siWeekStat is-right">
                   <strong>{weekTrainingTime}</strong>
                   <small>TRAINED THIS WEEK</small>
                 </div>
@@ -4500,20 +4514,41 @@ export function WorkoutPlayerPage({ params }: any) {
           ) : (
             <div className="tr-siCompact">
               <div className="tr-siCompactMetric is-weight">
-                <small>BODY WEIGHT</small>
-                <strong>{startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}</strong>
+                <div className="tr-siCompactVisual is-body"><SessionBodyHologram /></div>
+                <div className="tr-siCompactCopy">
+                  <small>BODY WEIGHT</small>
+                  <strong>{startedWeight != null ? `${formatLoggedWeight(startedWeight)} LB` : "—"}</strong>
+                  <span className={`tr-siMiniTrend ${weightTrend != null && weightTrend > 0 ? "is-positive" : weightTrend != null && weightTrend < 0 ? "is-negative" : ""}`}>{weightTrendText}</span>
+                </div>
               </div>
+
               <div className="tr-siCompactMetric is-protein">
-                <small>PROTEIN</small>
-                <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
+                <div className="tr-siCompactVisual is-shaker"><SessionProteinCore /></div>
+                <div className="tr-siCompactCopy">
+                  <small>PROTEIN TARGET</small>
+                  <strong>{proteinTarget != null ? `${proteinTarget} G` : "—"}</strong>
+                  <span>DAILY TARGET</span>
+                </div>
               </div>
+
               <div className="tr-siCompactMetric is-last">
-                <small>LAST {sessionShortLabel.toUpperCase()}</small>
-                <strong>{lastSessionAgo}</strong>
+                <div className="tr-siCompactVisual is-chrono"><SessionHistoryDial /></div>
+                <div className="tr-siCompactCopy">
+                  <small>LAST {sessionShortLabel.toUpperCase()}</small>
+                  <strong>{lastSessionAgo}</strong>
+                  <span>{lastSession ? compactDate(lastSession.completedAt) : "NO HISTORY"}</span>
+                </div>
               </div>
+
               <div className="tr-siCompactMetric is-performance">
                 <small>PREVIOUS PERFORMANCE</small>
-                <strong>{formatMinutesCompact(lastSession?.durationMinutes)} <em>•</em> {lastSession ? `${lastSession.completedSets}/${lastSession.plannedSets}` : "—"} <em>•</em> {formatVolumeLb(lastSession?.volume)}</strong>
+                <div className="tr-siCompactPerformance">
+                  <span><b className="tr-siMiniClock"><SessionHistoryDial /></b><strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong></span>
+                  <em>•</em>
+                  <span><b className="tr-siMiniDumbbell"><img src={icoDumbbell} alt="" aria-hidden="true" /></b><strong>{lastSession ? `${lastSession.completedSets}/${lastSession.plannedSets}` : "—"}</strong></span>
+                  <em>•</em>
+                  <span><b className="tr-siMiniVolume"><SessionVolumeMark /></b><strong>{formatVolumeLb(lastSession?.volume)}</strong></span>
+                </div>
               </div>
             </div>
           )}
@@ -6762,227 +6797,207 @@ export function WorkoutPlayerPage({ params }: any) {
 
 
         /* ============================================================
-           R12.5C.1 — SESSION CHECK-IN / SESSION INTEL
-           One continuous premium instrument surface. No nested metric cards.
-           Real photographic imagery is blended into the surface, never boxed.
+           R12.5C.2 — SESSION CHECK-IN / SESSION INTEL
+           Exact mockup direction: premium one-surface instrument panel,
+           user-supplied hologram / shaker / chrono assets, standalone chevron,
+           chrono + dumbbell + load benchmark icons, and a real weekly rail.
            ============================================================ */
         .tr-siShell .tr-card{
           position:relative;
           overflow:hidden;
-          border-color:rgba(79,188,230,.20);
+          border-color:rgba(63,190,236,.32);
           background:
-            radial-gradient(900px 270px at 10% -18%,rgba(25,187,255,.11),transparent 60%),
-            radial-gradient(650px 260px at 94% 8%,rgba(255,143,35,.06),transparent 64%),
-            linear-gradient(180deg,rgba(13,23,30,.99),rgba(4,8,12,.995));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 56px rgba(0,0,0,.22);
+            radial-gradient(850px 280px at 9% -20%,rgba(20,176,255,.12),transparent 62%),
+            radial-gradient(780px 280px at 100% 100%,rgba(255,137,36,.08),transparent 60%),
+            linear-gradient(180deg,#07131b 0%,#03090e 100%);
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,.07),
+            inset 0 -1px 0 rgba(255,155,49,.11),
+            0 22px 60px rgba(0,0,0,.28);
         }
         .tr-siShell .tr-card::before{
-          content:"";
-          position:absolute;
-          inset:0;
-          pointer-events:none;
+          content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
           background:
-            linear-gradient(116deg,transparent 0 25%,rgba(118,223,255,.032) 38%,transparent 51%),
-            repeating-linear-gradient(90deg,rgba(255,255,255,.010) 0 1px,transparent 1px 6px);
-          mix-blend-mode:screen;
-          opacity:.6;
+            linear-gradient(110deg,transparent 0 34%,rgba(111,226,255,.035) 43%,transparent 53%),
+            repeating-linear-gradient(90deg,rgba(255,255,255,.009) 0 1px,transparent 1px 7px);
+          mix-blend-mode:screen;opacity:.72
         }
         .tr-siShell .tr-card-head,.tr-siShell .tr-card-body{position:relative;z-index:1}
         .tr-siShell .tr-card-head{
           min-height:50px;
+          padding-top:0!important;padding-bottom:0!important;
+          border-bottom:1px solid rgba(93,191,225,.13)!important;
           background:linear-gradient(180deg,rgba(255,255,255,.025),transparent);
-          border-bottom-color:rgba(79,196,238,.11)!important;
         }
+        .tr-siShell.is-compact .tr-card-head{min-height:40px}
         .tr-siShell .tr-card-body{padding:0!important}
 
-        .tr-siHeaderRight{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+        .tr-siHeaderRight{display:flex;align-items:center;justify-content:flex-end;gap:12px;min-width:0}
         .tr-siToggle{
-          width:36px;height:36px;flex:0 0 36px;display:grid;place-items:center;
-          border:1px solid rgba(78,207,252,.28);border-radius:11px;color:#e9fbff;
-          background:linear-gradient(180deg,rgba(14,35,46,.94),rgba(4,10,14,.98));
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.075),0 0 20px rgba(33,185,236,.08);
-          cursor:pointer;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+          appearance:none;border:0!important;background:transparent!important;
+          width:28px;height:34px;display:grid;place-items:center;padding:0;
+          color:#b9efff;cursor:pointer;box-shadow:none!important;border-radius:0!important;
+          transition:color .16s ease,transform .16s ease,filter .16s ease;
         }
-        .tr-siToggle:hover{transform:translateY(-1px);border-color:rgba(103,229,255,.52);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 0 24px rgba(33,185,236,.14)}
-        .tr-siToggle span{font-size:17px;line-height:1;font-weight:1000;transform:translateY(-1px)}
+        .tr-siToggle:hover{color:#fff;transform:translateY(-1px);filter:drop-shadow(0 0 8px rgba(54,210,255,.62))}
+        .tr-siToggle span{font-size:25px;line-height:1;font-weight:650;transform:translateY(-1px);text-shadow:0 0 12px rgba(46,209,255,.40)}
 
-        /* Minimized: one precision rail, no pills/boxes. */
+        .tr-siVisualAsset{display:block;max-width:100%;height:auto;object-fit:contain;pointer-events:none;user-select:none}
+        .tr-siVisualBody{filter:saturate(1.08) contrast(1.03) drop-shadow(0 0 17px rgba(28,153,255,.34))}
+        .tr-siVisualProtein{filter:drop-shadow(0 18px 25px rgba(0,0,0,.36)) drop-shadow(0 0 10px rgba(20,133,255,.18))}
+        .tr-siVisualChrono{filter:drop-shadow(0 17px 24px rgba(0,0,0,.38)) drop-shadow(0 0 10px rgba(255,133,25,.18))}
+
+        /* Expanded desktop: exactly three premium image/text pairings on one surface. */
+        .tr-siMax{position:relative;min-width:0;background:linear-gradient(180deg,rgba(4,12,18,.35),rgba(2,7,11,.40));overflow:hidden}
+        .tr-siPrimaryRow{display:grid;grid-template-columns:1.06fr .98fr 1.08fr;min-height:238px}
+        .tr-siFeature{
+          position:relative;min-width:0;display:grid;grid-template-columns:minmax(92px,.90fr) minmax(0,1fr);
+          align-items:center;gap:13px;padding:16px 20px;overflow:hidden;
+        }
+        .tr-siFeature + .tr-siFeature::before{
+          content:"";position:absolute;left:0;top:22px;bottom:22px;width:1px;
+          background:linear-gradient(180deg,transparent,rgba(119,210,240,.16),transparent)
+        }
+        .tr-siFeature::after{
+          content:"";position:absolute;inset:auto 8% 0 8%;height:1px;opacity:.40;
+          background:linear-gradient(90deg,transparent,rgba(49,215,255,.62),transparent)
+        }
+        .tr-siFeature.is-last::after{background:linear-gradient(90deg,transparent,rgba(255,162,57,.50),transparent)}
+        .tr-siFeatureVisual{min-width:0;height:200px;display:grid;place-items:center;align-self:end}
+        .tr-siFeatureVisual.is-body{height:208px;align-self:stretch}
+        .tr-siFeatureVisual.is-body .tr-siVisualBody{height:100%;width:100%;object-fit:contain;object-position:center bottom}
+        .tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:194px;max-width:145px}
+        .tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:164px;max-width:164px}
+        .tr-siFeatureCopy{min-width:0;display:grid;gap:6px;align-content:center}
+        .tr-siFeatureCopy>span,.tr-siBenchmarkTitle>span,.tr-siBenchCopy>span,.tr-siWeekStat>span,.tr-siWeekStat>small,.tr-siCompactCopy>small,.tr-siCompactCopy>span,.tr-siCompactMetric.is-performance>small{
+          color:rgba(186,214,226,.72);font-size:8px;font-weight:1000;letter-spacing:.15em;text-transform:uppercase
+        }
+        .tr-siFeatureCopy strong{
+          min-width:0;color:#f8fcff;font-size:clamp(29px,3vw,44px);line-height:.94;font-weight:1100;
+          letter-spacing:-.045em;font-variant-numeric:tabular-nums;text-shadow:0 3px 0 rgba(0,0,0,.58),0 0 19px rgba(68,220,255,.08);
+          white-space:normal;overflow-wrap:anywhere
+        }
+        .tr-siFeature.is-last .tr-siFeatureCopy strong{color:#ffbd5f;text-shadow:0 3px 0 rgba(0,0,0,.60),0 0 20px rgba(255,145,36,.12)}
+        .tr-siFeatureCopy small{font-size:7.4px!important;font-weight:1000!important;letter-spacing:.085em!important;line-height:1.25;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+        .tr-siTrend.is-positive,.tr-siMiniTrend.is-positive{color:#70f4a1!important}.tr-siTrend.is-negative,.tr-siMiniTrend.is-negative{color:#ff9b65!important}
+
+        /* Benchmark: no waveform / no bar clusters. Clock, dumbbell, high-end load mark. */
+        .tr-siBenchmark{
+          display:grid;grid-template-columns:1.06fr 3fr;grid-template-areas:"title metrics" "delta metrics";
+          align-items:center;min-height:112px;padding:13px 20px 12px;border-top:1px solid rgba(95,198,234,.13);
+          border-bottom:1px solid rgba(95,198,234,.10);
+          background:linear-gradient(180deg,rgba(5,17,24,.72),rgba(2,8,12,.72));
+        }
+        .tr-siBenchmarkTitle{grid-area:title;min-width:0;display:grid;gap:4px;padding-right:18px}
+        .tr-siBenchmarkTitle strong{color:#e4f8fe;font-size:11px;line-height:1.22;font-weight:1050;letter-spacing:.035em;text-transform:uppercase}
+        .tr-siBenchmarkMetrics{grid-area:metrics;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0;align-self:stretch}
+        .tr-siBenchMetric{position:relative;min-width:0;display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:12px;padding:5px 16px}
+        .tr-siBenchMetric + .tr-siBenchMetric::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:1px;background:linear-gradient(180deg,transparent,rgba(135,215,241,.17),transparent)}
+        .tr-siBenchIcon{height:70px;display:grid;place-items:center;min-width:0}
+        .tr-siBenchClock .tr-siVisualChrono{width:67px;height:67px;object-fit:contain}
+        .tr-siBenchDumbbell img{width:72px;max-height:54px;object-fit:contain;filter:saturate(1.22) brightness(1.20) contrast(1.10) drop-shadow(0 7px 10px rgba(0,0,0,.34)) drop-shadow(0 0 8px rgba(42,192,255,.17))}
+        .tr-siVolumeMark{width:62px;height:62px;display:block;filter:drop-shadow(0 7px 10px rgba(0,0,0,.35)) drop-shadow(0 0 8px rgba(45,185,255,.16))}
+        .tr-siBenchCopy{min-width:0;display:grid;gap:5px}
+        .tr-siBenchCopy strong{color:#f9fcff;font-size:clamp(24px,2.5vw,34px);line-height:.95;font-weight:1100;letter-spacing:-.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
+        .tr-siPerfDelta{grid-area:delta;min-width:0;padding-top:5px;padding-right:16px;color:rgba(191,211,221,.62);font-size:6.7px;font-weight:1000;letter-spacing:.075em;line-height:1.2;text-transform:uppercase;white-space:normal;overflow-wrap:anywhere}
+        .tr-siPerfDelta.is-positive{color:#70f4a1}.tr-siPerfDelta.is-negative{color:#ff9b65}
+
+        /* Bottom: one precision rail, not a stack of bars. */
+        .tr-siWeekStrip{min-height:58px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:18px;padding:8px 20px 9px;background:linear-gradient(180deg,rgba(255,255,255,.011),rgba(0,0,0,.14))}
+        .tr-siWeekStat{display:grid;gap:2px;min-width:0}.tr-siWeekStat.is-right{text-align:right;justify-items:end}
+        .tr-siWeekStat strong{color:#f8fcff;font-size:23px;line-height:.94;font-weight:1100;font-variant-numeric:tabular-nums;white-space:nowrap}
+        .tr-siWeekRail{position:relative;height:18px;min-width:90px;display:flex;align-items:center;justify-content:space-between;padding:0 6px}
+        .tr-siWeekTrack,.tr-siWeekFill{position:absolute;left:6px;right:6px;top:50%;height:3px;border-radius:99px;transform:translateY(-50%)}
+        .tr-siWeekTrack{background:linear-gradient(90deg,rgba(66,111,128,.16),rgba(122,164,179,.22),rgba(93,118,129,.13));box-shadow:inset 0 1px 1px rgba(0,0,0,.65)}
+        .tr-siWeekFill{right:auto;background:linear-gradient(90deg,#36d8ff,#1f97ff,#58ffc5);box-shadow:0 0 12px rgba(45,207,255,.42),0 0 28px rgba(45,207,255,.12);transition:width .35s ease}
+        .tr-siWeekRail i{position:relative;z-index:2;width:6px;height:6px;border-radius:50%;background:#273943;border:1px solid rgba(133,183,199,.18);box-shadow:0 0 0 3px rgba(1,7,10,.52)}
+        .tr-siWeekRail i.is-start{background:#72f2ff;border-color:#b6fbff;box-shadow:0 0 11px rgba(57,218,255,.78),0 0 0 3px rgba(1,7,10,.55)}
+        .tr-siWeekRail i.is-end{border-color:rgba(255,163,56,.32)}
+
+        /* Minimized: same mockup language, same assets, one precision strip. */
         .tr-siCompact{
-          min-width:0;min-height:58px;display:grid;grid-template-columns:.82fr .72fr 1.02fr 1.75fr;
-          align-items:center;padding:0 16px;
-          background:
-            radial-gradient(520px 90px at 14% 0,rgba(36,202,255,.085),transparent 67%),
-            linear-gradient(180deg,rgba(8,19,25,.76),rgba(3,8,11,.92));
+          min-width:0;min-height:67px;display:grid;grid-template-columns:1.02fr .92fr 1.13fr 1.75fr;align-items:center;
+          padding:3px 14px 5px;background:
+            radial-gradient(420px 90px at 8% 0,rgba(32,198,255,.075),transparent 67%),
+            radial-gradient(420px 90px at 98% 100%,rgba(255,141,39,.07),transparent 68%),
+            linear-gradient(180deg,rgba(5,17,24,.78),rgba(2,8,12,.93));
+          box-shadow:inset 0 -1px 0 rgba(255,148,42,.18)
         }
-        .tr-siCompactMetric{position:relative;min-width:0;display:grid;gap:4px;padding:9px 15px 9px 18px}
-        .tr-siCompactMetric:first-child{padding-left:4px}
-        .tr-siCompactMetric + .tr-siCompactMetric::before{
-          content:"";position:absolute;left:0;top:12px;bottom:12px;width:1px;
-          background:linear-gradient(180deg,transparent,rgba(125,214,243,.18),transparent)
-        }
-        .tr-siCompactMetric::after{
-          content:"";position:absolute;left:5px;top:50%;width:4px;height:4px;border-radius:50%;
-          background:#48dfff;box-shadow:0 0 10px rgba(72,223,255,.55);transform:translateY(-50%);opacity:.68
-        }
-        .tr-siCompactMetric:first-child::after{left:-8px}
-        .tr-siCompactMetric.is-last::after{background:#ffbd66;box-shadow:0 0 10px rgba(255,173,76,.48)}
-        .tr-siCompactMetric small{color:rgba(174,205,219,.62);font-size:7.3px;font-weight:1000;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .tr-siCompactMetric strong{color:#f7fbfd;font-size:16px;line-height:1;font-weight:1050;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 0 rgba(0,0,0,.5)}
-        .tr-siCompactMetric.is-last strong{color:#ffd08a}
-        .tr-siCompactMetric.is-performance strong{font-size:14px}
-        .tr-siCompactMetric strong em{font-style:normal;color:#4bdcff;margin:0 4px}
-
-        /* Expanded: one continuous instrument surface with lighting zones only. */
-        .tr-siMax{
-          position:relative;min-width:0;display:grid;
-          grid-template-columns:1.08fr .96fr 1.08fr;
-          grid-template-areas:"weight protein last" "performance performance performance" "week week week";
-          background:
-            radial-gradient(500px 230px at 17% 24%,rgba(26,200,255,.08),transparent 72%),
-            radial-gradient(420px 220px at 82% 23%,rgba(255,157,51,.055),transparent 74%),
-            linear-gradient(180deg,rgba(9,20,27,.80),rgba(3,8,11,.91));
-          isolation:isolate;
-        }
-        .tr-siMax::before{
-          content:"";position:absolute;inset:0;pointer-events:none;z-index:4;
-          background:linear-gradient(112deg,transparent 0 31%,rgba(177,240,255,.028) 43%,transparent 54%);
-          mix-blend-mode:screen;opacity:.72
-        }
-        .tr-siHeroMetric{
-          position:relative;min-width:0;min-height:176px;overflow:hidden;padding:18px 20px;
-          display:flex;align-items:flex-end;
-        }
-        .tr-siHeroMetric.is-weight{grid-area:weight}
-        .tr-siHeroMetric.is-protein{grid-area:protein}
-        .tr-siHeroMetric.is-last{grid-area:last}
-        .tr-siHeroMetric + .tr-siHeroMetric::before{
-          content:"";position:absolute;left:0;top:18px;bottom:18px;width:1px;z-index:3;
-          background:linear-gradient(180deg,transparent,rgba(138,214,239,.18),transparent)
-        }
-        .tr-siPhoto{
-          position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;z-index:0;
-          transform:scale(1.04);transition:transform .7s ease,filter .7s ease,opacity .7s ease;
-          filter:saturate(.78) contrast(1.15) brightness(.62)
-        }
-        .tr-siHeroMetric:hover .tr-siPhoto{transform:scale(1.07)}
-        .tr-siBodyPhoto{object-position:52% 49%;opacity:.60;filter:grayscale(.90) sepia(.08) hue-rotate(150deg) saturate(1.7) contrast(1.23) brightness(.60)}
-        .tr-siProteinPhoto{object-position:58% 51%;opacity:.43;filter:saturate(.75) contrast(1.16) brightness(.48) hue-rotate(145deg)}
-        .tr-siHistoryPhoto{object-position:50% 48%;opacity:.48;filter:grayscale(.88) sepia(.25) hue-rotate(338deg) saturate(1.28) contrast(1.22) brightness(.52)}
-        .tr-siHeroShade{
-          position:absolute;inset:0;z-index:1;pointer-events:none;
-          background:
-            linear-gradient(180deg,rgba(3,8,11,.20),rgba(3,8,11,.40) 44%,rgba(3,8,11,.94) 100%),
-            linear-gradient(90deg,rgba(3,8,11,.84) 0%,rgba(3,8,11,.22) 58%,rgba(3,8,11,.34) 100%)
-        }
-        .tr-siHeroMetric.is-protein .tr-siHeroShade{background:linear-gradient(180deg,rgba(3,8,11,.25),rgba(3,8,11,.70)),linear-gradient(90deg,rgba(3,8,11,.86),rgba(3,8,11,.22))}
-        .tr-siHeroMetric.is-last .tr-siHeroShade{background:linear-gradient(180deg,rgba(8,7,5,.20),rgba(7,7,6,.76)),linear-gradient(90deg,rgba(6,8,10,.90),rgba(8,7,5,.18))}
-        .tr-siHeroCopy{position:relative;z-index:2;min-width:0;display:grid;gap:5px;align-content:end}
-        .tr-siHeroCopy > span,.tr-siPerformanceHead span,.tr-siPerfValue span,.tr-siWeekStrip span,.tr-siWeekStrip small{
-          color:rgba(188,210,221,.73);font-size:8px;font-weight:1000;letter-spacing:.15em;text-transform:uppercase
-        }
-        .tr-siHeroCopy strong{min-width:0;color:#f8fcff;font-size:clamp(30px,3.1vw,44px);line-height:.92;font-weight:1100;letter-spacing:-.045em;font-variant-numeric:tabular-nums;text-shadow:0 3px 0 rgba(0,0,0,.64),0 0 20px rgba(71,219,255,.10);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .tr-siHeroMetric.is-last .tr-siHeroCopy strong{color:#ffd08a;text-shadow:0 3px 0 rgba(0,0,0,.65),0 0 20px rgba(255,169,65,.10)}
-        .tr-siHeroCopy small{color:rgba(191,215,226,.68);font-size:7.3px;font-weight:950;letter-spacing:.085em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .tr-siTrend.is-positive{color:#6ff2a0!important}.tr-siTrend.is-negative{color:#ff9b69!important}
-
-        .tr-siPerformance{
-          grid-area:performance;position:relative;min-width:0;padding:13px 18px 12px;
-          border-top:1px solid rgba(105,203,238,.13);border-bottom:1px solid rgba(105,203,238,.10);
-          background:linear-gradient(180deg,rgba(8,20,27,.72),rgba(4,10,14,.78))
-        }
-        .tr-siPerformanceHead{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:10px}
-        .tr-siPerformanceHead>div{min-width:0;display:grid;gap:3px}
-        .tr-siPerformanceHead strong{color:#dff5fb;font-size:11px;font-weight:1050;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .tr-siPerformanceHead b{color:#ffc873;font-size:8px;font-weight:1000;letter-spacing:.12em;white-space:nowrap}
-        .tr-siPerformanceGrid{display:grid;grid-template-columns:1fr 1fr 1fr;min-width:0}
-        .tr-siPerfMetric{position:relative;min-width:0;min-height:74px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;padding:5px 18px}
-        .tr-siPerfMetric:first-child{padding-left:0}
-        .tr-siPerfMetric + .tr-siPerfMetric::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:1px;background:linear-gradient(180deg,transparent,rgba(134,213,240,.16),transparent)}
-        .tr-siPerfValue{min-width:0;display:grid;gap:4px}
-        .tr-siPerfValue strong{color:#f8fcff;font-size:clamp(23px,2.5vw,34px);line-height:.95;font-weight:1100;letter-spacing:-.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
-        .tr-siTimeline{width:120px;height:42px;display:flex;align-items:center;justify-content:flex-end;gap:4px;opacity:.72}
-        .tr-siTimeline i{width:3px;border-radius:99px;background:linear-gradient(180deg,#6cf3ff,#178cff);box-shadow:0 0 9px rgba(51,218,255,.22)}
-        .tr-siTimeline i:nth-child(1){height:12px}.tr-siTimeline i:nth-child(2){height:25px}.tr-siTimeline i:nth-child(3){height:17px}.tr-siTimeline i:nth-child(4){height:34px}.tr-siTimeline i:nth-child(5){height:22px}.tr-siTimeline i:nth-child(6){height:39px}.tr-siTimeline i:nth-child(7){height:20px}.tr-siTimeline i:nth-child(8){height:29px}.tr-siTimeline i:nth-child(9){height:14px}
-        .tr-siSetCells{width:118px;height:40px;display:flex;flex-wrap:wrap;align-content:center;justify-content:flex-end;gap:3px}
-        .tr-siSetCells i{width:6px;height:24px;border-radius:3px;border:1px solid rgba(150,197,214,.16);background:linear-gradient(180deg,rgba(128,158,170,.30),rgba(62,82,92,.20))}
-        .tr-siSetCells i.is-done{border-color:rgba(102,234,255,.68);background:linear-gradient(180deg,#64f0ff,#1699ff);box-shadow:0 0 9px rgba(46,205,255,.28)}
-        .tr-siVolumeBars{width:112px;height:42px;display:flex;align-items:end;justify-content:flex-end;gap:5px;opacity:.75}
-        .tr-siVolumeBars i{width:11px;border-radius:4px 4px 2px 2px;background:linear-gradient(180deg,rgba(104,236,255,.82),rgba(49,107,255,.18));box-shadow:0 0 11px rgba(51,207,255,.12)}
-        .tr-siVolumeBars i:nth-child(1){height:18px}.tr-siVolumeBars i:nth-child(2){height:28px}.tr-siVolumeBars i:nth-child(3){height:38px}.tr-siVolumeBars i:nth-child(4){height:31px}.tr-siVolumeBars i:nth-child(5){height:23px;background:linear-gradient(180deg,rgba(255,190,97,.72),rgba(255,117,42,.18))}
-        .tr-siPerfDelta{margin-top:7px;color:rgba(188,211,222,.60);font-size:7px;font-weight:1000;letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .tr-siPerfDelta.is-positive{color:#6ff2a0}.tr-siPerfDelta.is-negative{color:#ff9a64}
-
-        .tr-siWeekStrip{
-          grid-area:week;min-width:0;min-height:48px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:15px;padding:8px 18px;
-          background:linear-gradient(180deg,rgba(255,255,255,.012),rgba(0,0,0,.12))
-        }
-        .tr-siWeekStrip>div:first-child,.tr-siWeekTime{display:grid;gap:2px;min-width:0}
-        .tr-siWeekStrip strong{color:#f6fbfd;font-size:19px;line-height:1;font-weight:1100;font-variant-numeric:tabular-nums;white-space:nowrap}
-        .tr-siWeekTime{text-align:right;justify-items:end}
-        .tr-siWeekRail{height:12px;display:grid;grid-template-columns:repeat(5,1fr);gap:7px;align-items:center}
-        .tr-siWeekRail i{height:3px;border-radius:99px;background:rgba(140,170,182,.13);box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
-        .tr-siWeekRail i.is-live{background:linear-gradient(90deg,#35d8ff,#4cffc0);box-shadow:0 0 9px rgba(49,223,255,.20)}
+        .tr-siCompactMetric{position:relative;min-width:0;display:grid;align-items:center;gap:7px;padding:4px 12px}
+        .tr-siCompactMetric:not(.is-performance){grid-template-columns:42px minmax(0,1fr)}
+        .tr-siCompactMetric + .tr-siCompactMetric::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:1px;background:linear-gradient(180deg,transparent,rgba(126,207,235,.15),transparent)}
+        .tr-siCompactVisual{height:50px;display:grid;place-items:center;min-width:0;overflow:hidden}
+        .tr-siCompactVisual.is-body .tr-siVisualBody{height:54px;width:50px;object-fit:cover;object-position:center 18%;border-radius:4px;filter:saturate(1.12) contrast(1.06) drop-shadow(0 0 8px rgba(28,153,255,.31))}
+        .tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:48px;max-width:35px}
+        .tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:47px;max-width:47px}
+        .tr-siCompactCopy{min-width:0;display:grid;gap:3px}
+        .tr-siCompactCopy strong{color:#f8fcff;font-size:16px;line-height:.96;font-weight:1080;letter-spacing:-.025em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .tr-siCompactMetric.is-last .tr-siCompactCopy strong{color:#ffbd5f}
+        .tr-siCompactCopy>span{font-size:6px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .tr-siCompactMetric.is-performance{grid-template-columns:1fr;gap:5px}
+        .tr-siCompactPerformance{display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap;overflow:hidden}
+        .tr-siCompactPerformance>span{min-width:0;display:flex;align-items:center;gap:5px}
+        .tr-siCompactPerformance strong{font-size:12px;color:#f7fbfd;font-weight:1050;font-variant-numeric:tabular-nums}
+        .tr-siCompactPerformance em{font-style:normal;color:#43dfff;font-size:9px}
+        .tr-siCompactPerformance b{display:grid;place-items:center;width:23px;height:23px;flex:0 0 23px}
+        .tr-siMiniClock .tr-siVisualChrono{width:23px;height:23px;object-fit:contain}
+        .tr-siMiniDumbbell img{width:26px;max-height:20px;object-fit:contain;filter:brightness(1.23) contrast(1.08) saturate(1.15)}
+        .tr-siMiniVolume .tr-siVolumeMark{width:23px;height:23px}
 
         @media (max-width:900px){
-          .tr-siHeroMetric{min-height:158px;padding:15px}
-          .tr-siHeroCopy strong{font-size:30px}
-          .tr-siPerfMetric{padding:5px 12px;gap:8px}
-          .tr-siTimeline,.tr-siSetCells,.tr-siVolumeBars{width:88px}
+          .tr-siPrimaryRow{min-height:214px}
+          .tr-siFeature{grid-template-columns:minmax(78px,.78fr) minmax(0,1fr);gap:10px;padding:14px}
+          .tr-siFeatureVisual{height:178px}.tr-siFeatureVisual.is-body{height:186px}.tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:172px;max-width:126px}.tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:146px;max-width:146px}
+          .tr-siFeatureCopy strong{font-size:30px}
+          .tr-siBenchMetric{grid-template-columns:60px minmax(0,1fr);gap:9px;padding:5px 10px}.tr-siBenchIcon{height:60px}.tr-siBenchClock .tr-siVisualChrono{width:57px;height:57px}.tr-siBenchDumbbell img{width:61px}.tr-siVolumeMark{width:53px;height:53px}
         }
 
         @media (max-width:720px){
-          .tr-siShell .tr-card-head{min-height:48px}
-          .tr-siShell .tr-card-body{padding:0!important}
-          .tr-siHeaderRight{gap:7px}
-          .tr-siHeaderRight .tr-checkinContext{max-width:45vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:7.5px}
-          .tr-siToggle{width:34px;height:34px;flex-basis:34px;border-radius:10px}
+          .tr-siShell .tr-card-head{min-height:45px}
+          .tr-siShell.is-compact .tr-card-head{min-height:37px}
+          .tr-siHeaderRight{gap:6px}.tr-siHeaderRight .tr-checkinContext{max-width:47vw;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          .tr-siToggle{width:24px;height:30px}.tr-siToggle span{font-size:22px}
 
-          .tr-siCompact{
-            min-height:76px;grid-template-columns:1fr 1fr 1.15fr;grid-template-areas:"weight protein last" "performance performance performance";
-            padding:4px 10px 5px
-          }
-          .tr-siCompactMetric{padding:7px 10px 6px 14px;gap:3px}
-          .tr-siCompactMetric:first-child{grid-area:weight;padding-left:3px}
-          .tr-siCompactMetric.is-protein{grid-area:protein}.tr-siCompactMetric.is-last{grid-area:last}.tr-siCompactMetric.is-performance{grid-area:performance;padding:6px 3px 5px;border-top:1px solid rgba(114,204,235,.10)}
-          .tr-siCompactMetric.is-performance::before,.tr-siCompactMetric.is-performance::after{display:none}
-          .tr-siCompactMetric small{font-size:6.5px}.tr-siCompactMetric strong{font-size:14px}.tr-siCompactMetric.is-performance strong{font-size:11px}
+          /* Mobile expanded: three image/text rows on ONE surface, thin etched separators only. */
+          .tr-siPrimaryRow{grid-template-columns:1fr;min-height:0}
+          .tr-siFeature{grid-template-columns:108px minmax(0,1fr);min-height:116px;gap:12px;padding:8px 14px}
+          .tr-siFeature + .tr-siFeature::before{left:14px;right:14px;top:0;bottom:auto;width:auto;height:1px;background:linear-gradient(90deg,transparent,rgba(109,210,242,.17),transparent)}
+          .tr-siFeature::after{display:none}
+          .tr-siFeatureVisual,.tr-siFeatureVisual.is-body{height:106px;align-self:center}
+          .tr-siFeatureVisual.is-body .tr-siVisualBody{height:108px;width:98px;object-fit:cover;object-position:center 19%;border-radius:5px}
+          .tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:106px;max-width:74px}
+          .tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:96px;max-width:96px}
+          .tr-siFeatureCopy{gap:4px}.tr-siFeatureCopy>span{font-size:7px}.tr-siFeatureCopy strong{font-size:31px}.tr-siFeature.is-last .tr-siFeatureCopy strong{font-size:29px}.tr-siFeatureCopy small{font-size:6.5px!important}
 
-          .tr-siMax{
-            grid-template-columns:1fr 1fr;
-            grid-template-areas:"weight protein" "last last" "performance performance" "week week";
-          }
-          .tr-siHeroMetric{min-height:130px;padding:13px 14px}
-          .tr-siHeroMetric.is-last{min-height:92px}
-          .tr-siHeroMetric.is-last::before{display:none}
-          .tr-siHeroMetric.is-last{border-top:1px solid rgba(119,207,237,.11)}
-          .tr-siHeroMetric.is-protein::before{top:12px;bottom:12px}
-          .tr-siPhoto{transform:scale(1.06)}
-          .tr-siBodyPhoto{object-position:55% 46%;opacity:.52}.tr-siProteinPhoto{object-position:62% 50%;opacity:.36}.tr-siHistoryPhoto{object-position:52% 50%;opacity:.36}
-          .tr-siHeroCopy>span{font-size:7px}.tr-siHeroCopy strong{font-size:26px}.tr-siHeroCopy small{font-size:6.3px}
-          .tr-siHeroMetric.is-last .tr-siHeroCopy strong{font-size:28px}
+          .tr-siBenchmark{grid-template-columns:1fr;grid-template-areas:"title" "metrics" "delta";min-height:0;padding:10px 12px 9px}
+          .tr-siBenchmarkTitle{padding-right:0;margin-bottom:6px}.tr-siBenchmarkTitle>span{font-size:6.4px}.tr-siBenchmarkTitle strong{font-size:9.5px}.tr-siBenchmarkMetrics{min-height:80px}
+          .tr-siBenchMetric{grid-template-columns:1fr;justify-items:center;text-align:center;gap:3px;padding:4px 7px}.tr-siBenchMetric + .tr-siBenchMetric::before{top:8px;bottom:8px}
+          .tr-siBenchIcon{height:43px}.tr-siBenchClock .tr-siVisualChrono{width:43px;height:43px}.tr-siBenchDumbbell img{width:50px;max-height:38px}.tr-siBenchVolume .tr-siVolumeMark{width:42px;height:42px}
+          .tr-siBenchCopy{justify-items:center;gap:3px}.tr-siBenchCopy strong{font-size:20px}.tr-siBenchCopy>span{font-size:6px}
+          .tr-siPerfDelta{padding:4px 0 0;text-align:left;font-size:5.7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-          .tr-siPerformance{padding:11px 12px 10px}
-          .tr-siPerformanceHead{margin-bottom:7px}.tr-siPerformanceHead span{font-size:6.7px}.tr-siPerformanceHead strong{font-size:9px}.tr-siPerformanceHead b{font-size:7px}
-          .tr-siPerformanceGrid{grid-template-columns:repeat(3,minmax(0,1fr))}
-          .tr-siPerfMetric{min-height:82px;grid-template-columns:1fr;justify-items:center;text-align:center;gap:5px;padding:4px 7px}
-          .tr-siPerfMetric:first-child{padding-left:7px}
-          .tr-siPerfValue{justify-items:center}.tr-siPerfValue strong{font-size:20px}.tr-siPerfValue span{font-size:6.2px}
-          .tr-siTimeline,.tr-siSetCells,.tr-siVolumeBars{width:100%;height:32px;justify-content:center}
-          .tr-siTimeline i{width:3px}.tr-siSetCells{align-content:center}.tr-siSetCells i{width:5px;height:20px}.tr-siVolumeBars i{width:8px}
-          .tr-siPerfDelta{margin-top:5px;font-size:6px;text-align:center}
-          .tr-siWeekStrip{min-height:50px;padding:7px 11px;gap:9px}.tr-siWeekStrip span,.tr-siWeekStrip small{font-size:6px}.tr-siWeekStrip strong{font-size:17px}.tr-siWeekRail{gap:4px}
+          .tr-siWeekStrip{min-height:51px;gap:8px;padding:7px 12px}.tr-siWeekStat strong{font-size:18px}.tr-siWeekStat>span,.tr-siWeekStat>small{font-size:5.7px}.tr-siWeekRail{gap:0;padding:0 4px}.tr-siWeekTrack,.tr-siWeekFill{left:4px;right:4px}.tr-siWeekRail i{width:5px;height:5px}
+
+          /* Mobile minimized: compact but all four zones remain visible. */
+          .tr-siCompact{min-height:74px;grid-template-columns:.88fr .82fr 1fr 1.42fr;padding:3px 6px 5px}
+          .tr-siCompactMetric{gap:4px;padding:4px 5px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:25px minmax(0,1fr)}
+          .tr-siCompactVisual{height:36px}.tr-siCompactVisual.is-body .tr-siVisualBody{width:29px;height:37px;object-position:center 18%}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:34px;max-width:24px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:33px;max-width:33px}
+          .tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:5px;letter-spacing:.08em}.tr-siCompactCopy strong{font-size:11px}.tr-siCompactCopy>span{font-size:4.7px;letter-spacing:.04em}
+          .tr-siCompactPerformance{gap:3px}.tr-siCompactPerformance>span{gap:2px}.tr-siCompactPerformance strong{font-size:8.6px}.tr-siCompactPerformance em{font-size:6px}.tr-siCompactPerformance b{width:17px;height:17px;flex-basis:17px}.tr-siMiniClock .tr-siVisualChrono{width:17px;height:17px}.tr-siMiniDumbbell img{width:19px;max-height:15px}.tr-siMiniVolume .tr-siVolumeMark{width:17px;height:17px}
         }
 
         @media (max-width:420px){
-          .tr-siHeaderRight .tr-checkinContext{max-width:36vw}
-          .tr-siHeroMetric{min-height:120px;padding:11px}.tr-siHeroMetric.is-last{min-height:86px}
-          .tr-siHeroCopy strong{font-size:23px}.tr-siHeroMetric.is-last .tr-siHeroCopy strong{font-size:25px}
-          .tr-siPerfValue strong{font-size:18px}.tr-siPerformanceHead strong{font-size:8.5px}
-          .tr-siCompactMetric strong{font-size:13px}.tr-siCompactMetric.is-performance strong{font-size:10px}
+          .tr-siHeaderRight .tr-checkinContext{max-width:40vw}
+          .tr-siFeature{grid-template-columns:95px minmax(0,1fr);min-height:108px;padding:7px 10px;gap:9px}.tr-siFeatureVisual,.tr-siFeatureVisual.is-body{height:98px}.tr-siFeatureVisual.is-body .tr-siVisualBody{height:100px;width:90px}.tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:98px;max-width:67px}.tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:89px;max-width:89px}.tr-siFeatureCopy strong{font-size:28px}.tr-siFeature.is-last .tr-siFeatureCopy strong{font-size:26px}
+          .tr-siCompact{grid-template-columns:.86fr .78fr .98fr 1.38fr}.tr-siCompactMetric{padding-left:4px;padding-right:4px}.tr-siCompactCopy strong{font-size:10.4px}.tr-siCompactPerformance strong{font-size:8px}
+        }
+
+        @media (max-width:365px){
+          .tr-siCompact{grid-template-columns:.86fr .78fr .96fr 1.4fr;padding-left:3px;padding-right:3px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:22px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:25px;height:34px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:31px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:30px}.tr-siCompactCopy strong{font-size:9.5px}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.5px}.tr-siCompactCopy>span{font-size:4.3px}.tr-siCompactPerformance strong{font-size:7.4px}.tr-siCompactPerformance b{width:15px;height:15px;flex-basis:15px}.tr-siCompactPerformance em{font-size:5px}
         }
 
         @media (prefers-reduced-motion:reduce){
-          .tr-siPhoto,.tr-siToggle{transition:none!important}
+          .tr-siToggle,.tr-siWeekFill{transition:none!important}
         }
       `}</style>
     </div>
