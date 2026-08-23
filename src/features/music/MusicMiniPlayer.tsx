@@ -11693,6 +11693,185 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy small{font-size:5px!important;letter-spacing:0!important}
         }
 
+        /* MVP TRAINER R10.5 - MOBILE DSP COMPACT TABS + TOUCH SCROLL ONLY
+           Mobile-only final override. Desktop DSP geometry and all audio/DSP code remain untouched. */
+        @media(max-width:760px){
+          /* One vertical scroll owner on iOS. Remove the nested sticky workspace/tab layer
+             that can overlap controls and make upward swipes feel trapped. */
+          .tr-dspControlCenter.tr-audioEqPanel--pro7{
+            overflow-y:auto!important;
+            overflow-x:hidden!important;
+            -webkit-overflow-scrolling:touch!important;
+            overscroll-behavior-y:contain!important;
+            touch-action:pan-y!important;
+            scroll-padding-top:74px!important;
+            padding-bottom:max(18px,env(safe-area-inset-bottom))!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspWorkspace{
+            position:static!important;
+            top:auto!important;
+            z-index:auto!important;
+            margin:0 0 7px!important;
+            padding:5px 0 7px!important;
+            background:transparent!important;
+            backdrop-filter:none!important;
+            -webkit-backdrop-filter:none!important;
+          }
+          .tr-dspControlCenter .tr-mobileDspContext{
+            padding:0 0 5px!important;
+          }
+
+          /* Compact premium 4 + 3 tab grid. Full labels stay visible, never ellipsized. */
+          .tr-dspControlCenter .tr-dspTabs{
+            position:static!important;
+            top:auto!important;
+            z-index:auto!important;
+            width:100%!important;
+            grid-template-columns:repeat(4,minmax(0,1fr))!important;
+            gap:6px!important;
+            margin:0!important;
+            padding:6px!important;
+            border-radius:14px!important;
+            background:rgba(0,7,11,.70)!important;
+            backdrop-filter:none!important;
+            -webkit-backdrop-filter:none!important;
+            touch-action:pan-y!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button{
+            width:100%!important;
+            min-width:0!important;
+            height:76px!important;
+            min-height:76px!important;
+            padding:0!important;
+            border-radius:15px!important;
+            overflow:visible!important;
+            touch-action:pan-y!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabShell{
+            display:flex!important;
+            width:100%!important;
+            height:100%!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            gap:4px!important;
+            padding:6px 2px!important;
+            overflow:visible!important;
+            text-align:center!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon{
+            flex:0 0 28px!important;
+            width:28px!important;
+            height:28px!important;
+            border-radius:9px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon svg{
+            width:14px!important;
+            height:14px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button.is-active .tr-dspTabIcon{
+            filter:saturate(1.1) brightness(1.1)!important;
+            box-shadow:0 0 8px currentColor,inset 0 1px 0 rgba(255,255,255,.10)!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy{
+            display:flex!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            gap:2px!important;
+            overflow:visible!important;
+            text-align:center!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy b{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            color:#fff!important;
+            font-size:8.5px!important;
+            line-height:1.05!important;
+            font-weight:950!important;
+            letter-spacing:.025em!important;
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:normal!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy small{
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-height:12px!important;
+            color:#7892a5!important;
+            font-size:5.7px!important;
+            line-height:1.12!important;
+            font-weight:850!important;
+            letter-spacing:0!important;
+            white-space:normal!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            overflow-wrap:anywhere!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button.is-active .tr-dspTabCopy small{
+            color:#a8c7d7!important;
+          }
+
+          /* Vertical swipes over ordinary controls should scroll the sheet instead of
+             feeling like two controls are being touched at once. Taps still activate. */
+          .tr-dspControlCenter button,
+          .tr-dspControlCenter select,
+          .tr-dspControlCenter input:not([type="range"]){
+            touch-action:pan-y!important;
+          }
+          .tr-dspControlCenter input[type="range"]{
+            touch-action:pan-y!important;
+          }
+          /* Keep the 31-band vertical faders directly draggable. The EQ rack itself can
+             still distinguish horizontal rack swipes from vertical sheet scrolling. */
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqScroll{
+            touch-action:pan-x pan-y!important;
+            overscroll-behavior-x:contain!important;
+          }
+          .tr-dspControlCenter[data-mobile-dsp-tab="eq"] .tr-audioEqBands--31 .tr-audioEqSliderShell input[type="range"]{
+            touch-action:none!important;
+          }
+        }
+        @media(max-width:430px){
+          .tr-dspControlCenter .tr-dspTabs{
+            gap:5px!important;
+            padding:5px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button{
+            height:72px!important;
+            min-height:72px!important;
+            border-radius:14px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabShell{
+            gap:3px!important;
+            padding:5px 1px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon{
+            width:26px!important;
+            height:26px!important;
+            flex-basis:26px!important;
+            border-radius:8px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabIcon svg{
+            width:13px!important;
+            height:13px!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy b{
+            font-size:8px!important;
+            letter-spacing:.015em!important;
+          }
+          .tr-dspControlCenter .tr-dspTabs button .tr-dspTabCopy small{
+            font-size:5.25px!important;
+            line-height:1.08!important;
+          }
+        }
+
       `}
 
 
