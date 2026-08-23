@@ -1680,12 +1680,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     }, 140);
   }
 
-  function calibratedPreviewVolume(volume: number) {
-    const normalized = Math.max(0, Math.min(1, Number(volume) || 0));
-    const compensationGain = Math.pow(10, 1.25 / 20);
-    return Math.max(0, Math.min(1, normalized * compensationGain));
-  }
-
   function stopDiscoveryPreview() {
     if (previewStopTimerRef.current != null) {
       window.clearTimeout(previewStopTimerRef.current);
@@ -1712,7 +1706,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setPreviewErrorRecommendationId(null);
     const audio = new Audio(item.previewUrl);
     audio.preload = "none";
-    audio.volume = calibratedPreviewVolume(player.volume);
+    audio.volume = Math.max(0, Math.min(1, Number(player.volume) || 0));
     previewAudioRef.current = audio;
     setPreviewingRecommendationId(item.id);
     audio.onended = () => stopDiscoveryPreview();
@@ -1731,7 +1725,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   useEffect(() => {
     const audio = previewAudioRef.current;
     if (!audio) return;
-    audio.volume = calibratedPreviewVolume(player.volume);
+    audio.volume = Math.max(0, Math.min(1, Number(player.volume) || 0));
   }, [player.volume]);
 
   useEffect(() => {

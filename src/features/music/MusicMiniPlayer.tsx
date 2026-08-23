@@ -1480,21 +1480,10 @@ function MusicHeroSceneEngine({
   );
 }
 
-const MUSIC_PLAYER_COMPACT_KEY = "mvp_music_player_compact_v1";
-const MUSIC_PLAYER_COMPACT_REQUEST_EVENT = "mvp:music-player-compact-request";
-
 export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }) {
   const player = useMusicPlayer();
   const [playlists, setPlaylists] = useState<MusicPlaylist[]>([]);
   const [eqOpen, setEqOpen] = useState(false);
-  const [compact, setCompact] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return window.localStorage.getItem(MUSIC_PLAYER_COMPACT_KEY) === "true" || Boolean(window.localStorage.getItem("mvp_active_session_id"));
-    } catch {
-      return false;
-    }
-  });
   const [dspTab, setDspTab] = useState<"output" | "eq" | "tone" | "dynamics" | "space" | "smart" | "meter">("output");
   const dspPanelRef = useRef<HTMLElement | null>(null);
   const dspTouchStartYRef = useRef<number | null>(null);
@@ -1535,20 +1524,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     refreshPlaylists();
     window.addEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
     return () => window.removeEventListener(PLAYLISTS_CHANGED_EVENT, refreshPlaylists);
-  }, []);
-
-  function setCompactView(next: boolean) {
-    setCompact(next);
-    try { window.localStorage.setItem(MUSIC_PLAYER_COMPACT_KEY, next ? "true" : "false"); } catch { /* optional */ }
-  }
-
-  useEffect(() => {
-    const onCompactRequest = (event: Event) => {
-      const detail = (event as CustomEvent<{ compact?: boolean }>).detail;
-      setCompactView(detail?.compact !== false);
-    };
-    window.addEventListener(MUSIC_PLAYER_COMPACT_REQUEST_EVENT, onCompactRequest as EventListener);
-    return () => window.removeEventListener(MUSIC_PLAYER_COMPACT_REQUEST_EVENT, onCompactRequest as EventListener);
   }, []);
 
   useEffect(() => () => {
@@ -1909,52 +1884,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   return (
     <section
-      className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${compact ? "is-compact" : "is-expanded"} ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
+      className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
       aria-label="MVP Trainer music console"
     >
 
-      <div className="tr-compactPlayer" aria-label="Compact now playing">
-        <button type="button" className="tr-compactArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
-          {artworkUrl ? <img src={artworkUrl} alt="" /> : <span><PlayerIcon name="music" /></span>}
-        </button>
-        <button type="button" className="tr-compactIdentity" onClick={() => navigate("/music")} aria-label="Open current song in music library">
-          <strong>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
-          <small>{track?.artist || "Unknown Artist"}</small>
-        </button>
-        <div className="tr-compactTransport" aria-label="Compact music controls">
-          <button type="button" onClick={() => run(previousMusicTrack)} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Previous song"><PlayerIcon name="back" /></button>
-          <button type="button" className="is-primary" onClick={() => run(player.playing ? pauseMusic : playMusic)} disabled={player.loading || queueBusy} aria-label={player.playing ? "Pause music" : "Play music"}><PlayerIcon name={player.playing ? "pause" : "play"} /></button>
-          <button type="button" onClick={() => run(() => nextMusicTrack())} disabled={!player.tracks.length || player.loading || queueBusy} aria-label="Next song"><PlayerIcon name="next" /></button>
-        </div>
-        <div className="tr-compactUtilities">
-          <button
-            type="button"
-            className="tr-compactDsp"
-            data-profile={player.outputProfile}
-            onClick={() => { setCompactView(false); setDspTab("output"); setEqOpen(true); }}
-            aria-label={`Open ${MUSIC_OUTPUT_PROFILES[player.outputProfile].label} DSP`}
-          >
-            <PlayerIcon name={outputProfileIconName(player.outputProfile)} />
-            <span>DSP</span>
-          </button>
-          <button type="button" className="tr-compactExpand" onClick={() => setCompactView(false)} aria-label="Expand music player" title="Expand music player">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg>
-          </button>
-        </div>
-        <div className="tr-compactProgress" aria-hidden="true"><span style={{ width: `${duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0}%` }} /></div>
-      </div>
-
-      <div className="tr-playerExpanded">
       <div className="tr-playerHero">
         <MusicHeroSceneEngine
           playing={player.playing}
           trackKey={track?.id || `${track?.title || "music"}:${track?.artist || "unknown"}`}
           artworkUrl={artworkUrl}
         />
-        <button type="button" className="tr-playerCollapseDock" onClick={() => setCompactView(true)} aria-label="Minimize music player" title="Minimize music player">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-          <span>COMPACT</span>
-        </button>
         <button type="button" className="tr-audioArtwork" onClick={() => navigate("/music")} aria-label="Open music library">
           {artworkUrl ? <img className="tr-audioArtworkImage" src={artworkUrl} alt="" /> : <span className="tr-audioArtworkFallback"><PlayerIcon name="music" /></span>}
         </button>
@@ -2097,7 +2036,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </span>
           </label>
         </div>
-      </div>
       </div>
 
 
@@ -11940,81 +11878,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             line-height:1.08!important;
           }
         }
-
-
-        /* R12.5 — adaptive compact Now Playing, desktop + mobile */
-        .tr-playerExpanded{display:block;min-width:0}
-        .tr-compactPlayer{display:none}
-        .tr-audioDeck--pro7.is-compact{
-          position:relative!important;
-          min-height:68px!important;
-          height:auto!important;
-          padding:0!important;
-          overflow:hidden!important;
-          border:1px solid rgba(96,189,220,.28)!important;
-          border-radius:13px!important;
-          background:
-            radial-gradient(360px 76px at 18% -30%,rgba(64,199,244,.12),transparent 72%),
-            linear-gradient(112deg,rgba(12,23,30,.995),rgba(3,8,11,.998) 58%,rgba(7,16,21,.995))!important;
-          box-shadow:0 12px 34px rgba(0,0,0,.35),inset 0 1px rgba(255,255,255,.075),inset 0 -10px 22px rgba(0,0,0,.22)!important;
-          backdrop-filter:blur(16px) saturate(1.12)!important;
-          -webkit-backdrop-filter:blur(16px) saturate(1.12)!important;
-        }
-        .tr-audioDeck--pro7.is-compact .tr-playerExpanded{display:none!important}
-        .tr-audioDeck--pro7.is-compact .tr-compactPlayer{
-          position:relative;
-          min-height:66px;
-          display:grid;
-          grid-template-columns:50px minmax(100px,1fr) auto auto;
-          align-items:center;
-          gap:10px;
-          padding:7px 9px 8px;
-          isolation:isolate;
-        }
-        .tr-compactPlayer::before{
-          content:"";position:absolute;z-index:-1;left:5%;right:5%;top:0;height:1px;
-          background:linear-gradient(90deg,transparent,rgba(107,222,255,.24),rgba(237,252,255,.44),rgba(107,222,255,.24),transparent);
-          box-shadow:0 0 12px rgba(75,203,243,.10);
-        }
-        .tr-compactArtwork{
-          width:50px;height:50px;min-width:50px;padding:0;border:1px solid rgba(126,207,234,.24);border-radius:10px;overflow:hidden;
-          background:#061017;color:#bfefff;display:grid;place-items:center;cursor:pointer;
-          box-shadow:0 7px 16px rgba(0,0,0,.30),inset 0 1px rgba(255,255,255,.06),0 0 18px rgba(60,192,234,.055);
-        }
-        .tr-compactArtwork img{width:100%;height:100%;display:block;object-fit:cover}.tr-compactArtwork svg{width:21px;height:21px}
-        .tr-compactIdentity{min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:inherit;cursor:pointer;display:grid;gap:3px}
-        .tr-compactIdentity strong{min-width:0;color:#f9fdff;font-size:13px;line-height:1.08;font-weight:950;letter-spacing:-.015em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .tr-compactIdentity small{min-width:0;color:rgba(189,214,224,.74);font-size:9px;line-height:1.08;font-weight:780;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .tr-compactTransport{display:flex;align-items:center;gap:5px}
-        .tr-compactTransport button,.tr-compactUtilities button{
-          display:grid;place-items:center;border:1px solid rgba(126,191,216,.20);background:linear-gradient(180deg,rgba(20,36,44,.82),rgba(5,12,16,.92));color:#eefbff;cursor:pointer;
-          box-shadow:inset 0 1px rgba(255,255,255,.055),0 5px 12px rgba(0,0,0,.20);transition:transform .14s ease,border-color .14s ease,background .14s ease;
-        }
-        .tr-compactTransport button{width:31px;height:31px;border-radius:9px}.tr-compactTransport button svg{width:14px;height:14px}.tr-compactTransport button.is-primary{width:38px;height:38px;border-radius:50%;border-color:rgba(72,201,246,.46);background:linear-gradient(180deg,#0b8bc4,#075779);box-shadow:inset 0 1px rgba(255,255,255,.18),0 0 17px rgba(48,188,241,.16),0 6px 14px rgba(0,0,0,.24)}.tr-compactTransport button.is-primary svg{width:17px;height:17px}
-        .tr-compactTransport button:disabled{opacity:.34;cursor:default}
-        .tr-compactUtilities{display:flex;align-items:center;gap:4px}.tr-compactUtilities button{height:31px;border-radius:8px}
-        .tr-compactDsp{min-width:48px;padding:0 7px!important;display:flex!important;gap:4px!important;font-size:7px;font-weight:950;letter-spacing:.06em}.tr-compactDsp svg{width:13px;height:13px}.tr-compactDsp span{display:block}
-        .tr-compactExpand{width:31px;padding:0}.tr-compactExpand svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-        .tr-compactProgress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(85,132,149,.10);overflow:hidden}.tr-compactProgress span{display:block;height:100%;background:linear-gradient(90deg,#31c8f2,#80e9ff);box-shadow:0 0 8px rgba(68,206,245,.30);transition:width .18s linear}
-        .tr-playerCollapseDock{
-          position:absolute;z-index:8;top:8px;left:8px;min-height:29px;padding:0 9px;display:inline-flex;align-items:center;justify-content:center;gap:5px;
-          border:1px solid rgba(132,200,224,.24);border-radius:8px;background:linear-gradient(180deg,rgba(18,35,43,.78),rgba(4,11,15,.84));color:rgba(228,244,250,.84);font-size:7px;font-weight:950;letter-spacing:.08em;cursor:pointer;
-          box-shadow:inset 0 1px rgba(255,255,255,.055),0 5px 13px rgba(0,0,0,.20);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)
-        }
-        .tr-playerCollapseDock svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.tr-playerCollapseDock span{display:block}
-        @media(hover:hover) and (pointer:fine){.tr-compactTransport button:hover:not(:disabled),.tr-compactUtilities button:hover,.tr-playerCollapseDock:hover{transform:translateY(-1px);border-color:rgba(105,218,251,.44)}}
-        @media(max-width:650px){
-          .tr-audioDeck--pro7.is-compact{min-height:64px!important;border-radius:11px!important}
-          .tr-audioDeck--pro7.is-compact .tr-compactPlayer{min-height:62px;grid-template-columns:44px minmax(70px,1fr) auto auto;gap:6px;padding:6px 6px 7px}
-          .tr-compactArtwork{width:44px;height:44px;min-width:44px;border-radius:8px}.tr-compactIdentity{gap:2px}.tr-compactIdentity strong{font-size:11px}.tr-compactIdentity small{font-size:8px}
-          .tr-compactTransport{gap:3px}.tr-compactTransport button{width:27px;height:27px;border-radius:7px}.tr-compactTransport button svg{width:12px;height:12px}.tr-compactTransport button.is-primary{width:34px;height:34px}.tr-compactTransport button.is-primary svg{width:15px;height:15px}
-          .tr-compactUtilities{gap:3px}.tr-compactUtilities button{height:28px;border-radius:7px}.tr-compactDsp{min-width:38px;padding:0 5px!important}.tr-compactDsp span{display:none}.tr-compactExpand{width:28px}.tr-compactExpand svg{width:14px;height:14px}
-          .tr-playerCollapseDock{top:6px;left:6px;min-height:27px;padding:0 7px}.tr-playerCollapseDock span{display:none}
-        }
-        @media(max-width:380px){
-          .tr-audioDeck--pro7.is-compact .tr-compactPlayer{grid-template-columns:42px minmax(58px,1fr) auto auto;gap:4px;padding-left:5px;padding-right:5px}.tr-compactArtwork{width:42px;height:42px;min-width:42px}.tr-compactIdentity strong{font-size:10px}.tr-compactIdentity small{font-size:7.5px}.tr-compactTransport button{width:25px;height:25px}.tr-compactTransport button.is-primary{width:31px;height:31px}.tr-compactDsp{min-width:27px;width:27px;padding:0!important}.tr-compactExpand{width:27px}
-        }
-        @media(prefers-reduced-motion:reduce){.tr-compactProgress span,.tr-compactTransport button,.tr-compactUtilities button,.tr-playerCollapseDock{transition:none!important}}
 
       `}
 
