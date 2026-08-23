@@ -1919,6 +1919,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   return (
     <section
       className={`tr-audioDeck tr-audioDeck--v4 tr-audioDeck--pro7 ${compactPlayer ? "is-compact-player" : "is-expanded-player"} ${player.playing ? "is-playing" : ""} ${player.loading || queueBusy ? "is-busy" : ""}`}
+      data-output-profile={player.outputProfile}
       aria-label="MVP Trainer music console"
     >
 
@@ -11966,7 +11967,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
 
 
-        /* R12.5A.1 — compact Now Playing correction pass. Expanded player layout remains unchanged. */
+        /* R12.5A.2 — compact Now Playing visual separation + rail/profile corrections. Expanded player layout remains unchanged. */
         .tr-audioDeck--pro7{position:relative!important}
         .tr-compactNowPlaying{display:none}
         .tr-playerCompactTrigger{
@@ -11991,15 +11992,26 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-audioDeck--pro7.is-expanded-player>.tr-playerHero>.tr-dspPlayerCornerDock svg{color:#f7fdff!important;fill:#f7fdff!important;opacity:1!important}
         .tr-audioDeck--pro7.is-expanded-player>.tr-playerHero>.tr-dspPlayerCornerDock svg path{fill:currentColor!important;stroke:currentColor!important}
 
+        /* Compact mode is intentionally a distinct floating instrument surface, not another app card. */
         .tr-audioDeck--pro7.is-compact-player{
-          min-height:72px!important;height:auto!important;padding:0!important;overflow:hidden!important;
-          border:1px solid rgba(92,184,216,.34)!important;border-radius:13px!important;
+          --tr-compact-rgb:60,215,255;
+          min-height:80px!important;height:auto!important;padding:0!important;overflow:hidden!important;
+          border:1px solid rgba(var(--tr-compact-rgb),.42)!important;border-radius:14px!important;
           background:
-            radial-gradient(310px 88px at 10% -36%,rgba(67,201,244,.16),transparent 72%),
-            radial-gradient(280px 84px at 56% 118%,rgba(22,114,154,.08),transparent 70%),
-            linear-gradient(112deg,rgba(11,24,31,.997),rgba(3,8,11,.999) 58%,rgba(7,16,21,.997))!important;
-          box-shadow:0 13px 34px rgba(0,0,0,.38),inset 0 1px rgba(255,255,255,.085),inset 0 -14px 26px rgba(0,0,0,.24)!important;
+            radial-gradient(440px 120px at 7% -48%,rgba(var(--tr-compact-rgb),.22),transparent 69%),
+            radial-gradient(300px 96px at 54% 132%,rgba(var(--tr-compact-rgb),.10),transparent 72%),
+            linear-gradient(104deg,rgba(13,27,35,.998),rgba(3,8,12,.999) 49%,rgba(7,17,23,.998))!important;
+          box-shadow:
+            0 16px 38px rgba(0,0,0,.46),
+            0 0 0 1px rgba(255,255,255,.025),
+            inset 0 1px rgba(255,255,255,.12),
+            inset 0 -18px 30px rgba(0,0,0,.29),
+            0 0 24px rgba(var(--tr-compact-rgb),.07)!important;
         }
+        .tr-audioDeck--pro7.is-compact-player[data-output-profile="reference"]{--tr-compact-rgb:179,210,221}
+        .tr-audioDeck--pro7.is-compact-player[data-output-profile="car_hifi"]{--tr-compact-rgb:255,177,59}
+        .tr-audioDeck--pro7.is-compact-player[data-output-profile="headphones"]{--tr-compact-rgb:60,215,255}
+        .tr-audioDeck--pro7.is-compact-player[data-output-profile="speaker"]{--tr-compact-rgb:181,112,255}
         .tr-audioDeck--pro7.is-compact-player>.tr-playerHero,
         .tr-audioDeck--pro7.is-compact-player>.tr-heroPreferenceStage,
         .tr-audioDeck--pro7.is-compact-player>.tr-audioTimeline,
@@ -12012,80 +12024,93 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-audioDeck--pro7.is-compact-player>.tr-playerCompactTrigger{display:none!important}
         .tr-audioDeck--pro7.is-compact-player>.tr-compactNowPlaying{
           position:relative;display:grid!important;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;
-          column-gap:10px;min-height:70px;padding:7px 9px 10px;box-sizing:border-box;isolation:isolate
+          column-gap:10px;min-height:78px;padding:7px 10px 18px;box-sizing:border-box;isolation:isolate
         }
         .tr-compactNowPlaying::before{
-          content:"";position:absolute;z-index:-1;left:4%;right:4%;top:0;height:1px;
-          background:linear-gradient(90deg,transparent,rgba(95,213,250,.24),rgba(237,252,255,.48),rgba(95,213,250,.24),transparent);
-          box-shadow:0 0 14px rgba(75,203,243,.11)
+          content:"";position:absolute;z-index:-1;left:3%;right:3%;top:0;height:1px;
+          background:linear-gradient(90deg,transparent,rgba(var(--tr-compact-rgb),.42),rgba(245,253,255,.68),rgba(var(--tr-compact-rgb),.42),transparent);
+          box-shadow:0 0 18px rgba(var(--tr-compact-rgb),.18)
         }
+        .tr-compactNowPlaying::after{
+          content:"";position:absolute;z-index:-1;top:1px;bottom:12px;left:-32%;width:28%;pointer-events:none;opacity:0;
+          background:linear-gradient(108deg,transparent 0,rgba(255,255,255,.018) 28%,rgba(var(--tr-compact-rgb),.115) 48%,rgba(255,255,255,.035) 58%,transparent 76%);
+          filter:blur(.2px);transform:skewX(-12deg);will-change:transform,opacity
+        }
+        .tr-audioDeck--pro7.is-compact-player.is-playing>.tr-compactNowPlaying::after{opacity:.78;animation:trCompactSurfaceSweep 5.8s cubic-bezier(.45,0,.28,1) infinite}
+        @keyframes trCompactSurfaceSweep{0%,20%{transform:translateX(0) skewX(-12deg);opacity:0}28%{opacity:.75}64%{opacity:.55}78%,100%{transform:translateX(520%) skewX(-12deg);opacity:0}}
         .tr-compactNowMeta{min-width:0;display:grid;grid-template-columns:46px minmax(0,1fr);align-items:center;gap:9px;justify-self:stretch;overflow:hidden}
         .tr-compactNowArtwork{
           width:46px;height:46px;min-width:46px;padding:0;overflow:hidden;display:grid;place-items:center;
-          border:1px solid rgba(125,205,233,.28);border-radius:10px;background:#061017;color:#d8f7ff;cursor:pointer;
-          box-shadow:0 7px 16px rgba(0,0,0,.31),inset 0 1px rgba(255,255,255,.075),0 0 19px rgba(60,192,234,.075);position:relative
+          border:1px solid rgba(var(--tr-compact-rgb),.38);border-radius:10px;background:#061017;color:#d8f7ff;cursor:pointer;
+          box-shadow:0 8px 18px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.10),0 0 20px rgba(var(--tr-compact-rgb),.10);position:relative
         }
         .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowArtwork{animation:trCompactArtworkAlive 4.8s ease-in-out infinite}
-        @keyframes trCompactArtworkAlive{0%,100%{box-shadow:0 7px 16px rgba(0,0,0,.31),inset 0 1px rgba(255,255,255,.075),0 0 14px rgba(60,192,234,.06)}50%{box-shadow:0 7px 16px rgba(0,0,0,.31),inset 0 1px rgba(255,255,255,.10),0 0 25px rgba(60,192,234,.18)}}
+        @keyframes trCompactArtworkAlive{0%,100%{box-shadow:0 8px 18px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.08),0 0 14px rgba(var(--tr-compact-rgb),.07)}50%{box-shadow:0 8px 18px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.13),0 0 28px rgba(var(--tr-compact-rgb),.21)}}
         .tr-compactNowArtwork img{width:100%;height:100%;display:block;object-fit:cover}
         .tr-compactNowArtwork span{display:grid;place-items:center}.tr-compactNowArtwork svg{width:21px;height:21px;fill:currentColor!important}
         .tr-compactNowIdentity{min-width:0;padding:2px 0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;display:grid;gap:3px;overflow:hidden}
         .tr-compactNowTitleLine{display:flex;align-items:center;gap:7px;min-width:0;max-width:100%}
         .tr-compactNowIdentity strong,.tr-compactNowIdentity small{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .tr-compactNowIdentity strong{flex:0 1 auto;color:#fbfeff;font-size:13px;line-height:1.08;font-weight:950;letter-spacing:-.015em}
-        .tr-compactNowIdentity small{color:rgba(194,219,228,.80);font-size:9px;line-height:1.08;font-weight:800}
+        .tr-compactNowIdentity strong{flex:0 1 auto;color:#fbfeff;font-size:13px;line-height:1.08;font-weight:950;letter-spacing:-.015em;text-shadow:0 1px 9px rgba(0,0,0,.42)}
+        .tr-compactNowIdentity small{color:rgba(203,224,232,.82);font-size:9px;line-height:1.08;font-weight:800}
         .tr-compactNowActivity{flex:0 0 auto;height:13px;display:flex;align-items:flex-end;gap:2px;opacity:.22}
-        .tr-compactNowActivity i{display:block;width:2px;height:5px;border-radius:999px;background:#7ce8ff;box-shadow:0 0 6px rgba(79,211,249,.26);transform-origin:50% 100%}
-        .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity{opacity:.92}
+        .tr-compactNowActivity i{display:block;width:2px;height:5px;border-radius:999px;background:rgb(var(--tr-compact-rgb));box-shadow:0 0 7px rgba(var(--tr-compact-rgb),.34);transform-origin:50% 100%}
+        .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity{opacity:.94}
         .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i:nth-child(1){animation:trCompactEnergy .72s ease-in-out infinite alternate}
         .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i:nth-child(2){animation:trCompactEnergy .52s ease-in-out -.21s infinite alternate}
         .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i:nth-child(3){animation:trCompactEnergy .66s ease-in-out -.34s infinite alternate}
         @keyframes trCompactEnergy{from{transform:scaleY(.45);opacity:.55}to{transform:scaleY(1.7);opacity:1}}
 
-        /* Equal outer tracks keep transport geometrically centered in the player. */
+        /* Equal outer tracks keep Previous / Play-Pause / Next physically centered. */
         .tr-compactNowTransport{grid-column:2;justify-self:center;display:flex;align-items:center;gap:6px;flex:0 0 auto}
         .tr-compactNowUtilities{grid-column:3;justify-self:end;display:flex;align-items:center;gap:5px;flex:0 0 auto}
         .tr-compactNowTransport button,.tr-compactNowUtilities button{
           display:grid;place-items:center;padding:0;border:1px solid rgba(139,207,232,.24);
-          background:linear-gradient(180deg,rgba(20,37,46,.88),rgba(5,12,16,.95));color:#fff!important;cursor:pointer;
-          box-shadow:inset 0 1px rgba(255,255,255,.065),0 5px 13px rgba(0,0,0,.23);transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease
+          background:linear-gradient(180deg,rgba(20,37,46,.90),rgba(5,12,16,.97));color:#fff!important;cursor:pointer;
+          box-shadow:inset 0 1px rgba(255,255,255,.075),0 6px 15px rgba(0,0,0,.27);transition:transform .14s ease,border-color .14s ease,background .14s ease,box-shadow .14s ease
         }
         .tr-compactNowTransport button{width:34px;height:34px;border-radius:9px}
         .tr-compactNowTransport button svg,.tr-compactNowTransport button svg path{width:17px;height:17px;fill:#fff!important;stroke:none!important;color:#fff!important;opacity:1!important}
-        .tr-compactNowTransport button.is-primary{width:42px;height:42px;border-radius:50%;border-color:rgba(72,201,246,.55);background:linear-gradient(180deg,#0c94ce,#075979);box-shadow:inset 0 1px rgba(255,255,255,.20),0 0 19px rgba(48,188,241,.19),0 7px 15px rgba(0,0,0,.27)}
+        .tr-compactNowTransport button.is-primary{width:42px;height:42px;border-radius:50%;border-color:rgba(72,201,246,.62);background:linear-gradient(180deg,#0da1df,#075777);box-shadow:inset 0 1px rgba(255,255,255,.24),0 0 21px rgba(48,188,241,.22),0 8px 17px rgba(0,0,0,.30)}
         .tr-compactNowTransport button.is-primary svg,.tr-compactNowTransport button.is-primary svg path{width:19px;height:19px;fill:#fff!important}
         .tr-compactNowTransport button:disabled{opacity:.34;cursor:default}
-        .tr-compactNowUtilities button{height:34px;border-radius:9px;color:#f7fdff!important}
-        .tr-compactNowDsp{min-width:54px;padding:0 8px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;font-size:7px;font-weight:950;letter-spacing:.06em}
-        .tr-compactNowDsp svg{width:15px;height:15px;fill:#f7fdff!important;color:#f7fdff!important;opacity:1!important}.tr-compactNowDsp svg path{fill:currentColor!important;stroke:currentColor!important}.tr-compactNowDsp span{display:block;color:#f7fdff!important}
-        .tr-compactNowExpand{width:34px}
+        .tr-compactNowUtilities button{height:34px;border-radius:9px}
+        .tr-compactNowDsp{--tr-device-rgb:179,210,221;min-width:54px;padding:0 8px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;font-size:7px;font-weight:950;letter-spacing:.06em;color:rgb(var(--tr-device-rgb))!important;border-color:rgba(var(--tr-device-rgb),.43)!important;background:radial-gradient(100% 130% at 18% -12%,rgba(var(--tr-device-rgb),.15),transparent 50%),linear-gradient(180deg,rgba(15,31,39,.96),rgba(4,11,15,.99))!important;box-shadow:inset 0 1px rgba(255,255,255,.10),0 0 13px rgba(var(--tr-device-rgb),.10),0 6px 15px rgba(0,0,0,.27)!important}
+        .tr-compactNowDsp[data-profile="headphones"]{--tr-device-rgb:60,215,255}
+        .tr-compactNowDsp[data-profile="car_hifi"]{--tr-device-rgb:255,177,59}
+        .tr-compactNowDsp[data-profile="speaker"]{--tr-device-rgb:181,112,255}
+        .tr-compactNowDsp[data-profile="reference"]{--tr-device-rgb:179,210,221}
+        .tr-compactNowDsp svg{width:15px;height:15px;fill:currentColor!important;stroke:currentColor!important;color:currentColor!important;opacity:1!important}.tr-compactNowDsp svg path{fill:currentColor!important;stroke:currentColor!important}.tr-compactNowDsp span{display:block;color:currentColor!important}
+        .tr-compactNowExpand{width:34px;color:#f7fdff!important}
         .tr-compactNowExpand svg{width:17px;height:17px;fill:none!important;stroke:#f7fdff!important;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}
 
-        /* Thin visible seek rail with a much larger draggable/tappable interaction target. */
+        /* Rail gets a dedicated lower channel so the thumb and glow can never be clipped. */
         .tr-compactNowSeek{
-          --tr-compact-seek:0%;position:absolute;z-index:12;left:0;right:0;bottom:0;width:100%;height:13px;margin:0;padding:0;
+          --tr-compact-seek:0%;position:absolute;z-index:12;left:8px;right:8px;bottom:3px;width:auto;height:16px;margin:0;padding:0;
           appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer;touch-action:none;outline:none
         }
-        .tr-compactNowSeek::-webkit-slider-runnable-track{height:2.5px;border-radius:999px;background:linear-gradient(90deg,#31c8f2 0,#80e9ff var(--tr-compact-seek),rgba(87,139,157,.15) var(--tr-compact-seek),rgba(87,139,157,.15) 100%);box-shadow:0 0 8px rgba(68,206,245,.12)}
-        .tr-compactNowSeek::-moz-range-track{height:2.5px;border-radius:999px;background:rgba(87,139,157,.15)}
-        .tr-compactNowSeek::-moz-range-progress{height:2.5px;border-radius:999px;background:linear-gradient(90deg,#31c8f2,#80e9ff);box-shadow:0 0 8px rgba(68,206,245,.12)}
-        .tr-compactNowSeek::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:11px;height:11px;margin-top:-4.25px;border-radius:50%;border:1px solid rgba(231,252,255,.94);background:#e9fcff;box-shadow:0 0 0 3px rgba(55,200,241,.12),0 0 10px rgba(55,200,241,.46);opacity:.78;transition:opacity .12s ease,transform .12s ease}
-        .tr-compactNowSeek::-moz-range-thumb{width:10px;height:10px;border-radius:50%;border:1px solid rgba(231,252,255,.94);background:#e9fcff;box-shadow:0 0 0 3px rgba(55,200,241,.12),0 0 10px rgba(55,200,241,.46);opacity:.78}
+        .tr-compactNowSeek::-webkit-slider-runnable-track{height:3px;border-radius:999px;background:linear-gradient(90deg,rgb(var(--tr-compact-rgb)) 0,rgba(224,250,255,.98) var(--tr-compact-seek),rgba(87,139,157,.17) var(--tr-compact-seek),rgba(87,139,157,.17) 100%);box-shadow:0 0 9px rgba(var(--tr-compact-rgb),.17)}
+        .tr-compactNowSeek::-moz-range-track{height:3px;border-radius:999px;background:rgba(87,139,157,.17)}
+        .tr-compactNowSeek::-moz-range-progress{height:3px;border-radius:999px;background:linear-gradient(90deg,rgb(var(--tr-compact-rgb)),rgba(224,250,255,.98));box-shadow:0 0 9px rgba(var(--tr-compact-rgb),.17)}
+        .tr-compactNowSeek::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:11px;height:11px;margin-top:-4px;border-radius:50%;border:1px solid rgba(241,253,255,.98);background:#f0fdff;box-shadow:0 0 0 3px rgba(var(--tr-compact-rgb),.14),0 0 11px rgba(var(--tr-compact-rgb),.48);opacity:.88;transition:opacity .12s ease,transform .12s ease}
+        .tr-compactNowSeek::-moz-range-thumb{width:10px;height:10px;border-radius:50%;border:1px solid rgba(241,253,255,.98);background:#f0fdff;box-shadow:0 0 0 3px rgba(var(--tr-compact-rgb),.14),0 0 11px rgba(var(--tr-compact-rgb),.48);opacity:.88}
         .tr-compactNowSeek:hover::-webkit-slider-thumb,.tr-compactNowSeek:focus-visible::-webkit-slider-thumb{opacity:1;transform:scale(1.12)}
         .tr-compactNowSeek:disabled{cursor:default;opacity:.35}
 
         @media(hover:hover) and (pointer:fine){
           .tr-playerCompactTrigger:hover,.tr-compactNowTransport button:hover:not(:disabled),.tr-compactNowUtilities button:hover{transform:translateY(-1px);border-color:rgba(105,218,251,.48);box-shadow:inset 0 1px rgba(255,255,255,.08),0 0 16px rgba(69,202,244,.09),0 6px 14px rgba(0,0,0,.24)}
+          .tr-compactNowDsp:hover{border-color:rgba(var(--tr-device-rgb),.68)!important;box-shadow:inset 0 1px rgba(255,255,255,.11),0 0 18px rgba(var(--tr-device-rgb),.17),0 7px 16px rgba(0,0,0,.29)!important}
         }
         @media(max-width:650px){
           .tr-playerCompactTrigger{top:6px;right:6px;width:44px;height:44px;min-width:44px;min-height:44px;background:rgba(5,13,18,.78)}
           .tr-playerCompactTrigger svg{width:20px;height:20px}
-          .tr-audioDeck--pro7.is-compact-player{min-height:70px!important;border-radius:11px!important}
-          .tr-audioDeck--pro7.is-compact-player>.tr-compactNowPlaying{min-height:68px;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);column-gap:5px;padding:6px 6px 10px}
+          .tr-audioDeck--pro7.is-compact-player{min-height:76px!important;border-radius:12px!important}
+          .tr-audioDeck--pro7.is-compact-player>.tr-compactNowPlaying{min-height:74px;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);column-gap:5px;padding:6px 7px 17px}
           .tr-compactNowMeta{grid-template-columns:42px minmax(0,1fr);gap:6px}.tr-compactNowArtwork{width:42px;height:42px;min-width:42px;border-radius:8px}
           .tr-compactNowIdentity{gap:2px}.tr-compactNowIdentity strong{font-size:10.5px}.tr-compactNowIdentity small{font-size:7.8px}.tr-compactNowTitleLine{gap:4px}.tr-compactNowActivity{gap:1.5px}.tr-compactNowActivity i{width:1.7px}
           .tr-compactNowTransport{gap:3px}.tr-compactNowTransport button{width:29px;height:29px;border-radius:7px}.tr-compactNowTransport button svg,.tr-compactNowTransport button svg path{width:14px;height:14px}.tr-compactNowTransport button.is-primary{width:37px;height:37px}.tr-compactNowTransport button.is-primary svg,.tr-compactNowTransport button.is-primary svg path{width:17px;height:17px}
           .tr-compactNowUtilities{gap:3px}.tr-compactNowUtilities button{height:31px;border-radius:7px}.tr-compactNowDsp{min-width:31px;width:31px;padding:0!important}.tr-compactNowDsp span{display:none}.tr-compactNowDsp svg{width:14px;height:14px}.tr-compactNowExpand{width:31px}.tr-compactNowExpand svg{width:15px;height:15px}
+          .tr-compactNowSeek{left:7px;right:7px;bottom:2px;height:16px}
         }
         @media(max-width:390px){
           .tr-audioDeck--pro7.is-compact-player>.tr-compactNowPlaying{column-gap:3px;padding-left:5px;padding-right:5px}
@@ -12098,7 +12123,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         }
         @media(prefers-reduced-motion:reduce){
           .tr-playerCompactTrigger,.tr-compactNowTransport button,.tr-compactNowUtilities button,.tr-compactNowSeek::-webkit-slider-thumb{transition:none!important}
-          .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowArtwork,.tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i{animation:none!important}
+          .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowArtwork,.tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i,.tr-audioDeck--pro7.is-compact-player.is-playing>.tr-compactNowPlaying::after{animation:none!important}
         }
 
       `}
