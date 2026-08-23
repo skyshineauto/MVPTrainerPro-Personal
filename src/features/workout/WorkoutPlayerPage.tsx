@@ -3199,6 +3199,19 @@ function SessionHistoryDial() {
   );
 }
 
+function SessionSetsDumbbell() {
+  return (
+    <img
+      className="tr-siSetsDumbbellAsset"
+      src="/session-intel/mvp-sets-dumbbell.png"
+      alt=""
+      aria-hidden="true"
+      loading="eager"
+      decoding="async"
+    />
+  );
+}
+
 function SessionVolumeMark() {
   return (
     <svg className="tr-siVolumeMark" viewBox="0 0 64 64" aria-hidden="true">
@@ -4462,7 +4475,7 @@ export function WorkoutPlayerPage({ params }: any) {
 
                   <div className="tr-siBenchMetric is-sets">
                     <div className="tr-siBenchIcon tr-siBenchDumbbell">
-                      <img src={icoDumbbell} alt="" aria-hidden="true" />
+                      <SessionSetsDumbbell />
                     </div>
                     <div className="tr-siBenchCopy">
                       <strong>{lastSession ? `${lastSession.completedSets} / ${lastSession.plannedSets}` : "—"}</strong>
@@ -4545,7 +4558,7 @@ export function WorkoutPlayerPage({ params }: any) {
                 <div className="tr-siCompactPerformance">
                   <span><b className="tr-siMiniClock"><SessionHistoryDial /></b><strong>{formatMinutesCompact(lastSession?.durationMinutes)}</strong></span>
                   <em>•</em>
-                  <span><b className="tr-siMiniDumbbell"><img src={icoDumbbell} alt="" aria-hidden="true" /></b><strong>{lastSession ? `${lastSession.completedSets}/${lastSession.plannedSets}` : "—"}</strong></span>
+                  <span><b className="tr-siMiniDumbbell"><SessionSetsDumbbell /></b><strong>{lastSession ? `${lastSession.completedSets}/${lastSession.plannedSets}` : "—"}</strong></span>
                   <em>•</em>
                   <span><b className="tr-siMiniVolume"><SessionVolumeMark /></b><strong>{formatVolumeLb(lastSession?.volume)}</strong></span>
                 </div>
@@ -6895,7 +6908,7 @@ export function WorkoutPlayerPage({ params }: any) {
         .tr-siBenchMetric + .tr-siBenchMetric::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:1px;background:linear-gradient(180deg,transparent,rgba(135,215,241,.17),transparent)}
         .tr-siBenchIcon{height:70px;display:grid;place-items:center;min-width:0}
         .tr-siBenchClock .tr-siVisualChrono{width:67px;height:67px;object-fit:contain}
-        .tr-siBenchDumbbell img{width:72px;max-height:54px;object-fit:contain;filter:saturate(1.22) brightness(1.20) contrast(1.10) drop-shadow(0 7px 10px rgba(0,0,0,.34)) drop-shadow(0 0 8px rgba(42,192,255,.17))}
+        .tr-siBenchDumbbell img{width:76px;max-height:58px;object-fit:contain;filter:drop-shadow(0 9px 12px rgba(0,0,0,.42)) drop-shadow(0 0 8px rgba(255,145,34,.16))}
         .tr-siVolumeMark{width:62px;height:62px;display:block;filter:drop-shadow(0 7px 10px rgba(0,0,0,.35)) drop-shadow(0 0 8px rgba(45,185,255,.16))}
         .tr-siBenchCopy{min-width:0;display:grid;gap:5px}
         .tr-siBenchCopy strong{color:#f9fcff;font-size:clamp(24px,2.5vw,34px);line-height:.95;font-weight:1100;letter-spacing:-.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -6927,7 +6940,7 @@ export function WorkoutPlayerPage({ params }: any) {
         .tr-siCompactMetric:not(.is-performance){grid-template-columns:42px minmax(0,1fr)}
         .tr-siCompactMetric + .tr-siCompactMetric::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:1px;background:linear-gradient(180deg,transparent,rgba(126,207,235,.15),transparent)}
         .tr-siCompactVisual{height:50px;display:grid;place-items:center;min-width:0;overflow:hidden}
-        .tr-siCompactVisual.is-body .tr-siVisualBody{height:54px;width:50px;object-fit:cover;object-position:center 18%;border-radius:4px;filter:saturate(1.12) contrast(1.06) drop-shadow(0 0 8px rgba(28,153,255,.31))}
+        .tr-siCompactVisual.is-body .tr-siVisualBody{height:54px;width:50px;object-fit:contain;object-position:center center;border-radius:0;filter:saturate(1.08) contrast(1.04) drop-shadow(0 0 8px rgba(28,153,255,.31))}
         .tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:48px;max-width:35px}
         .tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:47px;max-width:47px}
         .tr-siCompactCopy{min-width:0;display:grid;gap:3px}
@@ -6941,7 +6954,7 @@ export function WorkoutPlayerPage({ params }: any) {
         .tr-siCompactPerformance em{font-style:normal;color:#43dfff;font-size:9px}
         .tr-siCompactPerformance b{display:grid;place-items:center;width:23px;height:23px;flex:0 0 23px}
         .tr-siMiniClock .tr-siVisualChrono{width:23px;height:23px;object-fit:contain}
-        .tr-siMiniDumbbell img{width:26px;max-height:20px;object-fit:contain;filter:brightness(1.23) contrast(1.08) saturate(1.15)}
+        .tr-siMiniDumbbell img{width:27px;max-height:21px;object-fit:contain;filter:drop-shadow(0 3px 5px rgba(0,0,0,.38)) drop-shadow(0 0 5px rgba(255,146,36,.14))}
         .tr-siMiniVolume .tr-siVolumeMark{width:23px;height:23px}
 
         @media (max-width:900px){
@@ -6964,7 +6977,7 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-siFeature + .tr-siFeature::before{left:14px;right:14px;top:0;bottom:auto;width:auto;height:1px;background:linear-gradient(90deg,transparent,rgba(109,210,242,.17),transparent)}
           .tr-siFeature::after{display:none}
           .tr-siFeatureVisual,.tr-siFeatureVisual.is-body{height:106px;align-self:center}
-          .tr-siFeatureVisual.is-body .tr-siVisualBody{height:108px;width:98px;object-fit:cover;object-position:center 19%;border-radius:5px}
+          .tr-siFeatureVisual.is-body .tr-siVisualBody{height:108px;width:98px;object-fit:contain;object-position:center center;border-radius:0}
           .tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:106px;max-width:74px}
           .tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:96px;max-width:96px}
           .tr-siFeatureCopy{gap:4px}.tr-siFeatureCopy>span{font-size:7px}.tr-siFeatureCopy strong{font-size:31px}.tr-siFeature.is-last .tr-siFeatureCopy strong{font-size:29px}.tr-siFeatureCopy small{font-size:6.5px!important}
@@ -6979,21 +6992,21 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-siWeekStrip{min-height:51px;gap:8px;padding:7px 12px}.tr-siWeekStat strong{font-size:18px}.tr-siWeekStat>span,.tr-siWeekStat>small{font-size:5.7px}.tr-siWeekRail{gap:0;padding:0 4px}.tr-siWeekTrack,.tr-siWeekFill{left:4px;right:4px}.tr-siWeekRail i{width:5px;height:5px}
 
           /* Mobile minimized: compact but all four zones remain visible. */
-          .tr-siCompact{min-height:74px;grid-template-columns:.88fr .82fr 1fr 1.42fr;padding:3px 6px 5px}
-          .tr-siCompactMetric{gap:4px;padding:4px 5px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:25px minmax(0,1fr)}
-          .tr-siCompactVisual{height:36px}.tr-siCompactVisual.is-body .tr-siVisualBody{width:29px;height:37px;object-position:center 18%}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:34px;max-width:24px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:33px;max-width:33px}
-          .tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:5px;letter-spacing:.08em}.tr-siCompactCopy strong{font-size:11px}.tr-siCompactCopy>span{font-size:4.7px;letter-spacing:.04em}
-          .tr-siCompactPerformance{gap:3px}.tr-siCompactPerformance>span{gap:2px}.tr-siCompactPerformance strong{font-size:8.6px}.tr-siCompactPerformance em{font-size:6px}.tr-siCompactPerformance b{width:17px;height:17px;flex-basis:17px}.tr-siMiniClock .tr-siVisualChrono{width:17px;height:17px}.tr-siMiniDumbbell img{width:19px;max-height:15px}.tr-siMiniVolume .tr-siVolumeMark{width:17px;height:17px}
+          .tr-siCompact{min-height:78px;grid-template-columns:.72fr .68fr .90fr 1.70fr;padding:3px 4px 6px}
+          .tr-siCompactMetric{gap:3px;padding:4px 3px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:23px minmax(0,1fr)}
+          .tr-siCompactVisual{height:38px}.tr-siCompactVisual.is-body .tr-siVisualBody{width:27px;height:39px;object-fit:contain;object-position:center center}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:34px;max-width:23px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:32px;max-width:32px}
+          .tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.8px;letter-spacing:.055em;line-height:1.12;white-space:normal;overflow:visible;text-overflow:clip}.tr-siCompactCopy strong{font-size:10.6px;white-space:nowrap;overflow:visible;text-overflow:clip}.tr-siCompactCopy>span{font-size:4.45px;letter-spacing:.025em;line-height:1.12;white-space:normal;overflow:visible;text-overflow:clip}
+          .tr-siCompactMetric.is-performance{gap:3px}.tr-siCompactPerformance{gap:2px;justify-content:space-between;overflow:visible}.tr-siCompactPerformance>span{gap:1px;flex:0 1 auto}.tr-siCompactPerformance strong{font-size:7.8px;letter-spacing:-.02em}.tr-siCompactPerformance em{font-size:5.2px}.tr-siCompactPerformance b{width:14px;height:14px;flex-basis:14px}.tr-siMiniClock .tr-siVisualChrono{width:14px;height:14px}.tr-siMiniDumbbell img{width:17px;max-height:13px}.tr-siMiniVolume .tr-siVolumeMark{width:14px;height:14px}
         }
 
         @media (max-width:420px){
           .tr-siHeaderRight .tr-checkinContext{max-width:40vw}
           .tr-siFeature{grid-template-columns:95px minmax(0,1fr);min-height:108px;padding:7px 10px;gap:9px}.tr-siFeatureVisual,.tr-siFeatureVisual.is-body{height:98px}.tr-siFeatureVisual.is-body .tr-siVisualBody{height:100px;width:90px}.tr-siFeatureVisual.is-shaker .tr-siVisualProtein{height:98px;max-width:67px}.tr-siFeatureVisual.is-chrono .tr-siVisualChrono{height:89px;max-width:89px}.tr-siFeatureCopy strong{font-size:28px}.tr-siFeature.is-last .tr-siFeatureCopy strong{font-size:26px}
-          .tr-siCompact{grid-template-columns:.86fr .78fr .98fr 1.38fr}.tr-siCompactMetric{padding-left:4px;padding-right:4px}.tr-siCompactCopy strong{font-size:10.4px}.tr-siCompactPerformance strong{font-size:8px}
+          .tr-siCompact{min-height:80px;grid-template-columns:.70fr .66fr .88fr 1.76fr}.tr-siCompactMetric{padding-left:2px;padding-right:2px}.tr-siCompactCopy strong{font-size:10px;overflow:visible;text-overflow:clip}.tr-siCompactPerformance strong{font-size:7.45px}
         }
 
         @media (max-width:365px){
-          .tr-siCompact{grid-template-columns:.86fr .78fr .96fr 1.4fr;padding-left:3px;padding-right:3px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:22px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:25px;height:34px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:31px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:30px}.tr-siCompactCopy strong{font-size:9.5px}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.5px}.tr-siCompactCopy>span{font-size:4.3px}.tr-siCompactPerformance strong{font-size:7.4px}.tr-siCompactPerformance b{width:15px;height:15px;flex-basis:15px}.tr-siCompactPerformance em{font-size:5px}
+          .tr-siCompact{min-height:84px;grid-template-columns:.68fr .64fr .86fr 1.82fr;padding-left:2px;padding-right:2px}.tr-siCompactMetric:not(.is-performance){grid-template-columns:20px minmax(0,1fr)}.tr-siCompactVisual.is-body .tr-siVisualBody{width:23px;height:35px}.tr-siCompactVisual.is-shaker .tr-siVisualProtein{height:30px}.tr-siCompactVisual.is-chrono .tr-siVisualChrono{height:28px}.tr-siCompactCopy strong{font-size:9.1px;overflow:visible;text-overflow:clip}.tr-siCompactCopy>small,.tr-siCompactMetric.is-performance>small{font-size:4.15px;letter-spacing:.035em}.tr-siCompactCopy>span{font-size:4px;line-height:1.08}.tr-siCompactPerformance strong{font-size:6.75px}.tr-siCompactPerformance b{width:12px;height:12px;flex-basis:12px}.tr-siMiniClock .tr-siVisualChrono{width:12px;height:12px}.tr-siMiniDumbbell img{width:14px;max-height:11px}.tr-siMiniVolume .tr-siVolumeMark{width:12px;height:12px}.tr-siCompactPerformance em{font-size:4.5px}
         }
 
         @media (prefers-reduced-motion:reduce){
