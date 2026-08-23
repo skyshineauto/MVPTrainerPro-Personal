@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio V4 Mastering Refinement
+// MVP Trainer Pro - MVP Studio V5 Advanced Audio Engine
 // Standalone C++ DSP core compiled to WebAssembly.
 // Real-time rule: no heap allocation, no locks, no I/O in mvp_process().
 
@@ -144,6 +144,21 @@ struct Biquad {
     b0 = ((1.0 - cw) * 0.5) / a0n;
     b1 = (1.0 - cw) / a0n;
     b2 = ((1.0 - cw) * 0.5) / a0n;
+    a1 = (-2.0 * cw) / a0n;
+    a2 = (1.0 - alpha) / a0n;
+  }
+
+  void setNotch(double sampleRate, double frequency, double q = 1.0) {
+    const double f = clampd(frequency, 10.0, sampleRate * 0.475);
+    const double safeQ = clampd(q, 0.15, 20.0);
+    const double w0 = 2.0 * kPi * f / sampleRate;
+    const double cw = cos(w0);
+    const double sw = sin(w0);
+    const double alpha = sw / (2.0 * safeQ);
+    const double a0n = 1.0 + alpha;
+    b0 = 1.0 / a0n;
+    b1 = (-2.0 * cw) / a0n;
+    b2 = 1.0 / a0n;
     a1 = (-2.0 * cw) / a0n;
     a2 = (1.0 - alpha) / a0n;
   }
@@ -416,6 +431,89 @@ float headphoneBassImpact = 0.0f;
 // without changing Car/Hi-Fi or Bluetooth output profiles.
 float headphoneOutputDriveGain = 1.0f;
 float meterHeadphoneOutputDriveDb = 0.0f;
+
+
+// MVP Studio V5 Advanced Audio Engine. All processors below are original,
+// allocation-free DSP owned by MVP Trainer Pro and run inside this WASM core.
+constexpr int kParametricBands = 6;
+struct ParametricBandState {
+  int enabled = 0;
+  float frequency = 1000.0f;
+  float gainDb = 0.0f;
+  float q = 1.0f;
+  int type = 0; // 0 bell, 1 low shelf, 2 high shelf, 3 HPF, 4 LPF, 5 notch approximation
+  Biquad filter[2];
+};
+ParametricBandState parametricBands[kParametricBands];
+int parametricEnabled = 0;
+
+int bassEngineEnabled = 0;
+float bassSubDb = 0.0f;
+float bassPunchDb = 0.0f;
+float bassBodyDb = 0.0f;
+float bassTightness = 0.5f;
+Biquad bassSubFilter[2];
+Biquad bassPunchFilter[2];
+Biquad bassBodyFilter[2];
+Biquad bassTightFilter[2];
+
+int toneEngineEnabled = 0;
+float presenceDb = 0.0f;
+float clarityDb = 0.0f;
+float airDb = 0.0f;
+float deharshAmount = 0.0f;
+Biquad presenceFilter[2];
+Biquad clarityFilter[2];
+Biquad airFilter[2];
+DynamicEqBand deharshBand;
+
+int exciterEnabled = 0;
+float exciterAmount = 0.0f;
+float saturationLow = 0.0f;
+float saturationMid = 0.0f;
+float saturationHigh = 0.0f;
+Biquad exciterHighpass[2];
+Biquad saturationLowpass[2];
+Biquad saturationHighpass[2];
+
+int stereoFieldEnabled = 0;
+float stereoUserWidth = 1.0f;
+float stereoCenterFocus = 1.0f;
+float bassMonoHz = 100.0f;
+Biquad bassMonoSideLp;
+
+int dynamicsRestoreEnabled = 0;
+float dynamicsRestoreAmount = 0.0f;
+float restoreFastEnvelope = 0.0f;
+float restoreSlowEnvelope = 0.0f;
+
+int smartDspEnabled = 0;
+float smartDspAmount = 0.0f;
+float smartLowEnvelope = 0.0f;
+float smartHighEnvelope = 0.0f;
+Biquad smartLowDetector;
+Biquad smartHighDetector;
+
+int autoMakeupEnabled = 0;
+float autoMakeupGain = 1.0f;
+float outputReserveDb = 0.0f;
+float outputReserveGain = 1.0f;
+float meterAutoMakeupDb = 0.0f;
+float meterOutputReserveDb = 0.0f;
+float meterAvailableHeadroomDb = 12.0f;
+float meterInternalPeak = 0.0f;
+float meterEqActivityDb = 0.0f;
+float meterBassActivityDb = 0.0f;
+float meterToneActivityDb = 0.0f;
+float meterExciterActivity = 0.0f;
+float meterDeharshReductionDb = 0.0f;
+float meterSmartActivity = 0.0f;
+
+int headphoneAdvancedEnabled = 0;
+float headphoneSpeakerAngle = 30.0f;
+float headphoneDistance = 0.35f;
+float headphoneReflections = 0.06f;
+float headphoneWet = 0.24f;
 // Studio Stereo Integrity is automatic for every processed non-reference path.
 int stereoIntegrityEnabled = 1;
 float stereoIntegrityAmount = 1.0f;
@@ -802,29 +900,200 @@ inline void processEqStereo(float &left, float &right) {
   }
 }
 
+
+void configureParametricBand(int index) {
+  if (index < 0 || index >= kParametricBands) return;
+  auto &band = parametricBands[index];
+  for (int ch = 0; ch < 2; ++ch) {
+    if (!band.enabled) { band.filter[ch].setIdentity(); continue; }
+    if (band.type == 3) band.filter[ch].setHighpass(sampleRateHz, band.frequency, band.q);
+    else if (band.type == 4) band.filter[ch].setLowpass(sampleRateHz, band.frequency, band.q);
+    else if (band.type == 5) band.filter[ch].setNotch(sampleRateHz, band.frequency, band.q);
+    else if (absf(band.gainDb) < 0.001f) band.filter[ch].setIdentity();
+    else if (band.type == 1) band.filter[ch].setLowShelf(sampleRateHz, band.frequency, band.gainDb);
+    else if (band.type == 2) band.filter[ch].setHighShelf(sampleRateHz, band.frequency, band.gainDb);
+    else band.filter[ch].setPeaking(sampleRateHz, band.frequency, band.q, band.gainDb);
+  }
+}
+
+void configureAdvancedTone() {
+  for (int ch = 0; ch < 2; ++ch) {
+    bassSubFilter[ch].setLowShelf(sampleRateHz, 48.0, bassEngineEnabled ? bassSubDb : 0.0f);
+    bassPunchFilter[ch].setPeaking(sampleRateHz, 82.0, 0.82, bassEngineEnabled ? bassPunchDb : 0.0f);
+    bassBodyFilter[ch].setPeaking(sampleRateHz, 145.0, 0.72, bassEngineEnabled ? bassBodyDb : 0.0f);
+    const float tightHz = 18.0f + clampf(bassTightness, 0.0f, 1.0f) * 18.0f;
+    bassTightFilter[ch].setHighpass(sampleRateHz, tightHz, 0.72);
+    presenceFilter[ch].setPeaking(sampleRateHz, 3200.0, 0.78, toneEngineEnabled ? presenceDb : 0.0f);
+    clarityFilter[ch].setPeaking(sampleRateHz, 6800.0, 0.72, toneEngineEnabled ? clarityDb : 0.0f);
+    airFilter[ch].setHighShelf(sampleRateHz, 11500.0, toneEngineEnabled ? airDb : 0.0f);
+    exciterHighpass[ch].setHighpass(sampleRateHz, 3000.0, 0.71);
+    saturationLowpass[ch].setLowpass(sampleRateHz, 180.0, 0.71);
+    saturationHighpass[ch].setHighpass(sampleRateHz, 3500.0, 0.71);
+  }
+  deharshBand.configure(sampleRateHz, 3900.0f, 1.05f, -19.0f, 4.5f, 2.2f, 8.0f, 190.0f);
+  bassMonoSideLp.setLowpass(sampleRateHz, clampf(bassMonoHz, 60.0f, 160.0f), 0.70710678);
+  smartLowDetector.setLowpass(sampleRateHz, 220.0, 0.70710678);
+  smartHighDetector.setHighpass(sampleRateHz, 2800.0, 0.70710678);
+  for (int i = 0; i < kParametricBands; ++i) configureParametricBand(i);
+}
+
+inline float softSaturate(float x, float amount) {
+  const float a = clampf(amount, 0.0f, 1.0f);
+  if (a <= 0.0001f) return x;
+  const float drive = 1.0f + a * 2.8f;
+  const float y = x * drive;
+  const float ay = absf(y);
+  const float shaped = y / (1.0f + ay * (0.45f + a * 0.25f));
+  const float normalization = 1.0f + a * 1.15f;
+  return shaped * normalization;
+}
+
+void processParametric(float &left, float &right) {
+  if (!parametricEnabled) return;
+  for (int i = 0; i < kParametricBands; ++i) {
+    if (!parametricBands[i].enabled) continue;
+    left = parametricBands[i].filter[0].process(left);
+    right = parametricBands[i].filter[1].process(right);
+  }
+}
+
+void processBassEngine(float &left, float &right) {
+  if (!bassEngineEnabled) { meterBassActivityDb = 0.0f; return; }
+  left = bassSubFilter[0].process(left);
+  right = bassSubFilter[1].process(right);
+  left = bassPunchFilter[0].process(left);
+  right = bassPunchFilter[1].process(right);
+  left = bassBodyFilter[0].process(left);
+  right = bassBodyFilter[1].process(right);
+  left = bassTightFilter[0].process(left);
+  right = bassTightFilter[1].process(right);
+  meterBassActivityDb = (absf(bassSubDb) + absf(bassPunchDb) + absf(bassBodyDb)) / 3.0f;
+}
+
+void processToneEngine(float &left, float &right) {
+  if (toneEngineEnabled) {
+    left = presenceFilter[0].process(left); right = presenceFilter[1].process(right);
+    left = clarityFilter[0].process(left); right = clarityFilter[1].process(right);
+    left = airFilter[0].process(left); right = airFilter[1].process(right);
+    meterToneActivityDb = (absf(presenceDb) + absf(clarityDb) + absf(airDb)) / 3.0f;
+  } else meterToneActivityDb = 0.0f;
+  if (deharshAmount > 0.0001f) {
+    deharshBand.process(left, right);
+    const float seconds = 1.0f / sampleRateHz;
+    deharshBand.update(sampleRateHz, deharshAmount, seconds);
+    meterDeharshReductionDb = deharshBand.reductionDb;
+  } else meterDeharshReductionDb = 0.0f;
+}
+
+void processExciter(float &left, float &right) {
+  const float amount = exciterEnabled ? clampf(exciterAmount, 0.0f, 1.0f) : 0.0f;
+  const float originalL = left, originalR = right;
+  if (amount > 0.0001f) {
+    const float saturatedL = softSaturate(left, amount * 0.75f);
+    const float saturatedR = softSaturate(right, amount * 0.75f);
+    const float harmonicL = exciterHighpass[0].process(saturatedL - left);
+    const float harmonicR = exciterHighpass[1].process(saturatedR - right);
+    left += harmonicL * amount * 0.68f;
+    right += harmonicR * amount * 0.68f;
+  }
+  if (saturationLow > 0.0001f || saturationMid > 0.0001f || saturationHigh > 0.0001f) {
+    const float lowL = saturationLowpass[0].process(left);
+    const float lowR = saturationLowpass[1].process(right);
+    const float highL = saturationHighpass[0].process(left);
+    const float highR = saturationHighpass[1].process(right);
+    const float midL = left - lowL - highL;
+    const float midR = right - lowR - highR;
+    left = softSaturate(lowL, saturationLow) + softSaturate(midL, saturationMid) + softSaturate(highL, saturationHigh);
+    right = softSaturate(lowR, saturationLow) + softSaturate(midR, saturationMid) + softSaturate(highR, saturationHigh);
+  }
+  meterExciterActivity = clampf((absf(left-originalL)+absf(right-originalR))*8.0f,0.0f,1.0f);
+}
+
+void processStereoFieldUser(float &left, float &right) {
+  if (!stereoFieldEnabled) return;
+  float mid = 0.5f * (left + right);
+  float side = 0.5f * (left - right);
+  const float lowSide = bassMonoSideLp.process(side);
+  const float highSide = side - lowSide;
+  const float monoAmount = clampf((bassMonoHz - 60.0f) / 100.0f, 0.0f, 1.0f) * 0.82f;
+  side = lowSide * (1.0f - monoAmount) + highSide;
+  side *= clampf(stereoUserWidth, 0.5f, 1.65f);
+  mid *= clampf(stereoCenterFocus, 0.75f, 1.30f);
+  left = mid + side;
+  right = mid - side;
+}
+
+void processDynamicsRestore(float &left, float &right) {
+  if (!dynamicsRestoreEnabled || dynamicsRestoreAmount <= 0.0001f) return;
+  const float detector = absf(left) > absf(right) ? absf(left) : absf(right);
+  const float fastCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.006)));
+  const float slowCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.120)));
+  restoreFastEnvelope += (detector - restoreFastEnvelope) * fastCoeff;
+  restoreSlowEnvelope += (detector - restoreSlowEnvelope) * slowCoeff;
+  const float crest = clampf((restoreFastEnvelope - restoreSlowEnvelope) / (restoreSlowEnvelope + 0.03f), 0.0f, 1.0f);
+  const float gain = static_cast<float>(dbToGain(crest * dynamicsRestoreAmount * 1.6f));
+  left *= gain; right *= gain;
+}
+
+void processSmartDsp(float &left, float &right) {
+  if (!smartDspEnabled || smartDspAmount <= 0.0001f) { meterSmartActivity = 0.0f; return; }
+  const float low = 0.5f * (absf(smartLowDetector.process(left)) + absf(smartLowDetector.process(right)));
+  const float high = 0.5f * (absf(smartHighDetector.process(left)) + absf(smartHighDetector.process(right)));
+  const float coeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.180)));
+  smartLowEnvelope += (low-smartLowEnvelope)*coeff;
+  smartHighEnvelope += (high-smartHighEnvelope)*coeff;
+  const float imbalance = clampf((smartLowEnvelope-smartHighEnvelope)*2.4f,-1.0f,1.0f);
+  const float mid = 0.5f*(left+right);
+  const float side = 0.5f*(left-right);
+  const float correction = 1.0f - absf(imbalance)*smartDspAmount*0.055f;
+  left = mid + side*correction;
+  right = mid - side*correction;
+  meterSmartActivity = absf(imbalance)*smartDspAmount;
+}
+
+void processOutputGain(float &left, float &right) {
+  const float preLimitPeak = absf(left) > absf(right) ? absf(left) : absf(right);
+  if (preLimitPeak > meterInternalPeak) meterInternalPeak = preLimitPeak;
+  float makeupTargetDb = 0.0f;
+  if (autoMakeupEnabled) {
+    makeupTargetDb = clampf(multibandEnabled ? meterMultibandGainReductionDb * 0.35f : 0.0f, 0.0f, 2.0f);
+    makeupTargetDb += clampf(deharshAmount * meterDeharshReductionDb * 0.15f, 0.0f, 0.8f);
+  }
+  const float makeupTarget = static_cast<float>(dbToGain(makeupTargetDb));
+  const float coeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
+  autoMakeupGain += (makeupTarget-autoMakeupGain)*coeff;
+  outputReserveGain = static_cast<float>(dbToGain(outputReserveDb));
+  left *= autoMakeupGain * outputReserveGain;
+  right *= autoMakeupGain * outputReserveGain;
+  meterAutoMakeupDb = autoMakeupGain > 0.000001f ? static_cast<float>(20.0*log10(autoMakeupGain)) : 0.0f;
+  meterOutputReserveDb = outputReserveDb;
+  const float after = absf(left)>absf(right)?absf(left):absf(right);
+  meterAvailableHeadroomDb = after > 0.000001f ? clampf(static_cast<float>(-20.0*log10(after)), -12.0f, 24.0f) : 24.0f;
+}
+
 void configureOutputProfile() {
   // Static correction remains intentionally tiny. The adaptive guard below is
   // profile-aware and cut-only, so the same music preset can travel between
   // car/hi-fi, headphones and Bluetooth without becoming a second musical EQ.
   for (int ch = 0; ch < 2; ++ch) {
+    // Every device profile starts tonally neutral. Device choice describes the
+    // output path; it must never behave like a hidden EQ preset. Only the
+    // sub-audible protection high-pass differs slightly by device family.
     if (outputProfile == 2) {
-      // Bluetooth / compact speaker: preserve weight, restore a touch of detail.
-      outputHp[ch].setHighpass(sampleRateHz, 42.0);
-      outputLow[ch].setLowShelf(sampleRateHz, 105.0, 0.7);
-      outputPresence[ch].setPeaking(sampleRateHz, 2800.0, 0.85, 0.65);
-      outputHigh[ch].setHighShelf(sampleRateHz, 8200.0, 0.55);
+      outputHp[ch].setHighpass(sampleRateHz, 25.0);
+      outputLow[ch].setLowShelf(sampleRateHz, 105.0, 0.0);
+      outputPresence[ch].setPeaking(sampleRateHz, 2800.0, 0.85, 0.0);
+      outputHigh[ch].setHighShelf(sampleRateHz, 8200.0, 0.0);
     } else if (outputProfile == 1) {
-      // Headphones: near-neutral technical path; immersion remains separate.
       outputHp[ch].setHighpass(sampleRateHz, 16.0);
       outputLow[ch].setLowShelf(sampleRateHz, 90.0, 0.0);
       outputPresence[ch].setPeaking(sampleRateHz, 3000.0, 0.9, 0.0);
       outputHigh[ch].setHighShelf(sampleRateHz, 10000.0, 0.0);
     } else {
-      // Car / Hi-Fi: full-range, almost neutral, with only tiny system polish.
       outputHp[ch].setHighpass(sampleRateHz, 18.0);
-      outputLow[ch].setLowShelf(sampleRateHz, 82.0, 0.25);
-      outputPresence[ch].setPeaking(sampleRateHz, 2900.0, 0.95, 0.2);
-      outputHigh[ch].setHighShelf(sampleRateHz, 10500.0, 0.15);
+      outputLow[ch].setLowShelf(sampleRateHz, 82.0, 0.0);
+      outputPresence[ch].setPeaking(sampleRateHz, 2900.0, 0.95, 0.0);
+      outputHigh[ch].setHighShelf(sampleRateHz, 10500.0, 0.0);
     }
   }
 
@@ -1024,39 +1293,44 @@ void processStereoIntegrity(float &left, float &right) {
 
 void processHeadphone(float &left, float &right) {
   if (!headphoneEnabled) return;
+  const float dryL = left;
+  const float dryR = right;
   left = headphoneBass[0].process(left);
   right = headphoneBass[1].process(right);
 
-  // V4.5: make immersion controls unmistakably audible while keeping the
-  // output stable and bounded. Width changes the side channel, Center changes
-  // the mid channel, Crossfeed creates a low-passed speaker-like blend, and
-  // Depth adds a short opposite-channel ambience cue.
-  const float width = clampf(headphoneWidth, 0.0f, 1.0f);
+  // Virtual-speaker presentation. Existing width/depth/center controls remain,
+  // while the V5 advanced layer adds speaker angle, distance, early reflections
+  // and an explicit wet/dry mix. No reverb tail is generated.
+  const float advanced = headphoneAdvancedEnabled ? 1.0f : 0.0f;
+  const float angleNorm = clampf((headphoneSpeakerAngle - 15.0f) / 45.0f, 0.0f, 1.0f);
+  const float distance = headphoneAdvancedEnabled ? clampf(headphoneDistance, 0.0f, 1.0f) : 0.0f;
+  const float width = clampf(headphoneWidth + angleNorm * 0.12f * advanced, 0.0f, 1.0f);
+  const float depth = clampf(headphoneDepth + distance * 0.22f * advanced, 0.0f, 1.0f);
   const float center = clampf(headphoneCenter, 0.0f, 1.0f);
   const float mid = 0.5f * (left + right);
   const float side = 0.5f * (left - right);
-  const float sideScale = 1.0f + width * 0.82f;
-  const float midScale = 0.84f + center * 0.32f;
+  const float sideScale = 1.0f + width * 0.48f;
+  const float midScale = 0.92f + center * 0.16f;
   float widenedL = mid * midScale + side * sideScale;
   float widenedR = mid * midScale - side * sideScale;
 
-  const float cf = clampf(headphoneCrossfeed, 0.0f, 1.0f);
+  const float cf = clampf(headphoneCrossfeed + angleNorm * 0.05f * advanced, 0.0f, 1.0f);
   if (cf > 0.0001f) {
-    const double cutoff = 1250.0;
+    const double cutoff = 1200.0;
     const double alpha = 1.0 - exp(-2.0 * kPi * cutoff / sampleRateHz);
     crossfeedStateL += alpha * (widenedL - crossfeedStateL);
     crossfeedStateR += alpha * (widenedR - crossfeedStateR);
-    const float mix = cf * 0.30f;
-    const float direct = 1.0f - mix * 0.24f;
+    const float mix = cf * 0.20f;
+    const float direct = 1.0f - mix * 0.20f;
     const float cfL = static_cast<float>(crossfeedStateR) * mix;
     const float cfR = static_cast<float>(crossfeedStateL) * mix;
     widenedL = widenedL * direct + cfL;
     widenedR = widenedR * direct + cfR;
   }
 
-  const float depth = clampf(headphoneDepth, 0.0f, 1.0f);
-  if (depth > 0.0001f) {
-    int delaySamples = static_cast<int>(sampleRateHz * (0.00055f + 0.00220f * depth));
+  if (depth > 0.0001f || (headphoneAdvancedEnabled && headphoneReflections > 0.0001f)) {
+    const float reflection = headphoneAdvancedEnabled ? clampf(headphoneReflections, 0.0f, 0.30f) : 0.0f;
+    int delaySamples = static_cast<int>(sampleRateHz * (0.00045f + 0.00185f * depth + distance * 0.0011f));
     if (delaySamples < 1) delaySamples = 1;
     if (delaySamples >= kSpatialDelayMax) delaySamples = kSpatialDelayMax - 1;
     const int read = (spatialWrite - delaySamples + kSpatialDelayMax) % kSpatialDelayMax;
@@ -1065,41 +1339,24 @@ void processHeadphone(float &left, float &right) {
     spatialDelayL[spatialWrite] = widenedL;
     spatialDelayR[spatialWrite] = widenedR;
     spatialWrite = (spatialWrite + 1) % kSpatialDelayMax;
-    const float mix = depth * 0.24f;
-    widenedL = widenedL * (1.0f - mix * 0.46f) + delayedR * mix;
-    widenedR = widenedR * (1.0f - mix * 0.46f) + delayedL * mix;
+    const float mix = clampf(depth * 0.13f + reflection * 0.34f, 0.0f, 0.18f);
+    widenedL = widenedL * (1.0f - mix * 0.30f) + delayedR * mix;
+    widenedR = widenedR * (1.0f - mix * 0.30f) + delayedL * mix;
   }
 
-  // Previous versions compensated so aggressively that the modes could sound
-  // nearly identical. Keep only a small energy correction so Wide/Spatial/
-  // Stage/Focus are obvious without turning into a gimmick.
-  const float compensation = 1.0f / (1.0f + width * 0.035f + depth * 0.025f);
-  left = widenedL * compensation;
-  right = widenedR * compensation;
+  const float compensation = 1.0f / (1.0f + width * 0.018f + depth * 0.012f);
+  widenedL *= compensation;
+  widenedR *= compensation;
+  const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 1.0f;
+  left = dryL * (1.0f - wet) + widenedL * wet;
+  right = dryR * (1.0f - wet) + widenedR * wet;
 }
 
 void processHeadphoneOutputDrive(float &left, float &right) {
-  // The drive is automatic for the Headphones output profile, even when
-  // Immersion itself is Off. It lives immediately before the true-peak
-  // limiter and backs off if the limiter is already doing significant work.
-  float targetDb = (outputProfile == 1 && limiterEnabled) ? 3.8f : 0.0f;
-  if (outputProfile == 1 && limiterEnabled) {
-    const float limiterGrDb = limiterGain < 0.999999f
-      ? static_cast<float>(-20.0 * log10(limiterGain))
-      : 0.0f;
-    if (limiterGrDb > 0.75f) targetDb -= (limiterGrDb - 0.75f) * 1.15f;
-    targetDb = clampf(targetDb, 0.0f, 3.8f);
-  }
-
-  const float target = static_cast<float>(dbToGain(targetDb));
-  const float tau = target < headphoneOutputDriveGain ? 0.10f : 0.70f;
-  const float coeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * tau)));
-  headphoneOutputDriveGain += (target - headphoneOutputDriveGain) * coeff;
-  left *= headphoneOutputDriveGain;
-  right *= headphoneOutputDriveGain;
-  meterHeadphoneOutputDriveDb = headphoneOutputDriveGain > 0.000001f
-    ? static_cast<float>(20.0 * log10(headphoneOutputDriveGain))
-    : 0.0f;
+  // V5: no hidden headphone gain. User-controlled Output Reserve owns final drive.
+  headphoneOutputDriveGain += (1.0f - headphoneOutputDriveGain) * 0.02f;
+  meterHeadphoneOutputDriveDb = 0.0f;
+  (void)left; (void)right;
 }
 
 inline float envelopeStep(float current, float detector, float attackCoeff, float releaseCoeff) {
@@ -1355,6 +1612,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   configureMultiband();
   configureDynamicEq();
   configureLoudness();
+  configureAdvancedTone();
   resetBuffers();
   return 1;
 }
@@ -1464,6 +1722,37 @@ __attribute__((visibility("default"))) void mvp_set_headphone(
   headphoneBassImpact = clampf(bassImpact, 0.0f, 1.0f);
   configureHeadphoneBass();
 }
+
+__attribute__((visibility("default"))) void mvp_set_parametric_enabled(int enabled) { parametricEnabled = enabled ? 1 : 0; }
+__attribute__((visibility("default"))) void mvp_set_parametric_band(int index, int enabled, float frequency, float gainDb, float q, int type) {
+  if (index < 0 || index >= kParametricBands) return;
+  auto &band = parametricBands[index];
+  band.enabled = enabled ? 1 : 0;
+  band.frequency = clampf(frequency, 20.0f, sampleRateHz * 0.45f);
+  band.gainDb = clampf(gainDb, -12.0f, 12.0f);
+  band.q = clampf(q, 0.15f, 12.0f);
+  band.type = type < 0 ? 0 : (type > 5 ? 5 : type);
+  configureParametricBand(index);
+}
+__attribute__((visibility("default"))) void mvp_set_bass_engine(int enabled, float subDb, float punchDb, float bodyDb, float tightness) {
+  bassEngineEnabled = enabled ? 1 : 0;
+  bassSubDb = clampf(subDb,-8.0f,8.0f); bassPunchDb=clampf(punchDb,-8.0f,8.0f); bassBodyDb=clampf(bodyDb,-8.0f,8.0f); bassTightness=clampf(tightness,0.0f,1.0f);
+  configureAdvancedTone();
+}
+__attribute__((visibility("default"))) void mvp_set_tone_engine(int enabled, float presence, float clarity, float air, float deharsh) {
+  toneEngineEnabled=enabled?1:0; presenceDb=clampf(presence,-8.0f,8.0f); clarityDb=clampf(clarity,-8.0f,8.0f); airDb=clampf(air,-8.0f,8.0f); deharshAmount=clampf(deharsh,0.0f,1.0f); configureAdvancedTone();
+}
+__attribute__((visibility("default"))) void mvp_set_exciter(int enabled, float amount, float lowSat, float midSat, float highSat) {
+  exciterEnabled=enabled?1:0; exciterAmount=clampf(amount,0.0f,1.0f); saturationLow=clampf(lowSat,0.0f,1.0f); saturationMid=clampf(midSat,0.0f,1.0f); saturationHigh=clampf(highSat,0.0f,1.0f);
+}
+__attribute__((visibility("default"))) void mvp_set_stereo_field(int enabled, float width, float center, float monoHz) {
+  stereoFieldEnabled=enabled?1:0; stereoUserWidth=clampf(width,0.5f,1.65f); stereoCenterFocus=clampf(center,0.75f,1.30f); bassMonoHz=clampf(monoHz,60.0f,160.0f); configureAdvancedTone();
+}
+__attribute__((visibility("default"))) void mvp_set_dynamics_restore(int enabled, float amount) { dynamicsRestoreEnabled=enabled?1:0; dynamicsRestoreAmount=clampf(amount,0.0f,1.0f); }
+__attribute__((visibility("default"))) void mvp_set_smart_dsp(int enabled, float amount) { smartDspEnabled=enabled?1:0; smartDspAmount=clampf(amount,0.0f,1.0f); }
+__attribute__((visibility("default"))) void mvp_set_output_gain(int autoMakeup, float reserveDb) { autoMakeupEnabled=autoMakeup?1:0; outputReserveDb=clampf(reserveDb,0.0f,12.0f); }
+__attribute__((visibility("default"))) void mvp_set_headphone_advanced(int enabled, float angle, float distance, float reflections, float wet) { headphoneAdvancedEnabled=enabled?1:0; headphoneSpeakerAngle=clampf(angle,15.0f,60.0f); headphoneDistance=clampf(distance,0.0f,1.0f); headphoneReflections=clampf(reflections,0.0f,0.30f); headphoneWet=clampf(wet,0.0f,1.0f); }
+
 __attribute__((visibility("default"))) void mvp_reset() { resetBuffers(); }
 
 __attribute__((visibility("default"))) int mvp_process(int frames) {
@@ -1472,6 +1761,8 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   refreshDynamicEqForBlock(frames);
   refreshOutputCorrectionForBlock(frames);
   meterInputPeak = meterOutputPeak = 0.0f;
+  meterInternalPeak = 0.0f;
+  meterEqActivityDb = 0.0f;
   meterTruePeakLinear = 0.0f;
   meterTransientBoostDb = 0.0f;
   meterMultibandGainReductionDb = 0.0f;
@@ -1501,16 +1792,25 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     float left = rawL * currentPreampGain;
     float right = rawR * currentPreampGain;
     processEqStereo(left, right);
+    meterEqActivityDb = eqEnabled ? 1.0f : 0.0f;
+    processParametric(left, right);
+    processBassEngine(left, right);
     processTransient(left, right);
     processMultiband(left, right);
     processDynamicEq(left, right);
+    processToneEngine(left, right);
+    processExciter(left, right);
+    processDynamicsRestore(left, right);
+    processSmartDsp(left, right);
     left = processOutput(0, left);
     right = processOutput(1, right);
     processOutputCorrection(left, right);
     processStereoIntegrity(left, right);
+    processStereoFieldUser(left, right);
     processHeadphone(left, right);
     processLoudness(left, right);
     processHeadphoneOutputDrive(left, right);
+    processOutputGain(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;
@@ -1582,6 +1882,16 @@ __attribute__((visibility("default"))) float mvp_meter_headphone_output_drive_db
 __attribute__((visibility("default"))) float mvp_meter_loudness_gain_db() { return loudnessGainDb; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_momentary_lufs() { return loudnessMomentaryLufs; }
 __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() { return loudnessProgramLufs; }
+
+__attribute__((visibility("default"))) float mvp_meter_auto_makeup_db() { return meterAutoMakeupDb; }
+__attribute__((visibility("default"))) float mvp_meter_output_reserve_db() { return meterOutputReserveDb; }
+__attribute__((visibility("default"))) float mvp_meter_available_headroom_db() { return meterAvailableHeadroomDb; }
+__attribute__((visibility("default"))) float mvp_meter_internal_peak() { return meterInternalPeak; }
+__attribute__((visibility("default"))) float mvp_meter_bass_activity_db() { return meterBassActivityDb; }
+__attribute__((visibility("default"))) float mvp_meter_tone_activity_db() { return meterToneActivityDb; }
+__attribute__((visibility("default"))) float mvp_meter_exciter_activity() { return meterExciterActivity; }
+__attribute__((visibility("default"))) float mvp_meter_deharsh_reduction_db() { return meterDeharshReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_smart_activity() { return meterSmartActivity; }
 __attribute__((visibility("default"))) int mvp_eq_topology() { return eqTopology; }
 __attribute__((visibility("default"))) int mvp_linear_phase_taps() { return kLinearFirTaps; }
 __attribute__((visibility("default"))) int mvp_linear_phase_latency_samples() { return kLinearFirHalf + kLinearFirBlock; }

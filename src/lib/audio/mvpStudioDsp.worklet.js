@@ -1,4 +1,4 @@
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V4.6 Runtime Verification + Headphone Power
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V5 Advanced Audio Engine
 // The C++ core owns sample processing. This wrapper only moves fixed buffers,
 // applies state changes outside the sample loop, and reports low-rate telemetry.
 
@@ -109,7 +109,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v4.6-runtime-verified",
+        version: "studio-wasm-v5.0-advanced",
       });
     } catch (error) {
       this.failed = true;
@@ -309,6 +309,61 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       );
     }
 
+
+    if (typeof api.mvp_set_output_gain === "function" && (
+      first || Boolean(state.autoMakeupEnabled) !== Boolean(previous.autoMakeupEnabled) ||
+      !this.sameNumber(state.outputReserveDb, previous.outputReserveDb)
+    )) {
+      api.mvp_set_output_gain(state.autoMakeupEnabled ? 1 : 0, Number(state.outputReserveDb) || 0);
+    }
+
+    if (typeof api.mvp_set_parametric_enabled === "function" && (first || Boolean(state.parametricEnabled) !== Boolean(previous.parametricEnabled))) {
+      api.mvp_set_parametric_enabled(state.parametricEnabled ? 1 : 0);
+    }
+    if (typeof api.mvp_set_parametric_band === "function") {
+      const bands = Array.isArray(state.parametricBands) ? state.parametricBands : [];
+      const oldBands = Array.isArray(previous?.parametricBands) ? previous.parametricBands : [];
+      for (let index = 0; index < 6; index += 1) {
+        const band = bands[index] || {};
+        const old = oldBands[index] || {};
+        const changed = first || Boolean(band.enabled) !== Boolean(old.enabled) ||
+          !this.sameNumber(band.frequency, old.frequency) || !this.sameNumber(band.gainDb, old.gainDb) ||
+          !this.sameNumber(band.q, old.q) || !this.sameNumber(band.type, old.type);
+        if (changed) api.mvp_set_parametric_band(index, band.enabled ? 1 : 0, Number(band.frequency) || 1000, Number(band.gainDb) || 0, Number(band.q) || 1, Number(band.type) || 0);
+      }
+    }
+
+    if (typeof api.mvp_set_bass_engine === "function" && (first || Boolean(state.bassEngineEnabled) !== Boolean(previous.bassEngineEnabled) ||
+      !this.sameNumber(state.bassSubDb, previous.bassSubDb) || !this.sameNumber(state.bassPunchDb, previous.bassPunchDb) ||
+      !this.sameNumber(state.bassBodyDb, previous.bassBodyDb) || !this.sameNumber(state.bassTightness, previous.bassTightness))) {
+      api.mvp_set_bass_engine(state.bassEngineEnabled ? 1 : 0, Number(state.bassSubDb)||0, Number(state.bassPunchDb)||0, Number(state.bassBodyDb)||0, Number(state.bassTightness)||0);
+    }
+    if (typeof api.mvp_set_tone_engine === "function" && (first || Boolean(state.toneEngineEnabled) !== Boolean(previous.toneEngineEnabled) ||
+      !this.sameNumber(state.presenceDb, previous.presenceDb) || !this.sameNumber(state.clarityDb, previous.clarityDb) ||
+      !this.sameNumber(state.airDb, previous.airDb) || !this.sameNumber(state.deharshAmount, previous.deharshAmount))) {
+      api.mvp_set_tone_engine(state.toneEngineEnabled ? 1 : 0, Number(state.presenceDb)||0, Number(state.clarityDb)||0, Number(state.airDb)||0, Number(state.deharshAmount)||0);
+    }
+    if (typeof api.mvp_set_exciter === "function" && (first || Boolean(state.exciterEnabled) !== Boolean(previous.exciterEnabled) ||
+      !this.sameNumber(state.exciterAmount, previous.exciterAmount) || !this.sameNumber(state.saturationLow, previous.saturationLow) ||
+      !this.sameNumber(state.saturationMid, previous.saturationMid) || !this.sameNumber(state.saturationHigh, previous.saturationHigh))) {
+      api.mvp_set_exciter(state.exciterEnabled ? 1 : 0, Number(state.exciterAmount)||0, Number(state.saturationLow)||0, Number(state.saturationMid)||0, Number(state.saturationHigh)||0);
+    }
+    if (typeof api.mvp_set_stereo_field === "function" && (first || Boolean(state.stereoFieldEnabled) !== Boolean(previous.stereoFieldEnabled) ||
+      !this.sameNumber(state.stereoUserWidth, previous.stereoUserWidth) || !this.sameNumber(state.stereoCenterFocus, previous.stereoCenterFocus) || !this.sameNumber(state.bassMonoHz, previous.bassMonoHz))) {
+      api.mvp_set_stereo_field(state.stereoFieldEnabled ? 1 : 0, Number(state.stereoUserWidth)||1, Number(state.stereoCenterFocus)||1, Number(state.bassMonoHz)||100);
+    }
+    if (typeof api.mvp_set_dynamics_restore === "function" && (first || Boolean(state.dynamicsRestoreEnabled) !== Boolean(previous.dynamicsRestoreEnabled) || !this.sameNumber(state.dynamicsRestoreAmount, previous.dynamicsRestoreAmount))) {
+      api.mvp_set_dynamics_restore(state.dynamicsRestoreEnabled ? 1 : 0, Number(state.dynamicsRestoreAmount)||0);
+    }
+    if (typeof api.mvp_set_smart_dsp === "function" && (first || Boolean(state.smartDspEnabled) !== Boolean(previous.smartDspEnabled) || !this.sameNumber(state.smartDspAmount, previous.smartDspAmount))) {
+      api.mvp_set_smart_dsp(state.smartDspEnabled ? 1 : 0, Number(state.smartDspAmount)||0);
+    }
+    if (typeof api.mvp_set_headphone_advanced === "function" && (first || Boolean(state.headphoneAdvancedEnabled) !== Boolean(previous.headphoneAdvancedEnabled) ||
+      !this.sameNumber(state.headphoneSpeakerAngle, previous.headphoneSpeakerAngle) || !this.sameNumber(state.headphoneDistance, previous.headphoneDistance) ||
+      !this.sameNumber(state.headphoneReflections, previous.headphoneReflections) || !this.sameNumber(state.headphoneWet, previous.headphoneWet))) {
+      api.mvp_set_headphone_advanced(state.headphoneAdvancedEnabled ? 1 : 0, Number(state.headphoneSpeakerAngle)||30, Number(state.headphoneDistance)||0.35, Number(state.headphoneReflections)||0, Number(state.headphoneWet)||0);
+    }
+
     this.appliedState = {
       ...state,
       eqGains: gains.slice(0, 31),
@@ -327,6 +382,9 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       headphoneCrossfeed: Number(state.headphoneCrossfeed) || 0,
       headphoneCenter: Number.isFinite(Number(state.headphoneCenter)) ? Number(state.headphoneCenter) : 0.5,
       headphoneBassImpact: Number(state.headphoneBassImpact) || 0,
+      outputReserveDb: Number(state.outputReserveDb) || 0,
+      autoMakeupEnabled: Boolean(state.autoMakeupEnabled),
+      smartDspEnabled: Boolean(state.smartDspEnabled),
     });
   }
 
@@ -458,6 +516,15 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         loudnessProgramLufs: typeof this.exports.mvp_meter_loudness_program_lufs === "function"
           ? this.exports.mvp_meter_loudness_program_lufs()
           : -70,
+        autoMakeupDb: typeof this.exports.mvp_meter_auto_makeup_db === "function" ? this.exports.mvp_meter_auto_makeup_db() : 0,
+        outputReserveDb: typeof this.exports.mvp_meter_output_reserve_db === "function" ? this.exports.mvp_meter_output_reserve_db() : 0,
+        availableHeadroomDb: typeof this.exports.mvp_meter_available_headroom_db === "function" ? this.exports.mvp_meter_available_headroom_db() : 24,
+        internalPeak: typeof this.exports.mvp_meter_internal_peak === "function" ? this.exports.mvp_meter_internal_peak() : 0,
+        bassActivityDb: typeof this.exports.mvp_meter_bass_activity_db === "function" ? this.exports.mvp_meter_bass_activity_db() : 0,
+        toneActivityDb: typeof this.exports.mvp_meter_tone_activity_db === "function" ? this.exports.mvp_meter_tone_activity_db() : 0,
+        exciterActivity: typeof this.exports.mvp_meter_exciter_activity === "function" ? this.exports.mvp_meter_exciter_activity() : 0,
+        deharshReductionDb: typeof this.exports.mvp_meter_deharsh_reduction_db === "function" ? this.exports.mvp_meter_deharsh_reduction_db() : 0,
+        smartActivity: typeof this.exports.mvp_meter_smart_activity === "function" ? this.exports.mvp_meter_smart_activity() : 0,
       });
     }
     return true;

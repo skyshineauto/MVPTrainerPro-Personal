@@ -1,4 +1,4 @@
-// MVP Trainer Pro - Studio WASM bridge V4.6 runtime-verification pass
+// MVP Trainer Pro - Studio WASM bridge V5 Advanced Audio Engine
 // This bridge owns asset freshness, processor lifecycle, state revisions and low-rate telemetry.
 
 export type MvpStudioTelemetry = {
@@ -22,6 +22,15 @@ export type MvpStudioTelemetry = {
   loudnessGainDb: number;
   loudnessMomentaryLufs: number;
   loudnessProgramLufs: number;
+  autoMakeupDb: number;
+  outputReserveDb: number;
+  availableHeadroomDb: number;
+  internalPeak: number;
+  bassActivityDb: number;
+  toneActivityDb: number;
+  exciterActivity: number;
+  deharshReductionDb: number;
+  smartActivity: number;
 };
 
 export type MvpStudioState = {
@@ -52,6 +61,38 @@ export type MvpStudioState = {
   headphoneCrossfeed: number;
   headphoneCenter: number;
   headphoneBassImpact: number;
+  outputReserveDb: number;
+  autoMakeupEnabled: boolean;
+  parametricEnabled: boolean;
+  parametricBands: Array<{ enabled: boolean; frequency: number; gainDb: number; q: number; type: number }>;
+  bassEngineEnabled: boolean;
+  bassSubDb: number;
+  bassPunchDb: number;
+  bassBodyDb: number;
+  bassTightness: number;
+  toneEngineEnabled: boolean;
+  presenceDb: number;
+  clarityDb: number;
+  airDb: number;
+  deharshAmount: number;
+  exciterEnabled: boolean;
+  exciterAmount: number;
+  saturationLow: number;
+  saturationMid: number;
+  saturationHigh: number;
+  stereoFieldEnabled: boolean;
+  stereoUserWidth: number;
+  stereoCenterFocus: number;
+  bassMonoHz: number;
+  dynamicsRestoreEnabled: boolean;
+  dynamicsRestoreAmount: number;
+  smartDspEnabled: boolean;
+  smartDspAmount: number;
+  headphoneAdvancedEnabled: boolean;
+  headphoneSpeakerAngle: number;
+  headphoneDistance: number;
+  headphoneReflections: number;
+  headphoneWet: number;
 };
 
 export type MvpStudioRuntimeInfo = {
@@ -66,7 +107,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "4.6.0-r9";
+const MVP_STUDIO_ASSET_VERSION = "5.0.0-r10";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -90,6 +131,15 @@ const EMPTY_TELEMETRY: MvpStudioTelemetry = {
   loudnessGainDb: 0,
   loudnessMomentaryLufs: -70,
   loudnessProgramLufs: -70,
+  autoMakeupDb: 0,
+  outputReserveDb: 0,
+  availableHeadroomDb: 24,
+  internalPeak: 0,
+  bassActivityDb: 0,
+  toneActivityDb: 0,
+  exciterActivity: 0,
+  deharshReductionDb: 0,
+  smartActivity: 0,
 };
 
 let latestTelemetry: MvpStudioTelemetry = { ...EMPTY_TELEMETRY };
@@ -144,6 +194,15 @@ function updateTelemetry(data: Record<string, unknown>) {
     loudnessGainDb: finite(data.loudnessGainDb),
     loudnessMomentaryLufs: finite(data.loudnessMomentaryLufs, -70),
     loudnessProgramLufs: finite(data.loudnessProgramLufs, -70),
+    autoMakeupDb: finite(data.autoMakeupDb),
+    outputReserveDb: finite(data.outputReserveDb),
+    availableHeadroomDb: finite(data.availableHeadroomDb, 24),
+    internalPeak: finite(data.internalPeak),
+    bassActivityDb: finite(data.bassActivityDb),
+    toneActivityDb: finite(data.toneActivityDb),
+    exciterActivity: finite(data.exciterActivity),
+    deharshReductionDb: finite(data.deharshReductionDb),
+    smartActivity: finite(data.smartActivity),
   };
 }
 
