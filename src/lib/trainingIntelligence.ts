@@ -157,20 +157,36 @@ function sessionQuality(session: TrainingSessionSample) {
 }
 
 function exerciseDirectiveFor(sessions: TrainingSessionSample[], action: ProgressionAction) {
-  const recent = sessions.slice(-4);
-  const painSignals = recent.filter((session) => Number(session.pain ?? 0) >= 3).length;
-  const severePain = recent.some((session) => Number(session.pain ?? 0) >= 7);
+  const recent = sessions.slice(-6);
+  const painWindow = recent.slice(-4);
+  const painSignals = painWindow.filter((session) => Number(session.pain ?? 0) >= 3).length;
+  const severePain = painWindow.some((session) => Number(session.pain ?? 0) >= 7);
   if (severePain) return { directive: "PAUSE" as const, reason: "A severe pain signal was recorded. Stop loading this movement until a pain-free setup or replacement is established." };
-  if (painSignals >= 2) return { directive: "SWAP REVIEW" as const, reason: `Pain was elevated in ${painSignals} of the last ${recent.length} usable sessions. Keep the pattern under review and favor a pain-free variation if it repeats.` };
+  if (painSignals >= 2) return { directive: "SWAP REVIEW" as const, reason: `Pain was elevated in ${painSignals} of the last ${painWindow.length} usable sessions. Review a pain-free replacement that preserves this movement's role in the program.` };
 
-  if (recent.length >= 4) {
-    const first = sessionQuality(recent[0]);
-    const last = sessionQuality(recent.at(-1)!);
+  // A full four-exposure plateau at hard effort earns a real swap review.
+  // Three flat hard exposures trigger a smaller programming modification first.
+  const swapWindow = recent.slice(-4);
+  if (swapWindow.length >= 4) {
+    const first = sessionQuality(swapWindow[0]);
+    const last = sessionQuality(swapWindow.at(-1)!);
     const change = first > 0 ? ((last - first) / first) * 100 : 0;
-    const recentRirs = recent.flatMap((session) => cleanSets(session.sets).map((set) => set.rir).filter((value): value is number => value != null));
+    const recentRirs = swapWindow.flatMap((session) => cleanSets(session.sets).map((set) => set.rir).filter((value): value is number => value != null));
     const avgRir = recentRirs.length ? recentRirs.reduce((sum, value) => sum + value, 0) / recentRirs.length : null;
     if (change < 1 && avgRir != null && avgRir <= 1.5) {
-      return { directive: "MODIFY" as const, reason: "Performance has been flat across several hard sessions. Adjust load, rest, rep strategy, or setup before replacing the exercise." };
+      return { directive: "SWAP REVIEW" as const, reason: "Performance has remained flat across four hard exposures. Review a fresh variation that keeps the same program role instead of forcing more fatigue into a stalled movement." };
+    }
+  }
+
+  const modifyWindow = recent.slice(-3);
+  if (modifyWindow.length >= 3) {
+    const first = sessionQuality(modifyWindow[0]);
+    const last = sessionQuality(modifyWindow.at(-1)!);
+    const change = first > 0 ? ((last - first) / first) * 100 : 0;
+    const recentRirs = modifyWindow.flatMap((session) => cleanSets(session.sets).map((set) => set.rir).filter((value): value is number => value != null));
+    const avgRir = recentRirs.length ? recentRirs.reduce((sum, value) => sum + value, 0) / recentRirs.length : null;
+    if (change < 1 && avgRir != null && avgRir <= 1.5) {
+      return { directive: "MODIFY" as const, reason: "Performance has been flat across three hard exposures. Adjust load, rest, rep strategy, or setup before replacing the exercise." };
     }
   }
 

@@ -87,6 +87,7 @@ type ExerciseMeta = {
   primary_muscles: string[] | null;
   secondary_muscles: string[] | null;
   equipment: string[] | null;
+  patterns?: string[] | null;
 };
 
 type WorkoutRow = {
@@ -186,6 +187,31 @@ type NextExercise = {
   confidenceDetail: string;
 };
 
+type SmartSwapCandidate = {
+  id: string;
+  name: string;
+  primaryMuscles: string[];
+  secondaryMuscles: string[];
+  equipment: string[];
+  patterns: string[];
+  role: string;
+  roleLabel: string;
+  reason: string;
+  priorSessions: number;
+  maxRecentPain: number | null;
+};
+
+type SmartSwapResult = {
+  dayRole: string;
+  dayLabel: string;
+  currentExerciseId: string;
+  currentExerciseName: string;
+  currentRole: string;
+  currentRoleLabel: string;
+  siblingLabel: string | null;
+  candidates: SmartSwapCandidate[];
+};
+
 type CoachRecommendation = {
   id: string;
   eyebrow: string;
@@ -194,6 +220,7 @@ type CoachRecommendation = {
   action: string;
   tone: Tone;
   exerciseId?: string;
+  buttonLabel?: string;
 };
 
 type CoachHistoryRow = {
@@ -437,6 +464,9 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
   const [workoutSets, setWorkoutSets] = useState<WorkoutSetRow[]>([]);
+  const [smartSwapMap, setSmartSwapMap] = useState<Record<string, SmartSwapResult>>({});
+  const [smartSwapLoading, setSmartSwapLoading] = useState<Record<string, boolean>>({});
+  const [smartSwapErrors, setSmartSwapErrors] = useState<Record<string, string>>({});
 
   const [manageOpen, setManageOpen] = useState(false);
   const [manageRows, setManageRows] = useState<RpcProgramListItem[]>([]);
@@ -656,7 +686,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       if (exerciseIds.length) {
         const { data, error } = await supabase
           .from("exercises")
-          .select("id,name,primary_muscles,secondary_muscles,equipment")
+          .select("id,name,primary_muscles,secondary_muscles,equipment,patterns")
           .in("id", exerciseIds);
         if (error) throw error;
         for (const row of (data ?? []) as ExerciseMeta[]) nextExerciseMap.set(row.id, row);
@@ -988,6 +1018,88 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       });
   }, [activeProgram?.goal, exerciseMap, insightMap, nextScheduled, templateExercises]);
 
+  const smartSwapTargetsKey = useMemo(
+    () => nextWorkoutExercises
+      .filter((row) => row.exerciseDirective === "SWAP REVIEW" || row.exerciseDirective === "PAUSE")
+      .map((row) => `${row.id}:${row.exerciseDirective}`)
+      .sort()
+      .join("|"),
+    [nextWorkoutExercises]
+  );
+
+  useEffect(() => {
+    if (!activeProgram?.id || !nextScheduled?.template_id || !smartSwapTargetsKey) {
+      setSmartSwapMap({});
+      setSmartSwapLoading({});
+      setSmartSwapErrors({});
+      return;
+    }
+
+    let cancelled = false;
+    const targets = nextWorkoutExercises.filter(
+      (row) => row.exerciseDirective === "SWAP REVIEW" || row.exerciseDirective === "PAUSE"
+    );
+
+    setSmartSwapLoading(Object.fromEntries(targets.map((row) => [row.id, true])));
+    setSmartSwapErrors({});
+
+    void Promise.all(
+      targets.map(async (exercise) => {
+        const { data, error } = await supabase.rpc("rpc_coach_swap_candidates_v1", {
+          p_program_block_id: activeProgram.id,
+          p_template_id: nextScheduled.template_id,
+          p_exercise_id: exercise.id,
+          p_limit: 3,
+        });
+
+        if (error) return { exerciseId: exercise.id, result: null as SmartSwapResult | null, error: error.message };
+        const raw = (data ?? {}) as any;
+        const candidates = Array.isArray(raw.candidates)
+          ? raw.candidates.map((candidate: any) => ({
+              id: String(candidate.id ?? ""),
+              name: String(candidate.name ?? "Exercise"),
+              primaryMuscles: Array.isArray(candidate.primary_muscles) ? candidate.primary_muscles : [],
+              secondaryMuscles: Array.isArray(candidate.secondary_muscles) ? candidate.secondary_muscles : [],
+              equipment: Array.isArray(candidate.equipment) ? candidate.equipment : [],
+              patterns: Array.isArray(candidate.patterns) ? candidate.patterns : [],
+              role: String(candidate.role ?? ""),
+              roleLabel: String(candidate.role_label ?? "Program Fit"),
+              reason: String(candidate.reason ?? "Fits the same role without duplicating the sibling workout."),
+              priorSessions: num(candidate.prior_sessions, 0),
+              maxRecentPain: candidate.max_recent_pain == null ? null : num(candidate.max_recent_pain),
+            })).filter((candidate: SmartSwapCandidate) => candidate.id)
+          : [];
+
+        const result: SmartSwapResult = {
+          dayRole: String(raw.day_role ?? ""),
+          dayLabel: String(raw.day_label ?? cleanWorkoutName(nextTemplate?.name)),
+          currentExerciseId: String(raw.current_exercise_id ?? exercise.id),
+          currentExerciseName: String(raw.current_exercise_name ?? exercise.name),
+          currentRole: String(raw.current_role ?? ""),
+          currentRoleLabel: String(raw.current_role_label ?? "Movement Role"),
+          siblingLabel: raw.sibling_label == null ? null : String(raw.sibling_label),
+          candidates,
+        };
+        return { exerciseId: exercise.id, result, error: null as string | null };
+      })
+    ).then((rows) => {
+      if (cancelled) return;
+      const nextMap: Record<string, SmartSwapResult> = {};
+      const nextErrors: Record<string, string> = {};
+      for (const row of rows) {
+        if (row.result) nextMap[row.exerciseId] = row.result;
+        if (row.error) nextErrors[row.exerciseId] = row.error;
+      }
+      setSmartSwapMap(nextMap);
+      setSmartSwapErrors(nextErrors);
+      setSmartSwapLoading({});
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProgram?.id, nextScheduled?.template_id, nextTemplate?.name, nextWorkoutExercises, smartSwapTargetsKey]);
+
   const recommendations = useMemo<CoachRecommendation[]>(() => {
     const progressions = nextWorkoutExercises.filter((row) => row.decision === "INCREASE");
     const corrections = nextWorkoutExercises.filter((row) => row.decision === "REDUCE" || row.decision === "RECOVERY");
@@ -1008,18 +1120,32 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     });
 
     const priority = [...nextWorkoutExercises].sort((a, b) => {
+      const directiveRank = (row: NextExercise) => row.exerciseDirective === "PAUSE" ? 0 : row.exerciseDirective === "SWAP REVIEW" ? 1 : 2;
+      const directiveDelta = directiveRank(a) - directiveRank(b);
+      if (directiveDelta !== 0) return directiveDelta;
       const rank: Record<Decision, number> = { RECOVERY: 0, REDUCE: 1, INCREASE: 2, MONITOR: 3, HOLD: 4, BASELINE: 5 };
       return rank[a.decision] - rank[b.decision];
     })[0] ?? null;
     if (priority) {
+      const smartSwap = smartSwapMap[priority.id]?.candidates?.[0] ?? null;
+      const needsSwap = priority.exerciseDirective === "SWAP REVIEW" || priority.exerciseDirective === "PAUSE";
       rows.push({
-        id: `${activeProgram?.id ?? "no-program"}:priority-${priority.id}-${priority.decision}`,
-        eyebrow: "COACH PRIORITY",
+        id: `${activeProgram?.id ?? "no-program"}:priority-${priority.id}-${priority.decision}-${priority.exerciseDirective}`,
+        eyebrow: needsSwap ? "PROGRAM-AWARE EXERCISE REVIEW" : "COACH PRIORITY",
         title: priority.exerciseDirective === "PAUSE" ? `Pause ${priority.name}` : priority.exerciseDirective === "SWAP REVIEW" ? `Review ${priority.name}` : `${priority.name} • ${priority.decision}`,
-        body: `${priority.reason} ${priority.exerciseReason}`,
-        action: priority.decision === "BASELINE" ? "ESTABLISH WORKING LOAD" : `START • ${formatWeight(priority.suggestedWeight ?? priority.currentWeight)} • ${priority.repPlan}`,
-        tone: decisionTone(priority.decision),
-        exerciseId: priority.id,
+        body: `${priority.reason} ${priority.exerciseReason}${smartSwap ? ` Best program-fit replacement: ${smartSwap.name}. ${smartSwap.reason}` : ""}`,
+        action: needsSwap
+          ? smartSwap
+            ? `BEST FIT • ${smartSwap.name.toUpperCase()}`
+            : smartSwapLoading[priority.id]
+              ? "ANALYZING PROGRAM FIT…"
+              : "REVIEW REPLACEMENT OPTIONS"
+          : priority.decision === "BASELINE"
+            ? "ESTABLISH WORKING LOAD"
+            : `START • ${formatWeight(priority.suggestedWeight ?? priority.currentWeight)} • ${priority.repPlan}`,
+        tone: needsSwap ? "amber" : decisionTone(priority.decision),
+        exerciseId: smartSwap?.id ?? priority.id,
+        buttonLabel: smartSwap ? "OPEN BEST REPLACEMENT" : "OPEN EXERCISE",
       });
     }
 
@@ -1035,7 +1161,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     });
 
     return rows.slice(0, 3);
-  }, [activeProgram?.id, nextScheduled?.id, nextTemplate, nextWorkoutExercises]);
+  }, [activeProgram?.id, nextScheduled?.id, nextTemplate, nextWorkoutExercises, smartSwapLoading, smartSwapMap]);
 
   useEffect(() => {
     const key = coachHistoryKey(activeProgram?.id);
@@ -1162,7 +1288,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
               <p>{recommendation.body}</p>
               <div className="co-briefAction">{recommendation.action}</div>
               {recommendation.exerciseId ? (
-                <button type="button" onClick={() => navigate(`/library/${recommendation.exerciseId}`)}>OPEN EXERCISE</button>
+                <button type="button" onClick={() => navigate(`/library/${recommendation.exerciseId}`)}>{recommendation.buttonLabel ?? "OPEN EXERCISE"}</button>
               ) : null}
             </article>
           ))}
@@ -1182,7 +1308,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
             </div>
             <div className="co-decisionRows">
               {nextWorkoutExercises.map((exercise) => (
-                <article key={exercise.id} className={`co-decisionRow is-${decisionTone(exercise.decision)}`}>
+                <article key={exercise.id} className={`co-decisionRow is-${exercise.exerciseDirective === "SWAP REVIEW" || exercise.exerciseDirective === "PAUSE" ? "amber" : decisionTone(exercise.decision)}`}>
                   <div className="co-decisionExercise">
                     <strong>{exercise.name}</strong>
                     <span>{exercise.sets} sets • {exercise.repMin}–{exercise.repMax} reps{exercise.muscles.length ? ` • ${exercise.muscles.join(" / ")}` : ""}</span>
@@ -1203,6 +1329,35 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
                       <span>EXERCISE STATUS • {exercise.exerciseReason}</span>
                       <span>{exercise.confidenceDetail.toUpperCase()} • {exercise.confidence} CONFIDENCE</span>
                     </div>
+                    {exercise.exerciseDirective === "SWAP REVIEW" || exercise.exerciseDirective === "PAUSE" ? (
+                      <div className="co-smartSwap">
+                        <div className="co-smartSwapHead">
+                          <div>
+                            <span>PROGRAM-AWARE SMART SWAP</span>
+                            <strong>{smartSwapLoading[exercise.id] ? "Analyzing sibling workouts…" : smartSwapMap[exercise.id]?.candidates?.[0]?.name ?? "Replacement review ready"}</strong>
+                            <small>
+                              {smartSwapLoading[exercise.id]
+                                ? `Checking ${cleanWorkoutName(nextTemplate.name)} against the full Upper 1/2 or Lower 1/2 pair.`
+                                : smartSwapMap[exercise.id]?.candidates?.[0]?.reason
+                                  ?? smartSwapErrors[exercise.id]
+                                  ?? "No clean replacement was found in the current curated program pools. Keep the movement paused/reviewed rather than forcing a poor substitute."}
+                            </small>
+                          </div>
+                          {smartSwapMap[exercise.id]?.currentRoleLabel ? <b>{smartSwapMap[exercise.id].currentRoleLabel}</b> : null}
+                        </div>
+                        {smartSwapMap[exercise.id]?.candidates?.length ? (
+                          <div className="co-smartSwapChoices">
+                            {smartSwapMap[exercise.id].candidates.map((candidate, candidateIndex) => (
+                              <button key={candidate.id} type="button" onClick={() => navigate(`/library/${candidate.id}`)}>
+                                <i>{candidateIndex === 0 ? "BEST FIT" : `OPTION ${candidateIndex + 1}`}</i>
+                                <strong>{candidate.name}</strong>
+                                <span>{candidate.roleLabel}{candidate.primaryMuscles.length ? ` • ${candidate.primaryMuscles.map(prettyMuscle).join(" / ")}` : ""}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <button type="button" onClick={() => navigate(`/library/${exercise.id}`)}>DETAILS</button>
                 </article>
@@ -1325,7 +1480,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-hero{padding:25px 27px;display:flex;align-items:center;justify-content:space-between;gap:22px}.co-kicker,.co-sectionTitleText p,.co-heroStatus span,.co-briefTop span,.co-reviewGrid span,.co-assessment span,.co-programControl span,.co-featuredTip>div>span,.co-tipEvidence span,.co-nextWorkoutHead span{color:#83b2c2;font-size:10px;font-weight:900;letter-spacing:.115em;text-transform:uppercase}.co-hero h1{margin:4px 0 4px;font-size:clamp(34px,5vw,58px);line-height:.96;letter-spacing:-.05em}.co-programName{font-size:clamp(21px,3vw,32px);font-weight:1000}.co-programMetaLine{margin-top:7px;color:#86dfff;font-size:13px;font-weight:850}.co-heroStatus{min-width:250px;padding:15px 17px;border:1px solid rgba(89,216,255,.19);border-radius:14px;background:rgba(10,33,44,.72)}.co-heroStatus strong{display:block;margin:5px 0;color:#fff;font-size:19px}.co-heroStatus small{color:#b7ccd5;font-size:12px}.co-error{padding:12px 14px;border:1px solid rgba(255,116,122,.32);border-radius:12px;background:rgba(115,30,35,.2);color:#ffd4d6;font-weight:800}.co-toast{position:fixed;z-index:10050;right:18px;bottom:88px;width:min(440px,calc(100vw - 36px));display:flex;align-items:center;justify-content:space-between;gap:15px;padding:13px 15px;border:1px solid rgba(89,216,255,.36);border-radius:12px;background:#09171e;box-shadow:0 20px 55px rgba(0,0,0,.6);font-size:13px;font-weight:850}.co-toast.is-err{border-color:rgba(255,116,122,.4);background:#1c0d10}.co-toast button{border:0;background:transparent;color:#86e4ff;font-weight:1000}
         .co-section{padding:22px}.co-sectionTitle{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:18px}.co-sectionTitleText{display:flex;gap:11px;min-width:0}.co-sectionAccent{width:4px;height:42px;border-radius:4px;background:linear-gradient(#8fe8ff,#189fd6)}.co-sectionTitle h2{margin:0;font-size:clamp(23px,3vw,31px);line-height:1;font-weight:1000;letter-spacing:-.035em}.co-sectionTitleText p{margin:7px 0 0;letter-spacing:.02em;text-transform:none;font-size:12px;line-height:1.45}.co-sectionRight button,.co-primaryAction{min-height:42px;padding:0 15px;border:1px solid rgba(89,216,255,.34);border-radius:10px;background:rgba(32,126,160,.18);font-size:11px;font-weight:950;letter-spacing:.05em}
         .co-briefingGrid{display:grid;grid-template-columns:1.28fr 1fr 1fr;gap:10px}.co-briefCard{min-height:210px;display:flex;flex-direction:column;padding:17px;border:1px solid rgba(139,202,226,.11);border-left:3px solid var(--c);border-radius:14px;background:linear-gradient(110deg,rgba(38,125,158,.12),transparent 72%)}.co-briefCard.is-green{border-left-color:var(--g)}.co-briefCard.is-amber{border-left-color:var(--a)}.co-briefCard.is-lead{background:linear-gradient(120deg,rgba(31,139,179,.19),rgba(6,15,21,.15))}.co-briefTop{display:flex;align-items:center;justify-content:space-between}.co-briefTop i{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}.co-briefCard h3{margin:14px 0 8px;font-size:20px;line-height:1.12}.co-briefCard p{margin:0;color:#c0d2da;font-size:13px;line-height:1.5}.co-briefAction{margin-top:auto;padding-top:15px;color:#fff;font-size:16px;font-weight:1000}.co-briefCard button{margin-top:10px;align-self:flex-start;border:0;background:transparent;color:#7fe1ff;font-size:10px;font-weight:1000;letter-spacing:.07em}
-        .co-nextWorkoutHead{display:grid;grid-template-columns:1fr 170px;gap:10px;margin-bottom:10px}.co-nextWorkoutHead>div{padding:15px 16px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nextWorkoutHead strong{display:block;margin:5px 0;font-size:22px}.co-nextWorkoutHead small{color:#a9c0ca;font-size:11px}.co-decisionRows{display:grid;gap:8px}.co-decisionRow{display:grid;grid-template-columns:minmax(190px,.85fr) minmax(0,1.55fr) 86px;gap:14px;align-items:center;padding:14px 15px;border:1px solid rgba(136,198,221,.11);border-left:3px solid #6e91a0;border-radius:12px;background:rgba(255,255,255,.018)}.co-decisionRow.is-green{border-left-color:var(--g)}.co-decisionRow.is-blue{border-left-color:var(--c)}.co-decisionRow.is-amber{border-left-color:var(--a)}.co-decisionExercise strong{display:block;font-size:15px}.co-decisionExercise span,.co-decisionCommand small{display:block;margin-top:4px;color:#9db6c0;font-size:11px;line-height:1.4}.co-decisionCommand>span{display:block;color:#8edfff;font-size:10px;font-weight:1000;letter-spacing:.11em}.co-decisionCommand>strong{display:block;margin-top:4px;color:#fff;font-size:20px;line-height:1.1}.co-decisionEvidence{display:grid;gap:3px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)}.co-decisionEvidence span{color:#8fa8b2!important;font-size:9px!important;font-weight:850;letter-spacing:.025em}.co-watchlistRows{display:grid;gap:7px}.co-watchlistRows article{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(240,178,88,.14);border-left:3px solid var(--a);border-radius:11px;background:rgba(240,178,88,.035)}.co-watchlistRows article div{display:grid;gap:3px}.co-watchlistRows article strong{font-size:14px}.co-watchlistRows article span{color:#9eb2ba;font-size:11px}.co-watchlistRows article b{color:#f2c57e;font-size:9px;letter-spacing:.06em}.co-watchlistRows article button{min-height:36px;padding:0 11px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0a141a;font-size:10px;font-weight:950}.co-decisionRow.is-green .co-decisionCommand>strong{color:#9ef3bf}.co-decisionRow.is-amber .co-decisionCommand>strong{color:#ffd195}.co-decisionRow>button{height:38px;border:1px solid rgba(120,194,220,.18);border-radius:9px;background:#0a171e;font-size:9px;font-weight:950}
+        .co-nextWorkoutHead{display:grid;grid-template-columns:1fr 170px;gap:10px;margin-bottom:10px}.co-nextWorkoutHead>div{padding:15px 16px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nextWorkoutHead strong{display:block;margin:5px 0;font-size:22px}.co-nextWorkoutHead small{color:#a9c0ca;font-size:11px}.co-decisionRows{display:grid;gap:8px}.co-decisionRow{display:grid;grid-template-columns:minmax(190px,.85fr) minmax(0,1.55fr) 86px;gap:14px;align-items:center;padding:14px 15px;border:1px solid rgba(136,198,221,.11);border-left:3px solid #6e91a0;border-radius:12px;background:rgba(255,255,255,.018)}.co-decisionRow.is-green{border-left-color:var(--g)}.co-decisionRow.is-blue{border-left-color:var(--c)}.co-decisionRow.is-amber{border-left-color:var(--a)}.co-decisionExercise strong{display:block;font-size:15px}.co-decisionExercise span,.co-decisionCommand small{display:block;margin-top:4px;color:#9db6c0;font-size:11px;line-height:1.4}.co-decisionCommand>span{display:block;color:#8edfff;font-size:10px;font-weight:1000;letter-spacing:.11em}.co-decisionCommand>strong{display:block;margin-top:4px;color:#fff;font-size:20px;line-height:1.1}.co-decisionEvidence{display:grid;gap:3px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)}.co-decisionEvidence span{color:#8fa8b2!important;font-size:9px!important;font-weight:850;letter-spacing:.025em}.co-watchlistRows{display:grid;gap:7px}.co-watchlistRows article{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(240,178,88,.14);border-left:3px solid var(--a);border-radius:11px;background:rgba(240,178,88,.035)}.co-watchlistRows article div{display:grid;gap:3px}.co-watchlistRows article strong{font-size:14px}.co-watchlistRows article span{color:#9eb2ba;font-size:11px}.co-watchlistRows article b{color:#f2c57e;font-size:9px;letter-spacing:.06em}.co-watchlistRows article button{min-height:36px;padding:0 11px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0a141a;font-size:10px;font-weight:950}.co-decisionRow.is-green .co-decisionCommand>strong{color:#9ef3bf}.co-decisionRow.is-amber .co-decisionCommand>strong{color:#ffd195}.co-decisionRow>button{height:38px;border:1px solid rgba(120,194,220,.18);border-radius:9px;background:#0a171e;font-size:9px;font-weight:950}.co-smartSwap{margin-top:11px;padding:12px;border:1px solid rgba(240,178,88,.2);border-radius:11px;background:linear-gradient(145deg,rgba(240,178,88,.055),rgba(6,18,24,.62));box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.co-smartSwapHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.co-smartSwapHead>div{min-width:0}.co-smartSwapHead span{display:block;color:#f2c57e;font-size:9px;font-weight:1000;letter-spacing:.11em}.co-smartSwapHead strong{display:block;margin-top:4px;color:#fff;font-size:15px;line-height:1.2}.co-smartSwapHead small{display:block;margin-top:5px;color:#a7bcc5;font-size:10px;line-height:1.45}.co-smartSwapHead>b{flex:0 0 auto;padding:6px 8px;border:1px solid rgba(240,178,88,.18);border-radius:999px;background:rgba(240,178,88,.07);color:#f4cc8d;font-size:8px;letter-spacing:.07em}.co-smartSwapChoices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.co-smartSwapChoices button{min-width:0;padding:9px 10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:#09151b;text-align:left}.co-smartSwapChoices button:first-child{border-color:rgba(89,216,255,.28);background:linear-gradient(145deg,rgba(40,163,205,.11),rgba(7,17,22,.86))}.co-smartSwapChoices i{display:block;color:#80dfff;font-style:normal;font-size:7px;font-weight:1000;letter-spacing:.1em}.co-smartSwapChoices strong{display:block;margin-top:4px;color:#fff!important;font-size:11px!important;line-height:1.2}.co-smartSwapChoices span{display:block;margin-top:4px;color:#8fa9b5;font-size:8px;line-height:1.35}
         .co-reviewGrid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid rgba(138,198,221,.11);border-radius:13px;overflow:hidden}.co-reviewGrid article{min-height:92px;padding:16px;background:rgba(255,255,255,.015)}.co-reviewGrid article+article{border-left:1px solid rgba(138,198,221,.09)}.co-reviewGrid strong{display:block;margin-top:9px;font-size:20px}.co-overall.is-green strong{color:#8ceab0}.co-overall.is-amber strong{color:#f4c27d}.co-assessment{margin-top:10px;padding:15px 16px;border-left:3px solid var(--c);background:linear-gradient(90deg,rgba(45,141,177,.12),transparent)}.co-assessment p{margin:6px 0 0;color:#d2e2e8;font-size:13px;line-height:1.55}
         .co-nutritionGrid{display:grid;grid-template-columns:220px 220px minmax(0,1fr);gap:9px}.co-nutritionGrid article{padding:15px;border:1px solid rgba(138,198,221,.11);border-radius:12px;background:rgba(255,255,255,.018)}.co-nutritionGrid span{color:#83aebb;font-size:9px;font-weight:950;letter-spacing:.11em}.co-nutritionGrid strong{display:block;margin-top:7px;font-size:17px}.co-nutritionAdvice strong{font-size:13px;line-height:1.45}
         .co-tipTabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:5px}.co-tipTabs button{flex:0 0 auto;min-height:37px;padding:0 11px;border:1px solid rgba(126,189,212,.13);border-radius:9px;background:#08151c;color:#a9c2cb;font-size:9px;font-weight:950}.co-tipTabs button.is-active{border-color:rgba(89,216,255,.42);background:rgba(35,130,166,.2);color:#fff}.co-featuredTip{display:grid;grid-template-columns:minmax(0,1.35fr) 1fr 1fr auto;gap:12px;align-items:center;margin-top:10px;padding:17px;border:1px solid rgba(133,198,222,.12);border-radius:13px;background:linear-gradient(115deg,rgba(35,119,151,.1),transparent 72%)}.co-featuredTip h3{margin:6px 0;font-size:19px}.co-featuredTip p{margin:0;color:#bdd1d9;font-size:12px;line-height:1.5}.co-tipEvidence{padding-left:12px;border-left:1px solid rgba(136,197,220,.1)}.co-tipEvidence strong{display:block;margin-top:6px;font-size:12px;line-height:1.45}.co-featuredTip>button{height:40px;padding:0 13px;border:1px solid rgba(89,216,255,.22);border-radius:9px;background:#0a1820;font-size:9px;font-weight:950}
@@ -1337,7 +1492,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         @media(max-width:650px){.co-page{width:min(100% - 16px,1180px);gap:9px;margin-bottom:105px}.co-hero{padding:18px;align-items:flex-start;flex-direction:column}.co-hero h1{font-size:38px}.co-programName{font-size:25px}.co-programMetaLine{font-size:12px}.co-heroStatus{width:100%;min-width:0}.co-section{padding:15px}.co-sectionTitle{align-items:flex-start;flex-direction:column;margin-bottom:13px}.co-sectionTitle h2{font-size:24px}.co-sectionTitleText p{font-size:11px}.co-sectionRight,.co-sectionRight button{width:100%}.co-nextWorkoutHead{grid-template-columns:1fr 115px}.co-nextWorkoutHead strong{font-size:18px}.co-decisionRow{grid-template-columns:1fr;gap:9px;padding:13px}.co-decisionCommand>strong{font-size:19px}.co-decisionRow>button{width:100%}.co-reviewGrid{grid-template-columns:1fr}.co-reviewGrid article+article,.co-reviewGrid article:nth-child(3){border-left:0;border-top:1px solid rgba(138,198,221,.09)}.co-nutritionGrid{grid-template-columns:1fr}.co-nutritionAdvice{grid-column:auto}.co-featuredTip{grid-template-columns:1fr}.co-featuredTip>div:first-child{grid-column:auto}.co-tipEvidence{padding-left:0;padding-top:10px;border-left:0;border-top:1px solid rgba(136,197,220,.1)}.co-featuredTip>button{width:100%}.co-historyList article{align-items:flex-start;flex-direction:column}.co-historyList article b{font-size:13px}.co-controlButtons{display:grid;grid-template-columns:1fr;width:100%}.co-manageRows article{grid-template-columns:28px minmax(0,1fr)}.co-manageRows article>button,.co-manageRows article>b{grid-column:2;width:100%;text-align:center}.co-deleteOptions{align-items:flex-start;flex-direction:column}.co-deleteOptions button{width:100%}.co-choiceGrid{grid-template-columns:1fr 1fr}.co-bodyFields{grid-template-columns:1fr 1fr}.co-builderActions{display:grid;grid-template-columns:1fr}.co-builderActions button{width:100%}.co-toast{right:8px;bottom:76px;width:calc(100vw - 16px)}}
         /* FINAL COACH READABILITY PASS */
         .co-sectionTitleText p,.co-heroStatus span,.co-briefTop span,.co-reviewGrid span,.co-assessment span,.co-programControl span,.co-featuredTip>div>span,.co-tipEvidence span,.co-nextWorkoutHead span{font-size:11px;line-height:1.35}.co-heroStatus small,.co-decisionExercise span,.co-decisionCommand small{font-size:13px;line-height:1.45}.co-briefCard h3{font-size:20px}.co-briefCard p{font-size:14px;line-height:1.55}.co-briefAction{font-size:14px}.co-briefCard button,.co-decisionRow>button,.co-controlButtons button,.co-manageHead button,.co-builderActions button,.co-builder .co-sectionRight button,.co-featuredTip>button{font-size:12px;color:#fff}.co-decisionExercise strong{font-size:17px}.co-decisionCommand>span{font-size:12px}.co-decisionCommand>strong{font-size:23px}.co-reviewGrid strong{font-size:22px}.co-programControl small{font-size:13px}.co-manageRows article strong{font-size:15px}.co-manageRows article span,.co-manageRows article small{font-size:12px}.co-manageRows article>button,.co-manageRows article>b{font-size:11px}.co-choiceRow button,.co-choiceGrid button{font-size:13px;color:#fff}.co-field span{font-size:11px}.co-field input{font-size:14px}.co-confirmModal>span,.co-confirmModal button{font-size:12px}
-        @media(max-width:650px){.co-page{width:calc(100% - 12px)}.co-hero{padding:17px 15px}.co-hero h1{font-size:34px}.co-programName{font-size:26px}.co-programMetaLine{font-size:14px}.co-heroStatus strong{font-size:20px}.co-section{padding:14px}.co-sectionTitle h2{font-size:24px}.co-sectionTitleText p{font-size:13px}.co-nextWorkoutHead{grid-template-columns:1fr}.co-nextWorkoutHead strong{font-size:22px}.co-nextWorkoutHead small{font-size:13px}.co-decisionRow{padding:15px}.co-decisionExercise strong{font-size:18px}.co-decisionExercise span{font-size:13px}.co-decisionCommand>span{font-size:12px}.co-decisionCommand>strong{font-size:24px}.co-decisionCommand small{font-size:13px}.co-decisionRow>button{min-height:43px;font-size:13px}.co-reviewGrid strong{font-size:24px}.co-controlButtons button{min-height:44px;font-size:13px}.co-manageRows article{padding:13px}.co-choiceRow button,.co-choiceGrid button{min-height:46px;font-size:13px}}
+        @media(max-width:650px){.co-page{width:calc(100% - 12px)}.co-hero{padding:17px 15px}.co-hero h1{font-size:34px}.co-programName{font-size:26px}.co-programMetaLine{font-size:14px}.co-heroStatus strong{font-size:20px}.co-section{padding:14px}.co-sectionTitle h2{font-size:24px}.co-sectionTitleText p{font-size:13px}.co-nextWorkoutHead{grid-template-columns:1fr}.co-nextWorkoutHead strong{font-size:22px}.co-nextWorkoutHead small{font-size:13px}.co-decisionRow{padding:15px}.co-decisionExercise strong{font-size:18px}.co-decisionExercise span{font-size:13px}.co-decisionCommand>span{font-size:12px}.co-decisionCommand>strong{font-size:24px}.co-decisionCommand small{font-size:13px}.co-decisionRow>button{min-height:43px;font-size:13px}.co-reviewGrid strong{font-size:24px}.co-controlButtons button{min-height:44px;font-size:13px}.co-manageRows article{padding:13px}.co-choiceRow button,.co-choiceGrid button{min-height:46px;font-size:13px}.co-smartSwap{padding:11px}.co-smartSwapHead{display:grid;gap:7px}.co-smartSwapHead span{font-size:10px}.co-smartSwapHead strong{font-size:16px}.co-smartSwapHead small{font-size:12px}.co-smartSwapHead>b{justify-self:start}.co-smartSwapChoices{grid-template-columns:1fr;gap:6px}.co-smartSwapChoices button{padding:11px}.co-smartSwapChoices i{font-size:9px}.co-smartSwapChoices strong{font-size:14px!important}.co-smartSwapChoices span{font-size:11px}}
 
         /* AUG 9 FINAL COACH ACTIVE-PROGRAM + MOBILE */
         .co-programName{overflow-wrap:anywhere!important;line-height:1.08!important}
