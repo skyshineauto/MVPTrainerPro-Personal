@@ -254,6 +254,404 @@ function difficultyToRating(d: "too_easy" | "just_right" | "too_hard") {
   return 3;
 }
 
+type PerformanceCoreState = "ready" | "active" | "paused" | "offline";
+type SessionDurationBaseline = {
+  seconds: number | null;
+  sampleCount: number;
+  exactCount: number;
+};
+
+function normalizedWorkoutName(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function workoutSummaryObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function completedWorkoutDurationSeconds(row: any) {
+  const active = Number(row?.active_seconds ?? 0);
+  if (Number.isFinite(active) && active >= 300 && active <= 4 * 60 * 60) return active;
+
+  const summary = workoutSummaryObject(row?.workout_summary);
+  const summarySeconds = Number(summary?.duration_seconds ?? 0);
+  if (Number.isFinite(summarySeconds) && summarySeconds >= 300 && summarySeconds <= 4 * 60 * 60) {
+    return summarySeconds;
+  }
+
+  const started = row?.started_at ? new Date(row.started_at).getTime() : NaN;
+  const ended = row?.ended_at ? new Date(row.ended_at).getTime() : NaN;
+  if (Number.isFinite(started) && Number.isFinite(ended) && ended > started) {
+    const seconds = (ended - started) / 1000;
+    if (seconds >= 300 && seconds <= 4 * 60 * 60) return seconds;
+  }
+
+  return null;
+}
+
+async function fetchSessionDurationBaseline(userId: string, templateName: string): Promise<SessionDurationBaseline> {
+  const { data, error } = await supabase
+    .from("workouts")
+    .select("active_seconds, workout_summary, started_at, ended_at, completed_at")
+    .eq("user_id", userId)
+    .not("completed_at", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(30);
+
+  if (error) throw error;
+
+  const target = normalizedWorkoutName(templateName);
+  const rows = (data ?? [])
+    .map((row: any) => {
+      const seconds = completedWorkoutDurationSeconds(row);
+      if (!seconds) return null;
+      const summary = workoutSummaryObject(row?.workout_summary);
+      return {
+        seconds,
+        templateName: normalizedWorkoutName(summary?.template_name),
+      };
+    })
+    .filter((row): row is { seconds: number; templateName: string } => Boolean(row));
+
+  const exact = target ? rows.filter((row) => row.templateName === target) : [];
+  const exactIds = new Set(exact);
+  const ordered = exact.length >= 3
+    ? exact.slice(0, 12)
+    : [...exact, ...rows.filter((row) => !exactIds.has(row))].slice(0, 12);
+
+  if (!ordered.length) return { seconds: null, sampleCount: 0, exactCount: 0 };
+
+  let weightedSeconds = 0;
+  let weightTotal = 0;
+  ordered.forEach((row, index) => {
+    const weight = Math.pow(0.88, index);
+    weightedSeconds += row.seconds * weight;
+    weightTotal += weight;
+  });
+
+  return {
+    seconds: Math.round(weightedSeconds / Math.max(0.0001, weightTotal)),
+    sampleCount: ordered.length,
+    exactCount: exact.length,
+  };
+}
+
+function PerformanceCoreIcon({ state }: { state: PerformanceCoreState }) {
+  return (
+    <span className={`tr-performanceCoreIcon is-${state}`} aria-hidden="true">
+      <svg viewBox="0 0 48 48" role="presentation">
+        <path className="tr-performanceCoreFrame" d="M24 3.5 39.8 12.6v18.8L24 44.5 8.2 35.4V12.6L24 3.5Z" />
+        <path className="tr-performanceCorePulse" d="M10.5 25h8.1l3.6-10.4 4.8 18.1 4-10.2h6.5" />
+        <circle className="tr-performanceCoreNode" cx="24" cy="24" r="3.2" />
+      </svg>
+    </span>
+  );
+}
+
+function sessionTrajectoryMetrics(elapsedSeconds: number, averageSeconds: number | null) {
+  const elapsed = Math.max(0, Number(elapsedSeconds) || 0);
+  const average = averageSeconds && averageSeconds >= 300 ? averageSeconds : null;
+  const averageScale = average ? average / 0.8 : 60 * 60;
+  const span = Math.max(30 * 60, averageScale, elapsed > 0 ? elapsed / 0.92 : 0);
+  return {
+    span,
+    progress: Math.max(0, Math.min(0.985, elapsed / span)),
+    averagePosition: average ? Math.max(0.05, Math.min(0.94, average / span)) : -1,
+  };
+}
+
+function SessionTrajectory({
+  elapsedSeconds,
+  averageSeconds,
+  paused,
+}: {
+  elapsedSeconds: number;
+  averageSeconds: number | null;
+  paused: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const propsRef = useRef({ elapsedSeconds, averageSeconds, paused });
+  const sampleRef = useRef({ seconds: elapsedSeconds, at: 0 });
+  const pulseRef = useRef(0);
+  const previousElapsedRef = useRef(elapsedSeconds);
+
+  propsRef.current = { elapsedSeconds, averageSeconds, paused };
+
+  useEffect(() => {
+    const now = typeof performance !== "undefined" ? performance.now() : 0;
+    sampleRef.current = { seconds: elapsedSeconds, at: now };
+    const average = averageSeconds ?? 0;
+    if (average > 0 && previousElapsedRef.current < average && elapsedSeconds >= average) {
+      pulseRef.current = 1;
+    }
+    previousElapsedRef.current = elapsedSeconds;
+  }, [elapsedSeconds, averageSeconds, paused]);
+
+  useEffect(() => {
+    const onImpulse = (event: Event) => {
+      const detail = (event as CustomEvent<{ intensity?: number }>).detail;
+      pulseRef.current = Math.max(pulseRef.current, Math.max(0.25, Math.min(1, Number(detail?.intensity) || 0.55)));
+    };
+    window.addEventListener("mvp:performance-impulse", onImpulse as EventListener);
+    return () => window.removeEventListener("mvp:performance-impulse", onImpulse as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+    const gl = canvas.getContext("webgl2", {
+      alpha: true,
+      antialias: true,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: true,
+      powerPreference: "high-performance",
+    });
+
+    let raf = 0;
+    let stopped = false;
+    let lastFrame = performance.now();
+    let visualTime = 0;
+
+    const resizeCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      return { width, height, dpr };
+    };
+
+    const liveElapsed = (now: number) => {
+      const sample = sampleRef.current;
+      if (propsRef.current.paused || reducedMotion) return sample.seconds;
+      return Math.max(sample.seconds, sample.seconds + Math.max(0, now - sample.at) / 1000);
+    };
+
+    if (!gl) {
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      const render2d = (now: number) => {
+        if (stopped) return;
+        const { width, height } = resizeCanvas();
+        context.clearRect(0, 0, width, height);
+        const elapsed = liveElapsed(now);
+        const metrics = sessionTrajectoryMetrics(elapsed, propsRef.current.averageSeconds);
+        const y = Math.round(height * 0.46) + 0.5;
+        const nodeX = metrics.progress * width;
+        const avgX = metrics.averagePosition >= 0 ? metrics.averagePosition * width : -1;
+        context.lineCap = "round";
+        context.lineWidth = Math.max(1, height * 0.055);
+        context.strokeStyle = "rgba(116,153,171,.23)";
+        context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
+        context.strokeStyle = propsRef.current.paused ? "rgba(244,176,74,.92)" : "rgba(91,216,255,.96)";
+        context.beginPath(); context.moveTo(0, y); context.lineTo(nodeX, y); context.stroke();
+        context.fillStyle = propsRef.current.paused ? "rgba(255,193,91,.98)" : "rgba(215,249,255,.98)";
+        context.beginPath(); context.arc(nodeX, y, Math.max(2, height * 0.11), 0, Math.PI * 2); context.fill();
+        if (avgX >= 0) {
+          context.strokeStyle = "rgba(231,242,247,.62)";
+          context.lineWidth = Math.max(1, height * 0.035);
+          context.beginPath(); context.moveTo(avgX, y - height * 0.18); context.lineTo(avgX, y + height * 0.18); context.stroke();
+        }
+        raf = requestAnimationFrame(render2d);
+      };
+      raf = requestAnimationFrame(render2d);
+      return () => { stopped = true; cancelAnimationFrame(raf); };
+    }
+
+    const compile = (type: number, source: string) => {
+      const shader = gl.createShader(type);
+      if (!shader) return null;
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.warn("MVP Session Trajectory shader compile failed.", gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vertex = compile(gl.VERTEX_SHADER, `#version 300 es
+      in vec2 a_position;
+      void main(){ gl_Position = vec4(a_position, 0.0, 1.0); }
+    `);
+    const fragment = compile(gl.FRAGMENT_SHADER, `#version 300 es
+      precision highp float;
+      uniform vec2 u_resolution;
+      uniform float u_progress;
+      uniform float u_average;
+      uniform float u_time;
+      uniform float u_active;
+      uniform float u_paused;
+      uniform float u_pulse;
+      out vec4 outColor;
+
+      void main(){
+        vec2 p = gl_FragCoord.xy;
+        float w = max(1.0, u_resolution.x);
+        float h = max(1.0, u_resolution.y);
+        float centerY = h * 0.54;
+        float dy = abs(p.y - centerY);
+        float xNorm = p.x / w;
+        float nodeX = clamp(u_progress, 0.0, 1.0) * w;
+        float beforeNode = 1.0 - smoothstep(nodeX - 0.8, nodeX + 0.8, p.x);
+
+        float core = 1.0 - smoothstep(0.55, 1.65, dy);
+        float nearGlow = 1.0 - smoothstep(1.0, 5.4, dy);
+        float surfaceGlow = 1.0 - smoothstep(1.0, 11.0, dy);
+
+        vec3 futureColor = vec3(0.28, 0.40, 0.47);
+        vec3 cool = vec3(0.22, 0.72, 1.0);
+        vec3 hot = vec3(0.38, 1.0, 0.77);
+        vec3 activeColor = mix(cool, hot, clamp(xNorm * 0.72, 0.0, 0.72));
+        activeColor = mix(activeColor, vec3(1.0, 0.61, 0.20), u_paused);
+
+        float futureAlpha = core * 0.17 + nearGlow * 0.035;
+        float completedAlpha = beforeNode * (core * 0.93 + nearGlow * 0.22 + surfaceGlow * 0.055);
+        float flow = (0.5 + 0.5 * sin(p.x * 0.041 - u_time * 2.6));
+        completedAlpha += beforeNode * core * flow * 0.055 * u_active * (1.0 - u_paused);
+
+        float behind = max(0.0, nodeX - p.x);
+        float trail = step(p.x, nodeX) * exp(-behind / max(38.0, w * 0.055)) * nearGlow;
+        completedAlpha += trail * 0.13 * u_active;
+
+        float nodeDist = length(vec2(p.x - nodeX, (p.y - centerY) * 1.08));
+        float nodeCore = 1.0 - smoothstep(0.0, 2.4, nodeDist);
+        float nodeRing = 1.0 - smoothstep(0.0, 1.2, abs(nodeDist - 4.2));
+        float nodeHalo = 1.0 - smoothstep(2.8, 14.0, nodeDist);
+        float nodeEnergy = nodeCore + nodeRing * 0.75 + nodeHalo * 0.24;
+
+        float pulseBand = 0.0;
+        if (u_pulse > 0.001) {
+          float pulseX = nodeX - mod(u_time * 230.0, max(1.0, nodeX + 80.0));
+          float pd = abs(p.x - pulseX);
+          pulseBand = (1.0 - smoothstep(0.0, 18.0, pd)) * nearGlow * u_pulse;
+        }
+
+        float avgMarker = 0.0;
+        if (u_average >= 0.0) {
+          float avgX = u_average * w;
+          float dx = abs(p.x - avgX);
+          float vertical = 1.0 - smoothstep(h * 0.11, h * 0.30, dy);
+          avgMarker = (1.0 - smoothstep(0.0, 0.75, dx)) * vertical * 0.72;
+        }
+
+        vec3 color = futureColor * futureAlpha;
+        float alpha = futureAlpha;
+        color += activeColor * completedAlpha;
+        alpha = max(alpha, completedAlpha);
+        vec3 nodeColor = mix(vec3(0.84, 0.97, 1.0), vec3(1.0, 0.78, 0.40), u_paused);
+        color += nodeColor * nodeEnergy;
+        alpha = max(alpha, nodeEnergy);
+        color += activeColor * pulseBand * 0.8;
+        alpha = max(alpha, pulseBand * 0.8);
+        color += vec3(0.88, 0.95, 0.98) * avgMarker;
+        alpha = max(alpha, avgMarker);
+
+        outColor = vec4(min(color, vec3(1.0)), clamp(alpha, 0.0, 1.0));
+      }
+    `);
+
+    if (!vertex || !fragment) return;
+    const program = gl.createProgram();
+    if (!program) return;
+    gl.attachShader(program, vertex);
+    gl.attachShader(program, fragment);
+    gl.linkProgram(program);
+    gl.deleteShader(vertex);
+    gl.deleteShader(fragment);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.warn("MVP Session Trajectory program link failed.", gl.getProgramInfoLog(program));
+      gl.deleteProgram(program);
+      return;
+    }
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const position = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(position);
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+    const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+    const progressLoc = gl.getUniformLocation(program, "u_progress");
+    const averageLoc = gl.getUniformLocation(program, "u_average");
+    const timeLoc = gl.getUniformLocation(program, "u_time");
+    const activeLoc = gl.getUniformLocation(program, "u_active");
+    const pausedLoc = gl.getUniformLocation(program, "u_paused");
+    const pulseLoc = gl.getUniformLocation(program, "u_pulse");
+    gl.useProgram(program);
+
+    const render = (now: number) => {
+      if (stopped) return;
+      const frameDelta = Math.min(50, Math.max(0, now - lastFrame));
+      lastFrame = now;
+      if (!propsRef.current.paused && !reducedMotion) visualTime += frameDelta / 1000;
+      pulseRef.current = Math.max(0, pulseRef.current - frameDelta / 850);
+
+      const { width, height } = resizeCanvas();
+      const elapsed = liveElapsed(now);
+      const metrics = sessionTrajectoryMetrics(elapsed, propsRef.current.averageSeconds);
+
+      gl.viewport(0, 0, width, height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(program);
+      gl.uniform2f(resolutionLoc, width, height);
+      gl.uniform1f(progressLoc, metrics.progress);
+      gl.uniform1f(averageLoc, metrics.averagePosition);
+      gl.uniform1f(timeLoc, visualTime);
+      gl.uniform1f(activeLoc, reducedMotion ? 0 : 1);
+      gl.uniform1f(pausedLoc, propsRef.current.paused ? 1 : 0);
+      gl.uniform1f(pulseLoc, pulseRef.current);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      raf = requestAnimationFrame(render);
+    };
+
+    raf = requestAnimationFrame(render);
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      if (buffer) gl.deleteBuffer(buffer);
+      gl.deleteProgram(program);
+    };
+  }, []);
+
+  const averageMinutes = averageSeconds ? Math.max(1, Math.round(averageSeconds / 60)) : null;
+  const overAverageMinutes = averageSeconds && elapsedSeconds > averageSeconds
+    ? Math.max(1, Math.floor((elapsedSeconds - averageSeconds) / 60))
+    : null;
+
+  return (
+    <div className={`tr-sessionTrajectory ${paused ? "is-paused" : "is-active"}`}>
+      <canvas ref={canvasRef} className="tr-sessionTrajectoryCanvas" aria-hidden="true" />
+      <div className="tr-sessionTrajectoryMeta" aria-live="off">
+        <span>{averageMinutes ? `AVG ${averageMinutes} MIN` : "LEARNING YOUR SESSION PACE"}</span>
+        {overAverageMinutes ? <strong>+{overAverageMinutes} MIN VS AVG</strong> : null}
+      </div>
+    </div>
+  );
+}
+
 
 type Hud =
   | { mode: "signed_out" }
@@ -647,6 +1045,477 @@ const HUD_FORCE_CSS = `
     letter-spacing: .06em !important;
   }
 }
+
+
+/* =====================================================================
+   MVP TRAINER R12.4 — ADAPTIVE PERFORMANCE HUD
+   One seamless performance surface. Active mode collapses hard so the
+   exercise UI owns the screen. The Session Trajectory is WebGL2-rendered
+   from real elapsed time + the user's recent completed-workout baseline.
+   ===================================================================== */
+.tr-performanceHudShell,
+.tr-performanceHudShell.tr-hudPanel,
+.tr-performanceHudShell.tr-card{
+  width:100%!important;
+  max-width:none!important;
+  margin:0 0 12px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+.tr-performanceHudShell::before,
+.tr-performanceHudShell::after{display:none!important}
+.tr-performanceHudSurface{
+  --perf-blue:81,207,255;
+  --perf-ice:219,247,255;
+  --perf-green:87,239,160;
+  --perf-amber:255,181,72;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  min-height:116px;
+  padding:15px 18px 11px;
+  border:1px solid rgba(139,202,224,.24);
+  border-radius:20px;
+  background:
+    radial-gradient(700px 150px at 50% -52%,rgba(96,206,244,.12),transparent 66%),
+    radial-gradient(420px 150px at 8% 110%,rgba(42,122,160,.065),transparent 72%),
+    linear-gradient(180deg,rgba(14,24,31,.975),rgba(5,10,14,.992));
+  box-shadow:
+    0 18px 48px rgba(0,0,0,.34),
+    inset 0 1px 0 rgba(255,255,255,.075),
+    inset 0 -1px 0 rgba(51,132,165,.055);
+  -webkit-backdrop-filter:blur(14px) saturate(1.08);
+  backdrop-filter:blur(14px) saturate(1.08);
+  transition:min-height .38s cubic-bezier(.22,.78,.22,1),padding .38s cubic-bezier(.22,.78,.22,1),border-color .28s ease,background .35s ease,box-shadow .35s ease;
+}
+.tr-performanceHudSurface::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  opacity:.78;
+  background:
+    linear-gradient(115deg,transparent 0 30%,rgba(255,255,255,.018) 43%,transparent 57% 100%),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.007) 0 1px,transparent 1px 5px);
+  mask-image:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,.24));
+}
+.tr-performanceHudSurface::after{
+  content:"";
+  position:absolute;
+  left:7%;right:7%;top:0;height:1px;
+  pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(214,246,255,.24) 30%,rgba(255,255,255,.35) 50%,rgba(214,246,255,.24) 70%,transparent);
+}
+.tr-performanceHudSurface.is-active,
+.tr-performanceHudSurface.is-paused{
+  min-height:68px;
+  padding:8px 14px 6px;
+  border-color:rgba(104,196,224,.26);
+  background:
+    radial-gradient(430px 92px at 43% 12%,rgba(58,184,230,.095),transparent 72%),
+    linear-gradient(180deg,rgba(10,19,25,.985),rgba(4,8,12,.995));
+  box-shadow:0 12px 34px rgba(0,0,0,.31),inset 0 1px 0 rgba(255,255,255,.065),inset 0 -1px rgba(35,124,157,.045);
+}
+.tr-performanceHudSurface.is-paused{
+  border-color:rgba(234,164,72,.24);
+  background:
+    radial-gradient(410px 90px at 36% 10%,rgba(234,155,52,.075),transparent 72%),
+    linear-gradient(180deg,rgba(19,17,13,.985),rgba(7,8,9,.995));
+}
+
+.tr-performanceStateBlock{display:flex;align-items:center;gap:10px;min-width:0}
+.tr-performanceStateText{display:grid;gap:3px;min-width:0}
+.tr-performanceStateText>span{
+  color:rgba(164,197,211,.58);
+  font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:8px;
+  line-height:1;
+  font-weight:850;
+  letter-spacing:.17em;
+  text-transform:uppercase;
+}
+.tr-performanceStateText>strong{
+  color:#c9f6da;
+  font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:16px;
+  line-height:1;
+  font-weight:880;
+  font-variation-settings:"wght" 880;
+  letter-spacing:.085em;
+  text-transform:uppercase;
+  text-shadow:none;
+}
+.tr-performanceStateText>strong.is-ready{color:#c8f8d9}
+.tr-performanceStateText>strong.is-offline{color:#e3edf1}
+.is-active .tr-performanceStateText>strong{color:#b9f7d2}
+.is-paused .tr-performanceStateText>strong{color:#ffd498}
+
+.tr-performanceCoreIcon{
+  position:relative;
+  display:inline-grid;
+  place-items:center;
+  width:38px;height:38px;
+  flex:0 0 auto;
+  color:rgb(var(--perf-ice));
+  filter:drop-shadow(0 3px 9px rgba(40,154,198,.15));
+}
+.tr-performanceCoreIcon::before{
+  content:"";
+  position:absolute;
+  inset:6px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(105,218,255,.11),transparent 68%);
+  opacity:.7;
+}
+.tr-performanceCoreIcon svg{position:relative;width:100%;height:100%;overflow:visible}
+.tr-performanceCoreFrame{
+  fill:rgba(8,18,24,.38);
+  stroke:rgba(179,229,245,.58);
+  stroke-width:1.4;
+  vector-effect:non-scaling-stroke;
+}
+.tr-performanceCorePulse{
+  fill:none;
+  stroke:rgba(119,218,250,.88);
+  stroke-width:2.05;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+}
+.tr-performanceCoreNode{fill:#eafaff;stroke:rgba(92,210,248,.8);stroke-width:1}
+.tr-performanceCoreIcon.is-active{color:rgb(var(--perf-green));filter:drop-shadow(0 0 8px rgba(82,226,167,.20))}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreFrame{stroke:rgba(100,232,181,.62)}
+.tr-performanceCoreIcon.is-active .tr-performanceCorePulse{stroke:#8af1c0;stroke-dasharray:13 7;animation:tr-performanceCoreFlow 2.15s linear infinite}
+.tr-performanceCoreIcon.is-active .tr-performanceCoreNode{fill:#eafff3;stroke:#74efb4}
+.tr-performanceCoreIcon.is-paused{filter:drop-shadow(0 0 7px rgba(245,173,67,.16))}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreFrame{stroke:rgba(255,190,94,.62)}
+.tr-performanceCoreIcon.is-paused .tr-performanceCorePulse{stroke:#ffc375}
+.tr-performanceCoreIcon.is-paused .tr-performanceCoreNode{fill:#fff3d8;stroke:#ffc070}
+.tr-performanceCoreIcon.is-offline{opacity:.63;filter:none}
+@keyframes tr-performanceCoreFlow{to{stroke-dashoffset:-40}}
+
+.tr-performanceReadyMain{
+  min-height:60px;
+  display:grid;
+  grid-template-columns:minmax(165px,.72fr) minmax(340px,1.5fr) minmax(180px,.72fr);
+  align-items:center;
+  gap:18px;
+}
+.tr-performanceClockBlock{display:grid;justify-items:center;gap:3px;text-align:center;min-width:0}
+.tr-performanceReadyDate{
+  color:rgba(246,250,252,.94);
+  font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:clamp(13px,1.35vw,17px);
+  line-height:1.05;
+  font-weight:760;
+  font-variation-settings:"wght" 760;
+  letter-spacing:.005em;
+  white-space:nowrap;
+  text-rendering:geometricPrecision;
+}
+.tr-performanceReadyTime{
+  color:#fff0c2;
+  font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:clamp(27px,2.8vw,36px);
+  line-height:1;
+  font-weight:820;
+  font-variation-settings:"wght" 820;
+  letter-spacing:.018em;
+  font-variant-numeric:tabular-nums lining-nums;
+  text-shadow:0 0 24px rgba(255,210,113,.10);
+}
+.tr-performanceReadyAction{display:flex;justify-content:flex-end;min-width:0}
+.tr-performanceStart{
+  min-width:170px;
+  min-height:43px;
+  padding:0 16px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  border:1px solid rgba(89,202,247,.46);
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(22,126,177,.28),rgba(6,45,67,.36));
+  color:#f7fdff;
+  box-shadow:0 8px 20px rgba(0,0,0,.22),inset 0 1px 0 rgba(222,249,255,.10),0 0 18px rgba(62,191,241,.07);
+  font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+  cursor:pointer;
+  transition:transform .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease;
+}
+.tr-performanceStartMark{font-size:12px;color:#bcecff;line-height:1}
+.tr-performanceStart:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(107,220,255,.68);background:linear-gradient(180deg,rgba(26,145,200,.34),rgba(7,57,82,.40));box-shadow:0 11px 23px rgba(0,0,0,.26),inset 0 1px 0 rgba(235,252,255,.13),0 0 20px rgba(63,199,248,.10)}
+.tr-performanceStart:active:not(:disabled){transform:translateY(0)}
+.tr-performanceStart:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.55)}
+
+.tr-performanceReadyFooter{
+  position:relative;
+  min-height:31px;
+  margin-top:7px;
+  padding-top:8px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+  border-top:1px solid rgba(152,201,218,.10);
+}
+.tr-performanceMetric{display:flex;align-items:baseline;gap:7px;min-width:0;white-space:nowrap}
+.tr-performanceMetric>span{
+  color:rgba(156,188,202,.58);
+  font-size:7.5px;
+  line-height:1;
+  font-weight:850;
+  letter-spacing:.14em;
+}
+.tr-performanceMetric>strong{
+  color:#f5fbfd;
+  font-size:15px;
+  line-height:1;
+  font-weight:860;
+  font-variation-settings:"wght" 860;
+  font-variant-numeric:tabular-nums lining-nums;
+}
+.tr-performanceMetric>small{color:rgba(146,173,184,.42);font-size:6.5px;font-weight:800;letter-spacing:.09em}
+.tr-performanceMetricDivider{width:1px;height:16px;background:rgba(159,202,218,.11)}
+.tr-performanceDormantRail{
+  position:relative;
+  height:9px;
+  flex:1 1 auto;
+  min-width:90px;
+  margin-left:5px;
+}
+.tr-performanceDormantRail::before{
+  content:"";
+  position:absolute;
+  left:0;right:0;top:4px;height:1px;
+  background:linear-gradient(90deg,rgba(83,149,174,.08),rgba(116,191,218,.18),rgba(83,149,174,.08));
+}
+.tr-performanceDormantRail>span{
+  position:absolute;
+  left:0;top:3px;width:26%;height:2px;
+  background:linear-gradient(90deg,rgba(72,176,215,.06),rgba(116,216,246,.30),rgba(72,176,215,.06));
+  opacity:.68;
+}
+
+.tr-performanceActiveMain{
+  min-height:37px;
+  display:grid;
+  grid-template-columns:minmax(130px,.72fr) auto minmax(220px,1.15fr) auto;
+  align-items:center;
+  gap:13px;
+}
+.tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+.tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:30px;height:30px}
+.tr-performanceHudSurface.is-active .tr-performanceStateText>span,
+.tr-performanceHudSurface.is-paused .tr-performanceStateText>span{font-size:6.8px;letter-spacing:.15em}
+.tr-performanceHudSurface.is-active .tr-performanceStateText>strong,
+.tr-performanceHudSurface.is-paused .tr-performanceStateText>strong{font-size:13px}
+.tr-performanceTimerBlock{display:grid;justify-items:center;gap:1px;min-width:112px}
+.tr-performanceTimer{
+  color:#f7fdff;
+  font-family:"Segoe UI Variable Display","SF Pro Display",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:25px;
+  line-height:.96;
+  font-weight:790;
+  font-variation-settings:"wght" 790;
+  letter-spacing:.028em;
+  font-variant-numeric:tabular-nums lining-nums;
+  font-feature-settings:"tnum" 1,"lnum" 1;
+  text-rendering:geometricPrecision;
+  -webkit-font-smoothing:antialiased;
+  text-shadow:0 0 20px rgba(99,214,255,.09);
+}
+.is-paused .tr-performanceTimer{color:#fff3d5;text-shadow:0 0 18px rgba(255,186,80,.08)}
+.tr-performanceTimerBlock>span{
+  color:rgba(149,190,207,.55);
+  font-size:6.5px;
+  font-weight:850;
+  letter-spacing:.16em;
+  line-height:1;
+}
+.tr-performanceDate{
+  min-width:0;
+  text-align:center;
+  color:rgba(217,230,236,.72);
+  font-size:10.5px;
+  line-height:1.1;
+  font-weight:720;
+  letter-spacing:.01em;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.tr-performanceActions{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+.tr-performanceControl{
+  min-height:31px;
+  padding:0 10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  border:1px solid rgba(122,193,220,.22);
+  border-radius:9px;
+  background:linear-gradient(180deg,rgba(18,35,44,.72),rgba(7,14,18,.86));
+  color:#eaf7fb;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.08em;
+  cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 5px 12px rgba(0,0,0,.19);
+  transition:transform .15s ease,border-color .15s ease,background .15s ease,color .15s ease;
+}
+.tr-performanceControl>span{font-size:8.5px;line-height:1}
+.tr-performanceControl.is-primary{border-color:rgba(76,200,239,.32);color:#d9f6ff}
+.tr-performanceControl.is-resume{border-color:rgba(87,224,155,.34);color:#c9f6da}
+.tr-performanceControl.is-end{border-color:rgba(239,104,110,.19);color:#f0b7ba;background:linear-gradient(180deg,rgba(50,24,26,.43),rgba(16,8,9,.70))}
+.tr-performanceControl:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(117,218,249,.52)}
+.tr-performanceControl.is-end:hover:not(:disabled){border-color:rgba(245,112,118,.42);color:#ffd1d3}
+.tr-performanceControl:disabled{opacity:.30;cursor:not-allowed}
+
+.tr-sessionTrajectory{
+  position:relative;
+  height:23px;
+  margin-top:0;
+  overflow:hidden;
+}
+.tr-sessionTrajectory::before{
+  content:"";
+  position:absolute;
+  left:0;right:0;top:9px;height:1px;
+  pointer-events:none;
+  background:linear-gradient(90deg,rgba(92,135,153,.08),rgba(112,163,182,.16),rgba(92,135,153,.08));
+}
+.tr-sessionTrajectoryCanvas{
+  position:absolute;
+  inset:0 0 auto 0;
+  width:100%;
+  height:17px;
+  display:block;
+  pointer-events:none;
+}
+.tr-sessionTrajectoryMeta{
+  position:absolute;
+  left:0;right:0;bottom:0;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  pointer-events:none;
+  color:rgba(142,174,188,.48);
+  font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
+  font-size:6.5px;
+  line-height:1;
+  font-weight:820;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.tr-sessionTrajectoryMeta strong{color:rgba(160,225,244,.72);font-size:6.5px;font-weight:850}
+.tr-sessionTrajectory.is-paused .tr-sessionTrajectoryMeta strong{color:rgba(255,203,126,.72)}
+
+@media(max-width:900px){
+  .tr-performanceReadyMain{grid-template-columns:minmax(145px,.7fr) minmax(270px,1.35fr) minmax(155px,.72fr);gap:12px}
+  .tr-performanceStart{min-width:150px;padding:0 12px}
+  .tr-performanceActiveMain{grid-template-columns:minmax(112px,.68fr) auto minmax(170px,1fr) auto;gap:9px}
+  .tr-performanceDate{font-size:9.5px}
+}
+
+@media(max-width:720px){
+  .tr-performanceHudShell,
+  .tr-performanceHudShell.tr-hudPanel{margin-bottom:9px!important}
+  .tr-performanceHudSurface{
+    min-height:132px;
+    padding:12px 12px 9px;
+    border-radius:16px;
+  }
+  .tr-performanceReadyMain{
+    min-height:84px;
+    grid-template-columns:1fr auto;
+    grid-template-areas:"state action" "clock clock";
+    gap:8px 10px;
+  }
+  .tr-performanceReadyMain>.tr-performanceStateBlock{grid-area:state}
+  .tr-performanceReadyMain>.tr-performanceClockBlock{grid-area:clock}
+  .tr-performanceReadyMain>.tr-performanceReadyAction{grid-area:action}
+  .tr-performanceCoreIcon{width:32px;height:32px}
+  .tr-performanceStateBlock{gap:8px}
+  .tr-performanceStateText>span{font-size:6.8px}
+  .tr-performanceStateText>strong{font-size:13.5px}
+  .tr-performanceReadyDate{font-size:clamp(10.5px,3.2vw,13px);white-space:nowrap}
+  .tr-performanceReadyTime{font-size:clamp(25px,8vw,31px)}
+  .tr-performanceStart{min-width:0;min-height:38px;padding:0 11px;border-radius:11px;font-size:8.5px;letter-spacing:.075em}
+  .tr-performanceStartMark{font-size:10px}
+  .tr-performanceReadyFooter{min-height:28px;margin-top:4px;padding-top:7px;gap:8px}
+  .tr-performanceMetric{gap:4px}
+  .tr-performanceMetric>span{font-size:6px;letter-spacing:.10em}
+  .tr-performanceMetric>strong{font-size:12.5px}
+  .tr-performanceMetric>small{display:none}
+  .tr-performanceMetricDivider{height:13px}
+  .tr-performanceDormantRail{display:none}
+
+  .tr-performanceHudSurface.is-active,
+  .tr-performanceHudSurface.is-paused{
+    min-height:88px;
+    padding:7px 9px 5px;
+    border-radius:14px;
+  }
+  .tr-performanceActiveMain{
+    min-height:56px;
+    grid-template-columns:minmax(105px,1fr) auto;
+    grid-template-areas:"state timer" "date actions";
+    align-items:center;
+    gap:5px 8px;
+  }
+  .tr-performanceActiveMain>.tr-performanceStateBlock{grid-area:state}
+  .tr-performanceActiveMain>.tr-performanceTimerBlock{grid-area:timer;justify-self:end}
+  .tr-performanceActiveMain>.tr-performanceDate{grid-area:date;text-align:left;justify-self:start;max-width:100%;font-size:clamp(8.8px,2.75vw,10.5px);overflow:visible;text-overflow:clip;white-space:nowrap}
+  .tr-performanceActiveMain>.tr-performanceActions{grid-area:actions;justify-self:end}
+  .tr-performanceHudSurface.is-active .tr-performanceCoreIcon,
+  .tr-performanceHudSurface.is-paused .tr-performanceCoreIcon{width:27px;height:27px}
+  .tr-performanceHudSurface.is-active .tr-performanceStateText>strong,
+  .tr-performanceHudSurface.is-paused .tr-performanceStateText>strong{font-size:11.5px}
+  .tr-performanceTimerBlock{min-width:0;justify-items:end}
+  .tr-performanceTimer{font-size:clamp(20px,6.5vw,24px)}
+  .tr-performanceTimerBlock>span{font-size:5.8px;letter-spacing:.13em}
+  .tr-performanceControl{min-height:29px;padding:0 8px;font-size:7.2px;border-radius:8px;gap:4px}
+  .tr-performanceControl>span{font-size:7.5px}
+  .tr-sessionTrajectory{height:22px;margin-top:0}
+  .tr-sessionTrajectoryCanvas{height:16px}
+  .tr-sessionTrajectoryMeta{font-size:5.7px;letter-spacing:.085em}
+  .tr-sessionTrajectoryMeta strong{font-size:5.7px}
+}
+
+@media(max-width:390px){
+  .tr-performanceHudSurface{padding-left:9px;padding-right:9px}
+  .tr-performanceReadyMain{grid-template-columns:minmax(0,1fr) auto}
+  .tr-performanceStart{padding:0 9px;font-size:8px}
+  .tr-performanceReadyFooter{gap:6px}
+  .tr-performanceMetric>span{display:none}
+  .tr-performanceMetric>strong{font-size:12px}
+  .tr-performanceActiveMain{grid-template-columns:minmax(92px,1fr) auto;gap:4px 6px}
+  .tr-performanceStateText>span{display:none}
+  .tr-performanceDate{font-size:8.5px!important}
+  .tr-performanceControl{padding:0 7px;font-size:6.8px}
+}
+
+@media(hover:none){
+  .tr-performanceStart:hover:not(:disabled),
+  .tr-performanceControl:hover:not(:disabled){transform:none}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .tr-performanceHudSurface,
+  .tr-performanceStart,
+  .tr-performanceControl{transition:none!important}
+  .tr-performanceCoreIcon.is-active .tr-performanceCorePulse{animation:none!important}
+}
+
 `;
 
 
@@ -1261,6 +2130,7 @@ export function AppShell({
   const [endDifficulty, setEndDifficulty] = useState<"too_easy" | "just_right" | "too_hard" | "">("");
   const [endNotes, setEndNotes] = useState("");
   const [endBusy, setEndBusy] = useState(false);
+  const [sessionBaseline, setSessionBaseline] = useState<SessionDurationBaseline>({ seconds: null, sampleCount: 0, exactCount: 0 });
 
   useEffect(() => {
     if (hideChrome) return;
@@ -1832,6 +2702,27 @@ export function AppShell({
     return Math.max(0, base - pausedTotal);
   }, [hud, nowTick]);
 
+  const activeTemplateName = hud.mode === "active" ? hud.templateName : null;
+
+  useEffect(() => {
+    if (!user?.id || !activeTemplateName) {
+      setSessionBaseline({ seconds: null, sampleCount: 0, exactCount: 0 });
+      return;
+    }
+
+    let cancelled = false;
+    void fetchSessionDurationBaseline(String(user.id), activeTemplateName)
+      .then((baseline) => {
+        if (!cancelled) setSessionBaseline(baseline);
+      })
+      .catch((error) => {
+        console.warn("Could not build MVP session-duration baseline.", error);
+        if (!cancelled) setSessionBaseline({ seconds: null, sampleCount: 0, exactCount: 0 });
+      });
+
+    return () => { cancelled = true; };
+  }, [user?.id, activeTemplateName]);
+
   const onTogglePause = async () => {
     if (hud.mode !== "active") return;
 
@@ -2004,7 +2895,7 @@ export function AppShell({
   }
 
 
-  const clockParts = hud.mode !== "active" ? fmtClockParts(nowTick) : null;
+  const clockParts = fmtClockParts(nowTick);
   const weatherLocation = branding?.weatherLocation ?? null;
   const weatherTimezone = weather?.timezone || weatherLocation?.timezone || "UTC";
   const weatherTime = formatWeatherLocalTime(weatherTimezone, new Date(nowTick));
@@ -2160,114 +3051,111 @@ export function AppShell({
           </div>
         ) : null}
 
-        <section className={`tr-card ${hudClass}`}>
-          <div className="tr-card-body tr-sessionOverviewBody">
+        <section className={`tr-performanceHudShell ${hudClass}`} aria-label="MVP training performance HUD">
+          <div className={`tr-performanceHudSurface ${hud.mode === "active" ? (hud.isPaused ? "is-paused" : "is-active") : "is-ready"}`}>
             {hud.mode === "active" ? (
               <>
-                <div className={`tr-sessionChronograph ${hud.isPaused ? "is-paused" : "is-running"}`}>
-                  <div className="tr-sessionChronographHead">
-                    <div className="tr-sessionChronographKicker">SESSION TIME</div>
-                    <div className={`tr-sessionChronographState ${hud.isPaused ? "is-paused" : "is-running"}`}>
-                      <span aria-hidden />
-                      {hud.isPaused ? "PAUSED" : "TRAINING"}
+                <div className="tr-performanceActiveMain">
+                  <div className="tr-performanceStateBlock">
+                    <PerformanceCoreIcon state={hud.isPaused ? "paused" : "active"} />
+                    <div className="tr-performanceStateText">
+                      <span>PERFORMANCE</span>
+                      <strong>{hud.isPaused ? "PAUSED" : "ACTIVE"}</strong>
                     </div>
                   </div>
 
-                  <div className="tr-sessionChronographTime" aria-label={`${toHHMMSS(timerSeconds)} elapsed`}>
-                    {toHHMMSS(timerSeconds)}
-                  </div>
-                  <div className="tr-sessionChronographUnits" aria-hidden>
-                    <span>HR</span>
-                    <span>MIN</span>
-                    <span>SEC</span>
+                  <div className="tr-performanceTimerBlock">
+                    <strong className="tr-performanceTimer" aria-label={`${toHHMMSS(timerSeconds)} elapsed session time`}>
+                      {toHHMMSS(timerSeconds)}
+                    </strong>
+                    <span>SESSION TIME</span>
                   </div>
 
-                  <div className="tr-sessionChronographActions">
+                  <div className="tr-performanceDate" aria-label={`Today is ${clockParts.date}`}>
+                    {clockParts.date}
+                  </div>
+
+                  <div className="tr-performanceActions">
                     <button
                       type="button"
-                      className={`tr-sessionChronographPrimary ${hud.isPaused ? "is-resume" : "is-pause"}`}
+                      className={`tr-performanceControl is-primary ${hud.isPaused ? "is-resume" : "is-pause"}`}
                       onClick={onTogglePause}
                     >
-                      {hud.isPaused ? "RESUME WORKOUT" : "PAUSE WORKOUT"}
+                      <span aria-hidden>{hud.isPaused ? "▶" : "Ⅱ"}</span>
+                      {hud.isPaused ? "RESUME" : "PAUSE"}
                     </button>
                     <button
                       type="button"
-                      className="tr-sessionChronographEnd"
+                      className="tr-performanceControl is-end"
                       onClick={onEndWorkout}
                       disabled={!endEnabled}
                       title={!endEnabled ? "Confirm today's body weight before ending" : "End workout"}
                     >
-                      END WORKOUT
+                      <span aria-hidden>■</span>
+                      END
                     </button>
                   </div>
                 </div>
 
+                <SessionTrajectory
+                  elapsedSeconds={timerSeconds}
+                  averageSeconds={sessionBaseline.seconds}
+                  paused={hud.isPaused}
+                />
               </>
             ) : (
               <>
-                <div className="tr-inactiveCommand">
-                  <div className="tr-inactiveCommandStatus">
-                    <div className="tr-inactiveCommandKicker">TRAINING STATUS</div>
-                    <div
-                      className={`tr-inactiveReady ${
-                        hud.mode === "no_program"
-                          ? "is-no-program"
-                          : hud.mode === "signed_out"
-                          ? "is-signed-out"
-                          : ""
-                      }`}
-                    >
-                      <span aria-hidden />
-                      {hud.mode === "inactive" ? "READY" : hud.mode === "no_program" ? "NO PROGRAM" : "SIGN IN"}
+                <div className="tr-performanceReadyMain">
+                  <div className="tr-performanceStateBlock">
+                    <PerformanceCoreIcon state={hud.mode === "inactive" ? "ready" : "offline"} />
+                    <div className="tr-performanceStateText">
+                      <span>TRAINING STATUS</span>
+                      <strong className={hud.mode === "inactive" ? "is-ready" : "is-offline"}>
+                        {hud.mode === "inactive" ? "READY" : hud.mode === "no_program" ? "NO PROGRAM" : "SIGN IN"}
+                      </strong>
                     </div>
                   </div>
 
-                  <div className="tr-inactiveCommandClock">
-                    <div
-                      className="tr-inactiveCommandDate"
-                      style={{
-                        whiteSpace: "nowrap",
-                        wordBreak: "normal",
-                        overflowWrap: "normal",
-                      }}
-                    >
-                      {clockParts?.date}
-                    </div>
-                    <div className="tr-inactiveCommandTime">{clockParts?.time}</div>
+                  <div className="tr-performanceClockBlock">
+                    <div className="tr-performanceReadyDate">{clockParts.date}</div>
+                    <div className="tr-performanceReadyTime">{clockParts.time}</div>
                   </div>
 
-                  <div className="tr-inactiveCommandActions">
+                  <div className="tr-performanceReadyAction">
                     {hud.mode === "inactive" ? (
                       <button
-                        className={`tr-seg tr-hudActionBtn tr-seg--startBlue ${hud.nextSessionId ? "is-enabled tr-pulse" : ""}`}
+                        type="button"
+                        className="tr-performanceStart"
                         disabled={!hud.nextSessionId}
                         onClick={() => hud.nextSessionId && startSession(hud.nextSessionId)}
                       >
-                        START WORKOUT
+                        <span className="tr-performanceStartMark" aria-hidden>▶</span>
+                        <span>START WORKOUT</span>
                       </button>
                     ) : hud.mode === "no_program" ? (
-                      <button
-                        className="tr-seg tr-hudActionBtn tr-seg--startBlue is-enabled"
-                        onClick={() => navigate("/coach")}
-                      >
-                        GO TO COACH
+                      <button type="button" className="tr-performanceStart" onClick={() => navigate("/coach")}>
+                        <span className="tr-performanceStartMark" aria-hidden>›</span>
+                        <span>GO TO COACH</span>
                       </button>
                     ) : null}
                   </div>
                 </div>
 
                 {hud.mode === "inactive" ? (
-                  <div className="tr-inactiveSupportRail">
-                    <div className="tr-inactiveSupportMetric">
+                  <div className="tr-performanceReadyFooter">
+                    <div className="tr-performanceMetric">
                       <span>BODY WEIGHT</span>
                       <strong>{hud.displayWeightLb != null ? `${hud.displayWeightLb} lb` : "Not set"}</strong>
-                      <small>Last completed</small>
+                      <small>LAST COMPLETED</small>
                     </div>
-
-                    <div className="tr-inactiveSupportMetric">
+                    <span className="tr-performanceMetricDivider" aria-hidden />
+                    <div className="tr-performanceMetric">
                       <span>PROTEIN TARGET</span>
-                      <strong>{hud.proteinTargetG != null ? `${hud.proteinTargetG}g` : "Not set"}</strong>
-                      <small>Daily target</small>
+                      <strong>{hud.proteinTargetG != null ? `${hud.proteinTargetG} g` : "Not set"}</strong>
+                      <small>DAILY TARGET</small>
+                    </div>
+                    <div className="tr-performanceDormantRail" aria-hidden>
+                      <span />
                     </div>
                   </div>
                 ) : null}

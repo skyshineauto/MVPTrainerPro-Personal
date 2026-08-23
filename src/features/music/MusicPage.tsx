@@ -1706,7 +1706,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setPreviewErrorRecommendationId(null);
     const audio = new Audio(item.previewUrl);
     audio.preload = "none";
-    audio.volume = 0.9;
+    audio.volume = Math.max(0, Math.min(1, Number(player.volume) || 0));
     previewAudioRef.current = audio;
     setPreviewingRecommendationId(item.id);
     audio.onended = () => stopDiscoveryPreview();
@@ -1721,6 +1721,17 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       setPreviewErrorRecommendationId(item.id);
     });
   }
+
+  useEffect(() => {
+    const audio = previewAudioRef.current;
+    if (!audio) return;
+    audio.volume = Math.max(0, Math.min(1, Number(player.volume) || 0));
+  }, [player.volume]);
+
+  useEffect(() => {
+    if (!player.playing || !previewAudioRef.current) return;
+    stopDiscoveryPreview();
+  }, [player.playing]);
 
   async function saveDiscoveryRecommendation(seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) {
     if (savedDiscoverySongIds.has(item.id) || savingRecommendationId === item.id) return;
@@ -3203,6 +3214,42 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         .tr10-discoverGrid article footer button:hover,.tr10-storeLink:hover{transform:translateY(-1px);border-color:rgba(113,210,242,.38)!important;box-shadow:0 7px 13px rgba(0,0,0,.30),inset 0 1px rgba(255,255,255,.075)!important}
         .tr10-discoverGrid article.is-owned{opacity:.82!important;background:linear-gradient(155deg,#101b20,#091116)!important}
         @media(max-width:650px){.tr10-discoverGrid article:hover{transform:none!important}.tr10-discover{border-radius:11px!important}.tr10-discoverCategory .tr10-discoverGrid{padding:7px!important}.tr10-discoverGrid article{box-shadow:0 8px 17px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.07)!important}}
+
+        /* R12.4 — precision Rediscover badge rendering, desktop + mobile */
+        .tr10-discoverType{
+          min-height:20px!important;
+          padding:5px 8px 4px!important;
+          display:inline-flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          border:1px solid rgba(218,238,246,.22)!important;
+          border-radius:999px!important;
+          font-family:"Segoe UI Variable Text","SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif!important;
+          font-size:8.25px!important;
+          line-height:1!important;
+          font-weight:850!important;
+          font-variation-settings:"wght" 850!important;
+          letter-spacing:.032em!important;
+          text-transform:uppercase!important;
+          text-shadow:none!important;
+          filter:none!important;
+          transform:none!important;
+          opacity:1!important;
+          -webkit-font-smoothing:antialiased!important;
+          -moz-osx-font-smoothing:grayscale!important;
+          text-rendering:geometricPrecision!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 1px rgba(0,0,0,.28)!important;
+          backface-visibility:hidden!important;
+        }
+        .tr10-discoverType.is-artist_catalog{color:#f7fbfd!important;border-color:rgba(231,244,249,.28)!important}
+        .tr10-discoverType.is-new_artist{color:#a9f5c9!important;border-color:rgba(73,205,137,.24)!important}
+        .tr10-discoverType.is-new_release{color:#ffdc91!important;border-color:rgba(222,166,66,.28)!important}
+        .tr10-discoverType.is-modern_match{color:#b7e6ff!important;border-color:rgba(89,180,225,.27)!important}
+        .tr10-discoverType.is-era_match{color:#9de9fb!important;border-color:rgba(72,184,217,.27)!important}
+        .tr10-discoverType.is-hidden_gem{color:#edceff!important;border-color:rgba(170,109,214,.27)!important}
+        @media(max-width:650px){
+          .tr10-discoverType{min-height:21px!important;padding:5px 8px!important;font-size:8.6px!important;letter-spacing:.028em!important}
+        }
       `}</style>
     </main>
   );
