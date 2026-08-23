@@ -151,10 +151,22 @@ function normalized(value: unknown) {
 
 function canonicalTitle(value: unknown) {
   return normalized(value)
-    .replace(/\b(remaster(?:ed)?|radio edit|single version|album version|explicit|clean|deluxe|bonus track)\b/g, "")
-    .replace(/\b(live(?: at| from)?|acoustic|remix|mix|sped up|slowed(?: down)?|re recording|re recorded)\b.*$/g, "")
+    .replace(/\b(?:19|20)\d{2}\s+(?:remaster(?:ed)?|remix(?:ed)?|mix|edit|version)\b/g, " ")
+    .replace(/\b(?:remaster(?:ed)?|remix(?:ed)?|mix|edit|version)\s+(?:19|20)\d{2}\b/g, " ")
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)\s+anniversary(?:\s+(?:edition|remaster(?:ed)?))?\b/g, " ")
+    .replace(/\b(?:anniversary|deluxe|super deluxe|expanded|legacy|collector s|special)\s+(?:edition|version)\b/g, " ")
+    .replace(/\b(?:remaster(?:ed)?|radio edit|single version|album version|explicit|clean|deluxe|bonus track|bonus version|reissue|re release|greatest hits version)\b/g, " ")
+    .replace(/\b(?:live(?: at| from)?|acoustic|remix|mix|sped up|slowed(?: down)?|re recording|re recorded)\b.*$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function titleVersionPenalty(value: unknown) {
+  const text = normalized(value);
+  if (/\b(?:karaoke|tribute|cover version|instrumental version|soundalike)\b/.test(text)) return 100;
+  if (/\b(?:live|acoustic|remix|sped up|slowed|re recorded|re recording)\b/.test(text)) return 30;
+  if (/\b(?:remaster(?:ed)?|radio edit|single version|album version|anniversary|deluxe|expanded|bonus track|reissue|re release)\b/.test(text)) return 12;
+  return 0;
 }
 
 function yearFromDate(value: unknown) {
@@ -235,10 +247,26 @@ function rebalanceDiscoveryLanes(
   const currentYear = new Date().getFullYear();
   const maxKnownYear = currentYear + 1;
   const seedArtistKey = normalized(seedArtist);
-  const primaryMin = seedYear == null ? null : seedYear >= currentYear - 2 ? seedYear - 2 : seedYear - 2;
-  const primaryMax = seedYear == null ? null : seedYear >= currentYear - 2 ? maxKnownYear : seedYear + 2;
-  const fallbackMin = seedYear == null ? null : seedYear >= currentYear - 2 ? seedYear - 3 : seedYear - 3;
-  const fallbackMax = seedYear == null ? null : seedYear >= currentYear - 2 ? maxKnownYear : seedYear + 3;
+  const primaryMin = seedYear == null ? null : seedYear - 2;
+  const primaryMax = seedYear == null
+    ? null
+    : seedYear >= currentYear - 2
+      ? Math.min(maxKnownYear, seedYear + 2)
+      : seedYear + 2;
+  const fallbackMin = seedYear == null
+    ? null
+    : seedYear >= currentYear - 1
+      ? seedYear - 3
+      : seedYear === currentYear - 2
+        ? seedYear - 2
+        : seedYear - 4;
+  const fallbackMax = seedYear == null
+    ? null
+    : seedYear >= currentYear - 1
+      ? Math.min(maxKnownYear, seedYear + 3)
+      : seedYear === currentYear - 2
+        ? Math.min(maxKnownYear, seedYear + 2)
+        : seedYear + 4;
 
   return recommendations.map((item) => {
     let category = item.category;
@@ -255,8 +283,8 @@ function rebalanceDiscoveryLanes(
           : "hidden_era";
       }
     } else if (item.category === "same_era" && item.year != null && seedYear != null) {
-      // Modern seeds: primary 2024-2026 style window for a 2026 seed, fallback only to 2023.
-      // Do not widen to 2022 merely to fill the lane.
+      // Modern seeds stay tight (2026 -> 2024-2026, fallback only to 2023). Older seeds may
+      // widen from +/-2 to +/-4 years so a 1995 seed can use a 1991-1999 secondary era pool.
       if (primaryMin != null && primaryMax != null && item.year >= primaryMin && item.year <= primaryMax) category = "same_era";
       else if (fallbackMin != null && fallbackMax != null && item.year >= fallbackMin && item.year <= fallbackMax) category = "same_era";
       else category = "hidden_era";
@@ -267,6 +295,27 @@ function rebalanceDiscoveryLanes(
   });
 }
 
+function dedupeRecommendationFamilies(recommendations: MusicDiscoveryRecommendation[]) {
+  const families = new Map<string, { item: MusicDiscoveryRecommendation; firstIndex: number; penalty: number }>();
+  recommendations.forEach((item, index) => {
+    const artistKey = normalized(item.artist);
+    const titleKey = canonicalTitle(item.title);
+    const key = artistKey && titleKey ? `${artistKey}|${titleKey}` : item.id;
+    const penalty = titleVersionPenalty(`${item.title} ${item.album}`);
+    const current = families.get(key);
+    if (!current) {
+      families.set(key, { item, firstIndex: index, penalty });
+      return;
+    }
+    const currentHasPreview = Boolean(current.item.previewUrl);
+    const candidateHasPreview = Boolean(item.previewUrl);
+    if (penalty < current.penalty || (penalty === current.penalty && candidateHasPreview && !currentHasPreview)) {
+      families.set(key, { item, firstIndex: current.firstIndex, penalty });
+    }
+  });
+  return [...families.values()].sort((a, b) => a.firstIndex - b.firstIndex).map((entry) => entry.item);
+}
+
 function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<MusicDiscoverySeed>;
@@ -274,13 +323,13 @@ function sanitizeSeed(value: unknown): MusicDiscoverySeed | null {
   const id = clean(row.id) || (trackId ? `seed:${trackId}` : "");
   if (!id || !trackId) return null;
   const seedYear = Number(row.seedYear) >= 1900 ? Number(row.seedYear) : null;
-  const recommendations = rebalanceDiscoveryLanes(
+  const recommendations = dedupeRecommendationFamilies(rebalanceDiscoveryLanes(
     Array.isArray(row.recommendations)
       ? row.recommendations.map(sanitizeRecommendation).filter((item): item is MusicDiscoveryRecommendation => Boolean(item))
       : [],
     seedYear,
     clean(row.trackArtist) || "Unknown Artist",
-  );
+  ));
   return {
     id,
     trackId,
