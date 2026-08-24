@@ -3139,7 +3139,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr10-savedSongsPager button{height:30px!important}
         }
         /* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: 7-TAB NAV */
-        .tr10-tabs{grid-template-columns:repeat(7,minmax(0,1fr))!important}
+        .tr10-tabs{grid-template-columns:repeat(8,minmax(0,1fr))!important}
         @media(max-width:650px){
           .tr10-tabs{grid-template-columns:repeat(3,minmax(0,1fr))!important}
           .tr10-tabs button:last-child{grid-column:auto!important}

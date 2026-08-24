@@ -95,7 +95,6 @@ const EVENT = "mvp:music-audition-changed";
 const LIST_TABLE = "music_audition_lists";
 const SONG_TABLE = "music_audition_songs";
 const LINK_TABLE = "music_audition_list_songs";
-
 const metadataRequests = new Map<string, Promise<MusicAuditionSong>>();
 let cloudHydrationPromise: Promise<void> | null = null;
 
@@ -556,6 +555,10 @@ function tokenSimilarity(a: string, b: string) {
   return (2 * overlap) / (left.size + right.size);
 }
 
+function compactKey(value: unknown) {
+  return normalize(value).replace(/\s+/g, "");
+}
+
 function leadArtist(value: unknown) {
   const raw = clean(value)
     .replace(/\s+(?:feat(?:uring)?|ft)\.?\s+.*$/i, "")
@@ -564,11 +567,19 @@ function leadArtist(value: unknown) {
   return normalize(raw);
 }
 
+function fullArtistKey(value: unknown) {
+  return normalize(clean(value)
+    .replace(/\s+(?:feat(?:uring)?|ft)\.?\s+/gi, " & ")
+    .replace(/\s+with\s+/gi, " & ")
+    .replace(/\s+x\s+/gi, " & "));
+}
+
 function strictTitleKey(value: unknown) {
   return canonicalTitle(value)
     .replace(/\b(?:feat(?:uring)?|ft)\b.*$/i, "")
-    .replace(/\((?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue)[^)]*\)/gi, " ")
-    .replace(/\[(?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue)[^\]]*\]/gi, " ")
+    .replace(/\((?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue|acoustic|sped up|slowed|instrumental)[^)]*\)/gi, " ")
+    .replace(/\[(?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue|acoustic|sped up|slowed|instrumental)[^\]]*\]/gi, " ")
+    .replace(/\b(?:official audio|official video|lyric video|visualizer)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -581,38 +592,91 @@ function isContainedMatch(left: string, right: string) {
   return shorter.length >= 5 && longer.includes(shorter);
 }
 
-function strictCandidateScore(song: MusicAuditionSong, item: ItunesSong) {
+function titleMatchScore(imported: string, candidate: string) {
+  if (!imported || !candidate) return 0;
+  if (imported === candidate || compactKey(imported) === compactKey(candidate)) return 1;
+  const token = tokenSimilarity(imported, candidate);
+  const contained = isContainedMatch(imported, candidate) ? 0.9 : 0;
+  return Math.max(token, contained);
+}
+
+function artistMatchScore(importedValue: unknown, candidateValue: unknown) {
+  const importedLead = leadArtist(importedValue);
+  const candidateLead = leadArtist(candidateValue);
+  const importedFull = fullArtistKey(importedValue);
+  const candidateFull = fullArtistKey(candidateValue);
+  if (!importedLead || !candidateLead) return 0;
+  if (importedLead === candidateLead || compactKey(importedLead) === compactKey(candidateLead)) return 1;
+  const leadToken = tokenSimilarity(importedLead, candidateLead);
+  const fullToken = tokenSimilarity(importedFull, candidateFull);
+  const contained = isContainedMatch(importedLead, candidateLead) ? 0.92 : 0;
+  return Math.max(leadToken, fullToken, contained);
+}
+
+function candidateScore(song: MusicAuditionSong, item: ItunesSong) {
   const importedTitle = strictTitleKey(song.title);
   const candidateTitle = strictTitleKey(item.trackName || "");
-  const importedArtist = leadArtist(song.artist);
-  const candidateArtist = leadArtist(item.artistName || "");
+  const titleScore = titleMatchScore(importedTitle, candidateTitle);
+  const artistScore = artistMatchScore(song.artist, item.artistName || "");
 
-  const titleScore = tokenSimilarity(importedTitle, candidateTitle);
-  const artistScore = tokenSimilarity(importedArtist, candidateArtist);
-  const titleExact = importedTitle === candidateTitle;
-  const artistExact = importedArtist === candidateArtist;
-  const titleStrong = titleExact || titleScore >= 0.88 || (isContainedMatch(importedTitle, candidateTitle) && titleScore >= 0.78);
-  const artistStrong = artistExact || artistScore >= 0.9 || isContainedMatch(importedArtist, candidateArtist);
+  // Artist is never optional. This prevents a common-title match from attaching to the wrong act.
+  const artistStrong = artistScore >= 0.72;
+  // Be forgiving about punctuation, featured credits and service-added suffixes, but not about the actual title.
+  const titleStrong = titleScore >= 0.76;
+  if (!artistStrong || !titleStrong) return null;
 
-  if (!titleStrong || !artistStrong) return null;
-
-  const score =
-    titleScore * 0.72 +
-    artistScore * 0.28 +
-    (titleExact ? 0.08 : 0) +
-    (artistExact ? 0.06 : 0);
-
-  return { item, score, titleScore, artistScore, titleExact, artistExact };
+  const score = titleScore * 0.7 + artistScore * 0.3;
+  return { item, score, titleScore, artistScore };
 }
 
 function artwork600(url: string | undefined) {
   if (!url) return null;
-  return url.replace(/\/100x100(?:bb)?\.(jpg|png)/i, "/600x600bb.$1");
+  return url
+    .replace(/\/100x100(?:bb)?\.(jpg|png)/i, "/600x600bb.$1")
+    .replace(/\/100x100-75\.(jpg|png)/i, "/600x600bb.$1");
 }
 
 function yearFromDate(value: string | undefined) {
   const match = clean(value).match(/^((?:19|20)\d{2})/);
   return match ? Number(match[1]) : null;
+}
+
+async function fetchItunesCandidates(term: string, attribute?: "songTerm" | "artistTerm") {
+  const params = new URLSearchParams({
+    entity: "song",
+    media: "music",
+    country: "US",
+    limit: "50",
+    term,
+  });
+  if (attribute) params.set("attribute", attribute);
+  const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+    mode: "cors",
+    cache: "no-store",
+  });
+  if (!response.ok) return [] as ItunesSong[];
+  const payload = await response.json() as ItunesResponse;
+  return (payload.results || []).filter((item) => item.trackName && item.artistName);
+}
+
+function metadataQueries(song: MusicAuditionSong) {
+  const artist = clean(song.artist).replace(/\s+(?:feat(?:uring)?|ft)\.?\s+.*$/i, "");
+  const title = clean(song.title)
+    .replace(/\s*[-–—]\s*(?:remaster(?:ed)?|radio edit|single version|album version|live|official.*)$/i, "")
+    .trim();
+  const rows: Array<{ term: string; attribute?: "songTerm" | "artistTerm" }> = [
+    { term: `${artist} ${title}` },
+    { term: `${title} ${artist}` },
+    { term: title, attribute: "songTerm" },
+    { term: artist, attribute: "artistTerm" },
+  ];
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.attribute || "all"}|${normalize(row.term)}`;
+    if (!row.term || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function resolveMusicAuditionMetadata(songId: string) {
@@ -625,26 +689,20 @@ export async function resolveMusicAuditionMetadata(songId: string) {
 
   const request = (async () => {
     try {
-      const params = new URLSearchParams({
-        entity: "song",
-        limit: "25",
-        term: `${song.artist} ${song.title}`,
-      });
-      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
-        mode: "cors",
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Preview lookup unavailable.");
+      const batches = await Promise.all(metadataQueries(song).map((query) => fetchItunesCandidates(query.term, query.attribute)));
+      const unique = new Map<string, ItunesSong>();
+      for (const item of batches.flat()) {
+        const key = String(item.trackId || `${normalize(item.artistName)}|${strictTitleKey(item.trackName)}`);
+        if (!unique.has(key)) unique.set(key, item);
+      }
 
-      const payload = await response.json() as ItunesResponse;
-      const candidates = (payload.results || [])
-        .filter((item) => item.trackName && item.artistName)
-        .map((item) => strictCandidateScore(song, item))
-        .filter((candidate): candidate is NonNullable<ReturnType<typeof strictCandidateScore>> => Boolean(candidate))
+      const candidates = [...unique.values()]
+        .map((item) => candidateScore(song, item))
+        .filter((candidate): candidate is NonNullable<ReturnType<typeof candidateScore>> => Boolean(candidate))
         .sort((a, b) => b.score - a.score);
 
       const best = candidates[0];
-      if (!best || best.score < 0.84) throw new Error("No exact artist/title preview match found.");
+      if (!best || best.score < 0.78) throw new Error("No verified artist/title preview match found.");
 
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
@@ -653,7 +711,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           if (item.id !== songId) return item;
           changed = {
             ...item,
-            // Imported artist/title stay authoritative. Lookup metadata can never overwrite them.
+            // Imported artist/title are always the authority. Streaming metadata may enrich, never rename.
             album: clean(best.item.collectionName),
             releaseYear: yearFromDate(best.item.releaseDate),
             genre: clean(best.item.primaryGenreName) || null,
@@ -669,7 +727,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
       if (changed) void persistSong(changed);
       return changed || song;
     } catch {
-      // Clear any previously cached loose/incorrect match. Wrong artwork/metadata is worse than no preview.
+      // Never keep a weak result. A missing preview is preferable to the wrong song or artist.
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
         ...current,
@@ -862,7 +920,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       refresh();
     }
     if (!resolved.previewUrl) {
-      setMessage("No exact artist/title preview match was found. Your imported artist and song are locked. Use YouTube for the exact search.");
+      setMessage("No verified preview source was found for this exact artist and song. The imported identity is still locked; use YouTube for the full-song search.");
       return;
     }
     onPreviewStart?.();
@@ -1055,9 +1113,9 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         <div className="mvp-auditionStageProgress"><b>{currentStats.reviewed} / {currentStats.total}</b><span>REVIEWED</span></div>
       </header>
       <div className="mvp-auditionStageBar"><i style={{ width: `${Math.round(currentStats.progress * 100)}%` }} /></div>
-      {currentSong ? <article className="mvp-auditionSongCard">
+      {currentSong ? <article className={`mvp-auditionSongCard ${currentMetadataVerified && currentSong.artworkUrl ? "has-art" : "no-art"}`}>
         <div className="mvp-auditionArtwork">
-          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><span>♫</span><small>{lookupSongId === currentSong.id ? "VERIFYING MATCH" : "IMPORTED TRACK"}</small></div>}
+          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "SEARCHING SOURCES" : "PREVIEW ART PENDING"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
         </div>
         <div className="mvp-auditionSongInfo">
@@ -1071,15 +1129,15 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
           <h3>{currentSong.artist}</h3>
           <p className="mvp-auditionMeta">
             {lookupSongId === currentSong.id
-              ? "Verifying exact artist + song before using artwork or preview…"
+              ? "Searching multiple verified artist/title combinations for artwork and preview…"
               : currentMetadataAvailable
                 ? ["Verified preview", currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
-                : "No verified embedded preview yet. YouTube always searches the imported artist + title."}
+                : "No verified embedded preview found yet. The imported artist and title stay locked; YouTube searches that exact identity."}
           </p>
           <div className="mvp-auditionListen">
             <button className={`is-preview ${previewSongId === currentSong.id ? "is-playing" : ""}`} disabled={lookupSongId === currentSong.id} onClick={() => void togglePreview(currentSong)}>
               <span className="mvp-auditionControlIcon">{lookupSongId === currentSong.id ? "⌁" : previewSongId === currentSong.id ? "■" : "▶"}</span>
-              <span className="mvp-auditionControlCopy"><strong>{lookupSongId === currentSong.id ? "VERIFYING" : previewSongId === currentSong.id ? "STOP PREVIEW" : "PREVIEW"}</strong><small>Exact-match sample</small></span>
+              <span className="mvp-auditionControlCopy"><strong>{lookupSongId === currentSong.id ? "VERIFYING" : previewSongId === currentSong.id ? "STOP PREVIEW" : "PREVIEW"}</strong><small>Verified sample</small></span>
             </button>
             <button className="is-youtube" onClick={() => openYoutube(currentSong)}>
               <span className="mvp-auditionControlIcon">▶</span>
@@ -1400,6 +1458,124 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         .mvp-auditionDecisionIcon{display:none!important}
         .mvp-auditionPager{grid-template-columns:1fr 1fr!important}
         .mvp-auditionPager .is-next-unreviewed{grid-column:1/-1;grid-row:1}
+      }
+
+
+      /* MVP AUDITION R12.5E.10 — premium discovery deck */
+      .mvp-audition{--aud-cyan:#49d7ff;--aud-orange:#ffad35;--aud-green:#63f0a2;--aud-red:#ff626d;--aud-amber:#ffc65a;gap:10px!important}
+      .mvp-auditionHero{
+        position:relative;overflow:hidden;padding:17px 18px!important;border-radius:13px!important;
+        border:1px solid rgba(75,196,235,.16)!important;
+        background:linear-gradient(110deg,rgba(7,29,38,.98),rgba(3,10,14,.98) 66%)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 12px 28px rgba(0,0,0,.16)!important;
+      }
+      .mvp-auditionHero:after{content:"";position:absolute;left:18px;right:18px;bottom:0;height:1px;background:linear-gradient(90deg,var(--aud-cyan),rgba(255,173,53,.72),transparent);opacity:.7}
+      .mvp-auditionHero h2{font-size:27px!important;line-height:1!important;margin:5px 0 7px!important}
+      .mvp-auditionHero p{font-size:10px!important;color:#91a9b2!important}
+      .mvp-auditionGlobal{gap:12px!important;grid-template-columns:repeat(4,60px)!important}
+      .mvp-auditionGlobal>div{min-height:48px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;position:relative}
+      .mvp-auditionGlobal>div:after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:2px;border-radius:2px;background:rgba(73,215,255,.18)}
+      .mvp-auditionGlobal>div:nth-child(1):after{background:rgba(99,240,162,.55)}
+      .mvp-auditionGlobal>div:nth-child(2):after{background:rgba(255,198,90,.55)}
+      .mvp-auditionGlobal>div:nth-child(3):after{background:rgba(255,98,109,.5)}
+      .mvp-auditionGlobal b{font-size:22px!important}
+      .mvp-auditionGlobal span{font-size:7px!important;letter-spacing:.12em!important}
+      .mvp-auditionNav{padding:4px!important;gap:4px!important;border-radius:10px!important;background:#030a0e!important}
+      .mvp-auditionNav button{min-height:40px!important;border-radius:7px!important;font-size:8px!important;color:#b9ccd3!important}
+      .mvp-auditionNav button.is-active{border-color:rgba(71,210,250,.42)!important;background:linear-gradient(180deg,#0b3544,#071d27)!important;box-shadow:inset 0 -3px #46d1f7,0 0 16px rgba(67,205,244,.06)!important}
+      .mvp-auditionNav button.is-import{min-width:120px!important;color:#071014!important;background:linear-gradient(180deg,#ffbd52,#ee8d14)!important;border-color:#ffbc4d!important;box-shadow:inset 0 1px rgba(255,255,255,.35),0 5px 16px rgba(237,138,17,.14)!important}
+      .mvp-auditionMessage{min-height:35px!important;padding:8px 11px!important;border-radius:8px!important;font-size:9px!important;color:#c7dce3!important;background:linear-gradient(180deg,#07161d,#041016)!important}
+
+      .mvp-auditionStage{border:1px solid rgba(71,174,207,.14)!important;border-radius:14px!important;overflow:hidden!important;background:#030a0e!important;box-shadow:0 16px 34px rgba(0,0,0,.16)!important}
+      .mvp-auditionStageHead{padding:12px 14px 10px!important;background:linear-gradient(180deg,#07161d,#040c11)!important}
+      .mvp-auditionStageHead>button{min-height:34px!important;padding:0 10px!important;border-radius:8px!important;font-size:8px!important}
+      .mvp-auditionStageHead>div:nth-child(2)>span{font-size:7px!important;letter-spacing:.15em!important}
+      .mvp-auditionStageHead h3{font-size:15px!important;margin-top:3px!important}
+      .mvp-auditionStageProgress b{font-size:18px!important}
+      .mvp-auditionStageProgress span{font-size:6.5px!important}
+      .mvp-auditionStageBar{height:3px!important}
+
+      .mvp-auditionSongCard{
+        position:relative!important;display:grid!important;grid-template-columns:minmax(210px,270px) minmax(0,1fr)!important;
+        gap:22px!important;padding:18px!important;border:0!important;border-radius:0!important;
+        background:
+          radial-gradient(600px 260px at 12% 12%,rgba(42,195,239,.075),transparent 70%),
+          linear-gradient(120deg,#06141b,#03090d 68%)!important;
+        box-shadow:none!important;
+      }
+      .mvp-auditionSongCard.no-art{grid-template-columns:155px minmax(0,1fr)!important;gap:20px!important}
+      .mvp-auditionArtwork{
+        width:100%!important;aspect-ratio:1/1!important;min-height:0!important;border-radius:16px!important;
+        border:1px solid rgba(86,194,228,.2)!important;background:linear-gradient(155deg,#0a2732,#06151c 68%)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.04),0 16px 32px rgba(0,0,0,.22)!important;
+      }
+      .mvp-auditionSongCard.no-art .mvp-auditionArtwork{aspect-ratio:auto!important;height:188px!important;align-self:center!important}
+      .mvp-auditionArtwork:after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(145deg,rgba(255,255,255,.045),transparent 35%,rgba(36,190,234,.035))}
+      .mvp-auditionArtworkFallback{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:8px!important;padding:14px!important}
+      .mvp-auditionArtworkFallback>b{font-size:24px!important;letter-spacing:.05em!important;color:#dff8ff!important;text-shadow:0 0 18px rgba(78,215,255,.17)}
+      .mvp-auditionArtworkFallback>small{font-size:6.5px!important;letter-spacing:.14em!important;color:#6f929e!important}
+      .mvp-auditionWave{height:55px;display:flex;align-items:center;justify-content:center;gap:4px}
+      .mvp-auditionWave i{display:block;width:3px;height:14px;border-radius:6px;background:linear-gradient(180deg,#7ce7ff,#2abde7);box-shadow:0 0 8px rgba(67,205,242,.24);animation:mvpAuditionWave 1.15s ease-in-out infinite;transform-origin:center}
+      .mvp-auditionWave i:nth-child(2),.mvp-auditionWave i:nth-child(10){animation-delay:-.8s}.mvp-auditionWave i:nth-child(3),.mvp-auditionWave i:nth-child(9){animation-delay:-.55s}.mvp-auditionWave i:nth-child(4),.mvp-auditionWave i:nth-child(8){animation-delay:-.25s}.mvp-auditionWave i:nth-child(5),.mvp-auditionWave i:nth-child(7){animation-delay:-.7s}.mvp-auditionWave i:nth-child(6){animation-delay:-.4s}
+      @keyframes mvpAuditionWave{0%,100%{transform:scaleY(.45);opacity:.45}50%{transform:scaleY(2.7);opacity:1}}
+      .mvp-auditionArtwork>span{right:8px!important;bottom:8px!important;left:auto!important;padding:6px 8px!important;border-radius:8px!important;background:rgba(2,8,11,.86)!important;border:1px solid rgba(101,194,225,.18)!important;font-size:10px!important}
+      .mvp-auditionArtwork>span small{font-size:6px!important}
+
+      .mvp-auditionSongInfo{align-self:center!important;padding:2px 4px 2px 0!important}
+      .mvp-auditionStatusRow{gap:6px!important;margin-bottom:7px!important}
+      .mvp-auditionStatusRow>span,.mvp-auditionStatusRow>b{min-height:22px!important;padding:0 8px!important;border-radius:999px!important;font-size:6.5px!important;letter-spacing:.08em!important}
+      .mvp-auditionSongInfo h2{font-size:34px!important;line-height:1.02!important;letter-spacing:-.045em!important;margin:5px 0 5px!important;color:#fff!important;text-shadow:0 4px 18px rgba(0,0,0,.25)}
+      .mvp-auditionSongInfo h3{font-size:16px!important;line-height:1.15!important;color:#8dddf5!important;margin:0!important}
+      .mvp-auditionMeta{min-height:19px!important;margin:7px 0 12px!important;font-size:9px!important;line-height:1.45!important;color:#829da7!important}
+      .mvp-auditionListen{gap:9px!important}
+      .mvp-auditionListen button{min-height:62px!important;padding:0 15px!important;border-radius:12px!important;font-size:9px!important;gap:12px!important}
+      .mvp-auditionListen .is-preview{border-color:rgba(76,207,247,.31)!important;background:linear-gradient(180deg,#0b3443,#071d27)!important;box-shadow:inset 0 -2px rgba(66,210,251,.35)!important}
+      .mvp-auditionListen button.is-youtube{border-color:rgba(255,77,89,.31)!important;background:linear-gradient(180deg,#351116,#19070a)!important;box-shadow:inset 0 -2px rgba(255,78,91,.3)!important}
+      .mvp-auditionControlIcon{width:36px!important;height:36px!important;flex:0 0 36px!important;border-radius:50%!important;font-size:13px!important;background:rgba(0,0,0,.23)!important;border:1px solid rgba(255,255,255,.08)!important}
+      .mvp-auditionControlCopy strong{font-size:10px!important;letter-spacing:.1em!important}
+      .mvp-auditionControlCopy small{font-size:7px!important;margin-top:2px!important}
+
+      .mvp-auditionDecision{grid-template-columns:1.28fr 1fr 1fr!important;gap:9px!important;margin-top:10px!important}
+      .mvp-auditionDecision button{min-height:70px!important;padding:0 14px!important;border-radius:12px!important;gap:11px!important;background:linear-gradient(180deg,#08171e,#040d12)!important}
+      .mvp-auditionDecisionIcon{width:38px!important;height:38px!important;flex:0 0 38px!important;border-radius:50%!important;font-size:17px!important}
+      .mvp-auditionDecision button strong{font-size:10px!important;letter-spacing:.12em!important}
+      .mvp-auditionDecision button small{font-size:7px!important;color:#8298a1!important}
+      .mvp-auditionDecision .is-keep{border-color:rgba(67,225,145,.22)!important}
+      .mvp-auditionDecision .is-keep:hover,.mvp-auditionDecision .is-keep.is-active{background:linear-gradient(180deg,#0d3b25,#061a10)!important;border-color:rgba(78,239,158,.58)!important;box-shadow:inset 0 -3px #48e996,0 0 24px rgba(56,221,139,.1)!important}
+      .mvp-auditionDecision .is-maybe{border-color:rgba(255,193,82,.18)!important}
+      .mvp-auditionDecision .is-maybe:hover,.mvp-auditionDecision .is-maybe.is-active{background:linear-gradient(180deg,#352408,#180f04)!important;border-color:rgba(255,196,84,.52)!important;box-shadow:inset 0 -3px #ffc34f!important}
+      .mvp-auditionDecision .is-pass{border-color:rgba(255,91,104,.2)!important}
+      .mvp-auditionDecision .is-pass:hover,.mvp-auditionDecision .is-pass.is-active{background:linear-gradient(180deg,#391016,#19070a)!important;border-color:rgba(255,96,109,.5)!important;box-shadow:inset 0 -3px #ff5c68!important}
+      .mvp-auditionPager{gap:7px!important;margin-top:9px!important}
+      .mvp-auditionPager button{min-height:41px!important;border-radius:9px!important;font-size:7.5px!important;color:#9eb5be!important}
+      .mvp-auditionPager .is-next-unreviewed{color:#effbff!important}
+      .mvp-auditionCounts{justify-content:center!important;gap:24px!important;min-height:43px!important;padding:9px 12px!important;font-size:7px!important;background:#02080b!important}
+      .mvp-auditionCounts span{letter-spacing:.08em!important}
+
+      @media(max-width:760px){
+        .mvp-auditionGlobal{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:4px!important}
+        .mvp-auditionSongCard,.mvp-auditionSongCard.no-art{grid-template-columns:1fr!important;gap:13px!important;padding:12px!important}
+        .mvp-auditionArtwork,.mvp-auditionSongCard.no-art .mvp-auditionArtwork{width:min(100%,300px)!important;height:auto!important;aspect-ratio:1/1!important;justify-self:center!important}
+        .mvp-auditionSongCard.no-art .mvp-auditionArtwork{max-height:190px!important;aspect-ratio:auto!important}
+        .mvp-auditionSongInfo{padding:0!important}
+        .mvp-auditionSongInfo h2{font-size:29px!important}
+        .mvp-auditionSongInfo h3{font-size:15px!important}
+        .mvp-auditionMeta{font-size:9px!important}
+        .mvp-auditionListen button{min-height:58px!important}
+        .mvp-auditionDecision button{min-height:62px!important}
+        .mvp-auditionNav button.is-import{min-width:0!important}
+      }
+      @media(max-width:430px){
+        .mvp-auditionHero{padding:14px 12px!important}
+        .mvp-auditionHero h2{font-size:25px!important}
+        .mvp-auditionGlobal{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+        .mvp-auditionGlobal b{font-size:18px!important}
+        .mvp-auditionListen{grid-template-columns:1fr!important}
+        .mvp-auditionDecision{grid-template-columns:1.2fr 1fr 1fr!important;gap:5px!important}
+        .mvp-auditionDecision button{min-height:58px!important;padding:0 6px!important}
+        .mvp-auditionDecision button small{display:none!important}
+        .mvp-auditionDecisionIcon{display:grid!important;width:28px!important;height:28px!important;flex-basis:28px!important;font-size:13px!important}
+        .mvp-auditionCounts{gap:12px!important}
       }
     `}</style>
   </section>;
