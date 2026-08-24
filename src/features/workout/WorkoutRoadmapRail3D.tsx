@@ -1,15 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Lightformer } from "@react-three/drei";
-import { Bloom, EffectComposer } from "@react-three/postprocessing";
-import {
-  ACESFilmicToneMapping,
-  Color,
-  ExtrudeGeometry,
-  Group,
-  Shape,
-  SRGBColorSpace,
-} from "three";
+import { useMemo, type CSSProperties } from "react";
 
 export type WorkoutRoadmapRailState = "current" | "next" | "done" | "remaining";
 
@@ -27,335 +16,26 @@ type WorkoutRoadmapRail3DProps = {
   onSelect: (index: number) => void;
 };
 
-function usePageVisible() {
-  const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
-  useEffect(() => {
-    const sync = () => setVisible(document.visibilityState !== "hidden");
-    document.addEventListener("visibilitychange", sync);
-    return () => document.removeEventListener("visibilitychange", sync);
-  }, []);
-  return visible;
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const sync = () => setMatches(media.matches);
-    sync();
-    media.addEventListener?.("change", sync);
-    return () => media.removeEventListener?.("change", sync);
-  }, [query]);
-  return matches;
-}
-
-function supportsWebGL() {
-  if (typeof document === "undefined") return false;
-  try {
-    const canvas = document.createElement("canvas");
-    return !!(canvas.getContext("webgl2") || canvas.getContext("webgl"));
-  } catch {
-    return false;
-  }
-}
-
-function extrudeShape(shape: Shape, depth: number, bevelSize: number, bevelThickness = bevelSize) {
-  const geometry = new ExtrudeGeometry(shape, {
-    depth,
-    bevelEnabled: true,
-    bevelSegments: 4,
-    bevelSize,
-    bevelThickness,
-    steps: 1,
-    curveSegments: 16,
-  });
-  geometry.center();
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/** Wide sculpted spine, intentionally not a rounded rectangle. */
-function spineGeometry(width: number, height: number, depth: number) {
-  const hw = width / 2;
-  const hh = height / 2;
-  const shoulder = Math.min(0.52, width * 0.055);
-  const shape = new Shape();
-  shape.moveTo(-hw + shoulder, -hh * 0.84);
-  shape.quadraticCurveTo(-hw + shoulder * 0.24, -hh * 0.78, -hw, -hh * 0.22);
-  shape.quadraticCurveTo(-hw + shoulder * 0.10, hh * 0.60, -hw + shoulder * 0.92, hh * 0.84);
-  shape.quadraticCurveTo(-width * 0.18, hh * 1.02, 0, hh * 0.96);
-  shape.quadraticCurveTo(width * 0.18, hh * 1.02, hw - shoulder * 0.92, hh * 0.84);
-  shape.quadraticCurveTo(hw - shoulder * 0.10, hh * 0.60, hw, -hh * 0.22);
-  shape.quadraticCurveTo(hw - shoulder * 0.24, -hh * 0.78, hw - shoulder, -hh * 0.84);
-  shape.quadraticCurveTo(width * 0.20, -hh * 1.01, 0, -hh * 0.94);
-  shape.quadraticCurveTo(-width * 0.20, -hh * 1.01, -hw + shoulder, -hh * 0.84);
-  shape.closePath();
-  return extrudeShape(shape, depth, Math.min(0.042, depth * 0.18));
-}
-
-/** Recessed lens / port profile, a precision slot rather than a button. */
-function slotGeometry(width: number, height: number, depth: number) {
-  const hw = width / 2;
-  const hh = height / 2;
-  const nose = Math.min(height * 0.48, width * 0.18);
-  const shape = new Shape();
-  shape.moveTo(-hw + nose, -hh);
-  shape.lineTo(hw - nose, -hh);
-  shape.quadraticCurveTo(hw, -hh, hw, 0);
-  shape.quadraticCurveTo(hw, hh, hw - nose, hh);
-  shape.lineTo(-hw + nose, hh);
-  shape.quadraticCurveTo(-hw, hh, -hw, 0);
-  shape.quadraticCurveTo(-hw, -hh, -hw + nose, -hh);
-  shape.closePath();
-  return extrudeShape(shape, depth, Math.min(0.026, depth * 0.22));
-}
-
-function PrecisionPort({
-  x,
-  accent,
-  state,
-  mobile,
-  reducedMotion,
-}: {
+type RailPoint = WorkoutRoadmapRailItem & {
   x: number;
-  accent: string;
-  state: WorkoutRoadmapRailState;
-  mobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const groupRef = useRef<Group | null>(null);
-  const accentColor = useMemo(() => new Color(accent), [accent]);
-  const isCurrent = state === "current";
-  const isNext = state === "next";
-  const isDone = state === "done";
-  const power = isCurrent ? 1 : isNext ? 0.62 : isDone ? 0.46 : 0.19;
-  const portW = mobile ? 0.64 : 0.72;
-  const portH = mobile ? 0.31 : 0.34;
-  const recess = useMemo(() => slotGeometry(portW, portH, 0.11), [portW, portH]);
-  const lens = useMemo(() => slotGeometry(portW * 0.78, portH * 0.50, 0.055), [portW, portH]);
-  const accentLens = useMemo(() => slotGeometry(portW * 0.43, portH * 0.15, 0.025), [portW, portH]);
+  index: number;
+};
 
-  useEffect(() => () => {
-    recess.dispose();
-    lens.dispose();
-    accentLens.dispose();
-  }, [recess, lens, accentLens]);
+const VIEW_W = 1200;
+const VIEW_H = 150;
+const START_X = 104;
+const END_X = 1096;
+const CENTER_Y = 77;
 
-  useFrame(({ clock }) => {
-    if (!groupRef.current || reducedMotion || !isCurrent) return;
-    const t = clock.getElapsedTime();
-    // Barely perceptible, more like live hardware breathing than animation.
-    groupRef.current.position.z = 0.385 + Math.sin(t * 1.05) * 0.008;
-  });
-
-  return (
-    <group ref={groupRef} position={[x, 0, 0.385]}>
-      <mesh geometry={recess} castShadow receiveShadow>
-        <meshPhysicalMaterial
-          color="#05090c"
-          metalness={0.86}
-          roughness={0.34}
-          clearcoat={0.42}
-          clearcoatRoughness={0.18}
-          envMapIntensity={1.38}
-        />
-      </mesh>
-
-      <mesh geometry={lens} position={[0, 0.004, 0.074]}>
-        <meshPhysicalMaterial
-          color={isCurrent ? "#19242a" : "#10171b"}
-          transparent
-          opacity={0.94}
-          metalness={0.16}
-          roughness={0.105}
-          clearcoat={1}
-          clearcoatRoughness={0.045}
-          transmission={0.10}
-          thickness={0.16}
-          envMapIntensity={2.35}
-          emissive={accentColor}
-          emissiveIntensity={0.025 + power * 0.10}
-        />
-      </mesh>
-
-      <mesh geometry={accentLens} position={[0, -portH * 0.015, 0.112]}>
-        <meshPhysicalMaterial
-          color={accentColor}
-          emissive={accentColor}
-          emissiveIntensity={0.12 + power * 0.75}
-          metalness={0.12}
-          roughness={0.18}
-          clearcoat={1}
-          clearcoatRoughness={0.04}
-          envMapIntensity={1.3}
-          toneMapped={false}
-        />
-      </mesh>
-
-      {/* precision white specular catch, not another colored object */}
-      <mesh position={[-portW * 0.08, portH * 0.105, 0.137]} rotation={[0, 0, -0.06]}>
-        <boxGeometry args={[portW * 0.30, 0.010, 0.012]} />
-        <meshBasicMaterial color="#dff3f8" transparent opacity={isCurrent ? 0.34 : 0.15} />
-      </mesh>
-
-      {isDone ? (
-        <group position={[portW * 0.37, -portH * 0.31, 0.14]}>
-          <mesh rotation={[0, 0, -0.72]} position={[-0.032, 0.002, 0]}>
-            <boxGeometry args={[0.085, 0.020, 0.018]} />
-            <meshBasicMaterial color="#77e3ab" toneMapped={false} />
-          </mesh>
-          <mesh rotation={[0, 0, 0.70]} position={[0.027, 0.026, 0]}>
-            <boxGeometry args={[0.14, 0.020, 0.018]} />
-            <meshBasicMaterial color="#77e3ab" toneMapped={false} />
-          </mesh>
-        </group>
-      ) : null}
-
-      {isCurrent ? (
-        <pointLight color={accentColor} intensity={mobile ? 0.16 : 0.20} distance={1.25} decay={2.5} position={[0, -0.05, 0.36]} />
-      ) : null}
-    </group>
-  );
+function statePower(state: WorkoutRoadmapRailState) {
+  if (state === "current") return 1;
+  if (state === "next") return 0.72;
+  if (state === "done") return 0.60;
+  return 0.34;
 }
 
-function RailScene({
-  items,
-  mobile,
-  reducedMotion,
-}: {
-  items: WorkoutRoadmapRailItem[];
-  mobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const { viewport } = useThree();
-  const railWidth = Math.max(4.7, viewport.width * (mobile ? 0.92 : 0.925));
-  const railHeight = mobile ? 0.92 : 1.05;
-  const span = railWidth * 0.80;
-  const spacing = items.length > 1 ? span / (items.length - 1) : span;
-  const portXs = items.map((_, index) => (items.length <= 1 ? 0 : -span / 2 + spacing * index));
-
-  const shadowGeo = useMemo(() => spineGeometry(railWidth * 1.01, railHeight * 0.94, 0.14), [railWidth, railHeight]);
-  const baseGeo = useMemo(() => spineGeometry(railWidth, railHeight, 0.34), [railWidth, railHeight]);
-  const crownGeo = useMemo(() => spineGeometry(railWidth * 0.982, railHeight * 0.77, 0.14), [railWidth, railHeight]);
-  const channelGeo = useMemo(() => slotGeometry(railWidth * 0.88, mobile ? 0.21 : 0.235, 0.06), [railWidth, mobile]);
-
-  useEffect(() => () => {
-    shadowGeo.dispose();
-    baseGeo.dispose();
-    crownGeo.dispose();
-    channelGeo.dispose();
-  }, [shadowGeo, baseGeo, crownGeo, channelGeo]);
-
-  return (
-    <>
-      <ambientLight intensity={0.18} />
-      <hemisphereLight intensity={0.33} color="#d8e6ea" groundColor="#020405" />
-      <directionalLight position={[-3.8, 5.2, 6.4]} intensity={2.7} color="#f4fbfd" />
-      <directionalLight position={[4.6, -2.4, 4.4]} intensity={0.48} color="#f1a46f" />
-      <directionalLight position={[0.4, 0.1, 6.5]} intensity={0.55} color="#9dc8d4" />
-
-      <Environment resolution={mobile ? 32 : 64} frames={1}>
-        <Lightformer form="rect" intensity={5.4} color="#eef9fc" position={[-1.7, 4.2, 4.2]} scale={[7.2, 0.26, 1]} />
-        <Lightformer form="rect" intensity={2.1} color="#9db6bd" position={[2.8, 1.5, 4]} scale={[4.4, 0.16, 1]} />
-        <Lightformer form="rect" intensity={1.0} color="#d88955" position={[4.0, -2.9, 3.2]} scale={[2.5, 0.12, 1]} />
-      </Environment>
-
-      <group rotation={[mobile ? -0.01 : -0.018, 0, 0]}>
-        <mesh geometry={shadowGeo} position={[0, -0.10, -0.18]} scale={[0.99, 0.93, 1]}>
-          <meshBasicMaterial color="#000000" transparent opacity={0.48} depthWrite={false} />
-        </mesh>
-
-        <mesh geometry={baseGeo} castShadow receiveShadow>
-          <meshPhysicalMaterial
-            color="#11171b"
-            metalness={0.88}
-            roughness={0.43}
-            clearcoat={0.38}
-            clearcoatRoughness={0.19}
-            envMapIntensity={1.48}
-          />
-        </mesh>
-
-        <mesh geometry={crownGeo} position={[0, 0.085, 0.215]} castShadow>
-          <meshPhysicalMaterial
-            color="#1a2227"
-            metalness={0.78}
-            roughness={0.34}
-            clearcoat={0.62}
-            clearcoatRoughness={0.105}
-            envMapIntensity={1.85}
-          />
-        </mesh>
-
-        {/* upper/lower precision seams read as machining, not neon */}
-        {[-0.31, 0.31].map((y) => (
-          <group key={y} position={[0, y * railHeight, 0.337]}>
-            <mesh>
-              <boxGeometry args={[railWidth * 0.82, 0.012, 0.018]} />
-              <meshStandardMaterial color={y > 0 ? "#607077" : "#050708"} metalness={0.96} roughness={0.26} envMapIntensity={1.8} />
-            </mesh>
-            {y > 0 ? (
-              <mesh position={[0, 0.009, 0.011]}>
-                <boxGeometry args={[railWidth * 0.72, 0.005, 0.008]} />
-                <meshBasicMaterial color="#d9e6e9" transparent opacity={0.10} />
-              </mesh>
-            ) : null}
-          </group>
-        ))}
-
-        <mesh geometry={channelGeo} position={[0, -0.015, 0.36]}>
-          <meshPhysicalMaterial
-            color="#050a0d"
-            metalness={0.22}
-            roughness={0.095}
-            clearcoat={1}
-            clearcoatRoughness={0.035}
-            transmission={0.07}
-            thickness={0.10}
-            envMapIntensity={2.15}
-          />
-        </mesh>
-
-        {/* subdued internal conductive seam, only slightly alive */}
-        <mesh position={[0, -0.015, 0.402]}>
-          <boxGeometry args={[railWidth * 0.835, 0.014, 0.013]} />
-          <meshBasicMaterial color="#94aab0" transparent opacity={0.18} />
-        </mesh>
-
-        {portXs.slice(0, -1).map((x, index) => {
-          const nextX = portXs[index + 1];
-          const mid = (x + nextX) / 2;
-          return (
-            <group key={`seam-${items[index]?.id ?? index}`} position={[mid, 0, 0.354]}>
-              <mesh>
-                <boxGeometry args={[0.012, railHeight * 0.48, 0.024]} />
-                <meshStandardMaterial color="#070b0d" metalness={0.92} roughness={0.31} />
-              </mesh>
-              <mesh position={[0.008, railHeight * 0.06, 0.018]}>
-                <boxGeometry args={[0.006, railHeight * 0.32, 0.009]} />
-                <meshBasicMaterial color="#b4c5ca" transparent opacity={0.085} />
-              </mesh>
-            </group>
-          );
-        })}
-
-        {items.map((item, index) => (
-          <PrecisionPort
-            key={item.id}
-            x={portXs[index] ?? 0}
-            accent={item.accent}
-            state={item.state}
-            mobile={mobile}
-            reducedMotion={reducedMotion}
-          />
-        ))}
-      </group>
-
-      <EffectComposer multisampling={0} enableNormalPass={false}>
-        <Bloom intensity={mobile ? 0.14 : 0.18} luminanceThreshold={0.92} luminanceSmoothing={0.12} mipmapBlur radius={0.34} />
-      </EffectComposer>
-    </>
-  );
+function sanitizeId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
 export function WorkoutRoadmapRail3D({
@@ -364,53 +44,178 @@ export function WorkoutRoadmapRail3D({
   completedCount,
   onSelect,
 }: WorkoutRoadmapRail3DProps) {
-  const mobile = useMediaQuery("(max-width: 720px)");
-  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const pageVisible = usePageVisible();
-  const [webgl] = useState(() => supportsWebGL());
+  const points = useMemo<RailPoint[]>(() => {
+    if (!items.length) return [];
+    if (items.length === 1) return [{ ...items[0], x: VIEW_W / 2, index: 0 }];
+    const step = (END_X - START_X) / (items.length - 1);
+    return items.map((item, index) => ({ ...item, x: START_X + step * index, index }));
+  }, [items]);
 
-  if (!items.length) return null;
+  if (!points.length) return null;
 
   return (
     <div
-      className="tr-roadmapRail3D"
+      className="tr-roadmapRail3D tr-roadmapRailPremium"
       role="navigation"
       aria-label={`Workout exercise status rail. ${completedCount} of ${items.length} completed.`}
       style={{ "--tr-roadmap-rail-count": items.length } as CSSProperties}
       data-active-index={activeIndex}
     >
-      {webgl ? (
-        <div className="tr-roadmapRail3DCanvas" aria-hidden="true">
-          <Canvas
-            dpr={mobile ? [1, 1.25] : [1, 1.65]}
-            frameloop={!pageVisible || reducedMotion ? "demand" : "always"}
-            camera={{ position: [0, 0.14, mobile ? 7.5 : 7.25], fov: mobile ? 30 : 28, near: 0.1, far: 40 }}
-            shadows={false}
-            gl={{ alpha: true, antialias: !mobile, powerPreference: "high-performance" }}
-            onCreated={({ gl }) => {
-              gl.toneMapping = ACESFilmicToneMapping;
-              gl.toneMappingExposure = mobile ? 0.96 : 1.0;
-              gl.outputColorSpace = SRGBColorSpace;
-              gl.setClearColor(0x000000, 0);
-            }}
-          >
-            <RailScene items={items} mobile={mobile} reducedMotion={reducedMotion} />
-          </Canvas>
-        </div>
-      ) : (
-        <div className="tr-roadmapRail3DFallback" aria-hidden="true">
-          {items.map((item) => (
-            <span
-              key={item.id}
-              className={`tr-roadmapRail3DFallbackPort is-${item.state}`}
-              style={{ "--rail-accent": item.accent } as CSSProperties}
-            />
-          ))}
-        </div>
-      )}
+      <svg
+        className="tr-roadmapRailPremiumSvg"
+        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="rm8Chassis" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#34434c" />
+            <stop offset="0.12" stopColor="#1a242b" />
+            <stop offset="0.48" stopColor="#070c10" />
+            <stop offset="0.72" stopColor="#11191f" />
+            <stop offset="1" stopColor="#020507" />
+          </linearGradient>
+          <linearGradient id="rm8Crown" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#71838b" stopOpacity="0.45" />
+            <stop offset="0.16" stopColor="#25333a" stopOpacity="0.76" />
+            <stop offset="0.60" stopColor="#081015" stopOpacity="0.96" />
+            <stop offset="1" stopColor="#020608" stopOpacity="0.99" />
+          </linearGradient>
+          <linearGradient id="rm8Channel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#c4d8df" stopOpacity="0.19" />
+            <stop offset="0.18" stopColor="#273940" stopOpacity="0.72" />
+            <stop offset="0.52" stopColor="#020608" />
+            <stop offset="0.82" stopColor="#18262d" stopOpacity="0.72" />
+            <stop offset="1" stopColor="#000203" />
+          </linearGradient>
+          <linearGradient id="rm8MetalEdge" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#82959d" stopOpacity="0.05" />
+            <stop offset="0.22" stopColor="#e1eef2" stopOpacity="0.44" />
+            <stop offset="0.50" stopColor="#ffffff" stopOpacity="0.12" />
+            <stop offset="0.78" stopColor="#d2e3e8" stopOpacity="0.34" />
+            <stop offset="1" stopColor="#71858e" stopOpacity="0.04" />
+          </linearGradient>
+          <radialGradient id="rm8Glass" cx="38%" cy="28%" r="72%">
+            <stop offset="0" stopColor="#d9edf3" stopOpacity="0.26" />
+            <stop offset="0.18" stopColor="#253a44" stopOpacity="0.72" />
+            <stop offset="0.48" stopColor="#071116" stopOpacity="0.96" />
+            <stop offset="1" stopColor="#010305" />
+          </radialGradient>
+          <filter id="rm8Shadow" x="-20%" y="-90%" width="140%" height="280%">
+            <feGaussianBlur stdDeviation="8" />
+          </filter>
+          <filter id="rm8SoftGlow" x="-180%" y="-180%" width="460%" height="460%">
+            <feGaussianBlur stdDeviation="7" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="rm8TightGlow" x="-120%" y="-120%" width="340%" height="340%">
+            <feGaussianBlur stdDeviation="2.7" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          {points.map((point) => {
+            const id = sanitizeId(`${point.id}-${point.index}`);
+            return (
+              <radialGradient key={id} id={`rm8Accent-${id}`} cx="36%" cy="28%" r="72%">
+                <stop offset="0" stopColor="#ffffff" stopOpacity={point.state === "current" ? 0.96 : 0.62} />
+                <stop offset="0.16" stopColor={point.accent} stopOpacity={statePower(point.state)} />
+                <stop offset="0.54" stopColor={point.accent} stopOpacity={statePower(point.state) * 0.58} />
+                <stop offset="1" stopColor="#020609" stopOpacity="0.98" />
+              </radialGradient>
+            );
+          })}
+        </defs>
+
+        <ellipse cx="600" cy="118" rx="545" ry="17" fill="#000000" opacity="0.54" filter="url(#rm8Shadow)" />
+
+        <path
+          d="M50 53 Q70 38 104 38 H1096 Q1130 38 1150 53 L1172 67 Q1182 74 1172 84 L1150 98 Q1130 113 1096 113 H104 Q70 113 50 98 L28 84 Q18 74 28 67 Z"
+          fill="url(#rm8Chassis)"
+          stroke="#7f959e"
+          strokeOpacity="0.30"
+          strokeWidth="2"
+        />
+        <path
+          d="M64 58 Q82 47 108 47 H1092 Q1118 47 1136 58 L1152 69 Q1159 75 1152 81 L1136 92 Q1118 103 1092 103 H108 Q82 103 64 92 L48 81 Q41 75 48 69 Z"
+          fill="url(#rm8Crown)"
+          stroke="url(#rm8MetalEdge)"
+          strokeWidth="2.2"
+        />
+
+        <rect x="79" y="65" width="1042" height="24" rx="12" fill="#010407" opacity="0.92" />
+        <rect x="88" y="68" width="1024" height="18" rx="9" fill="url(#rm8Channel)" stroke="#8ba3ad" strokeOpacity="0.13" />
+        <path d="M96 69.5 H1104" stroke="#d6e7ec" strokeOpacity="0.15" strokeWidth="1.5" />
+        <path d="M96 86 H1104" stroke="#000000" strokeOpacity="0.90" strokeWidth="2.4" />
+
+        {points.slice(0, -1).map((point, index) => {
+          const next = points[index + 1];
+          const mid = (point.x + next.x) / 2;
+          const start = index === 0 ? 88 : (points[index - 1]?.x + point.x) / 2;
+          const end = index === points.length - 2 ? 1112 : mid;
+          const width = Math.max(0, end - start);
+          const opacity = point.state === "current" ? 0.56 : point.state === "done" ? 0.28 : point.state === "next" ? 0.34 : 0.17;
+          return (
+            <g key={`segment-${point.id}`}>
+              <rect x={start} y="74" width={width} height="5" rx="2.5" fill={point.accent} opacity={opacity * 0.24} filter="url(#rm8SoftGlow)" />
+              <rect x={start} y="75.5" width={width} height="2" rx="1" fill={point.accent} opacity={opacity} />
+              <rect x={mid - 2} y="66" width="4" height="22" rx="2" fill="#020507" stroke="#6d7d84" strokeOpacity="0.22" />
+            </g>
+          );
+        })}
+
+        {points.map((point) => {
+          const id = sanitizeId(`${point.id}-${point.index}`);
+          const power = statePower(point.state);
+          const current = point.state === "current";
+          const next = point.state === "next";
+          const done = point.state === "done";
+          const outerR = current ? 39 : next ? 36 : 34;
+          const accentR = current ? 25 : next ? 22 : 19;
+          return (
+            <g key={point.id} className={`tr-roadmapRailPremiumNode is-${point.state}`}>
+              <circle cx={point.x} cy={CENTER_Y + 5} r={outerR + 8} fill="#000" opacity="0.34" filter="url(#rm8Shadow)" />
+              <circle cx={point.x} cy={CENTER_Y} r={outerR} fill="url(#rm8Chassis)" stroke="#8ba2ab" strokeOpacity="0.34" strokeWidth="2" />
+              <circle cx={point.x} cy={CENTER_Y} r={outerR - 6} fill="#020507" stroke="#d4e5ea" strokeOpacity="0.13" strokeWidth="1.6" />
+              <circle cx={point.x} cy={CENTER_Y} r={accentR + 7} fill="url(#rm8Glass)" stroke={point.accent} strokeOpacity={0.18 + power * 0.36} strokeWidth="2" />
+              <circle
+                cx={point.x}
+                cy={CENTER_Y}
+                r={accentR}
+                fill={`url(#rm8Accent-${id})`}
+                opacity={0.50 + power * 0.45}
+                filter={current || next ? "url(#rm8SoftGlow)" : undefined}
+                className={current ? "tr-roadmapRailPremiumCore is-current" : undefined}
+              />
+              <circle cx={point.x - accentR * 0.27} cy={CENTER_Y - accentR * 0.33} r={Math.max(2.5, accentR * 0.13)} fill="#ffffff" opacity={current ? 0.70 : 0.28} />
+              <path
+                d={`M ${point.x - outerR * 0.72} ${CENTER_Y - outerR * 0.72} A ${outerR} ${outerR} 0 0 1 ${point.x + outerR * 0.54} ${CENTER_Y - outerR * 0.82}`}
+                fill="none"
+                stroke="#e8f3f6"
+                strokeOpacity={current ? 0.38 : 0.17}
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              {done ? (
+                <g transform={`translate(${point.x} ${CENTER_Y})`} filter="url(#rm8TightGlow)">
+                  <circle r="15" fill="#0b261a" stroke="#70e2a6" strokeWidth="2" />
+                  <path d="M-7 0 L-2 6 L8 -7" fill="none" stroke="#9cf1c1" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" />
+                </g>
+              ) : null}
+            </g>
+          );
+        })}
+
+        <path d="M74 46 H1126" stroke="#f1f7f9" strokeOpacity="0.08" strokeWidth="1.4" />
+        <path d="M84 103 H1116" stroke="#000000" strokeOpacity="0.78" strokeWidth="2" />
+      </svg>
 
       <div className="tr-roadmapRail3DHitGrid">
-        {items.map((item, index) => (
+        {points.map((item, index) => (
           <button
             key={item.id}
             type="button"
