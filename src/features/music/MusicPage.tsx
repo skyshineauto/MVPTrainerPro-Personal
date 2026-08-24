@@ -71,11 +71,12 @@ import {
 } from "../../lib/musicDiscovery";
 
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
+import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
-type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "intelligence" | "discover";
+type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "intelligence" | "discover" | "audition";
 type DiscoverySort = "newest" | "oldest" | "artist" | "most";
 type DiscoveryFilter = "all" | "artist_catalog" | "new_current" | "same_era" | "hidden" | "unowned";
 type DiscoveryView = "archive" | "saved";
@@ -842,6 +843,37 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  async function uploadAuditionSong(file: File, auditionSong: MusicAuditionSong) {
+    setUploading(true); setMessage(""); setError("");
+    try {
+      setMessage(`Adding ${auditionSong.artist} - ${auditionSong.title}…`);
+      let uploaded = await uploadMusicTrack(file, tracks.length);
+      uploaded = await updateMusicTrack(uploaded.id, {
+        title: auditionSong.title,
+        artist: auditionSong.artist,
+        album: auditionSong.album || uploaded.album || undefined,
+        release_year: auditionSong.releaseYear ?? uploaded.release_year ?? undefined,
+        genre: auditionSong.genre || uploaded.genre || undefined,
+        external_artwork_url: auditionSong.artworkUrl || uploaded.external_artwork_url || undefined,
+        metadata_status: "manual",
+        metadata_confidence: 1,
+        metadata_source: "audition",
+        metadata_updated_at: new Date().toISOString(),
+      });
+      markMusicAuditionSongInLibrary(auditionSong.id, uploaded.id);
+      await refreshTracks();
+      await loadMusicLibrary(true);
+      setMessage(`${auditionSong.title} added to your music library.`);
+      return uploaded;
+    } catch (caught) {
+      const raw = caught instanceof Error ? caught.message : "Music upload failed.";
+      setError(/unsupported|audio type|file type/i.test(raw) ? "THIS AUDIO FORMAT IS NOT SUPPORTED FOR UPLOAD" : raw);
+      throw caught;
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -1811,7 +1843,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
@@ -1926,6 +1958,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "intelligence" ? (
           <MusicIntelligencePanel tracks={tracks} />
         ) : null}
+        {tab === "audition" ? <MusicAuditionPanel tracks={tracks} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
+
         {tab === "discover" ? <section className="tr10-discover">
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
             <header className="tr10-radarHead">
