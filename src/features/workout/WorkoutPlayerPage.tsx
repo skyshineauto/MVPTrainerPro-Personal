@@ -4289,6 +4289,19 @@ export function WorkoutPlayerPage({ params }: any) {
   const currentRoadmapVisual = current ? roadmapVisualFor(current) : resolveMuscleVisual(null);
   const roadmapRailInset = items.length > 1 ? Math.min(12, 50 / Math.max(items.length, 1)) : 50;
   const roadmapRailSpan = 100 - roadmapRailInset * 2;
+  const roadmapExerciseAccents = [
+    "#49ddff",
+    "#ffb84a",
+    "#6f8dff",
+    "#32dfbd",
+    "#ff7b59",
+    "#9eb7ff",
+    "#56e39f",
+    "#ffc857",
+    "#48b7ff",
+    "#ff9566",
+  ];
+  const roadmapAccentFor = (index: number) => roadmapExerciseAccents[Math.abs(index) % roadmapExerciseAccents.length];
 
   const endWorkoutNow = () => {
     setCompleteOverlayOpen(false);
@@ -4597,11 +4610,18 @@ export function WorkoutPlayerPage({ params }: any) {
                         : "remaining";
                 const left = items.length <= 1 ? 50 : roadmapRailInset + (index / (items.length - 1)) * roadmapRailSpan;
                 const right = items.length <= 1 ? 50 : roadmapRailInset + ((index + 1) / (items.length - 1)) * roadmapRailSpan;
+                const leftAccent = roadmapAccentFor(index);
+                const rightAccent = roadmapAccentFor(index + 1);
                 return (
                   <span
                     key={`roadmap-segment-${row.id}`}
                     className={`tr-roadmapV2Segment is-${segmentState}`}
-                    style={{ left: `${left}%`, width: `${right - left}%` }}
+                    style={{
+                      left: `${left}%`,
+                      width: `${right - left}%`,
+                      "--tr-rm-seg-a": leftAccent,
+                      "--tr-rm-seg-b": rightAccent,
+                    } as any}
                     aria-hidden="true"
                   />
                 );
@@ -4613,29 +4633,31 @@ export function WorkoutPlayerPage({ params }: any) {
                 const state = isCurrentNode ? "CURRENT" : isDoneNode ? "DONE" : isNextNode ? "NEXT" : "REMAINING";
                 const nodeLeft = items.length <= 1 ? 50 : roadmapRailInset + (index / (items.length - 1)) * roadmapRailSpan;
                 const exerciseName = row.exercise?.name ?? row.exercise?.title ?? `Exercise ${index + 1}`;
+                const exerciseAccent = roadmapAccentFor(index);
                 return (
                   <button
                     key={`roadmap-node-${row.id}`}
                     type="button"
                     className={`tr-roadmapV2Node ${isCurrentNode ? "is-current" : ""} ${isDoneNode ? "is-done" : ""} ${isNextNode ? "is-next" : ""}`}
-                    style={{ left: `${nodeLeft}%` }}
+                    style={{ left: `${nodeLeft}%`, "--tr-rm-exercise": exerciseAccent } as any}
                     onClick={() => setActiveIdx(index)}
                     aria-current={isCurrentNode ? "step" : undefined}
                     aria-label={`Exercise ${index + 1}: ${exerciseName}. ${state}. Go to exercise.`}
-                    title={`${String(index + 1).padStart(2, "0")} • ${exerciseName} • ${state}`}
+                    title={`${exerciseName} • ${state}`}
                   >
                     <span className="tr-roadmapV2NodeFace" aria-hidden="true">
                       {isDoneNode ? <b>✓</b> : <span className="tr-roadmapV2NodeLens" />}
                     </span>
-                    <span className="tr-roadmapV2NodeName">{exerciseName}</span>
-                    <small>{isCurrentNode ? "NOW" : isNextNode ? "NEXT" : isDoneNode ? "DONE" : "LEFT"}</small>
                   </button>
                 );
               })}
             </div>
 
             <div className="tr-roadmapV2Body">
-              <div className={`tr-roadmapV2Current ${current?.completed_at ? "is-complete" : ""}`}>
+              <div
+                className={`tr-roadmapV2Current ${current?.completed_at ? "is-complete" : ""}`}
+                style={{ "--tr-rm-exercise": roadmapAccentFor(activeIdx) } as any}
+              >
                 <div className="tr-roadmapV2CurrentFx" aria-hidden="true" />
                 <div className="tr-roadmapV2CurrentVisual" aria-hidden="true">
                   <span className="tr-roadmapV2VisualHalo" />
@@ -4670,6 +4692,7 @@ export function WorkoutPlayerPage({ params }: any) {
                         <button
                           type="button"
                           className="tr-roadmapV2AgendaRow is-next"
+                          style={{ "--tr-rm-exercise": roadmapAccentFor(index) } as any}
                           onClick={() => setActiveIdx(index)}
                           aria-label={`Go to ${name}`}
                         >
@@ -4695,6 +4718,7 @@ export function WorkoutPlayerPage({ params }: any) {
                           key={row.id}
                           type="button"
                           className="tr-roadmapV2AgendaRow is-remaining"
+                          style={{ "--tr-rm-exercise": roadmapAccentFor(index) } as any}
                           onClick={() => setActiveIdx(index)}
                           aria-label={`Go to ${name}`}
                         >
@@ -4720,6 +4744,7 @@ export function WorkoutPlayerPage({ params }: any) {
                           key={row.id}
                           type="button"
                           className="tr-roadmapV2AgendaRow is-done"
+                          style={{ "--tr-rm-exercise": roadmapAccentFor(index) } as any}
                           onClick={() => setActiveIdx(index)}
                           aria-label={`Go to completed exercise ${name}`}
                         >
@@ -7740,6 +7765,204 @@ export function WorkoutPlayerPage({ params }: any) {
           .tr-roadmapV2GroupHead>span{font-size:8.7px}.tr-roadmapV2AgendaRow{grid-template-columns:38px minmax(0,1fr) 10px;gap:5px;min-height:42px}.tr-roadmapV2AgendaRow.is-done{grid-template-columns:15px 38px minmax(0,1fr) 10px;gap:4px}.tr-roadmapV2AgendaVisual{width:36px;height:35px}.tr-roadmapV2AgendaVisual img{max-width:35px;max-height:34px}.tr-roadmapV2AgendaCopy>strong{font-size:12px}.tr-roadmapV2AgendaCopy>small{font-size:6.5px}.tr-roadmapV2AgendaArrow{font-size:14px}
         }
 
+
+
+        /* ============================================================
+           R12.5E.5 — ENGINEERED COLOR-COORDINATED EXERCISE RAIL
+           No rail text labels. Each exercise carries one accent color
+           through the rail, Current preview, and agenda. State is
+           expressed by hardware treatment, luminance, motion and check.
+           ============================================================ */
+        .tr-roadmapV2{
+          --tr-rm-rail-metal:#07141b;
+          --tr-rm-rail-edge:#244653;
+          --tr-rm-rail-highlight:#82bdd0;
+          padding-bottom:13px;
+        }
+
+        /* Precision chassis: two structural rails, a recessed bus, and segmented energy filaments. */
+        .tr-roadmapV2Rail{height:66px;margin:2px 7px 10px;isolation:isolate}
+        .tr-roadmapV2RailBed{
+          left:4.5%;right:4.5%;top:31px;height:20px;border-radius:7px;overflow:visible;
+          border:1px solid rgba(105,169,192,.18);
+          background:
+            linear-gradient(180deg,rgba(171,220,237,.095) 0 1px,transparent 1px 4px,rgba(0,0,0,.72) 4px 7px,rgba(22,52,63,.62) 7px 12px,rgba(1,7,10,.95) 12px 16px,rgba(91,149,169,.07) 16px 17px,rgba(0,0,0,.88) 17px 100%),
+            linear-gradient(90deg,#02080b,#102833 13%,#07151c 50%,#102833 87%,#02080b);
+          box-shadow:
+            inset 0 2px 0 rgba(255,255,255,.035),
+            inset 0 -3px 5px rgba(0,0,0,.84),
+            inset 0 0 0 3px rgba(0,0,0,.20),
+            0 1px 0 rgba(157,215,235,.045),
+            0 7px 16px rgba(0,0,0,.34),
+            0 0 22px rgba(76,184,220,.035);
+        }
+        .tr-roadmapV2RailBed::before{
+          content:"";position:absolute;left:1.2%;right:1.2%;top:50%;height:5px;transform:translateY(-50%);border-radius:2px;
+          border-top:1px solid rgba(177,226,240,.10);border-bottom:1px solid rgba(0,0,0,.78);
+          background:linear-gradient(180deg,rgba(18,48,60,.95),rgba(3,12,17,.98));
+          box-shadow:inset 0 1px 2px rgba(255,255,255,.035),inset 0 -1px 2px rgba(0,0,0,.9);
+        }
+        .tr-roadmapV2RailBed::after{
+          content:"";position:absolute;left:2%;right:2%;top:3px;height:1px;border-radius:99px;
+          background:linear-gradient(90deg,transparent,rgba(179,226,240,.20) 16%,rgba(179,226,240,.08) 50%,rgba(179,226,240,.20) 84%,transparent);
+          opacity:.9;pointer-events:none;
+        }
+        .tr-roadmapV2Segment{
+          top:31px;height:3px;z-index:3;border-radius:1px;
+          background:linear-gradient(90deg,var(--tr-rm-seg-a),var(--tr-rm-seg-b));
+          box-shadow:0 0 7px color-mix(in srgb,var(--tr-rm-seg-a) 22%,transparent),0 0 7px color-mix(in srgb,var(--tr-rm-seg-b) 22%,transparent);
+          filter:saturate(.85) brightness(.62);opacity:.66;
+          transition:filter .25s ease,opacity .25s ease,box-shadow .25s ease;
+        }
+        .tr-roadmapV2Segment::after{
+          content:"";position:absolute;inset:-2px 0;border-top:1px solid rgba(255,255,255,.025);border-bottom:1px solid rgba(0,0,0,.25);pointer-events:none;
+        }
+        .tr-roadmapV2Segment.is-current{filter:saturate(1.15) brightness(1.18);opacity:1;box-shadow:0 0 10px color-mix(in srgb,var(--tr-rm-seg-a) 45%,transparent),0 0 13px color-mix(in srgb,var(--tr-rm-seg-b) 45%,transparent)}
+        .tr-roadmapV2Segment.is-next{filter:saturate(1) brightness(.90);opacity:.92}
+        .tr-roadmapV2Segment.is-done{filter:saturate(.95) brightness(.88);opacity:.86}
+        .tr-roadmapV2Segment.is-remaining{filter:saturate(.72) brightness(.48);opacity:.56}
+
+        /* Nodes are precision docking modules, not circles. */
+        .tr-roadmapV2Node{top:31px;width:56px;height:44px;transform:translate(-50%,-21px);display:grid;place-items:center;gap:0;overflow:visible}
+        .tr-roadmapV2NodeFace{
+          position:relative;width:48px;height:34px;border:0;border-radius:0;clip-path:polygon(12% 0,88% 0,100% 22%,100% 78%,88% 100%,12% 100%,0 78%,0 22%);
+          background:
+            linear-gradient(180deg,rgba(255,255,255,.13),transparent 12%),
+            linear-gradient(90deg,rgba(255,255,255,.04),transparent 24% 76%,rgba(255,255,255,.035)),
+            linear-gradient(180deg,#18313b 0%,#09181f 34%,#02090d 72%,#10242d 100%);
+          box-shadow:
+            0 0 0 1px color-mix(in srgb,var(--tr-rm-exercise) 46%,#213944),
+            0 0 0 4px rgba(0,5,8,.94),
+            0 0 0 5px rgba(123,184,205,.05),
+            inset 0 1px 0 rgba(255,255,255,.13),
+            inset 0 -5px 9px rgba(0,0,0,.62),
+            0 7px 13px rgba(0,0,0,.48),
+            0 0 12px color-mix(in srgb,var(--tr-rm-exercise) 12%,transparent);
+          transition:transform .18s ease,filter .2s ease,box-shadow .22s ease;
+        }
+        .tr-roadmapV2NodeFace::before{
+          content:"";position:absolute;left:5px;right:5px;top:5px;height:4px;border-radius:1px;
+          background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--tr-rm-exercise) 70%,white 8%) 18%,color-mix(in srgb,var(--tr-rm-exercise) 94%,white 4%) 50%,color-mix(in srgb,var(--tr-rm-exercise) 70%,white 8%) 82%,transparent);
+          box-shadow:0 0 8px color-mix(in srgb,var(--tr-rm-exercise) 28%,transparent);opacity:.74;
+        }
+        .tr-roadmapV2NodeFace::after{
+          content:"";position:absolute;inset:9px 8px 6px;clip-path:polygon(10% 0,90% 0,100% 25%,100% 75%,90% 100%,10% 100%,0 75%,0 25%);
+          background:linear-gradient(180deg,color-mix(in srgb,var(--tr-rm-exercise) 29%,#18313b),#061016 58%,#02080b);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -2px 4px rgba(0,0,0,.7);
+        }
+        .tr-roadmapV2NodeLens{
+          position:relative;z-index:2;width:15px;height:6px;border-radius:2px;display:block;border:0;
+          background:linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 28%,#061017),var(--tr-rm-exercise),color-mix(in srgb,var(--tr-rm-exercise) 28%,#061017));
+          box-shadow:0 0 8px color-mix(in srgb,var(--tr-rm-exercise) 36%,transparent),inset 0 1px 0 rgba(255,255,255,.30);
+        }
+        .tr-roadmapV2Node:hover .tr-roadmapV2NodeFace,.tr-roadmapV2Node:focus-visible .tr-roadmapV2NodeFace{transform:translateY(-1px);filter:brightness(1.12);outline:none}
+        .tr-roadmapV2Node:focus-visible{outline:none}
+
+        .tr-roadmapV2Node:not(.is-current):not(.is-next):not(.is-done) .tr-roadmapV2NodeFace{
+          filter:saturate(.72) brightness(.82);
+          box-shadow:0 0 0 1px color-mix(in srgb,var(--tr-rm-exercise) 34%,#334b55),0 0 0 4px rgba(0,5,8,.94),inset 0 1px 0 rgba(255,255,255,.10),inset 0 -5px 9px rgba(0,0,0,.62),0 7px 13px rgba(0,0,0,.48),0 0 10px color-mix(in srgb,var(--tr-rm-exercise) 11%,transparent);
+        }
+        .tr-roadmapV2Node.is-next .tr-roadmapV2NodeFace{
+          filter:saturate(1.05) brightness(1.02);
+          box-shadow:0 0 0 1px color-mix(in srgb,var(--tr-rm-exercise) 78%,white 4%),0 0 0 4px rgba(0,5,8,.95),0 0 0 6px color-mix(in srgb,var(--tr-rm-exercise) 9%,transparent),inset 0 1px 0 rgba(255,255,255,.16),inset 0 -5px 9px rgba(0,0,0,.60),0 8px 14px rgba(0,0,0,.50),0 0 18px color-mix(in srgb,var(--tr-rm-exercise) 27%,transparent);
+        }
+        .tr-roadmapV2Node.is-current .tr-roadmapV2NodeFace{
+          width:54px;height:38px;filter:saturate(1.18) brightness(1.12);
+          background:linear-gradient(180deg,rgba(255,255,255,.18),transparent 13%),linear-gradient(180deg,color-mix(in srgb,var(--tr-rm-exercise) 28%,#132d38),#06131a 45%,#02080c 76%,color-mix(in srgb,var(--tr-rm-exercise) 14%,#0b2029));
+          box-shadow:0 0 0 1px color-mix(in srgb,var(--tr-rm-exercise) 92%,white 7%),0 0 0 4px rgba(0,6,9,.96),0 0 0 7px color-mix(in srgb,var(--tr-rm-exercise) 13%,transparent),inset 0 1px 0 rgba(255,255,255,.21),inset 0 -6px 10px rgba(0,0,0,.57),0 9px 16px rgba(0,0,0,.52),0 0 26px color-mix(in srgb,var(--tr-rm-exercise) 48%,transparent);
+          animation:tr-roadmapV2-engine-core 2.8s ease-in-out infinite;
+        }
+        .tr-roadmapV2Node.is-current .tr-roadmapV2NodeLens{width:19px;height:7px;background:linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 35%,#061017),color-mix(in srgb,var(--tr-rm-exercise) 86%,white 14%),color-mix(in srgb,var(--tr-rm-exercise) 35%,#061017));box-shadow:0 0 10px color-mix(in srgb,var(--tr-rm-exercise) 62%,transparent),0 0 18px color-mix(in srgb,var(--tr-rm-exercise) 34%,transparent),inset 0 1px 0 rgba(255,255,255,.48)}
+        .tr-roadmapV2Node.is-done .tr-roadmapV2NodeFace{
+          filter:none;background:linear-gradient(180deg,rgba(255,255,255,.14),transparent 14%),linear-gradient(180deg,color-mix(in srgb,var(--tr-rm-exercise) 18%,#173329),#071a14 47%,#02100b 78%);
+          box-shadow:0 0 0 1px color-mix(in srgb,var(--tr-rm-exercise) 58%,#6be7aa),0 0 0 4px rgba(0,7,7,.95),inset 0 1px 0 rgba(255,255,255,.17),inset 0 -5px 9px rgba(0,0,0,.58),0 8px 14px rgba(0,0,0,.48),0 0 17px rgba(76,224,153,.18);
+        }
+        .tr-roadmapV2Node.is-done b{position:relative;z-index:3;color:#eafff4;font-size:16px;line-height:1;text-shadow:0 0 8px rgba(73,229,157,.55)}
+
+        /* Color travels with the exercise into the Current zone. No nested image panel. */
+        .tr-roadmapV2Body{
+          position:relative;grid-template-columns:minmax(340px,.43fr) minmax(0,.57fr);gap:0;align-items:stretch;
+          border-top:1px solid rgba(116,190,217,.12);
+          background:linear-gradient(180deg,rgba(255,255,255,.012),transparent 17%),linear-gradient(90deg,rgba(17,50,64,.10),transparent 46%,rgba(0,0,0,.10));
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.016),inset 0 20px 45px rgba(33,150,190,.018);
+        }
+        .tr-roadmapV2Body::before{content:none}
+        .tr-roadmapV2Current{
+          position:relative;align-self:stretch;min-height:226px;grid-template-columns:minmax(166px,.46fr) minmax(0,.54fr);gap:13px;padding:17px 18px 16px 8px;border:0;border-right:1px solid rgba(120,190,215,.11);border-radius:0;
+          background:
+            radial-gradient(330px 240px at 21% 49%,color-mix(in srgb,var(--tr-rm-exercise) 18%,transparent),transparent 67%),
+            radial-gradient(270px 170px at 98% 108%,rgba(255,157,54,.045),transparent 70%),
+            linear-gradient(100deg,rgba(255,255,255,.014),transparent 38%);
+          box-shadow:inset -22px 0 34px rgba(0,0,0,.11);overflow:hidden;
+        }
+        .tr-roadmapV2Current::before{content:"";position:absolute;left:7%;right:41%;top:0;height:2px;background:linear-gradient(90deg,transparent,var(--tr-rm-exercise) 24%,color-mix(in srgb,var(--tr-rm-exercise) 72%,white 28%) 52%,var(--tr-rm-exercise) 78%,transparent);box-shadow:0 0 14px color-mix(in srgb,var(--tr-rm-exercise) 34%,transparent)}
+        .tr-roadmapV2Current::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(112deg,transparent 4% 34%,rgba(190,242,255,.025) 45%,transparent 56%),radial-gradient(240px 95px at 21% 90%,color-mix(in srgb,var(--tr-rm-exercise) 8%,transparent),transparent 72%);box-shadow:inset 20px 0 28px rgba(0,0,0,.03),inset -20px 0 34px rgba(0,0,0,.15)}
+        .tr-roadmapV2CurrentFx{background:linear-gradient(112deg,transparent 8%,color-mix(in srgb,var(--tr-rm-exercise) 7%,white 3%) 42%,transparent 61%)}
+        .tr-roadmapV2CurrentVisual{height:194px;border-radius:0;background:none;filter:drop-shadow(0 15px 20px rgba(0,0,0,.40))}
+        .tr-roadmapV2CurrentVisual::before{width:88%;height:88%;background:radial-gradient(circle,color-mix(in srgb,var(--tr-rm-exercise) 16%,transparent),transparent 68%);filter:blur(12px)}
+        .tr-roadmapV2CurrentVisual::after{left:11%;right:11%;bottom:1px;height:2px;background:linear-gradient(90deg,transparent,var(--tr-rm-exercise),transparent);box-shadow:0 0 15px color-mix(in srgb,var(--tr-rm-exercise) 32%,transparent)}
+        .tr-roadmapV2VisualHalo{width:76%;border-color:color-mix(in srgb,var(--tr-rm-exercise) 11%,transparent);box-shadow:0 0 30px color-mix(in srgb,var(--tr-rm-exercise) 8%,transparent),inset 0 0 22px color-mix(in srgb,var(--tr-rm-exercise) 5%,transparent)}
+        .tr-roadmapV2CurrentVisual img{max-width:190px;max-height:190px;filter:drop-shadow(0 10px 12px rgba(0,0,0,.52)) drop-shadow(0 0 14px color-mix(in srgb,var(--tr-rm-exercise) 14%,transparent))}
+        .tr-roadmapV2CurrentCopy{gap:6px}.tr-roadmapV2CurrentIndex{color:color-mix(in srgb,var(--tr-rm-exercise) 74%,#c5f7ff);text-shadow:0 0 14px color-mix(in srgb,var(--tr-rm-exercise) 18%,transparent)}
+        .tr-roadmapV2CurrentCopy>strong{font-size:clamp(26px,2.6vw,35px)}
+        .tr-roadmapV2CurrentState{color:color-mix(in srgb,var(--tr-rm-exercise) 78%,white 18%)}
+
+        /* Agenda rows share each exercise color through an engineered side bus and local surface wash. */
+        .tr-roadmapV2Agenda{align-self:stretch;gap:6px;padding:9px 0 4px 16px;background:linear-gradient(90deg,rgba(0,0,0,.08),transparent 18%)}
+        .tr-roadmapV2Group{gap:2px}.tr-roadmapV2GroupHead{min-height:25px;padding:0 7px;border-bottom:1px solid rgba(111,178,203,.10)}
+        .tr-roadmapV2GroupHead>span{font-size:9px;letter-spacing:.14em}.tr-roadmapV2GroupHead>small{font-size:7.6px}
+        .tr-roadmapV2AgendaRow{
+          min-height:54px;grid-template-columns:56px minmax(0,1fr) 16px;gap:10px;padding:4px 9px 4px 8px;border:0;border-radius:0;border-bottom:1px solid rgba(107,170,194,.075);
+          background:
+            linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 9%,transparent),transparent 40%),
+            linear-gradient(180deg,rgba(255,255,255,.012),transparent 48%);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.012);
+        }
+        .tr-roadmapV2AgendaRow::before{left:0;top:8px;bottom:8px;width:3px;background:var(--tr-rm-exercise);box-shadow:0 0 12px color-mix(in srgb,var(--tr-rm-exercise) 35%,transparent)}
+        .tr-roadmapV2AgendaRow::after{content:"";position:absolute;left:7px;right:26%;top:0;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 24%,transparent),transparent 78%);opacity:.60;pointer-events:none}
+        .tr-roadmapV2AgendaRow:hover,.tr-roadmapV2AgendaRow:focus-visible{background:linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 15%,transparent),rgba(18,55,68,.028) 65%,transparent);transform:translateX(2px)}
+        .tr-roadmapV2AgendaRow.is-next{background:linear-gradient(90deg,color-mix(in srgb,var(--tr-rm-exercise) 14%,transparent),transparent 48%),linear-gradient(180deg,rgba(255,255,255,.018),transparent 48%)}
+        .tr-roadmapV2AgendaRow.is-done{grid-template-columns:22px 56px minmax(0,1fr) 16px;background:linear-gradient(90deg,rgba(72,222,151,.055),color-mix(in srgb,var(--tr-rm-exercise) 6%,transparent) 34%,transparent 66%)}
+        .tr-roadmapV2AgendaVisual{width:54px;height:48px;border-radius:0;background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--tr-rm-exercise) 12%,transparent),transparent 69%);filter:drop-shadow(0 7px 9px rgba(0,0,0,.31))}
+        .tr-roadmapV2AgendaVisual img{max-width:52px;max-height:47px;filter:drop-shadow(0 6px 8px rgba(0,0,0,.43)) drop-shadow(0 0 10px color-mix(in srgb,var(--tr-rm-exercise) 10%,transparent))}
+        .tr-roadmapV2AgendaRow.is-next .tr-roadmapV2AgendaVisual,.tr-roadmapV2AgendaRow.is-done .tr-roadmapV2AgendaVisual{background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--tr-rm-exercise) 15%,transparent),transparent 69%)}
+        .tr-roadmapV2AgendaCopy>strong{font-size:15px}.tr-roadmapV2AgendaCopy>small{font-size:8px;letter-spacing:.07em;color:rgba(202,224,233,.74)}
+        .tr-roadmapV2AgendaRow.is-next .tr-roadmapV2AgendaCopy>small{color:color-mix(in srgb,var(--tr-rm-exercise) 58%,#f7f4e9)}
+        .tr-roadmapV2DoneCheck{position:relative;z-index:2;margin-left:1px}
+
+        @keyframes tr-roadmapV2-engine-core{
+          0%,100%{filter:saturate(1.12) brightness(1.08);transform:translateY(0);}
+          50%{filter:saturate(1.24) brightness(1.18);transform:translateY(-.5px);}
+        }
+
+        @media (max-width:900px) and (min-width:721px){
+          .tr-roadmapV2Body{grid-template-columns:minmax(300px,.43fr) minmax(0,.57fr)}
+          .tr-roadmapV2Current{grid-template-columns:150px minmax(0,1fr);min-height:214px;padding-left:7px;padding-right:14px}.tr-roadmapV2CurrentVisual{height:178px}.tr-roadmapV2CurrentVisual img{max-width:174px;max-height:174px}
+          .tr-roadmapV2Agenda{padding-left:13px}.tr-roadmapV2AgendaCopy>strong{font-size:14.2px}.tr-roadmapV2AgendaCopy>small{font-size:7.6px}
+        }
+
+        @media (max-width:720px){
+          .tr-roadmapV2{padding:10px 9px 10px}.tr-roadmapV2Header{margin-bottom:2px}
+          .tr-roadmapV2Rail{height:54px;margin:2px 1px 7px}.tr-roadmapV2RailBed{left:6%;right:6%;top:27px;height:16px;border-radius:6px}.tr-roadmapV2Segment{top:27px;height:3px}
+          .tr-roadmapV2Node{top:27px;width:44px;height:38px;transform:translate(-50%,-19px)}.tr-roadmapV2NodeFace{width:38px;height:28px}.tr-roadmapV2Node.is-current .tr-roadmapV2NodeFace{width:44px;height:32px}.tr-roadmapV2NodeLens{width:12px;height:5px}.tr-roadmapV2Node.is-current .tr-roadmapV2NodeLens{width:16px;height:6px}.tr-roadmapV2Node.is-done b{font-size:14px}
+          .tr-roadmapV2Body{grid-template-columns:1fr;gap:0;border-top-color:rgba(117,194,222,.11);background:linear-gradient(180deg,rgba(255,255,255,.01),transparent 19%)}
+          .tr-roadmapV2Current{min-height:112px;grid-template-columns:104px minmax(0,1fr);gap:8px;padding:7px 7px 8px 1px;border-right:0;border-bottom:1px solid rgba(116,191,218,.11)}
+          .tr-roadmapV2Current::before{left:4%;right:62%}.tr-roadmapV2CurrentVisual{height:99px}.tr-roadmapV2CurrentVisual img{max-width:101px;max-height:101px}.tr-roadmapV2CurrentCopy{gap:3px}.tr-roadmapV2CurrentIndex{font-size:18px}.tr-roadmapV2CurrentIndex small{font-size:8px}.tr-roadmapV2CurrentCopy>strong{font-size:clamp(21px,6.1vw,25px)}.tr-roadmapV2MuscleLabel{font-size:7px}.tr-roadmapV2CurrentState{font-size:6.5px}
+          .tr-roadmapV2Agenda{gap:3px;padding:5px 0 1px}.tr-roadmapV2Group{gap:0}.tr-roadmapV2GroupHead{min-height:23px;padding:0 5px}.tr-roadmapV2GroupHead>span{font-size:9.6px}.tr-roadmapV2GroupHead>small{font-size:7.4px}
+          .tr-roadmapV2AgendaRow{min-height:48px;grid-template-columns:46px minmax(0,1fr) 12px;gap:7px;padding:2px 5px}.tr-roadmapV2AgendaRow.is-done{grid-template-columns:17px 46px minmax(0,1fr) 12px;gap:6px}.tr-roadmapV2AgendaVisual{width:44px;height:42px}.tr-roadmapV2AgendaVisual img{max-width:43px;max-height:41px}.tr-roadmapV2DoneCheck{width:17px;height:17px;font-size:8.5px}.tr-roadmapV2AgendaCopy>strong{font-size:13.6px}.tr-roadmapV2AgendaCopy>small{font-size:7.2px}.tr-roadmapV2AgendaArrow{font-size:15px}
+        }
+
+        @media (max-width:390px){
+          .tr-roadmapV2Rail{height:52px}.tr-roadmapV2Node{width:40px}.tr-roadmapV2NodeFace{width:35px;height:27px}.tr-roadmapV2Node.is-current .tr-roadmapV2NodeFace{width:41px;height:31px}
+          .tr-roadmapV2Current{grid-template-columns:94px minmax(0,1fr);min-height:106px;gap:7px}.tr-roadmapV2CurrentVisual{height:92px}.tr-roadmapV2CurrentVisual img{max-width:94px;max-height:94px}.tr-roadmapV2CurrentCopy>strong{font-size:20px}.tr-roadmapV2MuscleLabel{font-size:6.5px}.tr-roadmapV2CurrentState{font-size:6.1px}
+          .tr-roadmapV2AgendaRow{grid-template-columns:43px minmax(0,1fr) 11px;gap:6px;min-height:46px}.tr-roadmapV2AgendaRow.is-done{grid-template-columns:16px 43px minmax(0,1fr) 11px;gap:5px}.tr-roadmapV2AgendaVisual{width:41px;height:40px}.tr-roadmapV2AgendaVisual img{max-width:40px;max-height:39px}.tr-roadmapV2AgendaCopy>strong{font-size:13px}.tr-roadmapV2AgendaCopy>small{font-size:6.8px}
+        }
+
+        @media (max-width:345px){
+          .tr-roadmapV2Rail{height:50px}.tr-roadmapV2Node{width:37px}.tr-roadmapV2NodeFace{width:33px;height:25px}.tr-roadmapV2Node.is-current .tr-roadmapV2NodeFace{width:38px;height:29px}.tr-roadmapV2NodeLens{width:10px}.tr-roadmapV2Node.is-current .tr-roadmapV2NodeLens{width:14px}
+          .tr-roadmapV2Current{grid-template-columns:86px minmax(0,1fr);min-height:100px;gap:6px}.tr-roadmapV2CurrentVisual{height:84px}.tr-roadmapV2CurrentVisual img{max-width:87px;max-height:87px}.tr-roadmapV2CurrentCopy>strong{font-size:18.5px}.tr-roadmapV2MuscleLabel{font-size:6px}.tr-roadmapV2CurrentState{font-size:5.8px}
+          .tr-roadmapV2GroupHead>span{font-size:9px}.tr-roadmapV2AgendaRow{grid-template-columns:40px minmax(0,1fr) 10px;gap:5px;min-height:44px}.tr-roadmapV2AgendaRow.is-done{grid-template-columns:15px 40px minmax(0,1fr) 10px;gap:4px}.tr-roadmapV2AgendaVisual{width:38px;height:37px}.tr-roadmapV2AgendaVisual img{max-width:37px;max-height:36px}.tr-roadmapV2AgendaCopy>strong{font-size:12.3px}.tr-roadmapV2AgendaCopy>small{font-size:6.4px}.tr-roadmapV2AgendaArrow{font-size:14px}
+        }
         @media (prefers-reduced-motion:reduce){
           .tr-siToggle,.tr-siWeekFill{transition:none!important}
           .tr-roadmapV2::before,.tr-roadmapV2CurrentFx,.tr-roadmapV2Node.is-current .tr-roadmapV2NodeFace{animation:none!important}
