@@ -4,11 +4,9 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import {
   ACESFilmicToneMapping,
-  AdditiveBlending,
   Color,
   ExtrudeGeometry,
   Group,
-  ShaderMaterial,
   Shape,
   SRGBColorSpace,
 } from "three";
@@ -31,19 +29,16 @@ type WorkoutRoadmapRail3DProps = {
 
 function usePageVisible() {
   const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
-
   useEffect(() => {
     const sync = () => setVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
-
   return visible;
 }
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(false);
-
   useEffect(() => {
     const media = window.matchMedia(query);
     const sync = () => setMatches(media.matches);
@@ -51,7 +46,6 @@ function useMediaQuery(query: string) {
     media.addEventListener?.("change", sync);
     return () => media.removeEventListener?.("change", sync);
   }, [query]);
-
   return matches;
 }
 
@@ -65,192 +59,160 @@ function supportsWebGL() {
   }
 }
 
-function chamferedGeometry(width: number, height: number, depth: number, chamfer: number) {
-  const halfW = width / 2;
-  const halfH = height / 2;
-  const c = Math.min(chamfer, halfW * 0.25, halfH * 0.7);
-  const shape = new Shape();
-  shape.moveTo(-halfW + c, -halfH);
-  shape.lineTo(halfW - c, -halfH);
-  shape.lineTo(halfW, -halfH + c);
-  shape.lineTo(halfW, halfH - c);
-  shape.lineTo(halfW - c, halfH);
-  shape.lineTo(-halfW + c, halfH);
-  shape.lineTo(-halfW, halfH - c);
-  shape.lineTo(-halfW, -halfH + c);
-  shape.closePath();
-
+function extrudeShape(shape: Shape, depth: number, bevelSize: number, bevelThickness = bevelSize) {
   const geometry = new ExtrudeGeometry(shape, {
     depth,
     bevelEnabled: true,
-    bevelSegments: 2,
-    bevelSize: Math.min(0.035, depth * 0.22),
-    bevelThickness: Math.min(0.035, depth * 0.22),
+    bevelSegments: 4,
+    bevelSize,
+    bevelThickness,
     steps: 1,
-    curveSegments: 1,
+    curveSegments: 16,
   });
   geometry.center();
   geometry.computeVertexNormals();
   return geometry;
 }
 
-
-function EnergyBus({ width, reducedMotion }: { width: number; reducedMotion: boolean }) {
-  const materialRef = useRef<ShaderMaterial | null>(null);
-  const uniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uCold: { value: new Color("#48d8ff") },
-      uHot: { value: new Color("#ff9a4d") },
-      uStrength: { value: reducedMotion ? 0.62 : 0.82 },
-    }),
-    [reducedMotion]
-  );
-
-  useFrame(({ clock }) => {
-    if (!materialRef.current || reducedMotion) return;
-    materialRef.current.uniforms.uTime.value = clock.getElapsedTime();
-  });
-
-  return (
-    <mesh position={[0, 0, 0.34]}>
-      <planeGeometry args={[width, 0.115, 1, 1]} />
-      <shaderMaterial
-        ref={materialRef}
-        uniforms={uniforms}
-        transparent
-        depthWrite={false}
-        blending={AdditiveBlending}
-        vertexShader={`
-          varying vec2 vUv;
-          void main(){
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `}
-        fragmentShader={`
-          uniform float uTime;
-          uniform vec3 uCold;
-          uniform vec3 uHot;
-          uniform float uStrength;
-          varying vec2 vUv;
-          void main(){
-            float center = 1.0 - smoothstep(0.0, 0.5, abs(vUv.y - 0.5) * 2.0);
-            float filament = pow(center, 4.0);
-            float travel = 0.55 + 0.45 * sin((vUv.x * 8.0 - uTime * 0.34) * 6.2831853);
-            float micro = 0.78 + 0.22 * sin((vUv.x * 33.0 + uTime * 0.12) * 6.2831853);
-            vec3 base = mix(uCold, uHot, smoothstep(0.58, 1.0, vUv.x));
-            float alpha = filament * (0.38 + travel * 0.28) * micro * uStrength;
-            gl_FragColor = vec4(base * (0.82 + travel * 0.34), alpha);
-          }
-        `}
-      />
-    </mesh>
-  );
+/** Wide sculpted spine, intentionally not a rounded rectangle. */
+function spineGeometry(width: number, height: number, depth: number) {
+  const hw = width / 2;
+  const hh = height / 2;
+  const shoulder = Math.min(0.52, width * 0.055);
+  const shape = new Shape();
+  shape.moveTo(-hw + shoulder, -hh * 0.84);
+  shape.quadraticCurveTo(-hw + shoulder * 0.24, -hh * 0.78, -hw, -hh * 0.22);
+  shape.quadraticCurveTo(-hw + shoulder * 0.10, hh * 0.60, -hw + shoulder * 0.92, hh * 0.84);
+  shape.quadraticCurveTo(-width * 0.18, hh * 1.02, 0, hh * 0.96);
+  shape.quadraticCurveTo(width * 0.18, hh * 1.02, hw - shoulder * 0.92, hh * 0.84);
+  shape.quadraticCurveTo(hw - shoulder * 0.10, hh * 0.60, hw, -hh * 0.22);
+  shape.quadraticCurveTo(hw - shoulder * 0.24, -hh * 0.78, hw - shoulder, -hh * 0.84);
+  shape.quadraticCurveTo(width * 0.20, -hh * 1.01, 0, -hh * 0.94);
+  shape.quadraticCurveTo(-width * 0.20, -hh * 1.01, -hw + shoulder, -hh * 0.84);
+  shape.closePath();
+  return extrudeShape(shape, depth, Math.min(0.042, depth * 0.18));
 }
 
-function StatusPort({
+/** Recessed lens / port profile, a precision slot rather than a button. */
+function slotGeometry(width: number, height: number, depth: number) {
+  const hw = width / 2;
+  const hh = height / 2;
+  const nose = Math.min(height * 0.48, width * 0.18);
+  const shape = new Shape();
+  shape.moveTo(-hw + nose, -hh);
+  shape.lineTo(hw - nose, -hh);
+  shape.quadraticCurveTo(hw, -hh, hw, 0);
+  shape.quadraticCurveTo(hw, hh, hw - nose, hh);
+  shape.lineTo(-hw + nose, hh);
+  shape.quadraticCurveTo(-hw, hh, -hw, 0);
+  shape.quadraticCurveTo(-hw, -hh, -hw + nose, -hh);
+  shape.closePath();
+  return extrudeShape(shape, depth, Math.min(0.026, depth * 0.22));
+}
+
+function PrecisionPort({
   x,
   accent,
   state,
-  radius,
+  mobile,
   reducedMotion,
 }: {
   x: number;
   accent: string;
   state: WorkoutRoadmapRailState;
-  radius: number;
+  mobile: boolean;
   reducedMotion: boolean;
 }) {
   const groupRef = useRef<Group | null>(null);
   const accentColor = useMemo(() => new Color(accent), [accent]);
-  const current = state === "current";
-  const next = state === "next";
-  const done = state === "done";
-  const intensity = current ? 3.6 : next ? 2.0 : done ? 1.25 : 0.46;
+  const isCurrent = state === "current";
+  const isNext = state === "next";
+  const isDone = state === "done";
+  const power = isCurrent ? 1 : isNext ? 0.62 : isDone ? 0.46 : 0.19;
+  const portW = mobile ? 0.64 : 0.72;
+  const portH = mobile ? 0.31 : 0.34;
+  const recess = useMemo(() => slotGeometry(portW, portH, 0.11), [portW, portH]);
+  const lens = useMemo(() => slotGeometry(portW * 0.78, portH * 0.50, 0.055), [portW, portH]);
+  const accentLens = useMemo(() => slotGeometry(portW * 0.43, portH * 0.15, 0.025), [portW, portH]);
+
+  useEffect(() => () => {
+    recess.dispose();
+    lens.dispose();
+    accentLens.dispose();
+  }, [recess, lens, accentLens]);
 
   useFrame(({ clock }) => {
-    if (!groupRef.current || reducedMotion || !current) return;
-    const pulse = Math.sin(clock.getElapsedTime() * 1.9) * 0.012;
-    const scale = 1 + Math.sin(clock.getElapsedTime() * 1.55) * 0.012;
-    groupRef.current.position.z = 0.36 + pulse;
-    groupRef.current.scale.setScalar(scale);
+    if (!groupRef.current || reducedMotion || !isCurrent) return;
+    const t = clock.getElapsedTime();
+    // Barely perceptible, more like live hardware breathing than animation.
+    groupRef.current.position.z = 0.385 + Math.sin(t * 1.05) * 0.008;
   });
 
   return (
-    <group ref={groupRef} position={[x, 0, 0.36]}>
-      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[radius * 1.16, radius * 1.16, 0.20, 8]} />
-        <meshStandardMaterial
-          color="#071219"
-          metalness={0.94}
-          roughness={0.23}
-          envMapIntensity={1.75}
-        />
-      </mesh>
-
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.115]} castShadow>
-        <cylinderGeometry args={[radius * 0.88, radius * 0.88, 0.075, 8]} />
+    <group ref={groupRef} position={[x, 0, 0.385]}>
+      <mesh geometry={recess} castShadow receiveShadow>
         <meshPhysicalMaterial
-          color="#06141b"
-          metalness={0.46}
-          roughness={0.10}
-          clearcoat={1}
-          clearcoatRoughness={0.055}
-          transmission={0.10}
-          thickness={0.22}
-          envMapIntensity={2.0}
-          emissive={accentColor}
-          emissiveIntensity={intensity * 0.08}
+          color="#05090c"
+          metalness={0.86}
+          roughness={0.34}
+          clearcoat={0.42}
+          clearcoatRoughness={0.18}
+          envMapIntensity={1.38}
         />
       </mesh>
 
-      {[-0.115, 0, 0.115].map((barY, index) => (
-        <mesh key={barY} position={[0, barY * radius * 2.15, 0.185]}>
-          <boxGeometry args={[radius * (index === 1 ? 1.12 : 0.83), radius * 0.105, 0.035]} />
-          <meshStandardMaterial
-            color={accentColor}
-            emissive={accentColor}
-            emissiveIntensity={intensity * (index === 1 ? 1.18 : 0.76)}
-            roughness={0.24}
-            metalness={0.24}
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
+      <mesh geometry={lens} position={[0, 0.004, 0.074]}>
+        <meshPhysicalMaterial
+          color={isCurrent ? "#19242a" : "#10171b"}
+          transparent
+          opacity={0.94}
+          metalness={0.16}
+          roughness={0.105}
+          clearcoat={1}
+          clearcoatRoughness={0.045}
+          transmission={0.10}
+          thickness={0.16}
+          envMapIntensity={2.35}
+          emissive={accentColor}
+          emissiveIntensity={0.025 + power * 0.10}
+        />
+      </mesh>
 
-      <mesh position={[0, -radius * 0.93, 0.03]}>
-        <boxGeometry args={[radius * 0.72, 0.026, 0.06]} />
-        <meshStandardMaterial
+      <mesh geometry={accentLens} position={[0, -portH * 0.015, 0.112]}>
+        <meshPhysicalMaterial
           color={accentColor}
           emissive={accentColor}
-          emissiveIntensity={Math.max(0.28, intensity * 0.34)}
+          emissiveIntensity={0.12 + power * 0.75}
+          metalness={0.12}
+          roughness={0.18}
+          clearcoat={1}
+          clearcoatRoughness={0.04}
+          envMapIntensity={1.3}
           toneMapped={false}
         />
       </mesh>
 
-      {done ? (
-        <group position={[radius * 0.78, radius * 0.76, 0.20]}>
-          <mesh>
-            <sphereGeometry args={[radius * 0.19, 14, 14]} />
-            <meshPhysicalMaterial
-              color="#7ff0b7"
-              emissive="#45e69a"
-              emissiveIntensity={2.2}
-              roughness={0.15}
-              clearcoat={1}
-              clearcoatRoughness={0.05}
-              toneMapped={false}
-            />
+      {/* precision white specular catch, not another colored object */}
+      <mesh position={[-portW * 0.08, portH * 0.105, 0.137]} rotation={[0, 0, -0.06]}>
+        <boxGeometry args={[portW * 0.30, 0.010, 0.012]} />
+        <meshBasicMaterial color="#dff3f8" transparent opacity={isCurrent ? 0.34 : 0.15} />
+      </mesh>
+
+      {isDone ? (
+        <group position={[portW * 0.37, -portH * 0.31, 0.14]}>
+          <mesh rotation={[0, 0, -0.72]} position={[-0.032, 0.002, 0]}>
+            <boxGeometry args={[0.085, 0.020, 0.018]} />
+            <meshBasicMaterial color="#77e3ab" toneMapped={false} />
           </mesh>
-          <pointLight color="#55eea2" intensity={0.55} distance={1.1} decay={2.2} />
+          <mesh rotation={[0, 0, 0.70]} position={[0.027, 0.026, 0]}>
+            <boxGeometry args={[0.14, 0.020, 0.018]} />
+            <meshBasicMaterial color="#77e3ab" toneMapped={false} />
+          </mesh>
         </group>
       ) : null}
 
-      {current ? (
-        <pointLight color={accentColor} intensity={1.2} distance={2.2} decay={2.1} position={[0, 0, 0.42]} />
-      ) : next ? (
-        <pointLight color={accentColor} intensity={0.42} distance={1.45} decay={2.2} position={[0, 0, 0.34]} />
+      {isCurrent ? (
+        <pointLight color={accentColor} intensity={mobile ? 0.16 : 0.20} distance={1.25} decay={2.5} position={[0, -0.05, 0.36]} />
       ) : null}
     </group>
   );
@@ -266,135 +228,131 @@ function RailScene({
   reducedMotion: boolean;
 }) {
   const { viewport } = useThree();
-  const railWidth = Math.max(4.4, viewport.width * (mobile ? 0.91 : 0.93));
-  const span = railWidth * 0.82;
+  const railWidth = Math.max(4.7, viewport.width * (mobile ? 0.92 : 0.925));
+  const railHeight = mobile ? 0.92 : 1.05;
+  const span = railWidth * 0.80;
   const spacing = items.length > 1 ? span / (items.length - 1) : span;
-  const portRadius = Math.max(0.22, Math.min(mobile ? 0.32 : 0.37, spacing * 0.25));
-
-  const mainGeometry = useMemo(() => chamferedGeometry(railWidth, mobile ? 0.68 : 0.78, 0.31, 0.18), [railWidth, mobile]);
-  const upperGeometry = useMemo(() => chamferedGeometry(railWidth * 0.975, mobile ? 0.135 : 0.15, 0.40, 0.07), [railWidth, mobile]);
-  const lowerGeometry = useMemo(() => chamferedGeometry(railWidth * 0.975, mobile ? 0.135 : 0.15, 0.40, 0.07), [railWidth, mobile]);
-  const channelGeometry = useMemo(() => chamferedGeometry(railWidth * 0.91, mobile ? 0.24 : 0.27, 0.10, 0.09), [railWidth, mobile]);
-  const glassGeometry = useMemo(() => chamferedGeometry(railWidth * 0.955, mobile ? 0.50 : 0.57, 0.055, 0.15), [railWidth, mobile]);
-
-  useEffect(
-    () => () => {
-      mainGeometry.dispose();
-      upperGeometry.dispose();
-      lowerGeometry.dispose();
-      channelGeometry.dispose();
-      glassGeometry.dispose();
-    }, [mainGeometry, upperGeometry, lowerGeometry, channelGeometry, glassGeometry]
-  );
-
   const portXs = items.map((_, index) => (items.length <= 1 ? 0 : -span / 2 + spacing * index));
+
+  const shadowGeo = useMemo(() => spineGeometry(railWidth * 1.01, railHeight * 0.94, 0.14), [railWidth, railHeight]);
+  const baseGeo = useMemo(() => spineGeometry(railWidth, railHeight, 0.34), [railWidth, railHeight]);
+  const crownGeo = useMemo(() => spineGeometry(railWidth * 0.982, railHeight * 0.77, 0.14), [railWidth, railHeight]);
+  const channelGeo = useMemo(() => slotGeometry(railWidth * 0.88, mobile ? 0.21 : 0.235, 0.06), [railWidth, mobile]);
+
+  useEffect(() => () => {
+    shadowGeo.dispose();
+    baseGeo.dispose();
+    crownGeo.dispose();
+    channelGeo.dispose();
+  }, [shadowGeo, baseGeo, crownGeo, channelGeo]);
 
   return (
     <>
-      <ambientLight intensity={0.34} />
-      <hemisphereLight intensity={0.55} color="#b9f1ff" groundColor="#01070a" />
-      <directionalLight position={[-4, 4, 6]} intensity={2.0} color="#dff9ff" />
-      <directionalLight position={[5, -2, 4]} intensity={0.72} color="#ff9a52" />
-      <pointLight position={[0, 1.1, 3.2]} intensity={0.72} color="#67dfff" distance={10} />
+      <ambientLight intensity={0.18} />
+      <hemisphereLight intensity={0.33} color="#d8e6ea" groundColor="#020405" />
+      <directionalLight position={[-3.8, 5.2, 6.4]} intensity={2.7} color="#f4fbfd" />
+      <directionalLight position={[4.6, -2.4, 4.4]} intensity={0.48} color="#f1a46f" />
+      <directionalLight position={[0.4, 0.1, 6.5]} intensity={0.55} color="#9dc8d4" />
 
       <Environment resolution={mobile ? 32 : 64} frames={1}>
-        <Lightformer form="rect" intensity={3.6} color="#d9f8ff" position={[-2.4, 3.2, 4]} scale={[6, 0.55, 1]} />
-        <Lightformer form="rect" intensity={2.0} color="#63d9ff" position={[3.2, 1.2, 3]} scale={[3.5, 0.36, 1]} />
-        <Lightformer form="rect" intensity={1.75} color="#ff9850" position={[3.9, -2.4, 2]} scale={[2.4, 0.36, 1]} />
-        <Lightformer form="ring" intensity={1.2} color="#ffffff" position={[0, 0, 5]} scale={[4.8, 4.8, 1]} />
+        <Lightformer form="rect" intensity={5.4} color="#eef9fc" position={[-1.7, 4.2, 4.2]} scale={[7.2, 0.26, 1]} />
+        <Lightformer form="rect" intensity={2.1} color="#9db6bd" position={[2.8, 1.5, 4]} scale={[4.4, 0.16, 1]} />
+        <Lightformer form="rect" intensity={1.0} color="#d88955" position={[4.0, -2.9, 3.2]} scale={[2.5, 0.12, 1]} />
       </Environment>
 
-      <group rotation={[mobile ? -0.015 : -0.035, 0, 0]}>
-        <mesh geometry={mainGeometry} castShadow receiveShadow>
+      <group rotation={[mobile ? -0.01 : -0.018, 0, 0]}>
+        <mesh geometry={shadowGeo} position={[0, -0.10, -0.18]} scale={[0.99, 0.93, 1]}>
+          <meshBasicMaterial color="#000000" transparent opacity={0.48} depthWrite={false} />
+        </mesh>
+
+        <mesh geometry={baseGeo} castShadow receiveShadow>
           <meshPhysicalMaterial
-            color="#07141b"
-            metalness={0.92}
-            roughness={0.30}
-            clearcoat={0.66}
-            clearcoatRoughness={0.12}
-            envMapIntensity={1.7}
+            color="#11171b"
+            metalness={0.88}
+            roughness={0.43}
+            clearcoat={0.38}
+            clearcoatRoughness={0.19}
+            envMapIntensity={1.48}
           />
         </mesh>
 
-        <mesh geometry={upperGeometry} position={[0, mobile ? 0.36 : 0.42, 0.01]} castShadow>
-          <meshStandardMaterial color="#102934" metalness={0.95} roughness={0.22} envMapIntensity={1.95} />
-        </mesh>
-        <mesh geometry={lowerGeometry} position={[0, mobile ? -0.36 : -0.42, 0.01]} castShadow>
-          <meshStandardMaterial color="#02090d" metalness={0.92} roughness={0.32} envMapIntensity={1.45} />
+        <mesh geometry={crownGeo} position={[0, 0.085, 0.215]} castShadow>
+          <meshPhysicalMaterial
+            color="#1a2227"
+            metalness={0.78}
+            roughness={0.34}
+            clearcoat={0.62}
+            clearcoatRoughness={0.105}
+            envMapIntensity={1.85}
+          />
         </mesh>
 
-        <mesh geometry={channelGeometry} position={[0, 0, 0.21]}>
+        {/* upper/lower precision seams read as machining, not neon */}
+        {[-0.31, 0.31].map((y) => (
+          <group key={y} position={[0, y * railHeight, 0.337]}>
+            <mesh>
+              <boxGeometry args={[railWidth * 0.82, 0.012, 0.018]} />
+              <meshStandardMaterial color={y > 0 ? "#607077" : "#050708"} metalness={0.96} roughness={0.26} envMapIntensity={1.8} />
+            </mesh>
+            {y > 0 ? (
+              <mesh position={[0, 0.009, 0.011]}>
+                <boxGeometry args={[railWidth * 0.72, 0.005, 0.008]} />
+                <meshBasicMaterial color="#d9e6e9" transparent opacity={0.10} />
+              </mesh>
+            ) : null}
+          </group>
+        ))}
+
+        <mesh geometry={channelGeo} position={[0, -0.015, 0.36]}>
           <meshPhysicalMaterial
-            color="#031017"
-            metalness={0.26}
-            roughness={0.12}
+            color="#050a0d"
+            metalness={0.22}
+            roughness={0.095}
             clearcoat={1}
-            clearcoatRoughness={0.05}
-            transmission={0.08}
-            thickness={0.18}
-            envMapIntensity={1.8}
+            clearcoatRoughness={0.035}
+            transmission={0.07}
+            thickness={0.10}
+            envMapIntensity={2.15}
           />
         </mesh>
 
-        <EnergyBus width={railWidth * 0.86} reducedMotion={reducedMotion} />
+        {/* subdued internal conductive seam, only slightly alive */}
+        <mesh position={[0, -0.015, 0.402]}>
+          <boxGeometry args={[railWidth * 0.835, 0.014, 0.013]} />
+          <meshBasicMaterial color="#94aab0" transparent opacity={0.18} />
+        </mesh>
 
         {portXs.slice(0, -1).map((x, index) => {
           const nextX = portXs[index + 1];
           const mid = (x + nextX) / 2;
           return (
-            <group key={`joint-${items[index]?.id ?? index}`} position={[mid, 0, 0.24]}>
+            <group key={`seam-${items[index]?.id ?? index}`} position={[mid, 0, 0.354]}>
               <mesh>
-                <boxGeometry args={[0.035, mobile ? 0.44 : 0.52, 0.045]} />
-                <meshStandardMaterial color="#183541" metalness={0.96} roughness={0.25} envMapIntensity={1.8} />
+                <boxGeometry args={[0.012, railHeight * 0.48, 0.024]} />
+                <meshStandardMaterial color="#070b0d" metalness={0.92} roughness={0.31} />
               </mesh>
-              <mesh position={[0, mobile ? 0.23 : 0.27, 0.035]}>
-                <sphereGeometry args={[0.027, 10, 10]} />
-                <meshStandardMaterial color="#6b91a0" metalness={1} roughness={0.19} envMapIntensity={2.1} />
-              </mesh>
-              <mesh position={[0, mobile ? -0.23 : -0.27, 0.035]}>
-                <sphereGeometry args={[0.027, 10, 10]} />
-                <meshStandardMaterial color="#2c4f5c" metalness={1} roughness={0.24} envMapIntensity={1.8} />
+              <mesh position={[0.008, railHeight * 0.06, 0.018]}>
+                <boxGeometry args={[0.006, railHeight * 0.32, 0.009]} />
+                <meshBasicMaterial color="#b4c5ca" transparent opacity={0.085} />
               </mesh>
             </group>
           );
         })}
 
         {items.map((item, index) => (
-          <StatusPort
+          <PrecisionPort
             key={item.id}
             x={portXs[index] ?? 0}
             accent={item.accent}
             state={item.state}
-            radius={portRadius}
+            mobile={mobile}
             reducedMotion={reducedMotion}
           />
         ))}
-
-        <mesh geometry={glassGeometry} position={[0, 0.04, 0.48]}>
-          <meshPhysicalMaterial
-            color="#a7e7f5"
-            transparent
-            opacity={0.045}
-            metalness={0.05}
-            roughness={0.08}
-            clearcoat={1}
-            clearcoatRoughness={0.035}
-            transmission={0.22}
-            thickness={0.12}
-            envMapIntensity={2.25}
-            depthWrite={false}
-          />
-        </mesh>
       </group>
 
       <EffectComposer multisampling={0} enableNormalPass={false}>
-        <Bloom
-          intensity={mobile ? 0.58 : 0.82}
-          luminanceThreshold={0.72}
-          luminanceSmoothing={0.16}
-          mipmapBlur
-          radius={0.52}
-        />
+        <Bloom intensity={mobile ? 0.14 : 0.18} luminanceThreshold={0.92} luminanceSmoothing={0.12} mipmapBlur radius={0.34} />
       </EffectComposer>
     </>
   );
@@ -424,14 +382,14 @@ export function WorkoutRoadmapRail3D({
       {webgl ? (
         <div className="tr-roadmapRail3DCanvas" aria-hidden="true">
           <Canvas
-            dpr={mobile ? [1, 1.2] : [1, 1.55]}
+            dpr={mobile ? [1, 1.25] : [1, 1.65]}
             frameloop={!pageVisible || reducedMotion ? "demand" : "always"}
-            camera={{ position: [0, 0.18, mobile ? 7.7 : 7.35], fov: mobile ? 31 : 29, near: 0.1, far: 50 }}
+            camera={{ position: [0, 0.14, mobile ? 7.5 : 7.25], fov: mobile ? 30 : 28, near: 0.1, far: 40 }}
             shadows={false}
             gl={{ alpha: true, antialias: !mobile, powerPreference: "high-performance" }}
             onCreated={({ gl }) => {
               gl.toneMapping = ACESFilmicToneMapping;
-              gl.toneMappingExposure = mobile ? 1.0 : 1.06;
+              gl.toneMappingExposure = mobile ? 0.96 : 1.0;
               gl.outputColorSpace = SRGBColorSpace;
               gl.setClearColor(0x000000, 0);
             }}
@@ -444,8 +402,8 @@ export function WorkoutRoadmapRail3D({
           {items.map((item) => (
             <span
               key={item.id}
-              className="tr-roadmapRail3DFallbackPort"
-              style={{ "--rail-accent": item.state === "done" ? "#50e79d" : item.accent } as CSSProperties}
+              className={`tr-roadmapRail3DFallbackPort is-${item.state}`}
+              style={{ "--rail-accent": item.accent } as CSSProperties}
             />
           ))}
         </div>
