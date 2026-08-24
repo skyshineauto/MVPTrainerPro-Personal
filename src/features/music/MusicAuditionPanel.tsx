@@ -95,7 +95,7 @@ const EVENT = "mvp:music-audition-changed";
 const LIST_TABLE = "music_audition_lists";
 const SONG_TABLE = "music_audition_songs";
 const LINK_TABLE = "music_audition_list_songs";
-const METADATA_FRESH_MS = 30 * 86400000;
+
 const metadataRequests = new Map<string, Promise<MusicAuditionSong>>();
 let cloudHydrationPromise: Promise<void> | null = null;
 
@@ -556,6 +556,55 @@ function tokenSimilarity(a: string, b: string) {
   return (2 * overlap) / (left.size + right.size);
 }
 
+function leadArtist(value: unknown) {
+  const raw = clean(value)
+    .replace(/\s+(?:feat(?:uring)?|ft)\.?\s+.*$/i, "")
+    .split(/\s+(?:&|x|with)\s+/i)[0]
+    .split(/\s*,\s*/)[0];
+  return normalize(raw);
+}
+
+function strictTitleKey(value: unknown) {
+  return canonicalTitle(value)
+    .replace(/\b(?:feat(?:uring)?|ft)\b.*$/i, "")
+    .replace(/\((?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue)[^)]*\)/gi, " ")
+    .replace(/\[(?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|live|deluxe|bonus track|reissue)[^\]]*\]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isContainedMatch(left: string, right: string) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length > right.length ? left : right;
+  return shorter.length >= 5 && longer.includes(shorter);
+}
+
+function strictCandidateScore(song: MusicAuditionSong, item: ItunesSong) {
+  const importedTitle = strictTitleKey(song.title);
+  const candidateTitle = strictTitleKey(item.trackName || "");
+  const importedArtist = leadArtist(song.artist);
+  const candidateArtist = leadArtist(item.artistName || "");
+
+  const titleScore = tokenSimilarity(importedTitle, candidateTitle);
+  const artistScore = tokenSimilarity(importedArtist, candidateArtist);
+  const titleExact = importedTitle === candidateTitle;
+  const artistExact = importedArtist === candidateArtist;
+  const titleStrong = titleExact || titleScore >= 0.88 || (isContainedMatch(importedTitle, candidateTitle) && titleScore >= 0.78);
+  const artistStrong = artistExact || artistScore >= 0.9 || isContainedMatch(importedArtist, candidateArtist);
+
+  if (!titleStrong || !artistStrong) return null;
+
+  const score =
+    titleScore * 0.72 +
+    artistScore * 0.28 +
+    (titleExact ? 0.08 : 0) +
+    (artistExact ? 0.06 : 0);
+
+  return { item, score, titleScore, artistScore, titleExact, artistExact };
+}
+
 function artwork600(url: string | undefined) {
   if (!url) return null;
   return url.replace(/\/100x100(?:bb)?\.(jpg|png)/i, "/600x600bb.$1");
@@ -570,25 +619,33 @@ export async function resolveMusicAuditionMetadata(songId: string) {
   const state = readLocal();
   const song = state.songs.find((item) => item.id === songId);
   if (!song) throw new Error("Song not found.");
-  if (song.metadataUpdatedAt && now() - song.metadataUpdatedAt < METADATA_FRESH_MS && (song.previewUrl || song.artworkUrl)) return song;
 
   const existing = metadataRequests.get(songId);
   if (existing) return existing;
 
   const request = (async () => {
     try {
-      const params = new URLSearchParams({ entity: "song", limit: "15", term: `${song.artist} ${song.title}` });
-      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, { mode: "cors", cache: "no-store" });
+      const params = new URLSearchParams({
+        entity: "song",
+        limit: "25",
+        term: `${song.artist} ${song.title}`,
+      });
+      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+        mode: "cors",
+        cache: "no-store",
+      });
       if (!response.ok) throw new Error("Preview lookup unavailable.");
+
       const payload = await response.json() as ItunesResponse;
-      const candidates = (payload.results || []).filter((item) => item.trackName && item.artistName);
-      const best = candidates
-        .map((item) => ({
-          item,
-          score: tokenSimilarity(song.title, item.trackName || "") * 0.65 + tokenSimilarity(song.artist, item.artistName || "") * 0.35,
-        }))
-        .sort((a, b) => b.score - a.score)[0];
-      if (!best || best.score < 0.55) throw new Error("No reliable preview match found.");
+      const candidates = (payload.results || [])
+        .filter((item) => item.trackName && item.artistName)
+        .map((item) => strictCandidateScore(song, item))
+        .filter((candidate): candidate is NonNullable<ReturnType<typeof strictCandidateScore>> => Boolean(candidate))
+        .sort((a, b) => b.score - a.score);
+
+      const best = candidates[0];
+      if (!best || best.score < 0.84) throw new Error("No exact artist/title preview match found.");
+
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
         ...current,
@@ -596,6 +653,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           if (item.id !== songId) return item;
           changed = {
             ...item,
+            // Imported artist/title stay authoritative. Lookup metadata can never overwrite them.
             album: clean(best.item.collectionName),
             releaseYear: yearFromDate(best.item.releaseDate),
             genre: clean(best.item.primaryGenreName) || null,
@@ -611,12 +669,23 @@ export async function resolveMusicAuditionMetadata(songId: string) {
       if (changed) void persistSong(changed);
       return changed || song;
     } catch {
+      // Clear any previously cached loose/incorrect match. Wrong artwork/metadata is worse than no preview.
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
         ...current,
         songs: current.songs.map((item) => {
           if (item.id !== songId) return item;
-          changed = { ...item, metadataUpdatedAt: now(), updatedAt: now() };
+          changed = {
+            ...item,
+            album: "",
+            releaseYear: null,
+            genre: null,
+            artworkUrl: null,
+            previewUrl: null,
+            storeUrl: null,
+            metadataUpdatedAt: now(),
+            updatedAt: now(),
+          };
           return changed;
         }),
       }));
@@ -626,6 +695,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
       metadataRequests.delete(songId);
     }
   })();
+
   metadataRequests.set(songId, request);
   return request;
 }
@@ -698,6 +768,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const [previewSongId, setPreviewSongId] = useState<string | null>(null);
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [verifiedMetadataIds, setVerifiedMetadataIds] = useState<Set<string>>(() => new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingFileSongRef = useRef<MusicAuditionSong | null>(null);
@@ -736,13 +807,21 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const parsedImportCount = useMemo(() => parseAuditionListText(importText).length, [importText]);
 
   useEffect(() => {
-    if (!currentSong) return;
-    if ((currentSong.artworkUrl || currentSong.previewUrl) && currentSong.metadataUpdatedAt) return;
-    setLookupSongId(currentSong.id);
-    void resolveMusicAuditionMetadata(currentSong.id).finally(() => {
-      setLookupSongId((id) => id === currentSong.id ? null : id);
-      refresh();
-    });
+    if (!currentSong || verifiedMetadataIds.has(currentSong.id)) return;
+    const songId = currentSong.id;
+    setLookupSongId(songId);
+    void resolveMusicAuditionMetadata(songId)
+      .then(() => {
+        setVerifiedMetadataIds((previous) => {
+          const next = new Set(previous);
+          next.add(songId);
+          return next;
+        });
+      })
+      .finally(() => {
+        setLookupSongId((id) => id === songId ? null : id);
+        refresh();
+      });
   }, [currentSong?.id]);
 
   function openList(list: MusicAuditionList) {
@@ -771,14 +850,19 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     }
     stopPreview();
     let resolved = song;
-    if (!resolved.previewUrl) {
+    if (!resolved.previewUrl || !verifiedMetadataIds.has(song.id)) {
       setLookupSongId(song.id);
       resolved = await resolveMusicAuditionMetadata(song.id);
+      setVerifiedMetadataIds((previous) => {
+        const next = new Set(previous);
+        next.add(song.id);
+        return next;
+      });
       setLookupSongId(null);
       refresh();
     }
     if (!resolved.previewUrl) {
-      setMessage("No embedded preview was found for this song. Use YouTube to hear the full track.");
+      setMessage("No exact artist/title preview match was found. Your imported artist and song are locked. Use YouTube for the exact search.");
       return;
     }
     onPreviewStart?.();
@@ -906,6 +990,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     reviewed: state.songs.filter((song) => Boolean(song.decision)).length,
   }), [state.songs]);
 
+  const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
+  const currentMetadataAvailable = Boolean(
+    currentSong &&
+    currentMetadataVerified &&
+    (currentSong.artworkUrl || currentSong.previewUrl || currentSong.album),
+  );
+
   return <section className="mvp-audition">
     <input ref={fileInputRef} hidden type="file" accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void handleFileChange(event)} />
 
@@ -966,24 +1057,41 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       <div className="mvp-auditionStageBar"><i style={{ width: `${Math.round(currentStats.progress * 100)}%` }} /></div>
       {currentSong ? <article className="mvp-auditionSongCard">
         <div className="mvp-auditionArtwork">
-          {currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div>♫</div>}
+          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><span>♫</span><small>{lookupSongId === currentSong.id ? "VERIFYING MATCH" : "IMPORTED TRACK"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
         </div>
         <div className="mvp-auditionSongInfo">
-          <div className="mvp-auditionStatusRow"><span className={`is-${currentSong.decision || "new"}`}>{decisionLabel(currentSong.decision)}</span>{musicAuditionSongInLibrary(currentSong, tracks) ? <b>✓ IN LIBRARY</b> : null}</div>
+          <div className="mvp-auditionStatusRow">
+            <span className={`is-${currentSong.decision || "new"}`}>{decisionLabel(currentSong.decision)}</span>
+            <span className="is-source">IMPORTED IDENTITY LOCKED</span>
+            {currentMetadataAvailable ? <span className="is-verified">✓ VERIFIED MATCH</span> : null}
+            {musicAuditionSongInLibrary(currentSong, tracks) ? <b>✓ IN LIBRARY</b> : null}
+          </div>
           <h2>{currentSong.title}</h2>
           <h3>{currentSong.artist}</h3>
-          <p>{[currentSong.album, currentSong.releaseYear, currentSong.genre].filter(Boolean).join(" • ") || (lookupSongId === currentSong.id ? "Finding artwork and preview…" : "Ready to audition")}</p>
+          <p className="mvp-auditionMeta">
+            {lookupSongId === currentSong.id
+              ? "Verifying exact artist + song before using artwork or preview…"
+              : currentMetadataAvailable
+                ? ["Verified preview", currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
+                : "No verified embedded preview yet. YouTube always searches the imported artist + title."}
+          </p>
           <div className="mvp-auditionListen">
-            <button className={previewSongId === currentSong.id ? "is-playing" : ""} disabled={lookupSongId === currentSong.id} onClick={() => void togglePreview(currentSong)}>{lookupSongId === currentSong.id ? "⌁ FINDING PREVIEW" : previewSongId === currentSong.id ? "■ STOP PREVIEW" : "▶ PREVIEW"}</button>
-            <button className="is-youtube" onClick={() => openYoutube(currentSong)}>▶ YOUTUBE ↗</button>
+            <button className={`is-preview ${previewSongId === currentSong.id ? "is-playing" : ""}`} disabled={lookupSongId === currentSong.id} onClick={() => void togglePreview(currentSong)}>
+              <span className="mvp-auditionControlIcon">{lookupSongId === currentSong.id ? "⌁" : previewSongId === currentSong.id ? "■" : "▶"}</span>
+              <span className="mvp-auditionControlCopy"><strong>{lookupSongId === currentSong.id ? "VERIFYING" : previewSongId === currentSong.id ? "STOP PREVIEW" : "PREVIEW"}</strong><small>Exact-match sample</small></span>
+            </button>
+            <button className="is-youtube" onClick={() => openYoutube(currentSong)}>
+              <span className="mvp-auditionControlIcon">▶</span>
+              <span className="mvp-auditionControlCopy"><strong>YOUTUBE</strong><small>Full-song search ↗</small></span>
+            </button>
           </div>
           <div className="mvp-auditionDecision">
-            <button className={`is-keep ${currentSong.decision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}>🔥<span>KEEP</span></button>
-            <button className={`is-maybe ${currentSong.decision === "maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong, "maybe")}>?<span>MAYBE</span></button>
-            <button className={`is-pass ${currentSong.decision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}>×<span>PASS</span></button>
+            <button className={`is-keep ${currentSong.decision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}><span className="mvp-auditionDecisionIcon">✓</span><span><strong>KEEP</strong><small>Save to winners</small></span></button>
+            <button className={`is-maybe ${currentSong.decision === "maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong, "maybe")}><span className="mvp-auditionDecisionIcon">?</span><span><strong>MAYBE</strong><small>Revisit later</small></span></button>
+            <button className={`is-pass ${currentSong.decision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}><span className="mvp-auditionDecisionIcon">×</span><span><strong>PASS</strong><small>Reject candidate</small></span></button>
           </div>
-          <div className="mvp-auditionPager"><button disabled={currentIndex <= 0} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.max(0, index - 1)); }}>‹ PREVIOUS</button><button onClick={nextUnreviewed}>NEXT UNREVIEWED</button><button disabled={currentIndex >= selectedSongs.length - 1} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.min(selectedSongs.length - 1, index + 1)); }}>NEXT ›</button></div>
+          <div className="mvp-auditionPager"><button disabled={currentIndex <= 0} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.max(0, index - 1)); }}>‹ PREVIOUS</button><button className="is-next-unreviewed" onClick={nextUnreviewed}>NEXT UNREVIEWED</button><button disabled={currentIndex >= selectedSongs.length - 1} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.min(selectedSongs.length - 1, index + 1)); }}>NEXT ›</button></div>
         </div>
       </article> : <div className="mvp-auditionEmpty"><b>THIS LIST IS EMPTY</b></div>}
       <footer className="mvp-auditionCounts"><span className="is-keep"><b>{currentStats.keep}</b> KEEP</span><span className="is-pass"><b>{currentStats.pass}</b> PASS</span><span className="is-maybe"><b>{currentStats.maybe}</b> MAYBE</span><span><b>{currentStats.total - currentStats.reviewed}</b> LEFT</span></footer>
@@ -1021,7 +1129,278 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
 
     <style>{`
       .mvp-audition{display:grid;gap:12px;color:#eef7fa}.mvp-audition button,.mvp-audition input,.mvp-audition textarea,.mvp-audition select{font:inherit}.mvp-auditionHero{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:18px 20px;border:1px solid rgba(80,186,223,.18);border-radius:15px;background:radial-gradient(circle at 85% 10%,rgba(20,128,192,.18),transparent 32%),linear-gradient(135deg,#081820,#050a0e 66%);box-shadow:0 18px 50px rgba(0,0,0,.22)}.mvp-auditionEyebrow,.mvp-auditionHero span{font-size:8px;font-weight:1000;letter-spacing:.18em;color:#64d2f4}.mvp-auditionHero h2{margin:4px 0 5px;font-size:28px;letter-spacing:-.04em;color:#fff}.mvp-auditionHero p{max-width:650px;margin:0;color:#8fa8b2;font-size:10px;line-height:1.5}.mvp-auditionGlobal{display:grid;grid-template-columns:repeat(4,70px);gap:6px}.mvp-auditionGlobal>div{min-height:57px;display:grid;place-content:center;text-align:center;border:1px solid rgba(116,180,202,.13);border-radius:10px;background:rgba(5,17,23,.78)}.mvp-auditionGlobal b{font-size:20px;line-height:1;color:#fff}.mvp-auditionGlobal span{margin-top:5px;font-size:6.5px;color:#7f9aa5}.mvp-auditionNav{display:flex;gap:6px;padding:5px;border:1px solid rgba(108,169,193,.12);border-radius:11px;background:#050c10}.mvp-auditionNav button{min-height:39px;padding:0 13px;border:1px solid transparent;border-radius:8px;background:transparent;color:#77939e;font-size:7.5px;font-weight:1000;letter-spacing:.08em;cursor:pointer}.mvp-auditionNav button:hover{color:#d9eef5;background:#0a171d}.mvp-auditionNav button.is-active{color:#fff;border-color:rgba(75,191,232,.3);background:linear-gradient(180deg,#0e2732,#09151b);box-shadow:inset 0 1px rgba(255,255,255,.04)}.mvp-auditionNav button.is-import{margin-left:auto;color:#081116;background:linear-gradient(135deg,#72ddfb,#43b7e5);box-shadow:0 0 18px rgba(74,193,232,.2)}.mvp-auditionNav button:disabled{opacity:.35;cursor:not-allowed}.mvp-auditionMessage{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border:1px solid rgba(88,183,215,.18);border-radius:9px;background:#07141a;color:#b7d3dc;font-size:9px}.mvp-auditionMessage button{border:0;background:transparent;color:#9eb7c0;font-size:18px;cursor:pointer}.mvp-auditionToolbar{display:flex;justify-content:space-between;gap:14px;align-items:end;padding:4px 2px}.mvp-auditionToolbar>div{display:grid;gap:3px}.mvp-auditionToolbar strong{font-size:10px;color:#dcecf1}.mvp-auditionToolbar>div span{font-size:8px;color:#748e98}.mvp-auditionToolbar label{display:grid;gap:4px}.mvp-auditionToolbar label span{font-size:6.5px;font-weight:1000;color:#6f8994;letter-spacing:.12em}.mvp-auditionToolbar select{min-width:150px;height:35px;padding:0 9px;border:1px solid rgba(115,170,191,.15);border-radius:8px;background:#071219;color:#dbe9ed;font-size:8px}.mvp-auditionLists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mvp-auditionListCard{padding:13px;border:1px solid rgba(108,175,199,.14);border-radius:13px;background:linear-gradient(160deg,#08141a,#050b0f);box-shadow:0 14px 35px rgba(0,0,0,.16)}.mvp-auditionListCard>header{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center}.mvp-auditionListIcon{width:42px;height:42px;display:grid;place-items:center;border-radius:10px;border:1px solid rgba(74,190,231,.2);background:linear-gradient(145deg,#102630,#07141a);color:#65d3f5;font-size:18px}.mvp-auditionListTitle{min-width:0}.mvp-auditionListTitle h3{margin:0 0 3px;color:#fff;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-auditionListTitle small{font-size:6.5px;color:#708994;letter-spacing:.08em}.mvp-auditionPercent{font-size:19px;color:#73dcfa}.mvp-auditionProgress,.mvp-auditionStageBar{height:4px;margin:11px 0 10px;overflow:hidden;border-radius:99px;background:#0d2028}.mvp-auditionProgress i,.mvp-auditionStageBar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#41b7e4,#74e4fb);box-shadow:0 0 12px rgba(72,201,238,.35)}.mvp-auditionListStats{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:5px}.mvp-auditionListStats span{min-height:47px;display:grid;place-content:center;border:1px solid rgba(106,161,180,.1);border-radius:8px;background:#061015;text-align:center;color:#bdcdd3;font-size:9px}.mvp-auditionListStats b{font-size:14px;color:#fff}.mvp-auditionListStats small{margin-top:2px;font-size:6px;font-weight:1000;letter-spacing:.08em;color:#708891}.mvp-auditionListStats .is-keep b{color:#72e9a6}.mvp-auditionListStats .is-maybe b{color:#ffd271}.mvp-auditionListStats .is-pass b{color:#ff8189}.mvp-auditionListCard footer{display:flex;gap:5px;margin-top:10px;flex-wrap:wrap}.mvp-auditionListCard footer button{min-height:31px;padding:0 9px;border:1px solid rgba(108,170,192,.13);border-radius:7px;background:#07141a;color:#a9c0c9;font-size:6.5px;font-weight:1000;cursor:pointer}.mvp-auditionListCard footer .is-open{color:#dff8ff;border-color:rgba(72,194,234,.3);background:#0b2530}.mvp-auditionListCard footer .is-danger{margin-left:auto;color:#ff8990;border-color:rgba(255,93,106,.16);background:#17090b}.mvp-auditionRename{display:flex;gap:4px}.mvp-auditionRename input{min-width:0;height:32px;padding:0 8px;border:1px solid #3db7df;border-radius:7px;background:#061118;color:#fff;font-size:10px}.mvp-auditionRename button{height:32px;padding:0 7px;border:1px solid rgba(89,184,215,.2);border-radius:7px;background:#0a1b22;color:#bfe8f5;font-size:6px;font-weight:1000}.mvp-auditionEmpty{min-height:220px;display:grid;place-content:center;justify-items:center;gap:8px;border:1px dashed rgba(111,177,199,.17);border-radius:13px;background:#050d11;color:#8299a2;text-align:center}.mvp-auditionEmpty b{color:#dcebf0;font-size:11px}.mvp-auditionEmpty span{max-width:440px;font-size:8px}.mvp-auditionEmpty button{min-height:36px;padding:0 14px;border:1px solid rgba(68,190,230,.25);border-radius:8px;background:#0b2631;color:#dff8ff;font-size:7px;font-weight:1000}.mvp-auditionStage{display:grid;gap:0;border:1px solid rgba(89,179,211,.16);border-radius:15px;background:radial-gradient(circle at 20% 0,rgba(32,130,174,.11),transparent 35%),#050c10;overflow:hidden}.mvp-auditionStageHead{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px 16px 8px}.mvp-auditionStageHead>button{height:32px;padding:0 9px;border:1px solid rgba(104,170,193,.15);border-radius:8px;background:#07141a;color:#9ab2bc;font-size:7px;font-weight:1000}.mvp-auditionStageHead>div:nth-child(2){display:grid;gap:2px}.mvp-auditionStageHead span{font-size:6.5px;font-weight:1000;letter-spacing:.14em;color:#56c9ed}.mvp-auditionStageHead h3{margin:0;font-size:14px;color:#fff}.mvp-auditionStageProgress{display:grid;text-align:right}.mvp-auditionStageProgress b{font-size:15px}.mvp-auditionStageProgress span{font-size:6px;color:#718d97}.mvp-auditionStageBar{margin:0 16px;height:3px}.mvp-auditionSongCard{display:grid;grid-template-columns:minmax(260px,.82fr) minmax(0,1.18fr);gap:24px;padding:20px}.mvp-auditionArtwork{position:relative;aspect-ratio:1/1;max-height:410px;border-radius:18px;overflow:hidden;border:1px solid rgba(106,185,214,.18);background:radial-gradient(circle at 50% 30%,#18313a,#071015 65%);box-shadow:0 24px 60px rgba(0,0,0,.32)}.mvp-auditionArtwork img{width:100%;height:100%;object-fit:cover}.mvp-auditionArtwork>div{width:100%;height:100%;display:grid;place-items:center;color:#66d4f3;font-size:80px;opacity:.5}.mvp-auditionArtwork>span{position:absolute;right:12px;bottom:12px;min-width:64px;height:35px;display:flex;align-items:baseline;justify-content:center;gap:3px;border:1px solid rgba(255,255,255,.13);border-radius:10px;background:rgba(3,9,12,.82);backdrop-filter:blur(10px);font-size:15px;font-weight:1000;color:#fff}.mvp-auditionArtwork>span small{font-size:8px;color:#90a7af}.mvp-auditionSongInfo{align-self:center;min-width:0}.mvp-auditionStatusRow{display:flex;gap:7px;align-items:center;margin-bottom:8px}.mvp-auditionStatusRow span,.mvp-auditionStatusRow b{min-height:24px;display:inline-flex;align-items:center;padding:0 8px;border-radius:999px;font-size:6.5px;font-weight:1000;letter-spacing:.08em}.mvp-auditionStatusRow span{border:1px solid rgba(97,164,188,.15);background:#07151b;color:#91aab4}.mvp-auditionStatusRow span.is-keep{color:#82efb0;border-color:rgba(74,220,142,.25);background:#071d13}.mvp-auditionStatusRow span.is-pass{color:#ff8a92;border-color:rgba(255,93,105,.2);background:#1a090c}.mvp-auditionStatusRow span.is-maybe{color:#ffd173;border-color:rgba(241,178,71,.22);background:#1b1406}.mvp-auditionStatusRow b{color:#8ceab7;background:#082117;border:1px solid rgba(83,214,148,.22)}.mvp-auditionSongInfo h2{margin:0;color:#fff;font-size:34px;line-height:1.05;letter-spacing:-.045em}.mvp-auditionSongInfo h3{margin:6px 0 0;color:#9ac7d6;font-size:17px}.mvp-auditionSongInfo>p{margin:7px 0 16px;color:#718c97;font-size:9px}.mvp-auditionListen{display:grid;grid-template-columns:1fr 1fr;gap:8px}.mvp-auditionListen button{min-height:48px;border-radius:11px;border:1px solid rgba(82,190,228,.24);background:linear-gradient(180deg,#0d2731,#08171d);color:#e7f8fd;font-size:8px;font-weight:1000;letter-spacing:.05em;cursor:pointer}.mvp-auditionListen button.is-playing{color:#071116;background:#72ddfa}.mvp-auditionListen button.is-youtube{border-color:rgba(255,79,87,.3);background:linear-gradient(180deg,#2a0d10,#150708);color:#ffb0b4}.mvp-auditionDecision{display:grid;grid-template-columns:1.2fr .8fr 1fr;gap:8px;margin-top:9px}.mvp-auditionDecision button{min-height:76px;display:grid;place-content:center;gap:3px;border-radius:13px;border:1px solid rgba(104,163,183,.14);background:#081319;color:#829ca6;font-size:19px;font-weight:1000;cursor:pointer}.mvp-auditionDecision button span{font-size:7px;letter-spacing:.1em}.mvp-auditionDecision .is-keep{color:#75e9a9}.mvp-auditionDecision .is-keep:hover,.mvp-auditionDecision .is-keep.is-active{border-color:rgba(68,221,141,.45);background:radial-gradient(circle at 50% 10%,rgba(65,219,137,.2),transparent 70%),#071a11;box-shadow:0 0 24px rgba(57,207,128,.1)}.mvp-auditionDecision .is-maybe{color:#ffd16f}.mvp-auditionDecision .is-maybe:hover,.mvp-auditionDecision .is-maybe.is-active{border-color:rgba(242,184,77,.42);background:#1a1306}.mvp-auditionDecision .is-pass{color:#ff818b}.mvp-auditionDecision .is-pass:hover,.mvp-auditionDecision .is-pass.is-active{border-color:rgba(255,84,99,.4);background:#19090c}.mvp-auditionPager{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:6px;margin-top:9px}.mvp-auditionPager button{min-height:34px;border:1px solid rgba(101,162,184,.12);border-radius:8px;background:#061015;color:#839ba4;font-size:6.5px;font-weight:1000}.mvp-auditionPager button:disabled{opacity:.3}.mvp-auditionCounts{display:flex;gap:14px;justify-content:center;padding:11px;border-top:1px solid rgba(99,164,188,.1);background:#040a0d;color:#8199a2;font-size:7px;font-weight:1000}.mvp-auditionCounts b{color:#fff}.mvp-auditionCounts .is-keep b{color:#75e9a9}.mvp-auditionCounts .is-pass b{color:#ff818b}.mvp-auditionCounts .is-maybe b{color:#ffd16f}.mvp-auditionKept{display:grid;gap:10px}.mvp-auditionKept>header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border:1px solid rgba(83,181,214,.14);border-radius:12px;background:#061117}.mvp-auditionKept>header span{font-size:6.5px;font-weight:1000;letter-spacing:.14em;color:#70dfa6}.mvp-auditionKept>header h3{margin:2px 0;font-size:20px}.mvp-auditionKept>header p{margin:0;color:#7d98a2;font-size:8px}.mvp-auditionKept>header>b{font-size:31px;color:#71e5a5}.mvp-auditionKeptGrid{display:grid;gap:6px}.mvp-auditionKeptGrid>article{display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid rgba(100,164,186,.11);border-radius:10px;background:#061015}.mvp-auditionKeptArt{width:58px;height:58px;border-radius:8px;overflow:hidden;background:#0d1d23;display:grid;place-items:center;color:#65d2f3}.mvp-auditionKeptArt img{width:100%;height:100%;object-fit:cover}.mvp-auditionKeptInfo{min-width:0;display:grid;gap:1px}.mvp-auditionKeptInfo small{color:#73e3a6;font-size:6px;font-weight:1000;letter-spacing:.08em}.mvp-auditionKeptInfo strong{color:#fff;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-auditionKeptInfo b{color:#a8c3cd;font-size:8px}.mvp-auditionKeptInfo p{margin:3px 0 0;color:#657f89;font-size:6.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-auditionKeptActions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.mvp-auditionKeptActions button{min-height:31px;padding:0 8px;border:1px solid rgba(100,168,192,.13);border-radius:7px;background:#08161c;color:#a9c2cc;font-size:6px;font-weight:1000}.mvp-auditionKeptActions .is-youtube{color:#ff9ba1;border-color:rgba(255,83,95,.2);background:#16080a}.mvp-auditionKeptActions .is-add{color:#7de8ad;border-color:rgba(70,214,139,.24);background:#071a11}.mvp-auditionKeptActions .is-remove{color:#ff858e}.mvp-auditionModalBackdrop{position:fixed;inset:0;z-index:10040;display:grid;place-items:center;padding:14px;background:rgba(0,0,0,.76);backdrop-filter:blur(12px)}.mvp-auditionModal{width:min(680px,96vw);max-height:92dvh;overflow:auto;padding:16px;border:1px solid rgba(91,190,225,.22);border-radius:16px;background:linear-gradient(155deg,#0a171d,#050a0d);box-shadow:0 30px 90px rgba(0,0,0,.55)}.mvp-auditionModal.is-small{width:min(480px,96vw)}.mvp-auditionModal>header{display:flex;justify-content:space-between;align-items:start;margin-bottom:12px}.mvp-auditionModal>header span{font-size:6.5px;font-weight:1000;letter-spacing:.14em;color:#62d1f3}.mvp-auditionModal>header h3{margin:3px 0;font-size:20px;color:#fff}.mvp-auditionModal>header>button{width:32px;height:32px;border:1px solid rgba(109,169,190,.14);border-radius:8px;background:#071218;color:#9ab1ba;font-size:18px}.mvp-auditionModal>label{display:grid;gap:5px;margin-top:10px}.mvp-auditionModal>label>span{font-size:6.5px;font-weight:1000;letter-spacing:.12em;color:#7b949d}.mvp-auditionModal input,.mvp-auditionModal textarea{width:100%;box-sizing:border-box;border:1px solid rgba(93,174,203,.18);border-radius:9px;background:#040c10;color:#f0f8fa;outline:none}.mvp-auditionModal input{height:41px;padding:0 11px;font-size:10px}.mvp-auditionModal textarea{height:270px;padding:11px;resize:vertical;font:500 10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.mvp-auditionModal input:focus,.mvp-auditionModal textarea:focus{border-color:#43bee8;box-shadow:0 0 0 2px rgba(67,190,232,.08)}.mvp-auditionImportHint{display:grid;grid-template-columns:auto auto 1fr;gap:6px;align-items:center;margin-top:9px;padding:8px 10px;border-radius:8px;background:#07151b}.mvp-auditionImportHint b{font-size:17px;color:#69d9f7}.mvp-auditionImportHint span{font-size:7px;font-weight:1000;color:#bdd2da}.mvp-auditionImportHint small{justify-self:end;color:#708a94;font-size:7px}.mvp-auditionError{padding:8px;border-radius:7px;background:#1a090b;color:#ff8e96;font-size:8px}.mvp-auditionModal>footer{display:flex;justify-content:flex-end;gap:7px;margin-top:12px}.mvp-auditionModal>footer button{min-height:38px;padding:0 13px;border:1px solid rgba(105,165,187,.14);border-radius:8px;background:#08151b;color:#9fb7c0;font-size:7px;font-weight:1000}.mvp-auditionModal>footer .is-import{color:#071116;background:#65d8f6;border-color:#65d8f6}.mvp-auditionModal>footer button:disabled{opacity:.35}.mvp-auditionMergeCopy{color:#829aa4;font-size:8px}.mvp-auditionMergeTargets{display:grid;gap:6px;margin-top:10px}.mvp-auditionMergeTargets button{display:flex;justify-content:space-between;align-items:center;min-height:46px;padding:0 11px;border:1px solid rgba(93,173,201,.14);border-radius:8px;background:#07141a;color:#d7e9ee}.mvp-auditionMergeTargets button strong{font-size:9px}.mvp-auditionMergeTargets button span{font-size:7px;color:#78929c}
+
+      /* MVP_TRAINER_V5_R12_5E_9_AUDITION_PREMIUM */
+      .mvp-audition{
+        --aud-cyan:#45d8ff;
+        --aud-cyan2:#10a7d7;
+        --aud-orange:#ff9f24;
+        --aud-green:#43e69a;
+        --aud-amber:#ffc05a;
+        --aud-red:#ff5e68;
+        color:#edf9fd;
+      }
+      .mvp-auditionHero{
+        position:relative;overflow:hidden;
+        padding:18px 19px;
+        border-bottom:1px solid rgba(79,190,225,.16);
+        background:
+          radial-gradient(700px 180px at 8% -30%,rgba(41,206,255,.16),transparent 62%),
+          radial-gradient(420px 180px at 92% 130%,rgba(255,151,30,.08),transparent 70%),
+          linear-gradient(180deg,#071820 0%,#051117 100%);
+      }
+      .mvp-auditionHero:after{content:"";position:absolute;inset:auto 0 0;height:1px;background:linear-gradient(90deg,transparent,rgba(64,214,255,.65),rgba(255,158,36,.38),transparent);opacity:.65}
+      .mvp-auditionHero h2{font-size:30px!important;letter-spacing:-.045em!important;text-shadow:0 4px 24px rgba(0,0,0,.36)}
+      .mvp-auditionHero p{max-width:680px!important;color:#8ea8b2!important;font-size:9px!important;font-weight:750!important}
+      .mvp-auditionGlobal>div{
+        min-width:70px!important;min-height:58px!important;
+        border:1px solid rgba(92,185,217,.13)!important;border-radius:11px!important;
+        background:linear-gradient(180deg,rgba(8,27,35,.92),rgba(4,13,18,.96))!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 10px 24px rgba(0,0,0,.18)!important;
+      }
+      .mvp-auditionGlobal>div b{font-size:21px!important;color:#f5fcff!important}
+      .mvp-auditionGlobal>div span{font-size:6px!important;letter-spacing:.13em!important}
+      .mvp-auditionNav{
+        padding:7px!important;gap:6px!important;
+        border-bottom:1px solid rgba(73,166,198,.13)!important;
+        background:#030b0f!important;
+      }
+      .mvp-auditionNav button{
+        min-height:39px!important;padding:0 13px!important;
+        border:1px solid rgba(91,171,198,.10)!important;border-radius:9px!important;
+        background:linear-gradient(180deg,#081820,#051015)!important;
+        color:#859da7!important;font-size:7.5px!important;font-weight:1000!important;letter-spacing:.08em!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.02)!important;
+      }
+      .mvp-auditionNav button:hover{color:#dff8ff!important;border-color:rgba(76,206,247,.28)!important;background:linear-gradient(180deg,#0a2632,#06161d)!important}
+      .mvp-auditionNav button.is-active{
+        color:#f4fcff!important;border-color:rgba(68,213,255,.42)!important;
+        background:linear-gradient(180deg,#0c3443,#08222d)!important;
+        box-shadow:inset 0 -2px var(--aud-cyan),0 0 18px rgba(49,197,239,.08)!important;
+      }
+      .mvp-auditionNav button.is-import{
+        margin-left:auto!important;color:#071116!important;
+        border-color:rgba(255,174,54,.86)!important;
+        background:linear-gradient(180deg,#ffb13f,#e58109)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.38),0 6px 18px rgba(229,129,9,.16)!important;
+        text-shadow:0 1px rgba(255,255,255,.22)!important;
+      }
+      .mvp-auditionStage{
+        overflow:hidden;border:1px solid rgba(77,183,217,.18)!important;border-radius:15px!important;
+        background:linear-gradient(180deg,#06141b,#030a0e)!important;
+        box-shadow:0 18px 42px rgba(0,0,0,.20),inset 0 1px rgba(255,255,255,.02)!important;
+      }
+      .mvp-auditionStageHead{
+        min-height:64px!important;padding:10px 13px!important;
+        background:linear-gradient(180deg,rgba(8,26,34,.98),rgba(4,13,18,.98))!important;
+      }
+      .mvp-auditionStageHead>button{
+        min-height:34px!important;border-radius:8px!important;border-color:rgba(95,178,208,.17)!important;
+        background:#07151b!important;color:#a9c1ca!important;
+      }
+      .mvp-auditionStageHead h3{font-size:14px!important;color:#f5fbfe!important}
+      .mvp-auditionStageProgress b{font-size:16px!important;color:#fff!important}
+      .mvp-auditionStageBar{height:2px!important;background:#031017!important}
+      .mvp-auditionStageBar i{background:linear-gradient(90deg,var(--aud-cyan),#79e7ff 58%,var(--aud-orange))!important;box-shadow:0 0 10px rgba(63,210,250,.42)!important}
+      .mvp-auditionSongCard{
+        position:relative;isolation:isolate;
+        grid-template-columns:minmax(220px,300px) minmax(0,1fr)!important;
+        gap:22px!important;padding:20px!important;
+        border:0!important;border-radius:0!important;
+        background:
+          radial-gradient(600px 250px at 12% 16%,rgba(49,200,242,.085),transparent 62%),
+          radial-gradient(500px 260px at 95% 95%,rgba(255,151,34,.045),transparent 68%),
+          linear-gradient(145deg,#061319 0%,#03090d 72%)!important;
+      }
+      .mvp-auditionSongCard:before{
+        content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+        background:linear-gradient(115deg,rgba(255,255,255,.018),transparent 38%);
+      }
+      .mvp-auditionArtwork{
+        width:100%!important;aspect-ratio:1/1!important;
+        border:1px solid rgba(86,196,230,.21)!important;border-radius:16px!important;
+        background:
+          radial-gradient(circle at 32% 20%,rgba(71,217,255,.15),transparent 42%),
+          linear-gradient(145deg,#0a2029,#040c10)!important;
+        box-shadow:0 22px 48px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.04),0 0 0 1px rgba(0,0,0,.35)!important;
+      }
+      .mvp-auditionArtwork img{filter:saturate(1.04) contrast(1.03)}
+      .mvp-auditionArtworkFallback{position:absolute!important;inset:0!important;display:grid!important;place-content:center!important;gap:8px!important;text-align:center!important;color:#78ddfa!important}
+      .mvp-auditionArtworkFallback>span{font-size:72px!important;line-height:1!important;opacity:.36!important;text-shadow:0 0 30px rgba(69,216,255,.16)}
+      .mvp-auditionArtworkFallback>small{font-size:7px!important;font-weight:1000!important;letter-spacing:.16em!important;color:#708e99!important}
+      .mvp-auditionArtwork>span{
+        right:11px!important;bottom:11px!important;min-width:60px!important;height:32px!important;border-radius:9px!important;
+        border-color:rgba(255,255,255,.16)!important;background:rgba(2,8,11,.88)!important;
+        box-shadow:0 8px 20px rgba(0,0,0,.24)!important;
+      }
+      .mvp-auditionSongInfo{padding:4px 0!important}
+      .mvp-auditionStatusRow{gap:6px!important;flex-wrap:wrap!important;margin-bottom:11px!important}
+      .mvp-auditionStatusRow span,.mvp-auditionStatusRow b{min-height:23px!important;padding:0 8px!important;font-size:6px!important;border-radius:7px!important}
+      .mvp-auditionStatusRow .is-source{color:#9bb5bf!important;border-color:rgba(126,168,183,.13)!important;background:#071219!important}
+      .mvp-auditionStatusRow .is-verified{color:#77efb0!important;border-color:rgba(73,223,148,.26)!important;background:rgba(7,38,24,.82)!important}
+      .mvp-auditionSongInfo h2{
+        max-width:760px;margin:0!important;font-size:36px!important;line-height:1.02!important;letter-spacing:-.048em!important;
+        color:#fff!important;text-wrap:balance;text-shadow:0 5px 24px rgba(0,0,0,.34)!important;
+      }
+      .mvp-auditionSongInfo h3{margin:7px 0 0!important;font-size:17px!important;color:#a9d7e6!important;letter-spacing:-.012em!important}
+      .mvp-auditionMeta{
+        min-height:20px;margin:9px 0 16px!important;color:#6f8a94!important;font-size:8px!important;font-weight:800!important;letter-spacing:.015em!important;
+      }
+      .mvp-auditionListen{grid-template-columns:1fr 1fr!important;gap:8px!important}
+      .mvp-auditionListen button{
+        min-height:54px!important;padding:0 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:11px!important;
+        border-radius:11px!important;border:1px solid rgba(76,200,240,.28)!important;
+        background:linear-gradient(180deg,#0b2a36,#061820)!important;color:#eefbff!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.04),0 8px 18px rgba(0,0,0,.18)!important;
+        text-align:left!important;cursor:pointer!important;
+      }
+      .mvp-auditionListen button:hover{transform:translateY(-1px);border-color:rgba(71,216,255,.52)!important;background:linear-gradient(180deg,#0d3645,#071e28)!important}
+      .mvp-auditionListen button.is-playing{border-color:#6fe0ff!important;background:linear-gradient(180deg,#143f4d,#0a2530)!important;color:#fff!important;box-shadow:0 0 0 1px rgba(85,220,255,.12),0 0 22px rgba(59,202,242,.12)!important}
+      .mvp-auditionListen button.is-youtube{
+        border-color:rgba(255,82,94,.34)!important;background:linear-gradient(180deg,#2b1014,#15080a)!important;color:#ffd8dc!important;
+      }
+      .mvp-auditionListen button.is-youtube:hover{border-color:rgba(255,83,95,.58)!important;background:linear-gradient(180deg,#371318,#1a090c)!important}
+      .mvp-auditionControlIcon{
+        width:31px;height:31px;display:grid;place-items:center;flex:0 0 31px;
+        border:1px solid rgba(255,255,255,.09);border-radius:999px;background:rgba(0,0,0,.22);
+        color:#fff;font-size:12px;font-weight:1000;
+      }
+      .mvp-auditionControlCopy{display:grid;gap:2px!important}
+      .mvp-auditionControlCopy strong{font-size:8px!important;letter-spacing:.09em!important}
+      .mvp-auditionControlCopy small{color:#78949f!important;font-size:6.5px!important;font-weight:850!important;letter-spacing:.025em!important}
+      .mvp-auditionListen .is-youtube .mvp-auditionControlCopy small{color:#a86e74!important}
+      .mvp-auditionDecision{grid-template-columns:1.2fr 1fr 1fr!important;gap:8px!important;margin-top:9px!important}
+      .mvp-auditionDecision button{
+        min-height:59px!important;padding:0 12px!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:10px!important;
+        border-radius:11px!important;border:1px solid rgba(105,163,183,.12)!important;
+        background:linear-gradient(180deg,#08171e,#050f14)!important;color:#8fa6af!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.022),0 7px 16px rgba(0,0,0,.14)!important;
+        text-align:left!important;
+      }
+      .mvp-auditionDecision button>span:last-child{display:grid!important;gap:1px!important}
+      .mvp-auditionDecision button strong{font-size:8px!important;letter-spacing:.12em!important}
+      .mvp-auditionDecision button small{font-size:6px!important;color:#667f89!important;font-weight:800!important;letter-spacing:.02em!important}
+      .mvp-auditionDecisionIcon{
+        width:30px;height:30px;display:grid!important;place-items:center!important;flex:0 0 30px;
+        border-radius:9px!important;background:rgba(0,0,0,.22)!important;font-size:15px!important;font-weight:1000!important;
+      }
+      .mvp-auditionDecision .is-keep{color:#76efad!important}
+      .mvp-auditionDecision .is-keep:hover,.mvp-auditionDecision .is-keep.is-active{
+        border-color:rgba(66,230,151,.46)!important;background:linear-gradient(180deg,#0a2d1d,#06170f)!important;
+        box-shadow:inset 0 -2px rgba(67,230,154,.55),0 0 20px rgba(49,210,132,.09)!important;
+      }
+      .mvp-auditionDecision .is-maybe{color:#ffc766!important}
+      .mvp-auditionDecision .is-maybe:hover,.mvp-auditionDecision .is-maybe.is-active{
+        border-color:rgba(255,190,75,.42)!important;background:linear-gradient(180deg,#2b1d08,#140e05)!important;
+        box-shadow:inset 0 -2px rgba(255,190,75,.48),0 0 18px rgba(237,166,44,.07)!important;
+      }
+      .mvp-auditionDecision .is-pass{color:#ff7e88!important}
+      .mvp-auditionDecision .is-pass:hover,.mvp-auditionDecision .is-pass.is-active{
+        border-color:rgba(255,88,101,.42)!important;background:linear-gradient(180deg,#2b0d12,#15070a)!important;
+        box-shadow:inset 0 -2px rgba(255,83,98,.48),0 0 18px rgba(226,54,69,.07)!important;
+      }
+      .mvp-auditionPager{grid-template-columns:.9fr 1.2fr .9fr!important;gap:6px!important;margin-top:8px!important}
+      .mvp-auditionPager button{
+        min-height:37px!important;border-radius:9px!important;border-color:rgba(94,164,189,.12)!important;
+        background:linear-gradient(180deg,#07151b,#040d11)!important;color:#839da7!important;font-size:6.5px!important;letter-spacing:.07em!important;
+      }
+      .mvp-auditionPager button:not(:disabled):hover{color:#dff8ff!important;border-color:rgba(74,200,240,.26)!important;background:#081d26!important}
+      .mvp-auditionPager .is-next-unreviewed{color:#c7f2ff!important;border-color:rgba(63,198,239,.24)!important;background:linear-gradient(180deg,#0a2834,#061921)!important}
+      .mvp-auditionCounts{
+        min-height:39px!important;align-items:center!important;gap:18px!important;padding:8px 12px!important;
+        border-top-color:rgba(82,170,200,.12)!important;background:#03090d!important;
+      }
       @media(max-width:760px){.mvp-auditionHero{align-items:stretch;flex-direction:column;padding:14px}.mvp-auditionHero h2{font-size:24px}.mvp-auditionGlobal{grid-template-columns:repeat(4,minmax(0,1fr))}.mvp-auditionGlobal>div{min-height:50px}.mvp-auditionNav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.mvp-auditionNav button.is-import{margin-left:0}.mvp-auditionToolbar{align-items:stretch;flex-direction:column}.mvp-auditionToolbar select{width:100%}.mvp-auditionLists{grid-template-columns:1fr}.mvp-auditionListStats{grid-template-columns:repeat(4,1fr)}.mvp-auditionListCard footer .is-danger{margin-left:0}.mvp-auditionSongCard{grid-template-columns:1fr;gap:15px;padding:13px}.mvp-auditionArtwork{width:min(100%,330px);justify-self:center}.mvp-auditionSongInfo h2{font-size:27px}.mvp-auditionListen{grid-template-columns:1fr 1fr}.mvp-auditionDecision button{min-height:67px}.mvp-auditionStageHead{grid-template-columns:auto 1fr}.mvp-auditionStageProgress{grid-column:1/-1;text-align:left;grid-template-columns:auto 1fr;gap:6px;align-items:center}.mvp-auditionKeptGrid>article{grid-template-columns:52px minmax(0,1fr)}.mvp-auditionKeptArt{width:52px;height:52px}.mvp-auditionKeptActions{grid-column:1/-1;justify-content:flex-start}.mvp-auditionModal textarea{height:230px}.mvp-auditionImportHint{grid-template-columns:auto 1fr}.mvp-auditionImportHint small{grid-column:1/-1;justify-self:start}.mvp-auditionCounts{flex-wrap:wrap}}
+
+      /* Premium saved-list and empty-state surfaces */
+      .mvp-auditionToolbar{padding:6px 3px 2px!important}
+      .mvp-auditionToolbar strong{font-size:9px!important;letter-spacing:.05em!important;color:#eaf8fc!important}
+      .mvp-auditionToolbar>div span{font-size:7.5px!important;color:#718b95!important}
+      .mvp-auditionToolbar select{
+        min-width:156px!important;height:38px!important;border-radius:9px!important;
+        border-color:rgba(85,180,213,.17)!important;background:linear-gradient(180deg,#071820,#050e13)!important;
+        color:#e0f0f5!important;
+      }
+      .mvp-auditionLists{gap:11px!important}
+      .mvp-auditionListCard{
+        position:relative;overflow:hidden;padding:14px!important;border-radius:14px!important;
+        border-color:rgba(81,180,214,.16)!important;
+        background:
+          radial-gradient(350px 110px at 0% 0%,rgba(48,204,247,.08),transparent 70%),
+          linear-gradient(155deg,#081820,#040c10 72%)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 16px 34px rgba(0,0,0,.18)!important;
+      }
+      .mvp-auditionListCard:after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(70,210,250,.28),transparent)}
+      .mvp-auditionListIcon{
+        border-radius:11px!important;border-color:rgba(71,207,249,.24)!important;
+        background:linear-gradient(145deg,#103544,#07171e)!important;color:#75e5ff!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.04),0 8px 18px rgba(0,0,0,.16)!important;
+      }
+      .mvp-auditionListTitle h3{font-size:15px!important;letter-spacing:-.02em!important}
+      .mvp-auditionPercent{font-size:20px!important;color:#7de5ff!important}
+      .mvp-auditionProgress{height:3px!important;background:#07171e!important}
+      .mvp-auditionListStats span{
+        min-height:45px!important;border-radius:9px!important;border-color:rgba(103,168,190,.09)!important;
+        background:rgba(3,11,15,.72)!important;
+      }
+      .mvp-auditionListCard footer button{
+        min-height:33px!important;padding:0 10px!important;border-radius:8px!important;
+        border-color:rgba(95,170,197,.12)!important;background:linear-gradient(180deg,#07161d,#050e13)!important;
+        color:#9cb4bd!important;
+      }
+      .mvp-auditionListCard footer button:hover{color:#e5f8fe!important;border-color:rgba(74,199,239,.25)!important}
+      .mvp-auditionListCard footer .is-open{
+        color:#f1fcff!important;border-color:rgba(65,209,250,.35)!important;
+        background:linear-gradient(180deg,#0b3140,#071e28)!important;
+        box-shadow:inset 0 -2px rgba(65,213,255,.45)!important;
+      }
+      .mvp-auditionListCard footer .is-danger{color:#ff9299!important;background:linear-gradient(180deg,#1e0a0d,#100507)!important}
+      .mvp-auditionEmpty{
+        min-height:230px!important;border-style:solid!important;border-color:rgba(89,177,208,.12)!important;
+        background:
+          radial-gradient(420px 150px at 50% 10%,rgba(55,201,242,.07),transparent 66%),
+          #040c10!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.018)!important;
+      }
+      .mvp-auditionEmpty b{font-size:10px!important;letter-spacing:.08em!important;color:#e9f7fb!important}
+      .mvp-auditionEmpty span{font-size:7.5px!important;color:#718a94!important}
+      .mvp-auditionEmpty button{
+        min-height:38px!important;border-radius:9px!important;border-color:rgba(70,205,246,.32)!important;
+        background:linear-gradient(180deg,#0b3342,#071d26)!important;color:#edfaff!important;
+        box-shadow:inset 0 -2px rgba(62,208,250,.4)!important;
+      }
+      .mvp-auditionArtworkFallback{opacity:1!important}
+      @media(max-width:760px){
+        .mvp-auditionHero{border-radius:12px!important}
+        .mvp-auditionHero h2{font-size:26px!important}
+        .mvp-auditionNav{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+        .mvp-auditionNav button{min-height:42px!important}
+        .mvp-auditionNav button.is-import{margin-left:0!important}
+        .mvp-auditionSongCard{grid-template-columns:1fr!important;gap:14px!important;padding:12px!important}
+        .mvp-auditionArtwork{width:min(100%,320px)!important;justify-self:center!important;border-radius:15px!important}
+        .mvp-auditionSongInfo{padding:1px 2px 3px!important}
+        .mvp-auditionSongInfo h2{font-size:27px!important}
+        .mvp-auditionSongInfo h3{font-size:15px!important}
+        .mvp-auditionListen{grid-template-columns:1fr 1fr!important}
+        .mvp-auditionListen button{min-height:52px!important;padding:0 10px!important;gap:8px!important}
+        .mvp-auditionControlIcon{width:28px;height:28px;flex-basis:28px}
+        .mvp-auditionDecision{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+        .mvp-auditionDecision button{min-height:58px!important;padding:0 7px!important;gap:6px!important}
+        .mvp-auditionDecisionIcon{width:27px;height:27px;flex-basis:27px}
+        .mvp-auditionDecision button small{display:none!important}
+        .mvp-auditionPager{grid-template-columns:1fr 1.35fr 1fr!important}
+        .mvp-auditionPager button{min-height:38px!important;font-size:6px!important}
+        .mvp-auditionStatusRow .is-source{display:none!important}
+      }
+      @media(max-width:420px){
+        .mvp-auditionGlobal{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+        .mvp-auditionListen{grid-template-columns:1fr!important}
+        .mvp-auditionDecision{grid-template-columns:1fr 1fr 1fr!important;gap:5px!important}
+        .mvp-auditionDecision button{min-height:54px!important;display:grid!important;place-content:center!important;text-align:center!important}
+        .mvp-auditionDecisionIcon{display:none!important}
+        .mvp-auditionPager{grid-template-columns:1fr 1fr!important}
+        .mvp-auditionPager .is-next-unreviewed{grid-column:1/-1;grid-row:1}
+      }
     `}</style>
   </section>;
 }
