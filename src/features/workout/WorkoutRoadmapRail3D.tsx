@@ -95,6 +95,20 @@ export function WorkoutRoadmapRail3D({
             <stop offset="0.78" stopColor="#d2e3e8" stopOpacity="0.34" />
             <stop offset="1" stopColor="#71858e" stopOpacity="0.04" />
           </linearGradient>
+          <linearGradient id="rm9NodeRim" x1="0" y1="0" x2="0.82" y2="1">
+            <stop offset="0" stopColor="#f0f8fa" stopOpacity="0.50" />
+            <stop offset="0.18" stopColor="#8fa5ae" stopOpacity="0.30" />
+            <stop offset="0.48" stopColor="#172229" stopOpacity="0.72" />
+            <stop offset="0.78" stopColor="#8aa0a9" stopOpacity="0.22" />
+            <stop offset="1" stopColor="#020507" stopOpacity="0.90" />
+          </linearGradient>
+          <linearGradient id="rm9TopSheen" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#ffffff" stopOpacity="0" />
+            <stop offset="0.18" stopColor="#eff9fb" stopOpacity="0.14" />
+            <stop offset="0.46" stopColor="#ffffff" stopOpacity="0.28" />
+            <stop offset="0.72" stopColor="#d8edf2" stopOpacity="0.10" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
           <radialGradient id="rm8Glass" cx="38%" cy="28%" r="72%">
             <stop offset="0" stopColor="#d9edf3" stopOpacity="0.26" />
             <stop offset="0.18" stopColor="#253a44" stopOpacity="0.72" />
@@ -146,6 +160,22 @@ export function WorkoutRoadmapRail3D({
           stroke="url(#rm8MetalEdge)"
           strokeWidth="2.2"
         />
+        <path
+          d="M74 55 Q91 46 116 46 H1084 Q1109 46 1126 55"
+          fill="none"
+          stroke="url(#rm9TopSheen)"
+          strokeWidth="2.6"
+          strokeLinecap="round"
+          opacity="0.92"
+        />
+        <path
+          d="M75 96 Q93 105 116 105 H1084 Q1107 105 1125 96"
+          fill="none"
+          stroke="#000000"
+          strokeWidth="3"
+          strokeLinecap="round"
+          opacity="0.62"
+        />
 
         <rect x="79" y="65" width="1042" height="24" rx="12" fill="#010407" opacity="0.92" />
         <rect x="88" y="68" width="1024" height="18" rx="9" fill="url(#rm8Channel)" stroke="#8ba3ad" strokeOpacity="0.13" />
@@ -179,8 +209,9 @@ export function WorkoutRoadmapRail3D({
           return (
             <g key={point.id} className={`tr-roadmapRailPremiumNode is-${point.state}`}>
               <circle cx={point.x} cy={CENTER_Y + 5} r={outerR + 8} fill="#000" opacity="0.34" filter="url(#rm8Shadow)" />
-              <circle cx={point.x} cy={CENTER_Y} r={outerR} fill="url(#rm8Chassis)" stroke="#8ba2ab" strokeOpacity="0.34" strokeWidth="2" />
-              <circle cx={point.x} cy={CENTER_Y} r={outerR - 6} fill="#020507" stroke="#d4e5ea" strokeOpacity="0.13" strokeWidth="1.6" />
+              <circle cx={point.x} cy={CENTER_Y} r={outerR + 1.5} fill="#030608" stroke="url(#rm9NodeRim)" strokeOpacity={current ? 0.86 : next ? 0.68 : 0.48} strokeWidth="2.5" />
+              <circle cx={point.x} cy={CENTER_Y} r={outerR} fill="url(#rm8Chassis)" stroke="#8ba2ab" strokeOpacity="0.28" strokeWidth="1.4" />
+              <circle cx={point.x} cy={CENTER_Y} r={outerR - 6} fill="#020507" stroke="#d4e5ea" strokeOpacity={current ? 0.22 : 0.13} strokeWidth="1.6" />
               <circle cx={point.x} cy={CENTER_Y} r={accentR + 7} fill="url(#rm8Glass)" stroke={point.accent} strokeOpacity={0.18 + power * 0.36} strokeWidth="2" />
               <circle
                 cx={point.x}
@@ -198,6 +229,14 @@ export function WorkoutRoadmapRail3D({
                 stroke="#e8f3f6"
                 strokeOpacity={current ? 0.38 : 0.17}
                 strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <path
+                d={`M ${point.x - outerR * 0.54} ${CENTER_Y + outerR * 0.78} A ${outerR} ${outerR} 0 0 0 ${point.x + outerR * 0.56} ${CENTER_Y + outerR * 0.76}`}
+                fill="none"
+                stroke="#000000"
+                strokeOpacity="0.68"
+                strokeWidth="2.4"
                 strokeLinecap="round"
               />
               {done ? (
