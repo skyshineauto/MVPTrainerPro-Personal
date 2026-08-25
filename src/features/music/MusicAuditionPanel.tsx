@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
 import { supabase } from "../../lib/supabase";
 
@@ -95,6 +95,7 @@ const EVENT = "mvp:music-audition-changed";
 const LIST_TABLE = "music_audition_lists";
 const SONG_TABLE = "music_audition_songs";
 const LINK_TABLE = "music_audition_list_songs";
+const METADATA_CACHE_MS = 7 * 86400000;
 const metadataRequests = new Map<string, Promise<MusicAuditionSong>>();
 let cloudHydrationPromise: Promise<void> | null = null;
 
@@ -1007,13 +1008,13 @@ type Props = {
 function listStats(
   list: MusicAuditionList,
   songsById: Map<string, MusicAuditionSong>,
-  tracks: MusicTrack[],
+  isInLibrary: (song: MusicAuditionSong) => boolean,
 ) {
   const importedSongs = list.songIds
     .map((id) => songsById.get(id))
     .filter((song): song is MusicAuditionSong => Boolean(song));
-  const skipped = importedSongs.filter((song) => musicAuditionSongInLibrary(song, tracks)).length;
-  const songs = importedSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks));
+  const skipped = importedSongs.filter(isInLibrary).length;
+  const songs = importedSongs.filter((song) => !isInLibrary(song));
   const keep = songs.filter((song) => song.decision === "keep").length;
   const pass = songs.filter((song) => song.decision === "pass").length;
   const maybe = songs.filter((song) => song.decision === "maybe").length;
@@ -1049,30 +1050,62 @@ function defaultListName() {
   return `Audition List ${date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
-function PlayGlyph({ stop = false }: { stop?: boolean }) {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
-    {stop ? <rect x="7" y="7" width="10" height="10" rx="1.5" /> : <path d="M8 5.8v12.4c0 .9 1 1.4 1.8.9l9-6.2a1.1 1.1 0 0 0 0-1.8l-9-6.2A1.1 1.1 0 0 0 8 5.8Z" />}
+
+function PreviewGlyph({ stop = false }: { stop?: boolean }) {
+  return <svg className="mvp-svg mvp-svgPreview" viewBox="0 0 42 28" aria-hidden="true" fill="none">
+    <path d="M2 14h3M7 9v10M11 5v18M15 8v12M19 11v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    {stop
+      ? <><rect x="27" y="7" width="4" height="14" rx="1" fill="currentColor" /><rect x="34" y="7" width="4" height="14" rx="1" fill="currentColor" /></>
+      : <path d="M27 5.5 39 14 27 22.5V5.5Z" fill="currentColor" />}
   </svg>;
 }
 
-function CheckGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5.2 12.5 4.2 4.2L19 7.3" /></svg>;
+function YouTubeGlyph() {
+  return <svg className="mvp-svg mvp-svgYoutube" viewBox="0 0 40 28" aria-hidden="true">
+    <path fill="#ff1938" d="M38.5 6.1a5.1 5.1 0 0 0-3.6-3.6C31.7 1.6 20 1.6 20 1.6S8.3 1.6 5.1 2.5A5.1 5.1 0 0 0 1.5 6.1C.6 9.3.6 14 .6 14s0 4.7.9 7.9a5.1 5.1 0 0 0 3.6 3.6c3.2.9 14.9.9 14.9.9s11.7 0 14.9-.9a5.1 5.1 0 0 0 3.6-3.6c.9-3.2.9-7.9.9-7.9s0-4.7-.9-7.9Z"/>
+    <path fill="#fff" d="m16.2 20.1 9.9-6.1-9.9-6.1v12.2Z"/>
+  </svg>;
+}
+
+function KeepGlyph() {
+  return <svg className="mvp-svg mvp-svgKeep" viewBox="0 0 36 28" aria-hidden="true" fill="none">
+    <path d="M3 15.5 11.3 24 33 3.5" stroke="currentColor" strokeWidth="3.1" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M7 15.2 12 20.3" stroke="rgba(255,255,255,.55)" strokeWidth="1.1" strokeLinecap="round"/>
+  </svg>;
 }
 
 function MaybeGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round"><path d="M8.7 8.4a3.7 3.7 0 0 1 7.1 1.5c0 2.7-3.8 3-3.8 5.2" /><circle cx="12" cy="18.4" r="1" fill="currentColor" stroke="none" /></svg>;
+  return <svg className="mvp-svg mvp-svgMaybe" viewBox="0 0 32 32" aria-hidden="true" fill="none">
+    <path d="M7.3 10.2c.8-4.1 4.1-6.4 8.8-6.4 5.3 0 8.8 3.1 8.8 7.6 0 6.3-7.2 6.3-7.2 11.1" stroke="currentColor" strokeWidth="2.7" strokeLinecap="round"/>
+    <path d="M17.7 28.2h.1" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+  </svg>;
 }
 
-function CloseGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round"><path d="m7 7 10 10M17 7 7 17" /></svg>;
+function PassGlyph() {
+  return <svg className="mvp-svg mvp-svgPass" viewBox="0 0 32 32" aria-hidden="true" fill="none">
+    <path d="M5 5 27 27M27 5 5 27" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round"/>
+    <path d="M8.5 4.5 27.5 23.5" stroke="rgba(255,255,255,.22)" strokeWidth=".9" strokeLinecap="round"/>
+  </svg>;
 }
 
 function UploadGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14.5V19h14v-4.5" /></svg>;
+  return <svg className="mvp-svg mvp-svgUpload" viewBox="0 0 36 30" aria-hidden="true" fill="none">
+    <path d="M18 20V3m0 0-6 6m6-6 6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M5 19v7h26v-7" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round"/>
+    <path d="M10 26h16" stroke="rgba(255,255,255,.3)" strokeWidth="1"/>
+  </svg>;
 }
 
 function MoreGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>;
+  return <svg className="mvp-svg mvp-svgMore" viewBox="0 0 36 12" aria-hidden="true" fill="currentColor">
+    <rect x="2" y="5" width="7" height="2" rx="1"/><rect x="14.5" y="5" width="7" height="2" rx="1"/><rect x="27" y="5" width="7" height="2" rx="1"/>
+  </svg>;
+}
+
+function ChevronGlyph({ direction }: { direction: "left" | "right" }) {
+  return <svg className="mvp-svg mvp-svgChevron" viewBox="0 0 20 32" aria-hidden="true" fill="none">
+    <path d={direction === "left" ? "M15.5 4 4 16l11.5 12" : "M4.5 4 16 16 4.5 28"} stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>;
 }
 
 export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Props) {
@@ -1093,6 +1126,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [verifiedMetadataIds, setVerifiedMetadataIds] = useState<Set<string>>(() => new Set());
+  const verifiedMetadataIdsRef = useRef<Set<string>>(new Set());
   const [decisionFlash, setDecisionFlash] = useState<{ songId: string; decision: Exclude<AuditionDecision, null> } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const decisionTimerRef = useRef<number | null>(null);
@@ -1113,6 +1147,22 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   }, []);
 
   const songsById = useMemo(() => new Map(state.songs.map((song) => [song.id, song])), [state.songs]);
+  const libraryIndex = useMemo(() => {
+    const ids = new Set<string>();
+    const keys = new Set<string>();
+    for (const track of tracks) {
+      ids.add(track.id);
+      const artist = track.artist || "";
+      keys.add(auditionCanonicalKey(artist, track.title));
+      keys.add(`${leadArtist(artist)}|${strictTitleKey(track.title)}`);
+    }
+    return { ids, keys };
+  }, [tracks]);
+  const isInLibraryFast = useCallback((song: MusicAuditionSong) => {
+    if (song.libraryTrackId && libraryIndex.ids.has(song.libraryTrackId)) return true;
+    if (libraryIndex.keys.has(song.canonicalKey)) return true;
+    return libraryIndex.keys.has(`${leadArtist(song.artist)}|${strictTitleKey(song.title)}`);
+  }, [libraryIndex]);
   const selectedList = state.lists.find((list) => list.id === selectedListId) || null;
   const selectedAllSongs = useMemo(
     () => selectedList
@@ -1121,11 +1171,11 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     [selectedList, songsById],
   );
   const selectedSongs = useMemo(
-    () => selectedAllSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks) && !song.decision),
-    [selectedAllSongs, tracks],
+    () => selectedAllSongs.filter((song) => !isInLibraryFast(song) && !song.decision),
+    [selectedAllSongs, isInLibraryFast],
   );
   const currentSong = selectedSongs[currentIndex] || null;
-  const currentStats = selectedList ? listStats(selectedList, songsById, tracks) : null;
+  const currentStats = selectedList ? listStats(selectedList, songsById, isInLibraryFast) : null;
 
   const allKeptSongs = useMemo(
     () => state.songs
@@ -1134,18 +1184,18 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     [state.songs],
   );
   const keptSongs = useMemo(
-    () => allKeptSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks)),
-    [allKeptSongs, tracks],
+    () => allKeptSongs.filter((song) => !isInLibraryFast(song)),
+    [allKeptSongs, isInLibraryFast],
   );
   const keptInLibraryCount = allKeptSongs.length - keptSongs.length;
 
   const sortedLists = useMemo(() => {
     const rows = [...state.lists];
     if (listSort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
-    if (listSort === "progress") return rows.sort((a, b) => listStats(b, songsById, tracks).progress - listStats(a, songsById, tracks).progress || b.updatedAt - a.updatedAt);
-    if (listSort === "most_kept") return rows.sort((a, b) => listStats(b, songsById, tracks).keep - listStats(a, songsById, tracks).keep || b.updatedAt - a.updatedAt);
+    if (listSort === "progress") return rows.sort((a, b) => listStats(b, songsById, isInLibraryFast).progress - listStats(a, songsById, isInLibraryFast).progress || b.updatedAt - a.updatedAt);
+    if (listSort === "most_kept") return rows.sort((a, b) => listStats(b, songsById, isInLibraryFast).keep - listStats(a, songsById, isInLibraryFast).keep || b.updatedAt - a.updatedAt);
     return rows.sort((a, b) => b.createdAt - a.createdAt);
-  }, [state.lists, songsById, tracks, listSort]);
+  }, [state.lists, songsById, isInLibraryFast, listSort]);
   const parsedImportCount = useMemo(() => parseAuditionListText(importText).length, [importText]);
 
   useEffect(() => {
@@ -1157,12 +1207,32 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   }, [selectedSongs.length, selectedListId]);
 
   useEffect(() => {
-    if (!currentSong || verifiedMetadataIds.has(currentSong.id)) return;
+    if (!currentSong) return;
     const songId = currentSong.id;
+    const freshCached = Boolean(
+      currentSong.metadataUpdatedAt &&
+      now() - currentSong.metadataUpdatedAt < METADATA_CACHE_MS &&
+      (currentSong.artworkUrl || currentSong.previewUrl || currentSong.album),
+    );
+
+    if (verifiedMetadataIds.has(songId)) return;
+    if (verifiedMetadataIdsRef.current.has(songId) || freshCached) {
+      verifiedMetadataIdsRef.current.add(songId);
+      setVerifiedMetadataIds((previous) => {
+        if (previous.has(songId)) return previous;
+        const next = new Set(previous);
+        next.add(songId);
+        return next;
+      });
+      return;
+    }
+
     setLookupSongId(songId);
     void resolveMusicAuditionMetadata(songId)
       .then(() => {
+        verifiedMetadataIdsRef.current.add(songId);
         setVerifiedMetadataIds((previous) => {
+          if (previous.has(songId)) return previous;
           const next = new Set(previous);
           next.add(songId);
           return next;
@@ -1171,26 +1241,30 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       .finally(() => {
         setLookupSongId((id) => id === songId ? null : id);
       });
-  }, [currentSong?.id]);
+  }, [currentSong?.id, currentSong?.metadataUpdatedAt, currentSong?.artworkUrl, currentSong?.previewUrl, currentSong?.album, verifiedMetadataIds]);
 
   useEffect(() => {
     if (!currentSong || !selectedSongs.length) return;
     const timer = window.setTimeout(() => {
-      const upcoming = selectedSongs.slice(currentIndex + 1, currentIndex + 3);
+      const upcoming = selectedSongs.slice(currentIndex + 1, currentIndex + 6);
       for (const song of upcoming) {
-        if (verifiedMetadataIds.has(song.id)) continue;
+        const freshCached = Boolean(
+          song.metadataUpdatedAt &&
+          now() - song.metadataUpdatedAt < METADATA_CACHE_MS &&
+          (song.artworkUrl || song.previewUrl || song.album),
+        );
+        if (freshCached || verifiedMetadataIdsRef.current.has(song.id)) {
+          verifiedMetadataIdsRef.current.add(song.id);
+          continue;
+        }
         void resolveMusicAuditionMetadata(song.id).then(() => {
-          setVerifiedMetadataIds((previous) => {
-            if (previous.has(song.id)) return previous;
-            const next = new Set(previous);
-            next.add(song.id);
-            return next;
-          });
+          verifiedMetadataIdsRef.current.add(song.id);
         });
       }
-    }, 220);
+    }, 80);
     return () => window.clearTimeout(timer);
-  }, [currentSong?.id, currentIndex, selectedSongs, verifiedMetadataIds]);
+  }, [currentSong?.id, currentIndex, selectedSongs]);
+
 
   function openList(list: MusicAuditionList) {
     stopPreview();
@@ -1261,14 +1335,14 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   function decide(song: MusicAuditionSong, decision: Exclude<AuditionDecision, null>) {
     if (decisionFlash) return;
     stopPreview();
+    setMessage("");
     setDecisionFlash({ songId: song.id, decision });
     if (decisionTimerRef.current) window.clearTimeout(decisionTimerRef.current);
     decisionTimerRef.current = window.setTimeout(() => {
       setMusicAuditionDecision(song.id, decision);
-      setState(listMusicAuditionState());
       setDecisionFlash(null);
       decisionTimerRef.current = null;
-    }, 180);
+    }, 110);
   }
 
   function submitImport() {
@@ -1277,7 +1351,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       const list = importMusicAuditionList(importName, importText);
       const freshState = listMusicAuditionState();
       const freshMap = new Map(freshState.songs.map((song) => [song.id, song]));
-      const stats = listStats(list, freshMap, tracks);
+      const stats = listStats(list, freshMap, isInLibraryFast);
       setImportOpen(false);
       setImportName(defaultListName());
       setImportText("");
@@ -1363,14 +1437,14 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   }
 
   const globalCounts = useMemo(() => {
-    const candidates = state.songs.filter((song) => !musicAuditionSongInLibrary(song, tracks));
+    const candidates = state.songs.filter((song) => !isInLibraryFast(song));
     return {
       keep: candidates.filter((song) => song.decision === "keep").length,
       pass: candidates.filter((song) => song.decision === "pass").length,
       maybe: candidates.filter((song) => song.decision === "maybe").length,
       reviewed: candidates.filter((song) => Boolean(song.decision)).length,
     };
-  }, [state.songs, tracks]);
+  }, [state.songs, isInLibraryFast]);
 
   const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
   const currentMetadataAvailable = Boolean(
@@ -1415,7 +1489,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       </div>
       {!sortedLists.length ? <div className="mvp-auditionEmpty"><b>NO AUDITION LISTS YET</b><span>Import an Octane list, Spotify finds, covers list, or any Artist - Song list to begin.</span><button onClick={() => setImportOpen(true)}>IMPORT YOUR FIRST LIST</button></div> : <div className="mvp-auditionLists">
         {sortedLists.map((list) => {
-          const stats = listStats(list, songsById, tracks);
+          const stats = listStats(list, songsById, isInLibraryFast);
           const percent = stats.total ? Math.round(stats.progress * 100) : stats.skipped ? 100 : 0;
           return <article key={list.id} className="mvp-auditionListCard">
             <header>
@@ -1442,6 +1516,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       </header>
       <div className="mvp-auditionStageBar"><i style={{ width: `${currentStats.total ? Math.round(currentStats.progress * 100) : currentStats.skipped ? 100 : 0}%` }} /></div>
       {currentSong ? <article className={`mvp-auditionSongCard ${currentMetadataVerified && currentSong.artworkUrl ? "has-art" : "no-art"}`}>
+        <div className="mvp-auditionAmbient" aria-hidden="true" style={currentMetadataVerified && currentSong.artworkUrl ? { backgroundImage: `url("${currentSong.artworkUrl}")` } : undefined} />
         <div className="mvp-auditionArtwork">
           {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "SEARCHING APPLE + DEEZER" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
@@ -1473,24 +1548,28 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
               disabled={lookupSongId === currentSong.id || (!currentPreviewReady && currentMetadataVerified)}
               onClick={() => void togglePreview(currentSong)}
             >
-              <span className="mvp-auditionControlIcon"><PlayGlyph stop={previewSongId === currentSong.id} /></span>
+              <span className="mvp-auditionControlIcon"><PreviewGlyph stop={previewSongId === currentSong.id} /></span>
               <span className="mvp-auditionControlCopy">
                 <strong>{lookupSongId === currentSong.id ? "SEARCHING" : previewSongId === currentSong.id ? "STOP PREVIEW" : currentPreviewReady ? "PREVIEW" : "NO SAMPLE"}</strong>
                 <small>{lookupSongId === currentSong.id ? "Apple + Deezer" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Use YouTube"}</small>
               </span>
             </button>
             <button className="is-youtube" onClick={() => openYoutube(currentSong)}>
-              <span className="mvp-auditionControlIcon"><PlayGlyph /></span>
+              <span className="mvp-auditionControlIcon"><YouTubeGlyph /></span>
               <span className="mvp-auditionControlCopy"><strong>YOUTUBE</strong><small>Exact full-song search</small></span>
             </button>
           </div>
           <div className="mvp-auditionActionLabel is-decision"><span>YOUR DECISION</span><i /></div>
           <div className="mvp-auditionDecision">
-            <button aria-pressed={currentFlashDecision === "keep"} disabled={Boolean(decisionFlash)} className={`is-keep ${currentFlashDecision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}><span className="mvp-auditionDecisionIcon"><CheckGlyph /></span><span><strong>{currentFlashDecision === "keep" ? "KEEP SELECTED" : "KEEP"}</strong><small>{currentFlashDecision === "keep" ? "Saved" : "Save to winners"}</small></span></button>
+            <button aria-pressed={currentFlashDecision === "keep"} disabled={Boolean(decisionFlash)} className={`is-keep ${currentFlashDecision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}><span className="mvp-auditionDecisionIcon"><KeepGlyph /></span><span><strong>{currentFlashDecision === "keep" ? "KEEP SELECTED" : "KEEP"}</strong><small>{currentFlashDecision === "keep" ? "Saved" : "Save to winners"}</small></span></button>
             <button aria-pressed={currentFlashDecision === "maybe"} disabled={Boolean(decisionFlash)} className={`is-maybe ${currentFlashDecision === "maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong, "maybe")}><span className="mvp-auditionDecisionIcon"><MaybeGlyph /></span><span><strong>{currentFlashDecision === "maybe" ? "MAYBE SELECTED" : "MAYBE"}</strong><small>{currentFlashDecision === "maybe" ? "Saved" : "Revisit later"}</small></span></button>
-            <button aria-pressed={currentFlashDecision === "pass"} disabled={Boolean(decisionFlash)} className={`is-pass ${currentFlashDecision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}><span className="mvp-auditionDecisionIcon"><CloseGlyph /></span><span><strong>{currentFlashDecision === "pass" ? "PASS SELECTED" : "PASS"}</strong><small>{currentFlashDecision === "pass" ? "Saved" : "Reject candidate"}</small></span></button>
+            <button aria-pressed={currentFlashDecision === "pass"} disabled={Boolean(decisionFlash)} className={`is-pass ${currentFlashDecision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}><span className="mvp-auditionDecisionIcon"><PassGlyph /></span><span><strong>{currentFlashDecision === "pass" ? "PASS SELECTED" : "PASS"}</strong><small>{currentFlashDecision === "pass" ? "Saved" : "Reject candidate"}</small></span></button>
           </div>
-          <div className="mvp-auditionPager"><button disabled={currentIndex <= 0} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.max(0, index - 1)); }}>‹ PREVIOUS</button><span><b>{selectedSongs.length}</b> UNREVIEWED LEFT</span><button className="is-next-unreviewed" onClick={nextUnreviewed}>NEXT UNREVIEWED ›</button></div>
+          <div className="mvp-auditionPager">
+            <button className="is-prev" disabled={currentIndex <= 0} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.max(0, index - 1)); }}><ChevronGlyph direction="left" /><span>PREVIOUS</span></button>
+            <span><b>{selectedSongs.length}</b><small>UNREVIEWED LEFT</small></span>
+            <button className="is-next-unreviewed" onClick={nextUnreviewed}><span>NEXT UNREVIEWED</span><ChevronGlyph direction="right" /></button>
+          </div>
         </div>
       </article> : <div className="mvp-auditionEmpty"><b>{currentStats.total === 0 && currentStats.skipped ? "EVERY TRACK IS ALREADY IN MVP" : currentRemaining === 0 ? "AUDITION COMPLETE" : "THIS LIST IS EMPTY"}</b><span>{currentStats.total === 0 && currentStats.skipped ? `${currentStats.skipped} imported track${currentStats.skipped === 1 ? "" : "s"} were recognized in your music library and skipped automatically.` : currentRemaining === 0 ? `${currentStats.keep} kept • ${currentStats.maybe} maybe • ${currentStats.pass} passed${currentStats.skipped ? ` • ${currentStats.skipped} already in MVP` : ""}.` : ""}</span></div>}
       <footer className="mvp-auditionCounts"><span className="is-keep"><b>{currentStats.keep}</b> KEEP</span><span className="is-pass"><b>{currentStats.pass}</b> PASS</span><span className="is-maybe"><b>{currentStats.maybe}</b> MAYBE</span><span><b>{currentRemaining}</b> LEFT TO AUDITION</span></footer>
@@ -1502,15 +1581,16 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         {keptSongs.map((song) => {
           const sources = musicAuditionSongSources(song.id, state.lists);
           return <article key={song.id}>
+            <div className="mvp-keptAmbient" aria-hidden="true" style={song.artworkUrl ? { backgroundImage: `url("${song.artworkUrl}")` } : undefined} />
             <div className="mvp-auditionKeptArt">{song.artworkUrl ? <img src={song.artworkUrl} alt="" /> : <span>♫</span>}</div>
             <div className="mvp-auditionKeptInfo"><small>🔥 READY TO ADD</small><strong>{song.title}</strong><b>{song.artist}</b><p>{sources.length ? `FROM ${sources.map((list) => list.name).join(" • ")}` : "KEPT FROM AUDITION"}</p></div>
             <div className="mvp-auditionKeptActions">
               <button className="mvp-keptAction is-preview" onClick={() => void togglePreview(song)}>
-                <span className="mvp-keptActionIcon"><PlayGlyph stop={previewSongId === song.id} /></span>
+                <span className="mvp-keptActionIcon"><PreviewGlyph stop={previewSongId === song.id} /></span>
                 <span><strong>{previewSongId === song.id ? "STOP" : "PREVIEW"}</strong><small>{song.previewUrl ? previewProviderLabel(song.previewUrl) : "Find sample"}</small></span>
               </button>
               <button className="mvp-keptAction is-youtube" onClick={() => openYoutube(song)}>
-                <span className="mvp-keptActionIcon"><PlayGlyph /></span>
+                <span className="mvp-keptActionIcon"><YouTubeGlyph /></span>
                 <span><strong>YOUTUBE</strong><small>Full song</small></span>
               </button>
               {onImportFile ? <button className="mvp-keptAction is-add" disabled={importingSongId === song.id} onClick={() => requestSongImport(song)}>
@@ -2254,6 +2334,353 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         .mvp-auditionKeptActions{grid-column:1/-1!important;display:grid!important;grid-template-columns:repeat(3,1fr) auto!important;gap:7px!important}
         .mvp-auditionKeptActions .mvp-keptAction{min-width:0!important;width:100%!important}
       }
+
+      /* MVP_TRAINER_V5_R12_5E_13_AUDITION_CINEMATIC_FAST */
+      .mvp-audition{
+        --mvp-ice:#bff5ff;
+        --mvp-cyan:#42d9ff;
+        --mvp-blue:#1596d6;
+        --mvp-orange:#ff9f24;
+        --mvp-green:#47e89a;
+        --mvp-amber:#ffc457;
+        --mvp-red:#ff5e6d;
+      }
+
+      /* CINEMATIC CURRENT-SONG DECK */
+      .mvp-auditionSongCard{
+        position:relative!important;
+        isolation:isolate!important;
+        overflow:hidden!important;
+        grid-template-columns:minmax(210px,290px) minmax(0,1fr)!important;
+        gap:34px!important;
+        padding:26px!important;
+        border:1px solid rgba(111,211,241,.13)!important;
+        border-radius:22px!important;
+        background:
+          radial-gradient(900px 420px at 8% 12%,rgba(42,186,229,.11),transparent 58%),
+          radial-gradient(650px 320px at 86% 108%,rgba(255,152,34,.055),transparent 68%),
+          linear-gradient(145deg,#07161d 0%,#03090d 72%,#020609 100%)!important;
+        box-shadow:
+          0 30px 90px rgba(0,0,0,.34),
+          inset 0 1px rgba(255,255,255,.026),
+          inset 0 -1px rgba(64,201,241,.035)!important;
+      }
+      .mvp-auditionSongCard:before{
+        content:"";position:absolute;z-index:-1;inset:0;pointer-events:none;
+        background:
+          linear-gradient(110deg,transparent 0 24%,rgba(94,224,255,.035) 38%,transparent 53%),
+          linear-gradient(180deg,rgba(255,255,255,.014),transparent 34%);
+        transform:translateZ(0);
+      }
+      .mvp-auditionAmbient{
+        position:absolute;z-index:-2;inset:-90px -70px -90px -50px;
+        background-position:20% 42%;background-size:58% auto;background-repeat:no-repeat;
+        filter:blur(58px) saturate(1.55) contrast(1.06);
+        opacity:.22;transform:scale(1.13) translateZ(0);
+        mask-image:linear-gradient(90deg,#000 0 45%,transparent 76%);
+        -webkit-mask-image:linear-gradient(90deg,#000 0 45%,transparent 76%);
+      }
+      .mvp-auditionSongCard.has-art .mvp-auditionArtwork{
+        transform:translateZ(0);
+        box-shadow:
+          0 24px 55px rgba(0,0,0,.44),
+          0 0 0 1px rgba(255,255,255,.12),
+          0 0 40px rgba(65,204,243,.09)!important;
+      }
+      .mvp-auditionArtwork{
+        border-radius:18px!important;
+        overflow:hidden!important;
+        background:#061116!important;
+      }
+      .mvp-auditionArtwork img{transform:scale(1.001);transition:transform .45s cubic-bezier(.2,.7,.2,1),filter .3s ease!important}
+      .mvp-auditionSongCard:hover .mvp-auditionArtwork img{transform:scale(1.016)!important;filter:saturate(1.05) contrast(1.02)!important}
+
+      .mvp-auditionStatusRow{margin-bottom:12px!important;gap:9px!important}
+      .mvp-auditionStatusRow span,.mvp-auditionStatusRow b{
+        min-height:22px!important;padding:0 8px!important;border-radius:5px!important;
+        letter-spacing:.13em!important;font-size:6px!important;
+        background:rgba(5,16,21,.72)!important;backdrop-filter:blur(10px)!important;
+      }
+      .mvp-auditionSongInfo h2{
+        font-size:clamp(36px,4.25vw,58px)!important;
+        line-height:.91!important;
+        letter-spacing:-.065em!important;
+        text-wrap:balance;
+        text-shadow:0 9px 34px rgba(0,0,0,.44);
+      }
+      .mvp-auditionSongInfo h3{
+        margin-top:11px!important;font-size:19px!important;
+        color:#9bd9eb!important;font-weight:900!important;letter-spacing:-.02em!important;
+      }
+      .mvp-auditionMeta{max-width:780px!important;margin:9px 0 22px!important;color:#6e8994!important}
+      .mvp-auditionActionLabel{
+        margin:13px 0 8px!important;
+        color:#657f89!important;font-size:6px!important;letter-spacing:.2em!important;
+      }
+      .mvp-auditionActionLabel.is-decision{margin-top:28px!important}
+      .mvp-auditionActionLabel i{opacity:.55!important}
+
+      /* REAL SVG MEDIA CONTROLS - no icon circles */
+      .mvp-auditionListen{
+        grid-template-columns:minmax(0,1.08fr) minmax(0,.82fr)!important;
+        gap:22px!important;
+      }
+      .mvp-auditionListen button{
+        min-height:74px!important;
+        padding:0 22px!important;
+        gap:17px!important;
+        border-radius:10px!important;
+        clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))!important;
+        border:0!important;
+        outline:1px solid rgba(115,191,216,.13)!important;
+        outline-offset:-1px!important;
+        background:
+          linear-gradient(180deg,rgba(10,26,33,.94),rgba(4,12,16,.97))!important;
+        box-shadow:
+          inset 0 1px rgba(255,255,255,.026),
+          0 14px 28px rgba(0,0,0,.18)!important;
+      }
+      .mvp-auditionListen button:before{
+        content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#29434d;opacity:.75;
+      }
+      .mvp-auditionListen .is-preview:before{background:linear-gradient(180deg,#87ecff,#1caee4)!important}
+      .mvp-auditionListen .is-youtube:before{background:linear-gradient(180deg,#ff6575,#e51635)!important}
+      .mvp-auditionListen button:after{
+        left:18px!important;right:18px!important;height:1px!important;opacity:.52!important;
+      }
+      .mvp-auditionListen button:not(:disabled):hover{
+        transform:translateY(-2px)!important;
+        outline-color:rgba(122,222,250,.28)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.04),0 18px 38px rgba(0,0,0,.24),0 0 30px rgba(48,192,233,.06)!important;
+      }
+      .mvp-auditionListen .is-youtube:not(:disabled):hover{
+        outline-color:rgba(255,83,103,.25)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.03),0 18px 38px rgba(0,0,0,.24),0 0 28px rgba(255,48,69,.055)!important;
+      }
+      .mvp-auditionControlIcon{
+        width:50px!important;height:32px!important;flex:0 0 50px!important;
+        border:0!important;border-radius:0!important;background:transparent!important;
+        box-shadow:none!important;display:grid!important;place-items:center!important;
+      }
+      .mvp-auditionControlIcon .mvp-svg{display:block!important;width:44px!important;height:29px!important;overflow:visible!important}
+      .mvp-auditionListen .is-preview .mvp-auditionControlIcon{color:#79e6ff!important}
+      .mvp-auditionListen .is-youtube .mvp-auditionControlIcon{
+        border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#fff!important;
+      }
+      .mvp-auditionControlCopy{gap:4px!important}
+      .mvp-auditionControlCopy strong{font-size:10px!important;letter-spacing:.14em!important}
+      .mvp-auditionControlCopy small{font-size:6.5px!important}
+      .mvp-auditionListen button.is-playing{
+        outline-color:rgba(80,221,255,.42)!important;
+        background:
+          radial-gradient(280px 80px at 0% 50%,rgba(57,205,244,.14),transparent 72%),
+          linear-gradient(180deg,#0b252f,#05141a)!important;
+      }
+      .mvp-auditionListen button.is-playing .mvp-svgPreview{filter:drop-shadow(0 0 10px rgba(72,217,255,.42))!important}
+
+      /* DECISION RAIL: neutral idle, unmistakable selected */
+      .mvp-auditionDecision{
+        gap:16px!important;
+        grid-template-columns:repeat(3,minmax(0,1fr))!important;
+      }
+      .mvp-auditionDecision button{
+        min-height:76px!important;padding:0 18px!important;gap:15px!important;
+        border:0!important;border-radius:9px!important;
+        clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))!important;
+        outline:1px solid rgba(118,166,181,.13)!important;outline-offset:-1px!important;
+        background:linear-gradient(180deg,rgba(8,19,24,.96),rgba(3,10,13,.985))!important;
+        color:#879ba3!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.018),0 12px 26px rgba(0,0,0,.13)!important;
+      }
+      .mvp-auditionDecision button:after{opacity:0!important}
+      .mvp-auditionDecision button:hover:not(:disabled){
+        transform:translateY(-2px)!important;
+        outline-color:rgba(146,200,218,.24)!important;
+        background:linear-gradient(180deg,#0a2029,#050f14)!important;
+      }
+      .mvp-auditionDecisionIcon{
+        width:41px!important;height:34px!important;flex:0 0 41px!important;
+        border:0!important;border-radius:0!important;background:transparent!important;
+        box-shadow:none!important;color:#82959c!important;
+        display:grid!important;place-items:center!important;
+      }
+      .mvp-auditionDecisionIcon .mvp-svg{width:34px!important;height:28px!important;overflow:visible!important}
+      .mvp-auditionDecision .is-keep:not(.is-active),
+      .mvp-auditionDecision .is-maybe:not(.is-active),
+      .mvp-auditionDecision .is-pass:not(.is-active){color:#879ba3!important}
+      .mvp-auditionDecision .is-keep:not(.is-active) .mvp-auditionDecisionIcon,
+      .mvp-auditionDecision .is-maybe:not(.is-active) .mvp-auditionDecisionIcon,
+      .mvp-auditionDecision .is-pass:not(.is-active) .mvp-auditionDecisionIcon{color:#71868e!important}
+      .mvp-auditionDecision button strong{color:#dce8ec!important;font-size:9px!important;letter-spacing:.14em!important}
+      .mvp-auditionDecision button small{color:#596f78!important;font-size:6.5px!important}
+      .mvp-auditionDecision .is-keep.is-active{
+        outline-color:#56eca1!important;
+        background:linear-gradient(110deg,rgba(21,78,53,.72),rgba(4,18,12,.98))!important;
+        box-shadow:0 0 0 1px rgba(70,234,151,.15),0 0 36px rgba(64,224,141,.16),inset 0 1px rgba(255,255,255,.04)!important;
+      }
+      .mvp-auditionDecision .is-keep.is-active .mvp-auditionDecisionIcon{color:#70ffb3!important;filter:drop-shadow(0 0 8px rgba(69,234,151,.42))!important}
+      .mvp-auditionDecision .is-keep.is-active strong{color:#b7ffd5!important}
+      .mvp-auditionDecision .is-maybe.is-active{
+        outline-color:#ffc14d!important;
+        background:linear-gradient(110deg,rgba(91,63,12,.7),rgba(19,13,3,.98))!important;
+        box-shadow:0 0 0 1px rgba(255,193,77,.13),0 0 34px rgba(244,177,54,.13)!important;
+      }
+      .mvp-auditionDecision .is-maybe.is-active .mvp-auditionDecisionIcon{color:#ffd26d!important;filter:drop-shadow(0 0 8px rgba(255,192,72,.35))!important}
+      .mvp-auditionDecision .is-maybe.is-active strong{color:#ffe5a8!important}
+      .mvp-auditionDecision .is-pass.is-active{
+        outline-color:#ff6674!important;
+        background:linear-gradient(110deg,rgba(87,24,34,.72),rgba(19,5,8,.98))!important;
+        box-shadow:0 0 0 1px rgba(255,90,104,.13),0 0 34px rgba(239,66,82,.13)!important;
+      }
+      .mvp-auditionDecision .is-pass.is-active .mvp-auditionDecisionIcon{color:#ff7c88!important;filter:drop-shadow(0 0 8px rgba(255,77,92,.35))!important}
+      .mvp-auditionDecision .is-pass.is-active strong{color:#ffc1c6!important}
+
+      /* NAVIGATION - engineered chevrons, no generic button arrows */
+      .mvp-auditionPager{
+        grid-template-columns:minmax(125px,.75fr) auto minmax(180px,1.05fr)!important;
+        gap:14px!important;margin-top:18px!important;
+      }
+      .mvp-auditionPager button{
+        min-height:42px!important;padding:0 14px!important;border:0!important;border-radius:7px!important;
+        background:linear-gradient(180deg,#061217,#030a0d)!important;
+        outline:1px solid rgba(104,165,185,.11)!important;outline-offset:-1px!important;
+        color:#718993!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:10px!important;
+      }
+      .mvp-auditionPager button .mvp-svgChevron{width:9px!important;height:19px!important}
+      .mvp-auditionPager button:not(:disabled):hover{color:#bfefff!important;outline-color:rgba(72,202,241,.23)!important}
+      .mvp-auditionPager .is-next-unreviewed{
+        color:#c9f4ff!important;
+        background:linear-gradient(180deg,#092631,#05161d)!important;
+        outline-color:rgba(64,202,242,.22)!important;
+      }
+      .mvp-auditionPager>span b{font-size:16px!important}
+      .mvp-auditionPager>span small{font-size:5.8px!important;letter-spacing:.13em!important}
+
+      /* KEPT SONGS - cinematic staging rails */
+      .mvp-auditionKeptGrid{gap:9px!important}
+      .mvp-auditionKeptGrid>article{
+        position:relative!important;isolation:isolate!important;overflow:hidden!important;
+        grid-template-columns:76px minmax(220px,1fr) auto!important;
+        gap:16px!important;padding:12px 14px!important;
+        border:0!important;border-radius:13px!important;
+        outline:1px solid rgba(100,176,201,.10)!important;outline-offset:-1px!important;
+        background:linear-gradient(110deg,rgba(8,21,27,.97),rgba(3,10,13,.985))!important;
+        box-shadow:0 12px 32px rgba(0,0,0,.13),inset 0 1px rgba(255,255,255,.014)!important;
+        transition:transform .16s ease,outline-color .16s ease,box-shadow .16s ease!important;
+      }
+      .mvp-auditionKeptGrid>article:hover{
+        transform:translateY(-1px)!important;outline-color:rgba(87,203,237,.20)!important;
+        box-shadow:0 16px 38px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.02)!important;
+      }
+      .mvp-keptAmbient{
+        position:absolute;z-index:-1;inset:-60px auto -60px -40px;width:360px;
+        background-size:220px;background-position:25px center;background-repeat:no-repeat;
+        filter:blur(48px) saturate(1.45);opacity:.105;transform:scale(1.16);
+        mask-image:linear-gradient(90deg,#000,transparent 95%);
+        -webkit-mask-image:linear-gradient(90deg,#000,transparent 95%);
+      }
+      .mvp-auditionKeptArt{
+        width:76px!important;height:76px!important;border-radius:11px!important;
+        box-shadow:0 12px 25px rgba(0,0,0,.30),0 0 0 1px rgba(255,255,255,.08)!important;
+      }
+      .mvp-auditionKeptInfo small{
+        color:#75e6a8!important;font-size:6.2px!important;letter-spacing:.14em!important;
+      }
+      .mvp-auditionKeptInfo strong{font-size:15px!important;line-height:1.05!important;letter-spacing:-.025em!important}
+      .mvp-auditionKeptInfo b{font-size:9.5px!important;color:#a7ccd7!important}
+      .mvp-auditionKeptInfo p{font-size:6px!important;color:#58727b!important;margin-top:5px!important}
+      .mvp-auditionKeptActions{gap:10px!important}
+      .mvp-auditionKeptActions .mvp-keptAction{
+        min-width:118px!important;min-height:50px!important;padding:0 11px!important;gap:8px!important;
+        border:0!important;border-radius:8px!important;
+        clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))!important;
+        outline:1px solid rgba(105,168,190,.11)!important;outline-offset:-1px!important;
+        background:linear-gradient(180deg,#07151b,#030b0f)!important;
+        box-shadow:none!important;
+      }
+      .mvp-auditionKeptActions .mvp-keptAction:hover{transform:translateY(-1px)!important;outline-color:rgba(90,202,236,.24)!important}
+      .mvp-keptActionIcon{
+        width:36px!important;height:28px!important;flex:0 0 36px!important;
+        border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;
+        display:grid!important;place-items:center!important;
+      }
+      .mvp-keptActionIcon .mvp-svg{width:33px!important;height:24px!important;overflow:visible!important}
+      .mvp-keptAction.is-preview .mvp-keptActionIcon{color:#6edfff!important}
+      .mvp-keptAction.is-youtube .mvp-keptActionIcon{color:#fff!important}
+      .mvp-keptAction.is-add{
+        outline-color:rgba(255,169,48,.22)!important;
+        background:linear-gradient(180deg,rgba(37,25,8,.80),rgba(11,10,6,.98))!important;
+      }
+      .mvp-keptAction.is-add .mvp-keptActionIcon{color:#ffb342!important}
+      .mvp-keptAction strong{font-size:7px!important;letter-spacing:.11em!important}
+      .mvp-keptAction small{font-size:5.6px!important;color:#617780!important}
+      .mvp-keptMore summary{
+        width:44px!important;height:44px!important;
+        border:0!important;border-radius:7px!important;
+        outline:1px solid rgba(103,164,185,.11)!important;outline-offset:-1px!important;
+        background:#061116!important;color:#617a83!important;
+      }
+      .mvp-keptMore summary .mvp-svgMore{width:26px!important;height:9px!important}
+
+      /* MOBILE: same premium SVG system, recomposed for touch */
+      @media(max-width:760px){
+        .mvp-auditionSongCard{
+          grid-template-columns:1fr!important;gap:18px!important;padding:14px!important;border-radius:17px!important;
+        }
+        .mvp-auditionAmbient{
+          inset:-60px!important;background-size:120% auto!important;background-position:center 8%!important;
+          filter:blur(62px) saturate(1.45)!important;opacity:.15!important;
+          mask-image:linear-gradient(180deg,#000 0 45%,transparent 74%)!important;
+          -webkit-mask-image:linear-gradient(180deg,#000 0 45%,transparent 74%)!important;
+        }
+        .mvp-auditionArtwork{width:min(86vw,360px)!important;margin:0 auto!important;border-radius:16px!important}
+        .mvp-auditionSongInfo h2{font-size:clamp(31px,10vw,45px)!important;text-align:left!important}
+        .mvp-auditionSongInfo h3{font-size:16px!important}
+        .mvp-auditionListen{grid-template-columns:1fr 1fr!important;gap:10px!important}
+        .mvp-auditionListen button{min-height:62px!important;padding:0 12px!important;gap:8px!important}
+        .mvp-auditionControlIcon{width:38px!important;height:28px!important;flex-basis:38px!important}
+        .mvp-auditionControlIcon .mvp-svg{width:36px!important;height:25px!important}
+        .mvp-auditionControlCopy strong{font-size:8px!important}
+        .mvp-auditionControlCopy small{font-size:5.5px!important}
+        .mvp-auditionActionLabel.is-decision{margin-top:21px!important}
+        .mvp-auditionDecision{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px!important}
+        .mvp-auditionDecision button{
+          min-height:67px!important;padding:7px 5px!important;gap:4px!important;
+          display:grid!important;place-content:center!important;text-align:center!important;
+        }
+        .mvp-auditionDecisionIcon{width:31px!important;height:27px!important;flex-basis:auto!important;margin:auto!important}
+        .mvp-auditionDecisionIcon .mvp-svg{width:29px!important;height:24px!important}
+        .mvp-auditionDecision button>span:last-child{text-align:center!important}
+        .mvp-auditionDecision button strong{font-size:7px!important}
+        .mvp-auditionDecision button small{display:none!important}
+        .mvp-auditionPager{grid-template-columns:1fr 1fr!important;gap:8px!important}
+        .mvp-auditionPager>span{grid-column:1/-1!important;grid-row:1!important}
+        .mvp-auditionPager button{min-height:42px!important}
+        .mvp-auditionKeptGrid>article{
+          grid-template-columns:64px minmax(0,1fr)!important;gap:11px!important;padding:10px!important;
+        }
+        .mvp-auditionKeptArt{width:64px!important;height:64px!important}
+        .mvp-auditionKeptActions{
+          grid-column:1/-1!important;
+          display:grid!important;grid-template-columns:1fr 1fr 1.15fr 42px!important;gap:6px!important;width:100%!important;
+        }
+        .mvp-auditionKeptActions .mvp-keptAction{
+          min-width:0!important;width:100%!important;min-height:48px!important;padding:0 6px!important;gap:5px!important;
+        }
+        .mvp-keptActionIcon{width:27px!important;height:23px!important;flex-basis:27px!important}
+        .mvp-keptActionIcon .mvp-svg{width:27px!important;height:21px!important}
+        .mvp-keptAction strong{font-size:6.2px!important}
+        .mvp-keptAction small{display:none!important}
+        .mvp-keptMore summary{width:42px!important;height:48px!important}
+      }
+      @media(max-width:430px){
+        .mvp-auditionListen{grid-template-columns:1fr!important}
+        .mvp-auditionListen button{min-height:60px!important}
+        .mvp-auditionKeptActions{grid-template-columns:1fr 1fr!important}
+        .mvp-auditionKeptActions .is-add{grid-column:1/-1!important}
+        .mvp-keptMore{position:absolute!important;right:8px!important;top:8px!important}
+      }
+
     `}
 </style>
   </section>;
