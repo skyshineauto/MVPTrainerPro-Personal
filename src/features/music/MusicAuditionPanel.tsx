@@ -546,6 +546,7 @@ export function markMusicAuditionSongInLibrary(songId: string, libraryTrackId: s
   return changed;
 }
 
+
 function tokenSimilarity(a: string, b: string) {
   const left = new Set(normalize(a).split(" ").filter(Boolean));
   const right = new Set(normalize(b).split(" ").filter(Boolean));
@@ -613,19 +614,46 @@ function artistMatchScore(importedValue: unknown, candidateValue: unknown) {
   return Math.max(leadToken, fullToken, contained);
 }
 
-function candidateScore(song: MusicAuditionSong, item: ItunesSong) {
+type PreviewProvider = "apple" | "deezer";
+
+type PreviewCandidate = {
+  provider: PreviewProvider;
+  id: string;
+  trackName: string;
+  artistName: string;
+  albumName: string;
+  artworkUrl: string | null;
+  releaseYear: number | null;
+  genre: string | null;
+  previewUrl: string | null;
+  storeUrl: string | null;
+};
+
+type DeezerSong = {
+  id?: number;
+  title?: string;
+  title_short?: string;
+  preview?: string;
+  link?: string;
+  artist?: { name?: string };
+  album?: { title?: string; cover_big?: string; cover_xl?: string };
+};
+
+type DeezerResponse = {
+  data?: DeezerSong[];
+};
+
+function candidateScore(song: MusicAuditionSong, item: PreviewCandidate) {
   const importedTitle = strictTitleKey(song.title);
-  const candidateTitle = strictTitleKey(item.trackName || "");
+  const candidateTitle = strictTitleKey(item.trackName);
   const titleScore = titleMatchScore(importedTitle, candidateTitle);
-  const artistScore = artistMatchScore(song.artist, item.artistName || "");
+  const artistScore = artistMatchScore(song.artist, item.artistName);
 
-  // Artist is never optional. This prevents a common-title match from attaching to the wrong act.
-  const artistStrong = artistScore >= 0.72;
-  // Be forgiving about punctuation, featured credits and service-added suffixes, but not about the actual title.
-  const titleStrong = titleScore >= 0.76;
-  if (!artistStrong || !titleStrong) return null;
+  // Artist is never optional. A common song title must never attach to the wrong band.
+  if (artistScore < 0.72 || titleScore < 0.76) return null;
 
-  const score = titleScore * 0.7 + artistScore * 0.3;
+  // Exact/near-exact artist matters a little more for short or common titles.
+  const score = titleScore * 0.68 + artistScore * 0.32;
   return { item, score, titleScore, artistScore };
 }
 
@@ -641,22 +669,106 @@ function yearFromDate(value: string | undefined) {
   return match ? Number(match[1]) : null;
 }
 
-async function fetchItunesCandidates(term: string, attribute?: "songTerm" | "artistTerm") {
+function appleCandidate(item: ItunesSong): PreviewCandidate | null {
+  const trackName = clean(item.trackName);
+  const artistName = clean(item.artistName);
+  if (!trackName || !artistName) return null;
+  return {
+    provider: "apple",
+    id: `apple:${item.trackId || `${normalize(artistName)}:${strictTitleKey(trackName)}`}`,
+    trackName,
+    artistName,
+    albumName: clean(item.collectionName),
+    artworkUrl: artwork600(item.artworkUrl100),
+    releaseYear: yearFromDate(item.releaseDate),
+    genre: clean(item.primaryGenreName) || null,
+    previewUrl: clean(item.previewUrl) || null,
+    storeUrl: clean(item.trackViewUrl) || null,
+  };
+}
+
+function deezerCandidate(item: DeezerSong): PreviewCandidate | null {
+  const trackName = clean(item.title_short || item.title);
+  const artistName = clean(item.artist?.name);
+  if (!trackName || !artistName) return null;
+  return {
+    provider: "deezer",
+    id: `deezer:${item.id || `${normalize(artistName)}:${strictTitleKey(trackName)}`}`,
+    trackName,
+    artistName,
+    albumName: clean(item.album?.title),
+    artworkUrl: clean(item.album?.cover_xl || item.album?.cover_big) || null,
+    releaseYear: null,
+    genre: null,
+    previewUrl: clean(item.preview) || null,
+    storeUrl: clean(item.link) || null,
+  };
+}
+
+async function fetchAppleCandidates(
+  term: string,
+  country = "US",
+  attribute?: "songTerm" | "artistTerm",
+) {
   const params = new URLSearchParams({
     entity: "song",
     media: "music",
-    country: "US",
+    country,
     limit: "50",
     term,
   });
   if (attribute) params.set("attribute", attribute);
-  const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
-    mode: "cors",
-    cache: "no-store",
+  try {
+    const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+      mode: "cors",
+      cache: "no-store",
+    });
+    if (!response.ok) return [] as PreviewCandidate[];
+    const payload = await response.json() as ItunesResponse;
+    return (payload.results || [])
+      .map(appleCandidate)
+      .filter((item): item is PreviewCandidate => Boolean(item));
+  } catch {
+    return [] as PreviewCandidate[];
+  }
+}
+
+async function fetchDeezerCandidates(term: string) {
+  // Deezer's search endpoint supports JSONP, which avoids the browser CORS restriction
+  // without relying on a third-party proxy.
+  if (typeof document === "undefined") return [] as PreviewCandidate[];
+  return new Promise<PreviewCandidate[]>((resolve) => {
+    const callbackName = `__mvpAuditionDeezer_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const target = window as unknown as Record<string, unknown>;
+    let settled = false;
+
+    const finish = (rows: PreviewCandidate[]) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      script.remove();
+      try {
+        delete target[callbackName];
+      } catch {
+        target[callbackName] = undefined;
+      }
+      resolve(rows);
+    };
+
+    target[callbackName] = (payload: DeezerResponse) => {
+      const rows = (payload?.data || [])
+        .map(deezerCandidate)
+        .filter((item): item is PreviewCandidate => Boolean(item));
+      finish(rows);
+    };
+
+    const timeoutId = window.setTimeout(() => finish([]), 4500);
+    script.onerror = () => finish([]);
+    script.async = true;
+    script.src = `https://api.deezer.com/search?limit=50&output=jsonp&callback=${encodeURIComponent(callbackName)}&q=${encodeURIComponent(term)}`;
+    document.head.appendChild(script);
   });
-  if (!response.ok) return [] as ItunesSong[];
-  const payload = await response.json() as ItunesResponse;
-  return (payload.results || []).filter((item) => item.trackName && item.artistName);
 }
 
 function metadataQueries(song: MusicAuditionSong) {
@@ -679,6 +791,76 @@ function metadataQueries(song: MusicAuditionSong) {
   });
 }
 
+function mergeCandidates(rows: PreviewCandidate[][]) {
+  const unique = new Map<string, PreviewCandidate>();
+  for (const item of rows.flat()) {
+    const key = `${item.provider}|${item.id}`;
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()];
+}
+
+function rankedCandidates(song: MusicAuditionSong, rows: PreviewCandidate[]) {
+  return rows
+    .map((item) => candidateScore(song, item))
+    .filter((candidate): candidate is NonNullable<ReturnType<typeof candidateScore>> => Boolean(candidate))
+    .sort((a, b) => b.score - a.score);
+}
+
+async function probePreviewUrl(url: string) {
+  if (!url || typeof Audio === "undefined") return false;
+  return new Promise<boolean>((resolve) => {
+    const audio = new Audio();
+    let settled = false;
+
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      audio.onloadedmetadata = null;
+      audio.oncanplay = null;
+      audio.onerror = null;
+      audio.src = "";
+      resolve(value);
+    };
+
+    const timeoutId = window.setTimeout(() => finish(false), 4200);
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => finish(true);
+    audio.oncanplay = () => finish(true);
+    audio.onerror = () => finish(false);
+    audio.src = url;
+    try {
+      audio.load();
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+async function firstPlayableCandidate(
+  ranked: Array<NonNullable<ReturnType<typeof candidateScore>>>,
+) {
+  const withPreview = ranked.filter((row) => Boolean(row.item.previewUrl)).slice(0, 5);
+  if (!withPreview.length) return null;
+
+  const probes = await Promise.all(
+    withPreview.map(async (row) => ({
+      row,
+      playable: await probePreviewUrl(row.item.previewUrl || ""),
+    })),
+  );
+  return probes.find((entry) => entry.playable)?.row || null;
+}
+
+function previewProviderLabel(url: string | null) {
+  const value = clean(url).toLowerCase();
+  if (!value) return "NO SAMPLE";
+  if (value.includes("dzcdn") || value.includes("deezer")) return "DEEZER SAMPLE";
+  if (value.includes("apple") || value.includes("itunes")) return "APPLE SAMPLE";
+  return "VERIFIED SAMPLE";
+}
+
 export async function resolveMusicAuditionMetadata(songId: string) {
   const state = readLocal();
   const song = state.songs.find((item) => item.id === songId);
@@ -689,20 +871,46 @@ export async function resolveMusicAuditionMetadata(songId: string) {
 
   const request = (async () => {
     try {
-      const batches = await Promise.all(metadataQueries(song).map((query) => fetchItunesCandidates(query.term, query.attribute)));
-      const unique = new Map<string, ItunesSong>();
-      for (const item of batches.flat()) {
-        const key = String(item.trackId || `${normalize(item.artistName)}|${strictTitleKey(item.trackName)}`);
-        if (!unique.has(key)) unique.set(key, item);
+      // Reuse a working cached preview immediately. If it died, continue into the full resolver.
+      if (song.previewUrl && await probePreviewUrl(song.previewUrl)) return song;
+
+      const queries = metadataQueries(song);
+      const primaryTerm = queries[0]?.term || `${song.artist} ${song.title}`;
+      const reverseTerm = queries[1]?.term || `${song.title} ${song.artist}`;
+
+      // First wave: the two strongest catalogs/searches. This keeps normal matches fast.
+      const firstWave = await Promise.all([
+        fetchAppleCandidates(primaryTerm, "US"),
+        fetchAppleCandidates(reverseTerm, "US"),
+        fetchDeezerCandidates(primaryTerm),
+      ]);
+
+      let combined = mergeCandidates(firstWave);
+      let ranked = rankedCandidates(song, combined);
+      let metadataBest = ranked[0] || null;
+      let playableBest = await firstPlayableCandidate(ranked);
+
+      // Second wave only when the first wave did not produce a playable sample.
+      if (!playableBest) {
+        const secondWave = await Promise.all([
+          fetchAppleCandidates(primaryTerm, "GB"),
+          fetchAppleCandidates(primaryTerm, "CA"),
+          fetchAppleCandidates(primaryTerm, "AU"),
+          queries[2] ? fetchAppleCandidates(queries[2].term, "US", queries[2].attribute) : Promise.resolve([] as PreviewCandidate[]),
+          fetchDeezerCandidates(reverseTerm),
+        ]);
+        combined = mergeCandidates([combined, ...secondWave]);
+        ranked = rankedCandidates(song, combined);
+        metadataBest = ranked[0] || metadataBest;
+        playableBest = await firstPlayableCandidate(ranked);
       }
 
-      const candidates = [...unique.values()]
-        .map((item) => candidateScore(song, item))
-        .filter((candidate): candidate is NonNullable<ReturnType<typeof candidateScore>> => Boolean(candidate))
-        .sort((a, b) => b.score - a.score);
+      if (!metadataBest || metadataBest.score < 0.78) {
+        throw new Error("No verified artist/title match found.");
+      }
 
-      const best = candidates[0];
-      if (!best || best.score < 0.78) throw new Error("No verified artist/title preview match found.");
+      const metadataItem = metadataBest.item;
+      const previewItem = playableBest?.item || null;
 
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
@@ -711,13 +919,13 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           if (item.id !== songId) return item;
           changed = {
             ...item,
-            // Imported artist/title are always the authority. Streaming metadata may enrich, never rename.
-            album: clean(best.item.collectionName),
-            releaseYear: yearFromDate(best.item.releaseDate),
-            genre: clean(best.item.primaryGenreName) || null,
-            artworkUrl: artwork600(best.item.artworkUrl100),
-            previewUrl: clean(best.item.previewUrl) || null,
-            storeUrl: clean(best.item.trackViewUrl) || null,
+            // Imported artist/title are always authoritative. Providers only enrich the record.
+            album: clean(metadataItem.albumName),
+            releaseYear: metadataItem.releaseYear,
+            genre: clean(metadataItem.genre) || null,
+            artworkUrl: metadataItem.artworkUrl || previewItem?.artworkUrl || null,
+            previewUrl: previewItem?.previewUrl || null,
+            storeUrl: previewItem?.storeUrl || metadataItem.storeUrl || null,
             metadataUpdatedAt: now(),
             updatedAt: now(),
           };
@@ -727,7 +935,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
       if (changed) void persistSong(changed);
       return changed || song;
     } catch {
-      // Never keep a weak result. A missing preview is preferable to the wrong song or artist.
+      // Keep the imported identity, but never keep weak/wrong provider metadata.
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
         ...current,
@@ -762,10 +970,25 @@ export function auditionYoutubeUrl(song: Pick<MusicAuditionSong, "artist" | "tit
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(`${song.artist} ${song.title} official audio`)}`;
 }
 
+export function matchingMusicLibraryTrack(song: MusicAuditionSong, tracks: MusicTrack[]) {
+  if (song.libraryTrackId) {
+    const byId = tracks.find((track) => track.id === song.libraryTrackId);
+    if (byId) return byId;
+  }
+
+  const exact = tracks.find((track) => auditionCanonicalKey(track.artist || "", track.title) === song.canonicalKey);
+  if (exact) return exact;
+
+  // A strict normalized fallback catches harmless metadata differences without hiding a different song.
+  return tracks.find((track) => {
+    const artistScore = artistMatchScore(song.artist, track.artist || "");
+    const titleScore = titleMatchScore(strictTitleKey(song.title), strictTitleKey(track.title));
+    return artistScore >= 0.94 && titleScore >= 0.94;
+  }) || null;
+}
+
 export function musicAuditionSongInLibrary(song: MusicAuditionSong, tracks: MusicTrack[]) {
-  if (song.libraryTrackId && tracks.some((track) => track.id === song.libraryTrackId)) return true;
-  const key = song.canonicalKey;
-  return tracks.some((track) => auditionCanonicalKey(track.artist || "", track.title) === key);
+  return Boolean(matchingMusicLibraryTrack(song, tracks));
 }
 
 export function musicAuditionSongSources(songId: string, lists: MusicAuditionList[]) {
@@ -781,13 +1004,30 @@ type Props = {
   onImportFile?: (file: File, song: MusicAuditionSong) => Promise<MusicTrack | null>;
 };
 
-function listStats(list: MusicAuditionList, songsById: Map<string, MusicAuditionSong>) {
-  const songs = list.songIds.map((id) => songsById.get(id)).filter((song): song is MusicAuditionSong => Boolean(song));
+function listStats(
+  list: MusicAuditionList,
+  songsById: Map<string, MusicAuditionSong>,
+  tracks: MusicTrack[],
+) {
+  const importedSongs = list.songIds
+    .map((id) => songsById.get(id))
+    .filter((song): song is MusicAuditionSong => Boolean(song));
+  const skipped = importedSongs.filter((song) => musicAuditionSongInLibrary(song, tracks)).length;
+  const songs = importedSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks));
   const keep = songs.filter((song) => song.decision === "keep").length;
   const pass = songs.filter((song) => song.decision === "pass").length;
   const maybe = songs.filter((song) => song.decision === "maybe").length;
   const reviewed = keep + pass + maybe;
-  return { total: songs.length, keep, pass, maybe, reviewed, progress: songs.length ? reviewed / songs.length : 0 };
+  return {
+    importedTotal: importedSongs.length,
+    skipped,
+    total: songs.length,
+    keep,
+    pass,
+    maybe,
+    reviewed,
+    progress: songs.length ? reviewed / songs.length : 0,
+  };
 }
 
 function decisionLabel(decision: AuditionDecision) {
@@ -807,6 +1047,32 @@ function dateLabel(value: number | null) {
 function defaultListName() {
   const date = new Date();
   return `Audition List ${date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
+function PlayGlyph({ stop = false }: { stop?: boolean }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+    {stop ? <rect x="7" y="7" width="10" height="10" rx="1.5" /> : <path d="M8 5.8v12.4c0 .9 1 1.4 1.8.9l9-6.2a1.1 1.1 0 0 0 0-1.8l-9-6.2A1.1 1.1 0 0 0 8 5.8Z" />}
+  </svg>;
+}
+
+function CheckGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5.2 12.5 4.2 4.2L19 7.3" /></svg>;
+}
+
+function MaybeGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round"><path d="M8.7 8.4a3.7 3.7 0 0 1 7.1 1.5c0 2.7-3.8 3-3.8 5.2" /><circle cx="12" cy="18.4" r="1" fill="currentColor" stroke="none" /></svg>;
+}
+
+function CloseGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round"><path d="m7 7 10 10M17 7 7 17" /></svg>;
+}
+
+function UploadGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14.5V19h14v-4.5" /></svg>;
+}
+
+function MoreGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>;
 }
 
 export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Props) {
@@ -845,24 +1111,47 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
 
   const songsById = useMemo(() => new Map(state.songs.map((song) => [song.id, song])), [state.songs]);
   const selectedList = state.lists.find((list) => list.id === selectedListId) || null;
-  const selectedSongs = useMemo(
-    () => selectedList ? selectedList.songIds.map((id) => songsById.get(id)).filter((song): song is MusicAuditionSong => Boolean(song)) : [],
+  const selectedAllSongs = useMemo(
+    () => selectedList
+      ? selectedList.songIds.map((id) => songsById.get(id)).filter((song): song is MusicAuditionSong => Boolean(song))
+      : [],
     [selectedList, songsById],
   );
+  const selectedSongs = useMemo(
+    () => selectedAllSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks)),
+    [selectedAllSongs, tracks],
+  );
   const currentSong = selectedSongs[currentIndex] || null;
-  const currentStats = selectedList ? listStats(selectedList, songsById) : null;
-  const keptSongs = useMemo(
-    () => state.songs.filter((song) => song.decision === "keep").sort((a, b) => (b.decidedAt || 0) - (a.decidedAt || 0)),
+  const currentStats = selectedList ? listStats(selectedList, songsById, tracks) : null;
+
+  const allKeptSongs = useMemo(
+    () => state.songs
+      .filter((song) => song.decision === "keep")
+      .sort((a, b) => (b.decidedAt || 0) - (a.decidedAt || 0)),
     [state.songs],
   );
+  const keptSongs = useMemo(
+    () => allKeptSongs.filter((song) => !musicAuditionSongInLibrary(song, tracks)),
+    [allKeptSongs, tracks],
+  );
+  const keptInLibraryCount = allKeptSongs.length - keptSongs.length;
+
   const sortedLists = useMemo(() => {
     const rows = [...state.lists];
     if (listSort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
-    if (listSort === "progress") return rows.sort((a, b) => listStats(b, songsById).progress - listStats(a, songsById).progress || b.updatedAt - a.updatedAt);
-    if (listSort === "most_kept") return rows.sort((a, b) => listStats(b, songsById).keep - listStats(a, songsById).keep || b.updatedAt - a.updatedAt);
+    if (listSort === "progress") return rows.sort((a, b) => listStats(b, songsById, tracks).progress - listStats(a, songsById, tracks).progress || b.updatedAt - a.updatedAt);
+    if (listSort === "most_kept") return rows.sort((a, b) => listStats(b, songsById, tracks).keep - listStats(a, songsById, tracks).keep || b.updatedAt - a.updatedAt);
     return rows.sort((a, b) => b.createdAt - a.createdAt);
-  }, [state.lists, songsById, listSort]);
+  }, [state.lists, songsById, tracks, listSort]);
   const parsedImportCount = useMemo(() => parseAuditionListText(importText).length, [importText]);
+
+  useEffect(() => {
+    if (!selectedSongs.length) {
+      setCurrentIndex(0);
+      return;
+    }
+    setCurrentIndex((index) => Math.min(index, selectedSongs.length - 1));
+  }, [selectedSongs.length, selectedListId]);
 
   useEffect(() => {
     if (!currentSong || verifiedMetadataIds.has(currentSong.id)) return;
@@ -882,10 +1171,14 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       });
   }, [currentSong?.id]);
 
-  function openList(list: MusicAuditionList) {
+  function openList(list: MusicAuditionList, sourceState: MusicAuditionState = state) {
     stopPreview();
     setSelectedListId(list.id);
-    const songs = list.songIds.map((id) => songsById.get(id)).filter((song): song is MusicAuditionSong => Boolean(song));
+    const sourceMap = new Map(sourceState.songs.map((song) => [song.id, song]));
+    const songs = list.songIds
+      .map((id) => sourceMap.get(id))
+      .filter((song): song is MusicAuditionSong => Boolean(song))
+      .filter((song) => !musicAuditionSongInLibrary(song, tracks));
     const firstUnreviewed = songs.findIndex((song) => !song.decision);
     setCurrentIndex(firstUnreviewed >= 0 ? firstUnreviewed : 0);
     setView("audition");
@@ -920,7 +1213,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       refresh();
     }
     if (!resolved.previewUrl) {
-      setMessage("No verified preview source was found for this exact artist and song. The imported identity is still locked; use YouTube for the full-song search.");
+      setMessage("No playable embedded sample was found across Apple and Deezer for this exact artist/title. YouTube is still available for the full song.");
       return;
     }
     onPreviewStart?.();
@@ -930,7 +1223,12 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     audio.onended = () => setPreviewSongId(null);
     audio.onerror = () => {
       setPreviewSongId(null);
-      setMessage("That preview could not be played. Use YouTube for the full song.");
+      setVerifiedMetadataIds((previous) => {
+        const next = new Set(previous);
+        next.delete(song.id);
+        return next;
+      });
+      setMessage("That sample expired or failed. MVP will search the other preview sources the next time you press Preview.");
     };
     audioRef.current = audio;
     try {
@@ -957,11 +1255,18 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     setImportError("");
     try {
       const list = importMusicAuditionList(importName, importText);
+      const freshState = listMusicAuditionState();
+      const freshMap = new Map(freshState.songs.map((song) => [song.id, song]));
+      const stats = listStats(list, freshMap, tracks);
       setImportOpen(false);
       setImportName(defaultListName());
       setImportText("");
-      refresh();
-      openList(list);
+      setState(freshState);
+      openList(list, freshState);
+      const remaining = Math.max(0, stats.total - stats.reviewed);
+      setMessage(
+        `${stats.importedTotal} tracks analyzed • ${stats.skipped} already in MVP skipped • ${stats.reviewed} previously reviewed • ${remaining} ready to audition.`,
+      );
     } catch (caught) {
       setImportError(caught instanceof Error ? caught.message : "Could not import this list.");
     }
@@ -1041,12 +1346,15 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     }
   }
 
-  const globalCounts = useMemo(() => ({
-    keep: state.songs.filter((song) => song.decision === "keep").length,
-    pass: state.songs.filter((song) => song.decision === "pass").length,
-    maybe: state.songs.filter((song) => song.decision === "maybe").length,
-    reviewed: state.songs.filter((song) => Boolean(song.decision)).length,
-  }), [state.songs]);
+  const globalCounts = useMemo(() => {
+    const candidates = state.songs.filter((song) => !musicAuditionSongInLibrary(song, tracks));
+    return {
+      keep: candidates.filter((song) => song.decision === "keep").length,
+      pass: candidates.filter((song) => song.decision === "pass").length,
+      maybe: candidates.filter((song) => song.decision === "maybe").length,
+      reviewed: candidates.filter((song) => Boolean(song.decision)).length,
+    };
+  }, [state.songs, tracks]);
 
   const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
   const currentMetadataAvailable = Boolean(
@@ -1054,6 +1362,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     currentMetadataVerified &&
     (currentSong.artworkUrl || currentSong.previewUrl || currentSong.album),
   );
+  const currentPreviewReady = Boolean(currentSong?.previewUrl && currentMetadataVerified);
 
   return <section className="mvp-audition">
     <input ref={fileInputRef} hidden type="file" accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void handleFileChange(event)} />
@@ -1088,8 +1397,8 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       </div>
       {!sortedLists.length ? <div className="mvp-auditionEmpty"><b>NO AUDITION LISTS YET</b><span>Import an Octane list, Spotify finds, covers list, or any Artist - Song list to begin.</span><button onClick={() => setImportOpen(true)}>IMPORT YOUR FIRST LIST</button></div> : <div className="mvp-auditionLists">
         {sortedLists.map((list) => {
-          const stats = listStats(list, songsById);
-          const percent = Math.round(stats.progress * 100);
+          const stats = listStats(list, songsById, tracks);
+          const percent = stats.total ? Math.round(stats.progress * 100) : stats.skipped ? 100 : 0;
           return <article key={list.id} className="mvp-auditionListCard">
             <header>
               <div className="mvp-auditionListIcon">♫</div>
@@ -1099,8 +1408,9 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
               <b className="mvp-auditionPercent">{percent}%</b>
             </header>
             <div className="mvp-auditionProgress"><i style={{ width: `${percent}%` }} /></div>
+            {stats.skipped ? <div className="mvp-auditionPreflight"><span>✓ {stats.skipped} ALREADY IN MVP</span><small>Skipped automatically • {stats.total} candidate{stats.total === 1 ? "" : "s"} remain</small></div> : null}
             <div className="mvp-auditionListStats"><span><b>{stats.reviewed}</b> / {stats.total}<small>REVIEWED</small></span><span className="is-keep"><b>{stats.keep}</b><small>KEEP</small></span><span className="is-maybe"><b>{stats.maybe}</b><small>MAYBE</small></span><span className="is-pass"><b>{stats.pass}</b><small>PASS</small></span></div>
-            <footer><button className="is-open" onClick={() => openList(list)}>▶ {stats.reviewed ? "CONTINUE" : "START"}</button><button onClick={() => startRename(list)}>RENAME</button><button onClick={() => duplicateList(list)}>DUPLICATE</button><button onClick={() => setMergeSourceId(list.id)} disabled={state.lists.length < 2}>MERGE</button><button className="is-danger" onClick={() => void deleteList(list)}>DELETE</button></footer>
+            <footer><button className="is-open" disabled={!stats.total} onClick={() => openList(list)}>▶ {stats.total ? (stats.reviewed ? "CONTINUE" : "START") : "ALL IN MVP"}</button><button onClick={() => startRename(list)}>RENAME</button><button onClick={() => duplicateList(list)}>DUPLICATE</button><button onClick={() => setMergeSourceId(list.id)} disabled={state.lists.length < 2}>MERGE</button><button className="is-danger" onClick={() => void deleteList(list)}>DELETE</button></footer>
           </article>;
         })}
       </div>}
@@ -1110,61 +1420,88 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       <header className="mvp-auditionStageHead">
         <button onClick={() => { stopPreview(); setView("lists"); }}>‹ LISTS</button>
         <div><span>NOW AUDITIONING</span><h3>{selectedList.name}</h3></div>
-        <div className="mvp-auditionStageProgress"><b>{currentStats.reviewed} / {currentStats.total}</b><span>REVIEWED</span></div>
+        <div className="mvp-auditionStageProgress"><b>{currentStats.reviewed} / {currentStats.total}</b><span>REVIEWED{currentStats.skipped ? ` • ${currentStats.skipped} IN MVP SKIPPED` : ""}</span></div>
       </header>
-      <div className="mvp-auditionStageBar"><i style={{ width: `${Math.round(currentStats.progress * 100)}%` }} /></div>
+      <div className="mvp-auditionStageBar"><i style={{ width: `${currentStats.total ? Math.round(currentStats.progress * 100) : currentStats.skipped ? 100 : 0}%` }} /></div>
       {currentSong ? <article className={`mvp-auditionSongCard ${currentMetadataVerified && currentSong.artworkUrl ? "has-art" : "no-art"}`}>
         <div className="mvp-auditionArtwork">
-          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "SEARCHING SOURCES" : "PREVIEW ART PENDING"}</small></div>}
+          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "SEARCHING APPLE + DEEZER" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
         </div>
         <div className="mvp-auditionSongInfo">
           <div className="mvp-auditionStatusRow">
             <span className={`is-${currentSong.decision || "new"}`}>{decisionLabel(currentSong.decision)}</span>
-            <span className="is-source">IMPORTED IDENTITY LOCKED</span>
-            {currentMetadataAvailable ? <span className="is-verified">✓ VERIFIED MATCH</span> : null}
-            {musicAuditionSongInLibrary(currentSong, tracks) ? <b>✓ IN LIBRARY</b> : null}
+            {lookupSongId === currentSong.id
+              ? <span className="is-source">SEARCHING APPLE + DEEZER</span>
+              : currentPreviewReady
+                ? <span className="is-verified">✓ {previewProviderLabel(currentSong.previewUrl)}</span>
+                : <span className="is-source">YOUTUBE READY</span>}
           </div>
           <h2>{currentSong.title}</h2>
           <h3>{currentSong.artist}</h3>
           <p className="mvp-auditionMeta">
             {lookupSongId === currentSong.id
-              ? "Searching multiple verified artist/title combinations for artwork and preview…"
-              : currentMetadataAvailable
-                ? ["Verified preview", currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
-                : "No verified embedded preview found yet. The imported artist and title stay locked; YouTube searches that exact identity."}
+              ? "Checking multiple preview catalogs and validating playable audio…"
+              : currentPreviewReady
+                ? [previewProviderLabel(currentSong.previewUrl), currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
+                : currentMetadataAvailable
+                  ? "Artwork matched, but no playable embedded sample survived verification. Use YouTube for the full song."
+                  : "No playable embedded sample found yet. YouTube always searches the exact imported artist and title."}
           </p>
           <div className="mvp-auditionListen">
-            <button className={`is-preview ${previewSongId === currentSong.id ? "is-playing" : ""}`} disabled={lookupSongId === currentSong.id} onClick={() => void togglePreview(currentSong)}>
-              <span className="mvp-auditionControlIcon">{lookupSongId === currentSong.id ? "⌁" : previewSongId === currentSong.id ? "■" : "▶"}</span>
-              <span className="mvp-auditionControlCopy"><strong>{lookupSongId === currentSong.id ? "VERIFYING" : previewSongId === currentSong.id ? "STOP PREVIEW" : "PREVIEW"}</strong><small>Verified sample</small></span>
+            <button
+              className={`is-preview ${previewSongId === currentSong.id ? "is-playing" : ""} ${!currentPreviewReady && lookupSongId !== currentSong.id ? "is-unavailable" : ""}`}
+              disabled={lookupSongId === currentSong.id || (!currentPreviewReady && currentMetadataVerified)}
+              onClick={() => void togglePreview(currentSong)}
+            >
+              <span className="mvp-auditionControlIcon"><PlayGlyph stop={previewSongId === currentSong.id} /></span>
+              <span className="mvp-auditionControlCopy">
+                <strong>{lookupSongId === currentSong.id ? "SEARCHING" : previewSongId === currentSong.id ? "STOP PREVIEW" : currentPreviewReady ? "PREVIEW" : "NO SAMPLE"}</strong>
+                <small>{lookupSongId === currentSong.id ? "Apple + Deezer" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Use YouTube"}</small>
+              </span>
             </button>
             <button className="is-youtube" onClick={() => openYoutube(currentSong)}>
-              <span className="mvp-auditionControlIcon">▶</span>
-              <span className="mvp-auditionControlCopy"><strong>YOUTUBE</strong><small>Full-song search ↗</small></span>
+              <span className="mvp-auditionControlIcon"><PlayGlyph /></span>
+              <span className="mvp-auditionControlCopy"><strong>YOUTUBE</strong><small>Exact full-song search</small></span>
             </button>
           </div>
           <div className="mvp-auditionDecision">
-            <button className={`is-keep ${currentSong.decision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}><span className="mvp-auditionDecisionIcon">✓</span><span><strong>KEEP</strong><small>Save to winners</small></span></button>
-            <button className={`is-maybe ${currentSong.decision === "maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong, "maybe")}><span className="mvp-auditionDecisionIcon">?</span><span><strong>MAYBE</strong><small>Revisit later</small></span></button>
-            <button className={`is-pass ${currentSong.decision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}><span className="mvp-auditionDecisionIcon">×</span><span><strong>PASS</strong><small>Reject candidate</small></span></button>
+            <button className={`is-keep ${currentSong.decision === "keep" ? "is-active" : ""}`} onClick={() => decide(currentSong, "keep")}><span className="mvp-auditionDecisionIcon"><CheckGlyph /></span><span><strong>KEEP</strong><small>Save to winners</small></span></button>
+            <button className={`is-maybe ${currentSong.decision === "maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong, "maybe")}><span className="mvp-auditionDecisionIcon"><MaybeGlyph /></span><span><strong>MAYBE</strong><small>Revisit later</small></span></button>
+            <button className={`is-pass ${currentSong.decision === "pass" ? "is-active" : ""}`} onClick={() => decide(currentSong, "pass")}><span className="mvp-auditionDecisionIcon"><CloseGlyph /></span><span><strong>PASS</strong><small>Reject candidate</small></span></button>
           </div>
           <div className="mvp-auditionPager"><button disabled={currentIndex <= 0} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.max(0, index - 1)); }}>‹ PREVIOUS</button><button className="is-next-unreviewed" onClick={nextUnreviewed}>NEXT UNREVIEWED</button><button disabled={currentIndex >= selectedSongs.length - 1} onClick={() => { stopPreview(); setCurrentIndex((index) => Math.min(selectedSongs.length - 1, index + 1)); }}>NEXT ›</button></div>
         </div>
-      </article> : <div className="mvp-auditionEmpty"><b>THIS LIST IS EMPTY</b></div>}
+      </article> : <div className="mvp-auditionEmpty"><b>{currentStats.skipped ? "EVERY TRACK IS ALREADY IN MVP" : "THIS LIST IS EMPTY"}</b><span>{currentStats.skipped ? `${currentStats.skipped} imported track${currentStats.skipped === 1 ? "" : "s"} were recognized in your music library and skipped automatically.` : ""}</span></div>}
       <footer className="mvp-auditionCounts"><span className="is-keep"><b>{currentStats.keep}</b> KEEP</span><span className="is-pass"><b>{currentStats.pass}</b> PASS</span><span className="is-maybe"><b>{currentStats.maybe}</b> MAYBE</span><span><b>{currentStats.total - currentStats.reviewed}</b> LEFT</span></footer>
     </div> : null}
 
     {view === "kept" ? <div className="mvp-auditionKept">
-      <header><div><span>APPROVED MUSIC</span><h3>Kept Songs</h3><p>These songs survived Audition. They stay here until you add the actual audio file to MVP.</p></div><b>{keptSongs.length}</b></header>
-      {!keptSongs.length ? <div className="mvp-auditionEmpty"><b>NO KEEPERS YET</b><span>Hit KEEP while auditioning and your winners will collect here.</span></div> : <div className="mvp-auditionKeptGrid">
+      <header><div><span>APPROVED MUSIC</span><h3>Kept Songs</h3><p>Only songs still waiting to be added to MVP stay here.{keptInLibraryCount ? ` ${keptInLibraryCount} previously kept song${keptInLibraryCount === 1 ? " is" : "s are"} already in your library and hidden.` : ""}</p></div><b>{keptSongs.length}</b></header>
+      {!keptSongs.length ? <div className="mvp-auditionEmpty"><b>{keptInLibraryCount ? "ALL KEPT SONGS ARE IN MVP" : "NO KEEPERS YET"}</b><span>{keptInLibraryCount ? "Your staging queue is clear." : "Hit KEEP while auditioning and your winners will collect here."}</span></div> : <div className="mvp-auditionKeptGrid">
         {keptSongs.map((song) => {
           const sources = musicAuditionSongSources(song.id, state.lists);
-          const inLibrary = musicAuditionSongInLibrary(song, tracks);
           return <article key={song.id}>
             <div className="mvp-auditionKeptArt">{song.artworkUrl ? <img src={song.artworkUrl} alt="" /> : <span>♫</span>}</div>
-            <div className="mvp-auditionKeptInfo"><small>{inLibrary ? "✓ IN LIBRARY" : "🔥 KEPT"}</small><strong>{song.title}</strong><b>{song.artist}</b><p>{sources.length ? `FROM ${sources.map((list) => list.name).join(" • ")}` : "KEPT FROM AUDITION"}</p></div>
-            <div className="mvp-auditionKeptActions"><button onClick={() => void togglePreview(song)}>{previewSongId === song.id ? "STOP" : "PREVIEW"}</button><button className="is-youtube" onClick={() => openYoutube(song)}>YOUTUBE ↗</button>{!inLibrary && onImportFile ? <button className="is-add" disabled={importingSongId === song.id} onClick={() => requestSongImport(song)}>{importingSongId === song.id ? "ADDING…" : "+ ADD FILE"}</button> : null}<button className="is-remove" onClick={() => { setMusicAuditionDecision(song.id, null); refresh(); }}>REMOVE</button></div>
+            <div className="mvp-auditionKeptInfo"><small>🔥 READY TO ADD</small><strong>{song.title}</strong><b>{song.artist}</b><p>{sources.length ? `FROM ${sources.map((list) => list.name).join(" • ")}` : "KEPT FROM AUDITION"}</p></div>
+            <div className="mvp-auditionKeptActions">
+              <button className="mvp-keptAction is-preview" onClick={() => void togglePreview(song)}>
+                <span className="mvp-keptActionIcon"><PlayGlyph stop={previewSongId === song.id} /></span>
+                <span><strong>{previewSongId === song.id ? "STOP" : "PREVIEW"}</strong><small>{song.previewUrl ? previewProviderLabel(song.previewUrl) : "Find sample"}</small></span>
+              </button>
+              <button className="mvp-keptAction is-youtube" onClick={() => openYoutube(song)}>
+                <span className="mvp-keptActionIcon"><PlayGlyph /></span>
+                <span><strong>YOUTUBE</strong><small>Full song</small></span>
+              </button>
+              {onImportFile ? <button className="mvp-keptAction is-add" disabled={importingSongId === song.id} onClick={() => requestSongImport(song)}>
+                <span className="mvp-keptActionIcon"><UploadGlyph /></span>
+                <span><strong>{importingSongId === song.id ? "ADDING…" : "ADD TO MVP"}</strong><small>Import audio</small></span>
+              </button> : null}
+              <details className="mvp-keptMore">
+                <summary aria-label={`More actions for ${song.title}`}><MoreGlyph /></summary>
+                <div><button onClick={() => { setMusicAuditionDecision(song.id, null); refresh(); }}>REMOVE FROM KEPT</button></div>
+              </details>
+            </div>
           </article>;
         })}
       </div>}
@@ -1577,6 +1914,241 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         .mvp-auditionDecisionIcon{display:grid!important;width:28px!important;height:28px!important;flex-basis:28px!important;font-size:13px!important}
         .mvp-auditionCounts{gap:12px!important}
       }
+
+      /* MVP_TRAINER_V5_R12_5E_11_AUDITION_INTELLIGENCE_PREMIUM */
+      .mvp-auditionPreflight{
+        display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;
+        margin:8px 0 7px!important;padding:7px 9px!important;border-radius:9px!important;
+        border:1px solid rgba(72,221,151,.13)!important;background:linear-gradient(90deg,rgba(13,64,43,.32),rgba(4,14,18,.2))!important;
+      }
+      .mvp-auditionPreflight span{font-size:6.8px!important;font-weight:1000!important;letter-spacing:.08em!important;color:#73e9a7!important}
+      .mvp-auditionPreflight small{font-size:6.6px!important;color:#718a94!important}
+      .mvp-auditionListCard footer .is-open:disabled{
+        color:#6d8b80!important;border-color:rgba(75,155,116,.16)!important;background:#07110d!important;
+        box-shadow:none!important;cursor:default!important;
+      }
+
+      /* Main audition listening controls: dark glass, luminous icon cores, no giant color slabs. */
+      .mvp-auditionListen{
+        display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px!important;margin-top:3px!important;
+      }
+      .mvp-auditionListen button{
+        position:relative!important;overflow:hidden!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;
+        min-height:70px!important;padding:0 16px!important;gap:13px!important;border-radius:16px!important;
+        border:1px solid rgba(110,177,200,.16)!important;
+        background:
+          radial-gradient(120px 70px at 0% 50%,rgba(78,213,252,.08),transparent 72%),
+          linear-gradient(180deg,rgba(10,25,32,.96),rgba(4,13,18,.98))!important;
+        color:#dff8ff!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.035),0 12px 28px rgba(0,0,0,.18)!important;
+        transform:none!important;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease!important;
+      }
+      .mvp-auditionListen button:after{
+        content:"";position:absolute!important;left:14px!important;right:14px!important;bottom:0!important;height:2px!important;
+        border-radius:99px 99px 0 0!important;opacity:.78!important;
+      }
+      .mvp-auditionListen .is-preview:after{background:linear-gradient(90deg,transparent,#54d8ff,transparent)!important}
+      .mvp-auditionListen .is-youtube:after{background:linear-gradient(90deg,transparent,#ff4f5e,transparent)!important}
+      .mvp-auditionListen button:not(:disabled):hover{
+        border-color:rgba(111,219,249,.34)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.22),0 0 24px rgba(62,196,235,.07)!important;
+      }
+      .mvp-auditionListen .is-youtube:not(:disabled):hover{
+        border-color:rgba(255,91,104,.34)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.04),0 12px 30px rgba(0,0,0,.22),0 0 22px rgba(255,74,88,.06)!important;
+      }
+      .mvp-auditionListen button.is-unavailable,.mvp-auditionListen button:disabled{
+        opacity:.48!important;cursor:default!important;box-shadow:none!important;
+      }
+      .mvp-auditionListen button.is-unavailable:after{background:linear-gradient(90deg,transparent,#536872,transparent)!important}
+      .mvp-auditionControlIcon{
+        width:44px!important;height:44px!important;flex:0 0 44px!important;display:grid!important;place-items:center!important;
+        border-radius:50%!important;background:linear-gradient(145deg,#102c37,#07151b)!important;
+        border:1px solid rgba(110,219,249,.26)!important;color:#e9fbff!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.08),0 0 0 5px rgba(68,205,244,.025),0 8px 18px rgba(0,0,0,.25)!important;
+      }
+      .mvp-auditionListen .is-youtube .mvp-auditionControlIcon{
+        color:#fff!important;border-color:rgba(255,88,101,.26)!important;background:linear-gradient(145deg,#331319,#16080b)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.06),0 0 0 5px rgba(255,70,84,.02),0 8px 18px rgba(0,0,0,.25)!important;
+      }
+      .mvp-auditionControlIcon svg{width:17px!important;height:17px!important}
+      .mvp-auditionControlCopy{display:grid!important;gap:3px!important;text-align:left!important}
+      .mvp-auditionControlCopy strong{font-size:10px!important;letter-spacing:.11em!important;color:#f4fcff!important}
+      .mvp-auditionControlCopy small{font-size:7px!important;color:#72909b!important;letter-spacing:.025em!important}
+      .mvp-auditionListen .is-youtube .mvp-auditionControlCopy small{color:#956d73!important}
+      .mvp-auditionListen button.is-playing{
+        border-color:rgba(89,224,255,.45)!important;background:linear-gradient(180deg,#0b2732,#06161d)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 26px rgba(55,201,242,.08)!important;
+      }
+
+      /* KEEP / MAYBE / PASS now use the same floating control language as the player. */
+      .mvp-auditionDecision{
+        display:grid!important;grid-template-columns:1.18fr 1fr 1fr!important;gap:10px!important;margin-top:10px!important;
+      }
+      .mvp-auditionDecision button{
+        position:relative!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;
+        min-height:68px!important;padding:0 14px!important;gap:11px!important;border-radius:15px!important;
+        border:1px solid rgba(104,166,187,.13)!important;
+        background:linear-gradient(180deg,rgba(8,21,27,.96),rgba(4,12,16,.98))!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 10px 22px rgba(0,0,0,.16)!important;
+        transform:none!important;
+      }
+      .mvp-auditionDecision button:after{
+        content:"";position:absolute!important;left:16px!important;right:16px!important;bottom:0!important;height:2px!important;
+        border-radius:99px!important;opacity:.48!important;
+      }
+      .mvp-auditionDecision .is-keep:after{background:linear-gradient(90deg,transparent,#4bea98,transparent)!important}
+      .mvp-auditionDecision .is-maybe:after{background:linear-gradient(90deg,transparent,#ffc14d,transparent)!important}
+      .mvp-auditionDecision .is-pass:after{background:linear-gradient(90deg,transparent,#ff5967,transparent)!important}
+      .mvp-auditionDecisionIcon{
+        width:40px!important;height:40px!important;flex:0 0 40px!important;display:grid!important;place-items:center!important;
+        border-radius:50%!important;background:#061117!important;border:1px solid currentColor!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.045),0 0 0 5px rgba(255,255,255,.012)!important;
+      }
+      .mvp-auditionDecisionIcon svg{width:18px!important;height:18px!important}
+      .mvp-auditionDecision button>span:last-child{display:grid!important;gap:2px!important;text-align:left!important}
+      .mvp-auditionDecision button strong{font-size:10px!important;letter-spacing:.12em!important}
+      .mvp-auditionDecision button small{font-size:7px!important;color:#708891!important}
+      .mvp-auditionDecision .is-keep{color:#73e9a7!important}
+      .mvp-auditionDecision .is-maybe{color:#ffc85d!important}
+      .mvp-auditionDecision .is-pass{color:#ff737f!important}
+      .mvp-auditionDecision .is-keep:hover,.mvp-auditionDecision .is-keep.is-active{
+        border-color:rgba(75,234,153,.35)!important;background:linear-gradient(180deg,#0a2117,#05110c)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.03),0 0 24px rgba(51,216,135,.07)!important;
+      }
+      .mvp-auditionDecision .is-maybe:hover,.mvp-auditionDecision .is-maybe.is-active{
+        border-color:rgba(255,196,77,.3)!important;background:linear-gradient(180deg,#201707,#100b04)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 0 22px rgba(243,176,51,.06)!important;
+      }
+      .mvp-auditionDecision .is-pass:hover,.mvp-auditionDecision .is-pass.is-active{
+        border-color:rgba(255,89,103,.32)!important;background:linear-gradient(180deg,#211014,#100609)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 0 22px rgba(235,61,76,.055)!important;
+      }
+
+      /* Kept Songs becomes a true premium staging queue. */
+      .mvp-auditionKept{gap:11px!important}
+      .mvp-auditionKept>header{
+        padding:15px 17px!important;border-radius:14px!important;border-color:rgba(78,188,221,.14)!important;
+        background:
+          radial-gradient(330px 100px at 100% 0%,rgba(55,224,147,.055),transparent 72%),
+          linear-gradient(150deg,#07171e,#040c10)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 14px 28px rgba(0,0,0,.15)!important;
+      }
+      .mvp-auditionKept>header h3{font-size:22px!important;letter-spacing:-.025em!important}
+      .mvp-auditionKept>header p{font-size:8px!important;line-height:1.5!important;color:#78929c!important}
+      .mvp-auditionKept>header>b{
+        min-width:50px;height:50px;display:grid;place-items:center;border-radius:50%!important;
+        border:1px solid rgba(82,226,151,.2)!important;background:#061810!important;color:#78ecad!important;font-size:24px!important;
+        box-shadow:0 0 0 5px rgba(75,223,145,.018)!important;
+      }
+      .mvp-auditionKeptGrid{gap:8px!important}
+      .mvp-auditionKeptGrid>article{
+        position:relative!important;grid-template-columns:68px minmax(0,1fr) auto!important;gap:13px!important;
+        min-height:88px!important;padding:10px 12px!important;border-radius:13px!important;
+        border-color:rgba(95,174,202,.12)!important;
+        background:
+          linear-gradient(90deg,rgba(17,54,67,.22),transparent 28%),
+          linear-gradient(180deg,#07141a,#040c10)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.02),0 9px 22px rgba(0,0,0,.12)!important;
+        transition:border-color .18s ease,background .18s ease!important;
+      }
+      .mvp-auditionKeptGrid>article:hover{
+        border-color:rgba(86,196,230,.23)!important;
+        background:linear-gradient(90deg,rgba(20,72,88,.25),transparent 30%),linear-gradient(180deg,#081820,#040d11)!important;
+      }
+      .mvp-auditionKeptArt{
+        width:68px!important;height:68px!important;border-radius:11px!important;border:1px solid rgba(91,189,220,.13)!important;
+        background:radial-gradient(circle at 50% 35%,#15303a,#07141a 70%)!important;
+        box-shadow:0 8px 20px rgba(0,0,0,.2)!important;
+      }
+      .mvp-auditionKeptInfo{gap:2px!important}
+      .mvp-auditionKeptInfo small{font-size:6.5px!important;letter-spacing:.1em!important;color:#76eaaa!important}
+      .mvp-auditionKeptInfo strong{font-size:14px!important;letter-spacing:-.015em!important}
+      .mvp-auditionKeptInfo b{font-size:9px!important;color:#9fc4d0!important}
+      .mvp-auditionKeptInfo p{margin-top:4px!important;font-size:6.7px!important;color:#647e88!important}
+
+      .mvp-auditionKeptActions{
+        display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:7px!important;flex-wrap:nowrap!important;
+      }
+      .mvp-auditionKeptActions .mvp-keptAction{
+        position:relative!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:8px!important;
+        min-width:112px!important;min-height:51px!important;padding:0 10px!important;border-radius:12px!important;
+        border:1px solid rgba(105,170,192,.13)!important;
+        background:linear-gradient(180deg,#08171e,#040d12)!important;
+        color:#a9c4ce!important;box-shadow:inset 0 1px rgba(255,255,255,.025),0 8px 18px rgba(0,0,0,.14)!important;
+        transition:border-color .18s ease,box-shadow .18s ease!important;
+      }
+      .mvp-auditionKeptActions .mvp-keptAction:hover{border-color:rgba(93,196,229,.25)!important;color:#edfaff!important}
+      .mvp-keptActionIcon{
+        width:32px!important;height:32px!important;flex:0 0 32px!important;display:grid!important;place-items:center!important;
+        border-radius:50%!important;background:#071218!important;border:1px solid currentColor!important;
+        box-shadow:0 0 0 4px rgba(255,255,255,.012)!important;
+      }
+      .mvp-keptActionIcon svg{width:14px!important;height:14px!important}
+      .mvp-keptAction>span:last-child{display:grid!important;gap:2px!important;text-align:left!important}
+      .mvp-keptAction strong{font-size:7.7px!important;letter-spacing:.08em!important;color:inherit!important;white-space:nowrap!important}
+      .mvp-keptAction small{font-size:6px!important;color:#637d87!important;white-space:nowrap!important}
+      .mvp-keptAction.is-preview{color:#72dcf7!important}
+      .mvp-keptAction.is-youtube{
+        color:#ff8b94!important;border-color:rgba(255,88,101,.16)!important;
+        background:linear-gradient(180deg,#160a0d,#090507)!important;
+      }
+      .mvp-keptAction.is-add{
+        color:#ffbd55!important;border-color:rgba(255,178,57,.22)!important;
+        background:
+          radial-gradient(100px 45px at 0% 50%,rgba(245,157,31,.08),transparent 74%),
+          linear-gradient(180deg,#1a1207,#0b0804)!important;
+        box-shadow:inset 0 1px rgba(255,255,255,.025),0 0 20px rgba(239,145,19,.035)!important;
+      }
+      .mvp-keptAction.is-add:hover{
+        border-color:rgba(255,188,73,.4)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 0 24px rgba(239,145,19,.07)!important;
+      }
+      .mvp-keptAction:disabled{opacity:.45!important;cursor:default!important}
+      .mvp-keptMore{position:relative!important;flex:0 0 auto!important}
+      .mvp-keptMore summary{
+        list-style:none!important;width:42px!important;height:42px!important;display:grid!important;place-items:center!important;cursor:pointer!important;
+        border-radius:50%!important;border:1px solid rgba(107,171,193,.13)!important;background:#07141a!important;color:#78939d!important;
+      }
+      .mvp-keptMore summary::-webkit-details-marker{display:none!important}
+      .mvp-keptMore summary svg{width:18px!important;height:18px!important}
+      .mvp-keptMore[open] summary,.mvp-keptMore summary:hover{color:#dceff5!important;border-color:rgba(91,193,225,.25)!important;background:#091b22!important}
+      .mvp-keptMore>div{
+        position:absolute!important;z-index:30!important;right:0!important;top:48px!important;min-width:150px!important;padding:5px!important;
+        border:1px solid rgba(255,95,108,.16)!important;border-radius:10px!important;background:#0c0a0c!important;
+        box-shadow:0 16px 35px rgba(0,0,0,.4)!important;
+      }
+      .mvp-keptMore>div button{
+        width:100%!important;min-height:34px!important;border:0!important;border-radius:7px!important;background:transparent!important;
+        color:#ff8992!important;font-size:6.7px!important;font-weight:1000!important;letter-spacing:.07em!important;text-align:left!important;padding:0 9px!important;
+      }
+      .mvp-keptMore>div button:hover{background:#210b0f!important}
+
+      @media(max-width:980px){
+        .mvp-auditionKeptGrid>article{grid-template-columns:62px minmax(0,1fr)!important}
+        .mvp-auditionKeptArt{width:62px!important;height:62px!important}
+        .mvp-auditionKeptActions{grid-column:1/-1!important;justify-content:flex-start!important;flex-wrap:wrap!important}
+      }
+      @media(max-width:760px){
+        .mvp-auditionPreflight{align-items:flex-start!important;flex-direction:column!important;gap:3px!important}
+        .mvp-auditionListen{grid-template-columns:1fr 1fr!important}
+        .mvp-auditionDecision{grid-template-columns:1.15fr 1fr 1fr!important;gap:6px!important}
+        .mvp-auditionDecision button{min-height:62px!important;padding:0 8px!important;gap:7px!important}
+        .mvp-auditionDecisionIcon{width:32px!important;height:32px!important;flex-basis:32px!important}
+        .mvp-auditionKeptGrid>article{grid-template-columns:58px minmax(0,1fr)!important;padding:9px 10px!important}
+        .mvp-auditionKeptArt{width:58px!important;height:58px!important}
+        .mvp-auditionKeptActions{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr)) auto!important;width:100%!important;gap:6px!important}
+        .mvp-auditionKeptActions .mvp-keptAction{min-width:0!important;width:100%!important;min-height:48px!important;padding:0 8px!important}
+        .mvp-keptMore summary{width:48px!important;height:48px!important}
+      }
+      @media(max-width:520px){
+        .mvp-auditionListen{grid-template-columns:1fr!important}
+        .mvp-auditionControlIcon{width:40px!important;height:40px!important;flex-basis:40px!important}
+        .mvp-auditionDecision button small{display:none!important}
+        .mvp-auditionDecisionIcon{width:29px!important;height:29px!important;flex-basis:29px!important}
+        .mvp-auditionKeptActions{grid-template-columns:1fr 1fr!important}
+        .mvp-keptMore{grid-column:2!important;justify-self:end!important}
+      }
+
     `}</style>
   </section>;
 }
