@@ -1,0 +1,143 @@
+/* MVP Trainer Pro — Song Library GPU / premium surface layer */
+.tr10-premiumLibrary{
+  --ml-cyan:#44dcff;
+  --ml-orange:#ff9b2f;
+  --ml-ink:#02070b;
+  --ml-surface:rgba(4,15,22,.79);
+  --ml-surface-2:rgba(5,20,29,.66);
+  --ml-line:rgba(92,206,239,.16);
+  position:relative!important;
+  isolation:isolate;
+  overflow:visible!important;
+}
+.tr10-premiumLibrary>.mlv-engine{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;border-radius:22px;opacity:.98}
+.tr10-premiumLibrary>.mlv-engine canvas{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
+.mlv-engineSheen{position:absolute;inset:0;background:linear-gradient(118deg,transparent 0 28%,rgba(121,226,255,.035) 42%,transparent 55% 100%);mix-blend-mode:screen;animation:mlvSheen 11s ease-in-out infinite;opacity:.7}
+.mlv-engineGrain{position:absolute;inset:0;opacity:.07;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.32'/%3E%3C/svg%3E");mix-blend-mode:soft-light}
+@keyframes mlvSheen{0%,100%{transform:translate3d(-9%,0,0);opacity:.35}50%{transform:translate3d(9%,0,0);opacity:.72}}
+.tr10-premiumLibrary>:not(.mlv-engine){position:relative;z-index:2}
+
+/* Hero + core Song Library shell */
+.tr10-premiumLibrary .tr10-hero,
+.tr10-premiumLibrary .tr10-stats{background:rgba(3,12,18,.68)!important;backdrop-filter:blur(18px) saturate(135%);-webkit-backdrop-filter:blur(18px) saturate(135%)}
+.tr10-premiumLibrary .tr10-hero{border:1px solid rgba(84,214,250,.16)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 22px 60px rgba(0,0,0,.3)!important}
+.tr10-premiumLibrary .tr10-stats{gap:1px!important;background:rgba(63,190,226,.08)!important;border:1px solid rgba(78,206,242,.12)!important;overflow:hidden!important}
+.tr10-premiumLibrary .tr10-stats>div{border:0!important;border-right:1px solid rgba(105,219,247,.10)!important;background:linear-gradient(180deg,rgba(8,29,39,.76),rgba(3,12,18,.72))!important;box-shadow:none!important}
+.tr10-premiumLibrary .tr10-stats>div:last-child{border-right:0!important}
+.tr10-premiumLibrary .tr10-stats strong{letter-spacing:-.025em!important;text-shadow:0 0 22px rgba(255,168,54,.13)!important}
+
+.tr10-premiumLibrary .tr10-console{
+  position:relative!important;
+  border:1px solid rgba(76,204,240,.16)!important;
+  border-radius:18px!important;
+  background:linear-gradient(180deg,rgba(3,17,25,.82),rgba(2,9,14,.72))!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 28px 90px rgba(0,0,0,.38)!important;
+  overflow:clip!important;
+  backdrop-filter:blur(20px) saturate(135%);
+  -webkit-backdrop-filter:blur(20px) saturate(135%);
+}
+.tr10-premiumLibrary .tr10-console:before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(77,222,255,.72),rgba(255,151,40,.58),transparent);opacity:.75;pointer-events:none}
+.tr10-premiumLibrary .tr10-sectionHead{border-bottom:0!important;padding-bottom:12px!important}
+.tr10-premiumLibrary .tr10-sectionHead h2{font-size:25px!important;letter-spacing:-.035em!important}
+.tr10-premiumLibrary .tr10-directoryEyebrow{color:#68e5ff!important;letter-spacing:.2em!important}
+.tr10-premiumLibrary .tr10-headActions button{border:1px solid rgba(100,214,244,.16)!important;background:rgba(5,18,25,.58)!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important;border-radius:8px!important;transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease!important}
+.tr10-premiumLibrary .tr10-headActions button:hover{transform:translateY(-1px)!important;border-color:rgba(85,220,255,.46)!important;background:rgba(8,35,46,.72)!important;box-shadow:0 8px 24px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.07)!important}
+.tr10-premiumLibrary .tr10-headActions .is-orange{background:linear-gradient(180deg,#ffae36,#dc7900)!important;border-color:rgba(255,198,84,.72)!important;color:#071016!important;text-shadow:none!important;box-shadow:0 8px 24px rgba(238,122,0,.18),inset 0 1px rgba(255,255,255,.5)!important}
+
+/* Status becomes a light HUD strip, not a box inside the console. */
+.tr10-premiumLibrary .tr10-statusPanel{border:0!important;border-top:1px solid rgba(111,222,250,.07)!important;border-bottom:1px solid rgba(111,222,250,.09)!important;background:rgba(2,10,15,.26)!important;padding:7px 10px!important}
+.tr10-premiumLibrary .tr10-statusPanelHead{display:none!important}
+.tr10-premiumLibrary .tr10-healthRail{gap:8px!important}
+.tr10-premiumLibrary .tr10-healthRail button{position:relative!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;min-height:38px!important;padding:4px 9px!important;color:#9ab1bb!important;overflow:visible!important}
+.tr10-premiumLibrary .tr10-healthRail button:after{content:"";position:absolute;left:10px;right:10px;bottom:0;height:1px;background:rgba(111,213,242,.11);transition:.2s ease}
+.tr10-premiumLibrary .tr10-healthRail button:hover{color:#e9faff!important;background:linear-gradient(180deg,rgba(49,202,244,.05),transparent)!important}
+.tr10-premiumLibrary .tr10-healthRail button.is-active{color:#fff!important;background:linear-gradient(180deg,rgba(47,211,255,.09),transparent)!important}
+.tr10-premiumLibrary .tr10-healthRail button.is-active:after{height:2px;background:linear-gradient(90deg,#31d9ff,#82edff);box-shadow:0 0 16px rgba(55,219,255,.52)}
+.tr10-premiumLibrary .tr10-healthRail button b{font-size:10px!important;color:#f4fbff!important}
+
+/* One continuous tab rail. No individual tab boxes. */
+.tr10-premiumLibrary .tr10-tabs{display:flex!important;grid-template-columns:none!important;gap:0!important;position:relative!important;overflow-x:auto!important;padding:0 8px!important;background:rgba(1,7,11,.56)!important;border:0!important;border-bottom:1px solid rgba(93,213,243,.14)!important;scrollbar-width:none!important}
+.tr10-premiumLibrary .tr10-tabs::-webkit-scrollbar{display:none!important}
+.tr10-premiumLibrary .tr10-tabs button{position:relative!important;flex:1 0 98px!important;min-width:98px!important;height:52px!important;padding:0 12px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#78929d!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.13em!important;transition:color .2s ease,transform .2s ease!important;overflow:hidden!important}
+.tr10-premiumLibrary .tr10-tabs button:hover{color:#dff8ff!important;transform:translateY(-1px)!important;background:linear-gradient(180deg,rgba(53,205,244,.04),transparent)!important}
+.tr10-premiumLibrary .tr10-tabs button.is-active{color:#fff!important;background:linear-gradient(180deg,rgba(50,215,255,.08),transparent 80%)!important;box-shadow:none!important}
+.tr10-premiumLibrary .tr10-tabs button>span:not(.tr10-tabEnergy){position:relative;z-index:2}
+.tr10-tabEnergy{position:absolute;z-index:1;left:18%;right:18%;bottom:0;height:2px;background:linear-gradient(90deg,transparent,#42ddff 28%,#c8f8ff 50%,#ff9a28 76%,transparent);box-shadow:0 0 18px rgba(62,219,255,.48),0 0 18px rgba(255,147,34,.24)}
+
+/* Toolbars */
+.tr10-premiumLibrary .tr10-toolbar{border:0!important;border-bottom:1px solid rgba(96,210,240,.08)!important;background:rgba(2,11,16,.24)!important;padding:11px!important;gap:8px!important}
+.tr10-premiumLibrary .tr10-toolbar label{border:1px solid rgba(100,203,232,.10)!important;border-radius:8px!important;background:rgba(3,14,20,.58)!important;padding:7px 9px!important;box-shadow:inset 0 1px rgba(255,255,255,.025)!important}
+.tr10-premiumLibrary .tr10-toolbar input,.tr10-premiumLibrary .tr10-toolbar select{background:transparent!important;border:0!important;color:#f4fbff!important;outline:0!important}
+.tr10-premiumLibrary .tr10-toolbar label:focus-within{border-color:rgba(65,218,255,.43)!important;box-shadow:0 0 0 1px rgba(65,218,255,.08),0 0 24px rgba(31,180,222,.09)!important}
+
+/* Songs */
+.tr10-premiumLibrary .tr10-table{background:transparent!important}
+.tr10-premiumLibrary .tr10-tableHead{border:0!important;border-bottom:1px solid rgba(100,210,240,.10)!important;background:rgba(3,15,21,.45)!important;color:#7c98a3!important}
+.tr10-premiumLibrary .tr10-row{position:relative!important;border:0!important;border-bottom:1px solid rgba(101,205,232,.065)!important;border-radius:0!important;background:linear-gradient(90deg,rgba(6,22,30,.38),rgba(3,12,18,.14))!important;transition:background .18s ease,transform .18s ease,box-shadow .18s ease!important}
+.tr10-premiumLibrary .tr10-row:before{content:"";position:absolute;inset:0;opacity:0;background:linear-gradient(110deg,transparent 8%,rgba(76,219,255,.07) 45%,rgba(255,148,34,.035) 70%,transparent);transform:translateX(-12%);transition:.24s ease;pointer-events:none}
+.tr10-premiumLibrary .tr10-row:hover{background:linear-gradient(90deg,rgba(8,34,45,.68),rgba(4,16,23,.36))!important;box-shadow:inset 3px 0 rgba(63,216,255,.52)!important}
+.tr10-premiumLibrary .tr10-row:hover:before{opacity:1;transform:translateX(0)}
+.tr10-premiumLibrary .tr10-row.is-current{background:linear-gradient(90deg,rgba(15,64,80,.56),rgba(5,20,28,.32))!important;box-shadow:inset 3px 0 #45dcff,0 0 34px rgba(25,166,206,.05)!important}
+.tr10-premiumLibrary .tr10-play{border:0!important;border-radius:8px!important;background:linear-gradient(180deg,#ffb63e,#ef8700)!important;color:#081016!important;box-shadow:inset 0 1px rgba(255,255,255,.52),0 6px 18px rgba(239,132,0,.18)!important}
+.tr10-premiumLibrary .tr10-play.is-playing{background:linear-gradient(180deg,#42e3ff,#139fc8)!important;box-shadow:0 0 20px rgba(56,218,255,.25)!important}
+.tr10-premiumLibrary .tr10-actions button{border:1px solid rgba(95,203,232,.12)!important;border-radius:7px!important;background:rgba(5,19,26,.56)!important;color:#d9edf4!important;box-shadow:inset 0 1px rgba(255,255,255,.025)!important;transition:.16s ease!important}
+.tr10-premiumLibrary .tr10-actions button:hover{border-color:rgba(74,218,255,.38)!important;background:rgba(8,35,46,.72)!important;transform:translateY(-1px)!important;color:#fff!important}
+.tr10-premiumLibrary .tr10-actions .is-edit{color:#8feaff!important}
+.tr10-premiumLibrary .tr10-likeAction.is-liked{border-color:rgba(46,235,144,.34)!important;background:rgba(16,91,59,.36)!important;color:#76ffc2!important}
+.tr10-premiumLibrary .tr10-lessAction.is-down{border-color:rgba(255,77,92,.32)!important;background:rgba(92,15,27,.36)!important;color:#ff8994!important}
+
+/* Artist / album collections */
+.tr10-premiumLibrary .tr10-cardGrid{gap:10px!important;background:transparent!important}
+.tr10-premiumLibrary .tr10-collectionCard{position:relative!important;border:1px solid rgba(86,207,239,.12)!important;border-radius:12px!important;background:linear-gradient(160deg,rgba(8,30,39,.72),rgba(3,12,18,.78))!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 18px 38px rgba(0,0,0,.18)!important;overflow:hidden!important;transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease!important}
+.tr10-premiumLibrary .tr10-collectionCard:before{content:"";position:absolute;inset:-40% 35% 50% -25%;background:radial-gradient(circle,rgba(53,216,255,.12),transparent 66%);pointer-events:none}
+.tr10-premiumLibrary .tr10-collectionCard:hover{transform:translateY(-3px)!important;border-color:rgba(70,220,255,.35)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 24px 52px rgba(0,0,0,.28),0 0 32px rgba(36,183,220,.08)!important}
+.tr10-premiumLibrary .tr10-collectionOpen{background:transparent!important;border:0!important}
+.tr10-premiumLibrary .tr10-collectionPlay{border:0!important;background:linear-gradient(180deg,rgba(24,80,99,.8),rgba(8,35,47,.8))!important;color:#fff!important;box-shadow:inset 0 1px rgba(255,255,255,.05)!important}
+.tr10-premiumLibrary .tr10-collectionDetail{background:rgba(2,11,17,.38)!important}
+.tr10-premiumLibrary .tr10-collectionDetailHero{border-bottom:1px solid rgba(93,209,239,.10)!important;background:linear-gradient(120deg,rgba(10,39,50,.64),rgba(4,14,20,.35))!important}
+.tr10-premiumLibrary .tr10-collectionSongList article{border-bottom:1px solid rgba(95,205,232,.07)!important;background:transparent!important}
+
+/* Playlists */
+.tr10-premiumLibrary .tr10-playlistLayout{background:transparent!important}
+.tr10-premiumLibrary .tr10-playlistLayout>aside{border-color:rgba(86,204,235,.10)!important;background:rgba(2,12,18,.32)!important}
+.tr10-premiumLibrary .tr10-playlistLayout>aside>button{border:0!important;border-bottom:1px solid rgba(96,204,232,.07)!important;border-radius:0!important;background:transparent!important;transition:.18s ease!important}
+.tr10-premiumLibrary .tr10-playlistLayout>aside>button:hover,.tr10-premiumLibrary .tr10-playlistLayout>aside>button.is-active{background:linear-gradient(90deg,rgba(53,215,255,.11),transparent)!important;box-shadow:inset 2px 0 #45d9ff!important}
+.tr10-premiumLibrary .tr10-playlistConsole{background:rgba(3,14,20,.26)!important}
+.tr10-premiumLibrary .tr10-playlistSongs article{border:0!important;border-bottom:1px solid rgba(94,204,232,.07)!important;background:transparent!important}
+
+/* Smart Mix */
+.tr10-premiumLibrary .tr10-smart{background:transparent!important;gap:12px!important;padding:12px!important}
+.tr10-premiumLibrary .tr10-smartBuild,.tr10-premiumLibrary .tr10-savedMixes{border:1px solid rgba(83,210,241,.13)!important;border-radius:14px!important;background:linear-gradient(145deg,rgba(5,25,33,.72),rgba(2,11,16,.66))!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 22px 52px rgba(0,0,0,.18)!important}
+.tr10-premiumLibrary .tr10-smartLaunch{background:linear-gradient(100deg,#1ea7ce,#38d9ff 46%,#ff9c2c 120%)!important;color:#031015!important;border:0!important;box-shadow:0 10px 30px rgba(32,184,224,.17),inset 0 1px rgba(255,255,255,.42)!important}
+.tr10-premiumLibrary .tr10-savedMixes article{border:0!important;border-bottom:1px solid rgba(95,207,235,.08)!important;background:transparent!important}
+.tr10-premiumLibrary .tr10-smartCollections button{border:1px solid rgba(91,205,235,.11)!important;background:rgba(4,17,23,.52)!important}
+
+/* Intelligence */
+.tr10-premiumLibrary .mvp-v5-intel{background:transparent!important;padding:12px!important}
+.tr10-premiumLibrary .mvp-v5-hero,.tr10-premiumLibrary .mvp-v5-block,.tr10-premiumLibrary .mvp-v5-dna,.tr10-premiumLibrary .mvp-v5-taste,.tr10-premiumLibrary .mvp-v5-live,.tr10-premiumLibrary .mvp-v5-pr{border:1px solid rgba(82,207,239,.12)!important;border-radius:14px!important;background:linear-gradient(145deg,rgba(5,24,33,.68),rgba(2,11,16,.64))!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 22px 52px rgba(0,0,0,.15)!important}
+
+/* Discover */
+.tr10-premiumLibrary .tr10-discover{background:transparent!important;padding:12px!important}
+.tr10-premiumLibrary .tr10-radarPanel,.tr10-premiumLibrary .tr10-discoverHead,.tr10-premiumLibrary .tr10-discoverArchiveTools{border-color:rgba(84,208,239,.11)!important;background:rgba(4,17,24,.48)!important;box-shadow:inset 0 1px rgba(255,255,255,.025)!important}
+.tr10-premiumLibrary .tr10-radarGrid article,.tr10-premiumLibrary .tr10-discoverGrid article{border:1px solid rgba(88,208,238,.11)!important;border-radius:12px!important;background:linear-gradient(150deg,rgba(7,28,37,.64),rgba(3,12,18,.69))!important;box-shadow:inset 0 1px rgba(255,255,255,.03),0 16px 38px rgba(0,0,0,.14)!important;transition:transform .2s ease,border-color .2s ease!important}
+.tr10-premiumLibrary .tr10-radarGrid article:hover,.tr10-premiumLibrary .tr10-discoverGrid article:hover{transform:translateY(-2px)!important;border-color:rgba(65,220,255,.31)!important}
+
+/* Audition outer surface. Detailed controls live in MusicAuditionPanel. */
+.tr10-premiumLibrary .mvp-audition{background:transparent!important;border:0!important;box-shadow:none!important}
+.tr10-premiumLibrary .mvp-auditionHero{background:linear-gradient(120deg,rgba(5,27,36,.66),rgba(2,11,17,.34))!important;border-top:1px solid rgba(75,216,250,.09)!important}
+
+/* Motion / accessibility */
+@media (prefers-reduced-motion:reduce){.mlv-engineSheen{animation:none!important}.tr10-premiumLibrary *{scroll-behavior:auto!important}}
+@media(max-width:760px){
+  .tr10-premiumLibrary>.mlv-engine{border-radius:14px;opacity:.86}
+  .mlv-engineGrain{opacity:.035}
+  .tr10-premiumLibrary .tr10-console{border-radius:13px!important;backdrop-filter:blur(12px) saturate(120%);-webkit-backdrop-filter:blur(12px) saturate(120%)}
+  .tr10-premiumLibrary .tr10-tabs{display:flex!important;grid-template-columns:none!important;padding:0 5px!important;gap:0!important;overflow-x:auto!important}
+  .tr10-premiumLibrary .tr10-tabs button{flex:0 0 106px!important;min-width:106px!important;width:auto!important;height:48px!important;font-size:8.7px!important;padding:0 8px!important}
+  .tr10-premiumLibrary .tr10-tabs button:last-child{grid-column:auto!important}
+  .tr10-premiumLibrary .tr10-statusPanel{padding:6px!important}
+  .tr10-premiumLibrary .tr10-healthRail{overflow-x:auto!important;display:flex!important;grid-template-columns:none!important;gap:3px!important}
+  .tr10-premiumLibrary .tr10-healthRail button{flex:0 0 116px!important;min-width:116px!important}
+  .tr10-premiumLibrary .tr10-row:hover{transform:none!important}
+  .tr10-premiumLibrary .tr10-collectionCard:hover,.tr10-premiumLibrary .tr10-radarGrid article:hover,.tr10-premiumLibrary .tr10-discoverGrid article:hover{transform:none!important}
+}

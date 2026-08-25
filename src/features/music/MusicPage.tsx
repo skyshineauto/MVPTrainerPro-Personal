@@ -73,6 +73,9 @@ import {
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
+import { motion } from "motion/react";
+import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
+import "./premium/MusicLibraryPremium.css";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -1811,7 +1814,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
   return (
-    <main className="tr10-page">
+    <main className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><MusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
       <section className="tr10-hero">
         <div><h1>My Music</h1></div>
         <button type="button" onClick={goBack}>BACK TO TRAINER</button>
@@ -1843,7 +1846,19 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav className="tr10-tabs">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => <button type="button" key={value} className={tab === value ? "is-active" : ""} onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}>{label}</button>)}
+          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => (
+            <motion.button
+              type="button"
+              key={value}
+              className={tab === value ? "is-active" : ""}
+              onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}
+              whileTap={{ scale: 0.985 }}
+              transition={{ type: "spring", stiffness: 460, damping: 34, mass: 0.42 }}
+            >
+              {tab === value ? <motion.span className="tr10-tabEnergy" layoutId="music-library-active-tab" transition={{ type: "spring", stiffness: 410, damping: 34 }} /> : null}
+              <span>{label}</span>
+            </motion.button>
+          ))}
         </nav>
 
         {message ? <div className="tr10-message">{message}</div> : null}
