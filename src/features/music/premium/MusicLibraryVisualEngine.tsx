@@ -9,9 +9,7 @@ import {
   type MusicLibraryVisualTab,
 } from "./musicLibraryShaders";
 
-function color(value: string) {
-  return new THREE.Color(value);
-}
+function color(value: string) { return new THREE.Color(value); }
 
 function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
   tab: MusicLibraryVisualTab;
@@ -31,7 +29,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
     fragmentShader: MUSIC_LIBRARY_FRAGMENT_SHADER,
     uniforms: {
       uTime: { value: 0 },
-      uEnergy: { value: playing ? 1 : 0.35 },
+      uEnergy: { value: playing ? 1 : 0.34 },
       uColorA: { value: color(palette[0]) },
       uColorB: { value: color(palette[1]) },
       uPointer: { value: pointer.current },
@@ -42,7 +40,8 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
   useEffect(() => {
     material.uniforms.uColorA.value.copy(color(palette[0]));
     material.uniforms.uColorB.value.copy(color(palette[1]));
-  }, [material, palette]);
+    invalidate();
+  }, [material, palette, invalidate]);
 
   useEffect(() => {
     const onPointer = (event: PointerEvent) => {
@@ -57,7 +56,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
 
   useEffect(() => {
     if (reducedMotion) { invalidate(); return; }
-    const fps = mobile ? (playing ? 30 : 22) : (playing ? 45 : 30);
+    const fps = mobile ? (playing ? 28 : 18) : (playing ? 48 : 28);
     const timer = window.setInterval(() => invalidate(), Math.round(1000 / fps));
     return () => window.clearInterval(timer);
   }, [invalidate, mobile, playing, reducedMotion]);
@@ -67,18 +66,14 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
   useFrame((state, delta) => {
     const uniforms = material.uniforms;
     if (!reducedMotion) uniforms.uTime.value += Math.min(delta, 0.034);
-    uniforms.uEnergy.value += ((playing ? 1 : 0.34) - uniforms.uEnergy.value) * 0.045;
-    pointer.current.lerp(targetPointer.current, mobile ? 0.025 : 0.055);
+    uniforms.uEnergy.value += ((playing ? 1 : 0.34) - uniforms.uEnergy.value) * 0.05;
+    pointer.current.lerp(targetPointer.current, mobile ? 0.024 : 0.052);
     uniforms.uPointer.value.copy(pointer.current);
-    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.05 : 0.96, 0.03);
+    state.gl.toneMapping = THREE.ACESFilmicToneMapping;
+    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.08 : 0.96, 0.035);
   });
 
-  return (
-    <mesh frustumCulled={false}>
-      <planeGeometry args={[2, 2]} />
-      <primitive attach="material" object={material} />
-    </mesh>
-  );
+  return <mesh frustumCulled={false}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
 }
 
 export function MusicLibraryVisualEngine({ activeTab, playing }: {
@@ -104,7 +99,7 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   return (
     <div className="mlv-engine" aria-hidden="true">
       <Canvas
-        dpr={mobile ? [0.72, 1] : [0.9, 1.35]}
+        dpr={mobile ? [0.68, 1] : [0.9, 1.4]}
         gl={{ alpha: true, antialias: false, powerPreference: "high-performance" }}
         camera={{ position: [0, 0, 1], fov: 50 }}
         frameloop="demand"
@@ -112,14 +107,14 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
         <SpectralSurface tab={activeTab} playing={playing} mobile={mobile} reducedMotion={reducedMotion} />
         {!mobile ? (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.48} luminanceThreshold={0.58} luminanceSmoothing={0.35} mipmapBlur />
-            <Noise opacity={0.018} />
-            <Vignette offset={0.18} darkness={0.72} />
+            <Bloom intensity={0.72} luminanceThreshold={0.54} luminanceSmoothing={0.30} mipmapBlur />
+            <Noise opacity={0.012} />
+            <Vignette offset={0.16} darkness={0.76} />
           </EffectComposer>
         ) : (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.28} luminanceThreshold={0.66} luminanceSmoothing={0.45} mipmapBlur />
-            <Vignette offset={0.2} darkness={0.66} />
+            <Bloom intensity={0.34} luminanceThreshold={0.64} luminanceSmoothing={0.42} mipmapBlur />
+            <Vignette offset={0.19} darkness={0.70} />
           </EffectComposer>
         )}
       </Canvas>

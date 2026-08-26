@@ -151,3 +151,174 @@
 .tr10-premiumLibrary .tr10-smartBuild,.tr10-premiumLibrary .tr10-savedMixes,.tr10-premiumLibrary .mvp-v5-hero,.tr10-premiumLibrary .mvp-v5-block,.tr10-premiumLibrary .mvp-v5-dna,.tr10-premiumLibrary .mvp-v5-taste,.tr10-premiumLibrary .mvp-v5-live,.tr10-premiumLibrary .mvp-v5-pr{border-color:rgba(83,207,239,.075)!important;background:linear-gradient(145deg,rgba(4,22,30,.52),rgba(2,9,14,.36))!important;box-shadow:inset 0 1px rgba(255,255,255,.022),0 14px 38px rgba(0,0,0,.13)!important}
 .tr10-premiumLibrary .tr10-smart{gap:18px!important}.tr10-premiumLibrary .tr10-smartLaunch{min-height:48px!important;border-radius:12px!important;font-weight:1000!important;letter-spacing:.08em!important}
 .tr10-premiumLibrary .tr10-tabs button{height:56px!important;font-size:9.5px!important;color:#91a9b2!important}.tr10-premiumLibrary .tr10-tabs button.is-active{color:#fff!important;text-shadow:0 0 18px rgba(66,221,255,.24)!important}
+
+/* === v16: ACTUAL SONG LIBRARY VISUAL CORRECTION ===
+   Removes the "stacked glowing rectangles" look and makes the rendered objects,
+   artwork, typography and GPU field carry the design. */
+.tr10-premiumLibrary .mlv-engineSheen{opacity:.42!important;mix-blend-mode:screen!important}
+.tr10-premiumLibrary .mlv-engineGrain{opacity:.035!important}
+.tr10-premiumLibrary .tr10-console{
+  border:0!important;border-radius:22px!important;
+  background:linear-gradient(180deg,rgba(1,8,12,.68),rgba(1,7,11,.46))!important;
+  box-shadow:0 34px 90px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.018)!important;
+}
+.tr10-premiumLibrary .tr10-console:before{opacity:.52!important}
+
+/* Stronger, cleaner primary tab rail. */
+.tr10-premiumLibrary .tr10-tabs{height:60px!important;padding:0 14px!important;background:rgba(0,6,10,.62)!important;border-bottom:1px solid rgba(100,220,248,.09)!important}
+.tr10-premiumLibrary .tr10-tabs button{height:60px!important;font-size:10px!important;letter-spacing:.16em!important;color:#89a6b1!important}
+.tr10-premiumLibrary .tr10-tabs button.is-active{font-size:10.4px!important;color:#fff!important;text-shadow:0 0 18px rgba(74,224,255,.28)!important}
+.tr10-premiumLibrary .tr10-tabEnergy{left:10%!important;right:10%!important;height:3px!important;border-radius:999px!important;background:linear-gradient(90deg,transparent,#35dfff 24%,#e9fdff 50%,#ff9a25 78%,transparent)!important;box-shadow:0 0 22px rgba(56,222,255,.62),0 0 18px rgba(255,142,30,.32)!important}
+
+/* Artist / album cards become artwork-led strips instead of bordered utility cards. */
+.tr10-premiumLibrary .tr10-cardGrid{gap:4px 18px!important;padding:10px 14px 20px!important}
+.tr10-premiumLibrary .tr10-collectionCard{
+  min-height:104px!important;border:0!important;border-radius:0!important;
+  background:linear-gradient(90deg,rgba(4,20,27,.48),rgba(1,8,12,.10))!important;
+  box-shadow:none!important;border-bottom:1px solid rgba(91,207,236,.075)!important;
+  overflow:visible!important;
+}
+.tr10-premiumLibrary .tr10-collectionCard:before{inset:12px auto 12px -6px!important;width:190px!important;background:radial-gradient(circle at 34% 50%,rgba(45,213,255,.12),transparent 68%)!important;opacity:.7!important}
+.tr10-premiumLibrary .tr10-collectionCard:hover{transform:translateX(3px)!important;border-color:rgba(89,218,248,.16)!important;background:linear-gradient(90deg,rgba(5,31,40,.72),rgba(1,9,14,.12))!important;box-shadow:inset 3px 0 rgba(54,218,255,.62)!important}
+.tr10-premiumLibrary .tr10-collectionOpen{min-height:104px!important;padding:10px!important}
+.tr10-premiumLibrary .tr10-collectionOpen img{width:78px!important;height:78px!important;border-radius:14px!important;box-shadow:0 16px 32px rgba(0,0,0,.34),0 0 0 1px rgba(255,255,255,.06)!important}
+.tr10-premiumLibrary .tr10-collectionPlay{width:64px!important;min-width:64px!important;height:42px!important;border:0!important;border-radius:12px!important;background:linear-gradient(145deg,rgba(26,93,115,.84),rgba(5,29,40,.84))!important;box-shadow:0 10px 26px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.08)!important}
+.tr10-premiumLibrary .tr10-collectionPlay:hover{transform:translateY(-2px) scale(1.025)!important;background:linear-gradient(145deg,rgba(41,166,202,.92),rgba(8,48,64,.88))!important;box-shadow:0 12px 28px rgba(0,0,0,.22),0 0 24px rgba(47,214,255,.13)!important}
+
+/* Smart Mix becomes a stage, not a form inside two boxes. */
+.tr10-premiumLibrary .tr10-smart{position:relative!important;padding:22px 18px 30px!important;gap:28px!important;background:radial-gradient(circle at 28% 20%,rgba(43,213,255,.08),transparent 34%),radial-gradient(circle at 82% 42%,rgba(255,155,45,.07),transparent 28%)!important}
+.tr10-premiumLibrary .tr10-smartBuild,.tr10-premiumLibrary .tr10-savedMixes{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+.tr10-premiumLibrary .tr10-smartBuild{padding:22px 8px 24px!important;border-bottom:1px solid rgba(94,215,244,.09)!important}
+.tr10-premiumLibrary .tr10-savedMixes{padding:10px 0 0!important;border-left:1px solid rgba(96,213,241,.08)!important}
+.tr10-premiumLibrary .tr10-smartCollections{gap:10px!important}
+.tr10-premiumLibrary .tr10-smartCollections button{min-height:48px!important;border:0!important;border-radius:12px!important;background:linear-gradient(180deg,rgba(10,37,48,.58),rgba(4,17,23,.50))!important;box-shadow:inset 0 1px rgba(255,255,255,.035)!important}
+.tr10-premiumLibrary .tr10-smartCollections button:hover,.tr10-premiumLibrary .tr10-smartCollections button.is-active{background:linear-gradient(180deg,rgba(17,78,98,.72),rgba(5,25,34,.64))!important;box-shadow:inset 0 -2px #42dcff,0 0 28px rgba(47,207,244,.08)!important}
+.tr10-premiumLibrary .tr10-smartLaunch{min-height:58px!important;border-radius:15px!important;background:linear-gradient(100deg,#159fc6,#42deff 43%,#f8ce69 78%,#ff9b25)!important;box-shadow:0 14px 40px rgba(20,175,215,.17),0 10px 34px rgba(235,135,21,.08),inset 0 1px rgba(255,255,255,.55)!important;font-size:15px!important;letter-spacing:.06em!important}
+.tr10-premiumLibrary .tr10-savedMixes article{padding:15px 12px!important;border-bottom:1px solid rgba(94,211,240,.075)!important;background:transparent!important}
+
+/* Intelligence: remove dashboard-card chrome. */
+.tr10-premiumLibrary .mvp-v5-intel{padding:18px!important;background:radial-gradient(circle at 12% 10%,rgba(46,218,255,.06),transparent 30%),radial-gradient(circle at 88% 32%,rgba(255,139,32,.045),transparent 26%)!important}
+.tr10-premiumLibrary .mvp-v5-hero,.tr10-premiumLibrary .mvp-v5-block,.tr10-premiumLibrary .mvp-v5-dna,.tr10-premiumLibrary .mvp-v5-taste,.tr10-premiumLibrary .mvp-v5-live,.tr10-premiumLibrary .mvp-v5-pr{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;border-bottom:1px solid rgba(89,209,239,.08)!important;padding-top:20px!important;padding-bottom:22px!important}
+.tr10-premiumLibrary .mvp-v5-hero{padding-top:8px!important;background:linear-gradient(90deg,rgba(40,210,250,.035),transparent 55%)!important}
+.tr10-premiumLibrary .mvp-v5-dna>div,.tr10-premiumLibrary .mvp-v5-taste>div{border-color:rgba(85,207,238,.08)!important;background:linear-gradient(180deg,rgba(5,24,32,.42),rgba(2,10,15,.24))!important;box-shadow:inset 0 1px rgba(255,255,255,.02)!important}
+
+/* Discover/Playlists: lighter structure, content first. */
+.tr10-premiumLibrary .tr10-radarPanel,.tr10-premiumLibrary .tr10-discoverHead,.tr10-premiumLibrary .tr10-discoverArchiveTools{border:0!important;border-bottom:1px solid rgba(87,207,237,.08)!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+.tr10-premiumLibrary .tr10-radarGrid article,.tr10-premiumLibrary .tr10-discoverGrid article{border:0!important;border-radius:14px!important;background:linear-gradient(150deg,rgba(7,31,40,.56),rgba(2,11,16,.36))!important;box-shadow:0 18px 44px rgba(0,0,0,.14),inset 0 1px rgba(255,255,255,.025)!important}
+.tr10-premiumLibrary .tr10-playlistLayout>aside{border:0!important;border-right:1px solid rgba(89,210,239,.08)!important;background:transparent!important}
+.tr10-premiumLibrary .tr10-playlistConsole{background:transparent!important}
+
+/* Rendered asset primitives. Never crop the icon itself. */
+.tr10-premiumLibrary .mlv-premiumAsset,
+.tr10-premiumLibrary .mlv-previewRenderIcon{display:block!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:contain!important;object-position:center!important;overflow:visible!important;clip-path:none!important;transform:none!important}
+.tr10-premiumLibrary .mlv-previewRenderIcon{filter:drop-shadow(0 16px 34px rgba(0,0,0,.34)) drop-shadow(0 0 18px rgba(42,216,255,.16))!important}
+.tr10-premiumLibrary .mlv-previewRenderIcon.is-playing{filter:drop-shadow(0 18px 38px rgba(0,0,0,.36)) drop-shadow(0 0 26px rgba(255,145,31,.20))!important}
+.tr10-premiumLibrary .mlv-keepRender{filter:drop-shadow(0 0 18px rgba(30,235,130,.24)) drop-shadow(0 12px 20px rgba(0,0,0,.34))!important}
+.tr10-premiumLibrary .mlv-maybeRender{filter:drop-shadow(0 0 18px rgba(255,184,39,.18)) drop-shadow(0 12px 20px rgba(0,0,0,.34))!important}
+.tr10-premiumLibrary .mlv-passRender{filter:drop-shadow(0 0 18px rgba(255,42,61,.22)) drop-shadow(0 12px 20px rgba(0,0,0,.34))!important}
+.tr10-premiumLibrary .mlv-youtubeRender{filter:drop-shadow(0 0 18px rgba(255,0,37,.18)) drop-shadow(0 12px 20px rgba(0,0,0,.34))!important}
+.tr10-premiumLibrary .mlv-uploadRender{filter:drop-shadow(0 0 16px rgba(43,207,255,.18)) drop-shadow(0 0 14px rgba(255,145,20,.12))!important}
+.tr10-premiumLibrary .mlv-moreRender{width:34px!important;height:14px!important;overflow:visible!important}
+
+/* Audition: actual open command deck. No icon trapped inside rectangles. */
+.tr10-premiumLibrary .mvp-audition .mvp-auditionSongCard{
+  border:0!important;border-radius:24px!important;
+  background:linear-gradient(110deg,rgba(1,10,14,.82),rgba(3,14,19,.50) 58%,rgba(10,11,9,.44))!important;
+  box-shadow:0 34px 90px rgba(0,0,0,.35),inset 0 1px rgba(255,255,255,.025)!important;
+  overflow:visible!important;
+}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionArtwork{overflow:visible!important;border-radius:19px!important;box-shadow:0 28px 55px rgba(0,0,0,.38),0 0 0 1px rgba(255,255,255,.055)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionArtwork img{border-radius:19px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionSongInfo h2{font-size:clamp(38px,4.2vw,62px)!important;line-height:.94!important;letter-spacing:-.055em!important;text-shadow:0 10px 30px rgba(0,0,0,.28)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionSongInfo h3{font-size:18px!important;color:#6ee8ff!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionMeta{font-size:9px!important;color:#829ca6!important;max-width:660px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionActionLabel{margin-top:22px!important;opacity:.82!important}
+
+.tr10-premiumLibrary .mvp-audition .mvp-auditionListen{display:grid!important;grid-template-columns:minmax(300px,1.3fr) minmax(190px,.7fr)!important;gap:34px!important;align-items:center!important;margin-top:2px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionListen button{
+  min-height:128px!important;padding:6px 8px!important;border:0!important;border-radius:0!important;
+  background:transparent!important;outline:0!important;clip-path:none!important;box-shadow:none!important;
+  overflow:visible!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:18px!important;
+}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionListen button:before{content:""!important;position:absolute!important;inset:14px 4px!important;border-radius:28px!important;background:radial-gradient(circle at 26% 50%,rgba(48,219,255,.10),transparent 58%)!important;opacity:0!important;transition:.2s ease!important;pointer-events:none!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionListen button:hover:before,.tr10-premiumLibrary .mvp-audition .mvp-auditionListen button.is-playing:before{opacity:1!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionListen .is-youtube:before{background:radial-gradient(circle at 28% 50%,rgba(255,21,55,.10),transparent 58%)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionControlIcon{width:112px!important;height:112px!important;flex:0 0 112px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important;padding:0!important}
+.tr10-premiumLibrary .mvp-audition .is-youtube .mvp-auditionControlIcon{width:94px!important;height:94px!important;flex-basis:94px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionControlCopy strong{font-size:12px!important;letter-spacing:.13em!important;color:#f7fcff!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionControlCopy small{font-size:7px!important;color:#6f8c96!important;margin-top:6px!important}
+
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:26px!important;margin-top:0!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button{
+  position:relative!important;min-height:142px!important;padding:4px 8px 8px!important;border:0!important;border-radius:0!important;
+  background:transparent!important;outline:0!important;clip-path:none!important;box-shadow:none!important;
+  overflow:visible!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:14px!important;
+}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button:before{content:""!important;position:absolute!important;inset:14px!important;border-radius:50%!important;opacity:0!important;filter:blur(12px)!important;transition:.18s ease!important;pointer-events:none!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision .is-keep:before{background:radial-gradient(circle,rgba(37,241,137,.18),transparent 68%)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision .is-maybe:before{background:radial-gradient(circle,rgba(255,183,39,.18),transparent 68%)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision .is-pass:before{background:radial-gradient(circle,rgba(255,39,61,.18),transparent 68%)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button:hover:before,.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button.is-active:before{opacity:1!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecisionIcon{width:98px!important;height:98px!important;flex:0 0 98px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important;padding:0!important;opacity:.72!important;filter:saturate(.82) brightness(.82)!important;transition:transform .18s ease,opacity .18s ease,filter .18s ease!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button:hover .mvp-auditionDecisionIcon{opacity:1!important;filter:saturate(1) brightness(1)!important;transform:translateY(-2px) scale(1.045)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button.is-active .mvp-auditionDecisionIcon{opacity:1!important;filter:saturate(1.18) brightness(1.13)!important;transform:scale(1.075)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button>span:last-child{text-align:left!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button strong{font-size:11px!important;letter-spacing:.16em!important;color:#f7fbfd!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button small{font-size:7px!important;color:#6c858e!important;margin-top:5px!important}
+
+/* Pager is engineered navigation, not two rectangular web buttons. */
+.tr10-premiumLibrary .mvp-audition .mvp-auditionPager{margin-top:12px!important;padding-top:18px!important;border-top:1px solid rgba(98,213,241,.075)!important;gap:18px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionPager button{min-height:54px!important;border:0!important;border-radius:0!important;background:transparent!important;outline:0!important;box-shadow:none!important;overflow:visible!important;color:#8da8b1!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionPager button:hover{color:#fff!important;transform:translateX(0)!important;text-shadow:0 0 18px rgba(54,218,255,.24)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionPager button .mlv-premiumAsset{width:34px!important;height:42px!important}
+
+/* Kept Songs: premium staging rows with open icon actions, no pasted utility buttons. */
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptGrid{gap:0!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptGrid>article{min-height:108px!important;padding:12px 14px!important;border:0!important;border-radius:0!important;outline:0!important;border-bottom:1px solid rgba(93,207,236,.07)!important;background:linear-gradient(90deg,rgba(4,21,28,.42),rgba(1,8,12,.05))!important;box-shadow:none!important;overflow:visible!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptGrid>article:hover{transform:translateX(3px)!important;background:linear-gradient(90deg,rgba(6,31,40,.66),rgba(1,9,13,.08))!important;box-shadow:inset 3px 0 rgba(55,217,255,.48)!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptArt{width:82px!important;height:82px!important;border-radius:14px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptActions{gap:18px!important;align-items:center!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptActions .mvp-keptAction{min-width:106px!important;min-height:72px!important;padding:2px 4px!important;border:0!important;border-radius:0!important;clip-path:none!important;outline:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important;display:flex!important;gap:8px!important}
+.tr10-premiumLibrary .mvp-audition .mvp-auditionKeptActions .mvp-keptAction:hover{transform:translateY(-2px)!important;background:transparent!important}
+.tr10-premiumLibrary .mvp-audition .mvp-keptActionIcon{width:58px!important;height:58px!important;flex:0 0 58px!important;border:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important}
+.tr10-premiumLibrary .mvp-audition .mvp-keptAction strong{font-size:7px!important;letter-spacing:.12em!important}
+.tr10-premiumLibrary .mvp-audition .mvp-keptAction small{font-size:5.8px!important;color:#607982!important}
+.tr10-premiumLibrary .mvp-audition .mvp-keptMore summary{border:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;color:#78929b!important}
+
+@media(max-width:760px){
+  .tr10-premiumLibrary .tr10-tabs{height:54px!important;padding:0 6px!important}
+  .tr10-premiumLibrary .tr10-tabs button{height:54px!important;font-size:9px!important;flex-basis:112px!important}
+  .tr10-premiumLibrary .tr10-cardGrid{display:block!important;padding:8px 10px 16px!important}
+  .tr10-premiumLibrary .tr10-collectionCard{min-height:92px!important}
+  .tr10-premiumLibrary .tr10-collectionOpen{min-height:92px!important}
+  .tr10-premiumLibrary .tr10-collectionOpen img{width:66px!important;height:66px!important}
+  .tr10-premiumLibrary .tr10-smart{padding:14px 10px 20px!important;gap:14px!important}
+  .tr10-premiumLibrary .tr10-savedMixes{border-left:0!important;border-top:1px solid rgba(96,213,241,.08)!important;padding-top:15px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionSongCard{padding:14px 12px 18px!important;border-radius:18px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionSongInfo h2{font-size:clamp(34px,11vw,48px)!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionListen{grid-template-columns:1fr 1fr!important;gap:12px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionListen button{min-height:98px!important;display:grid!important;place-items:center!important;gap:2px!important;text-align:center!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionControlIcon{width:76px!important;height:76px!important;flex-basis:76px!important}
+  .tr10-premiumLibrary .mvp-audition .is-youtube .mvp-auditionControlIcon{width:68px!important;height:68px!important;flex-basis:68px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionControlCopy strong{font-size:8px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionControlCopy small{display:none!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecision{gap:4px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button{min-height:112px!important;display:grid!important;place-items:center!important;gap:0!important;padding:2px!important;text-align:center!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecisionIcon{width:70px!important;height:70px!important;flex-basis:70px!important;margin:auto!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button>span:last-child{text-align:center!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button strong{font-size:7px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecision button small{display:none!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionKeptGrid>article{grid-template-columns:66px minmax(0,1fr)!important;min-height:0!important;padding:10px 8px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionKeptArt{width:66px!important;height:66px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionKeptActions{grid-column:1/-1!important;display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:6px!important;width:100%!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionKeptActions .mvp-keptAction{min-width:0!important;min-height:62px!important;display:grid!important;place-items:center!important;gap:0!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-keptActionIcon{width:46px!important;height:46px!important;flex-basis:46px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-keptAction small{display:none!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-keptMore{position:absolute!important;right:6px!important;top:8px!important}
+}
+
+@media(max-width:430px){
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionListen{grid-template-columns:1fr 1fr!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionControlIcon{width:68px!important;height:68px!important}
+  .tr10-premiumLibrary .mvp-audition .mvp-auditionDecisionIcon{width:62px!important;height:62px!important}
+}
