@@ -82,6 +82,8 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
 }) {
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches);
   const [reducedMotion, setReducedMotion] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [auditionPreviewPlaying, setAuditionPreviewPlaying] = useState(false);
+  const [auditionArtworkUrl, setAuditionArtworkUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 760px)");
@@ -96,15 +98,28 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
     };
   }, []);
 
+  useEffect(() => {
+    const onAuditionPreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ playing?: boolean; artworkUrl?: string | null }>).detail;
+      setAuditionPreviewPlaying(Boolean(detail?.playing));
+      if (detail?.artworkUrl) setAuditionArtworkUrl(detail.artworkUrl);
+      if (detail?.playing === false && activeTab !== "audition") setAuditionArtworkUrl(null);
+    };
+    window.addEventListener("mvp:audition-preview-state", onAuditionPreview as EventListener);
+    return () => window.removeEventListener("mvp:audition-preview-state", onAuditionPreview as EventListener);
+  }, [activeTab]);
+
+  const visualPlaying = playing || (activeTab === "audition" && auditionPreviewPlaying);
+
   return (
-    <div className="mlv-engine" aria-hidden="true">
+    <div className={`mlv-engine ${activeTab === "audition" && auditionPreviewPlaying ? "is-audition-preview" : ""}`} aria-hidden="true">
       <Canvas
         dpr={mobile ? [0.68, 1] : [0.9, 1.4]}
         gl={{ alpha: true, antialias: false, powerPreference: "high-performance" }}
         camera={{ position: [0, 0, 1], fov: 50 }}
         frameloop="demand"
       >
-        <SpectralSurface tab={activeTab} playing={playing} mobile={mobile} reducedMotion={reducedMotion} />
+        <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
         {!mobile ? (
           <EffectComposer multisampling={0} enableNormalPass={false}>
             <Bloom intensity={0.72} luminanceThreshold={0.54} luminanceSmoothing={0.30} mipmapBlur />
@@ -118,6 +133,7 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
           </EffectComposer>
         )}
       </Canvas>
+      {activeTab === "audition" && auditionArtworkUrl ? <div className="mlv-engineArtwork" style={{ backgroundImage: `url("${auditionArtworkUrl}")` }} /> : null}
       <div className="mlv-engineSheen" />
       <div className="mlv-engineGrain" />
     </div>

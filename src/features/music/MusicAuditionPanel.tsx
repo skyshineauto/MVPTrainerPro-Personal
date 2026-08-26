@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
 import { supabase } from "../../lib/supabase";
 import { AnimatePresence, motion } from "motion/react";
@@ -113,6 +113,33 @@ const PREVIEW_URL_CACHE_MS = 10 * 60 * 1000;
 const PREVIEW_FAILURE_RETRY_MS = 5 * 60 * 1000;
 const APPLE_STOREFRONTS = ["US", "GB", "CA", "AU", "NZ", "IE", "DE", "FR", "NL", "SE", "NO", "DK", "ES", "IT", "BR", "MX"] as const;
 const MAX_PREVIEW_PROBES = 14;
+
+type MusicAuditionResolutionState = {
+  metadataVerified: boolean;
+  previewFound: boolean;
+  previewPlayable: boolean;
+  previewFailed: boolean;
+};
+
+const auditionResolutionStates = new Map<string, MusicAuditionResolutionState>();
+
+function resolutionStateFor(songId: string, song?: MusicAuditionSong | null): MusicAuditionResolutionState {
+  const cached = auditionResolutionStates.get(songId);
+  if (cached) return cached;
+  const previewFound = Boolean(song?.previewUrl);
+  return {
+    metadataVerified: Boolean(song?.metadataUpdatedAt),
+    previewFound,
+    previewPlayable: false,
+    previewFailed: false,
+  };
+}
+
+function setResolutionState(songId: string, next: MusicAuditionResolutionState) {
+  auditionResolutionStates.set(songId, next);
+  return next;
+}
+
 const PREVIEW_UNLOCK_AUDIO = "data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
 let cloudHydrationPromise: Promise<void> | null = null;
 
@@ -128,7 +155,15 @@ function normalize(value: unknown) {
     .replace(/&/g, " and ")
     .replace(/\b(feat|featuring|ft)\.?\b.*$/i, "")
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeStylizedIdentity(value: unknown) {
+  return normalize(clean(value)
+    .replace(/([a-z0-9])!([a-z0-9])/gi, "$1i$2")
+    .replace(/([a-z0-9])\$([a-z0-9])/gi, "$1s$2")
+    .replace(/([a-z0-9])@([a-z0-9])/gi, "$1a$2"));
 }
 
 function canonicalTitle(value: unknown) {
@@ -578,12 +613,40 @@ function compactKey(value: unknown) {
   return normalize(value).replace(/\s+/g, "");
 }
 
+function editSimilarity(a: string, b: string) {
+  const left = compactKey(a);
+  const right = compactKey(b);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (Math.max(left.length, right.length) < 4) return 0;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    let northwest = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const north = previous[j];
+      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, northwest + (left[i - 1] === right[j - 1] ? 0 : 1));
+      northwest = north;
+    }
+  }
+  const distance = previous[right.length];
+  return Math.max(0, 1 - distance / Math.max(left.length, right.length));
+}
+
+function withoutLeadingArticle(value: string) {
+  return normalize(value).replace(/^the\s+/, "");
+}
+
+function hasCensoredTitleToken(value: unknown) {
+  return /[a-z0-9][*#_•]+[a-z0-9]/i.test(clean(value));
+}
+
 function leadArtist(value: unknown) {
   const raw = clean(value)
     .replace(/\s+(?:feat(?:uring)?|ft)\.?\s+.*$/i, "")
     .split(/\s+(?:&|x|with)\s+/i)[0]
     .split(/\s*,\s*/)[0];
-  return normalize(raw);
+  return normalizeStylizedIdentity(raw);
 }
 
 function artistIdentityKey(value: unknown) {
@@ -591,7 +654,7 @@ function artistIdentityKey(value: unknown) {
 }
 
 function fullArtistKey(value: unknown) {
-  return normalize(clean(value)
+  return normalizeStylizedIdentity(clean(value)
     .replace(/\s+(?:feat(?:uring)?|ft)\.?\s+/gi, " & ")
     .replace(/\s+with\s+/gi, " & ")
     .replace(/\s+x\s+/gi, " & "));
@@ -602,10 +665,10 @@ function strictTitleKey(value: unknown) {
   // Those are different recordings and must not be silently matched to the studio song.
   return normalize(clean(value)
     .replace(/\b(?:feat(?:uring)?|ft)\.?\b.*$/i, "")
-    .replace(/\((?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|deluxe|bonus track|reissue)[^)]*\)/gi, " ")
-    .replace(/\[(?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|deluxe|bonus track|reissue)[^\]]*\]/gi, " ")
+    .replace(/\((?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|explicit|clean|deluxe|bonus track|reissue)[^)]*\)/gi, " ")
+    .replace(/\[(?:feat(?:uring)?|ft|remaster(?:ed)?|radio edit|single version|album version|explicit|clean|deluxe|bonus track|reissue)[^\]]*\]/gi, " ")
     .replace(/\b(?:official audio|official video|lyric video|visualizer)\b/gi, " ")
-    .replace(/\b(?:remaster(?:ed)?|radio edit|single version|album version)\b/gi, " "))
+    .replace(/\b(?:remaster(?:ed)?|radio edit|single version|album version|explicit|clean)\b/gi, " "))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -651,7 +714,8 @@ function titleMatchScore(imported: string, candidate: string) {
   if (imported === candidate || compactKey(imported) === compactKey(candidate)) return 1;
   const token = tokenSimilarity(imported, candidate);
   const contained = isContainedMatch(imported, candidate) ? 0.94 : 0;
-  return Math.max(token, contained);
+  const edit = editSimilarity(imported, candidate);
+  return Math.max(token, contained, edit >= 0.74 ? edit : 0);
 }
 
 function artistMatchScore(importedValue: unknown, candidateValue: unknown) {
@@ -661,10 +725,12 @@ function artistMatchScore(importedValue: unknown, candidateValue: unknown) {
   const candidateFull = fullArtistKey(candidateValue);
   if (!importedLead || !candidateLead) return 0;
   if (importedLead === candidateLead || compactKey(importedLead) === compactKey(candidateLead)) return 1;
+  if (withoutLeadingArticle(importedLead) === withoutLeadingArticle(candidateLead)) return 0.99;
   const leadToken = tokenSimilarity(importedLead, candidateLead);
   const fullToken = tokenSimilarity(importedFull, candidateFull);
   const contained = isContainedMatch(importedLead, candidateLead) ? 0.95 : 0;
-  return Math.max(leadToken, fullToken, contained);
+  const edit = Math.max(editSimilarity(importedLead, candidateLead), editSimilarity(importedFull, candidateFull));
+  return Math.max(leadToken, fullToken, contained, edit >= 0.78 ? edit : 0);
 }
 
 type PreviewProvider = "apple" | "deezer";
@@ -709,6 +775,9 @@ function candidateScore(song: MusicAuditionSong, item: PreviewCandidate) {
   const exactArtist = Boolean(importedArtist && candidateArtist && (
     importedArtist === candidateArtist || compactKey(importedArtist) === compactKey(candidateArtist)
   ));
+  const censoredTitle = hasCensoredTitleToken(song.title);
+  const censoredTitleSimilarity = censoredTitle ? editSimilarity(importedTitle, candidateTitle) : 0;
+  const censoredNearExact = censoredTitle && exactArtist && censoredTitleSimilarity >= 0.82;
 
   // Never attach live/acoustic/remix/tribute/etc. when that version was not imported.
   if (hasUnrequestedVersion(song.title, item.trackName)) return null;
@@ -720,10 +789,11 @@ function candidateScore(song: MusicAuditionSong, item: PreviewCandidate) {
   // Exact titles remain preferred. A very-close normalized title is allowed so
   // provider punctuation, "&", apostrophes and harmless suffix formatting do not
   // create a false NO PREVIEW result.
-  if (!exactTitle && titleScore < 0.90) return null;
+  if (!exactTitle && !censoredNearExact && titleScore < 0.90) return null;
 
-  // Short/common titles need exact artist + exact title to avoid famous-title false positives.
-  if (importedTitle.length <= 8 && (!exactTitle || !exactArtist)) return null;
+  // Short/common titles stay strict, except when the imported title is visibly censored
+  // and the artist is exact (for example Beartooth "Bullsh*t" -> provider "Bullshit").
+  if (importedTitle.length <= 8 && (!exactArtist || (!exactTitle && !censoredNearExact))) return null;
 
   const score =
     titleScore * 0.64 +
@@ -982,7 +1052,10 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
   const request = (async () => {
     try {
       // Reuse a working cached preview immediately unless this call explicitly asks for a fresh source.
-      if (!options.forceFresh && song.previewUrl && !blockedPreviewUrls.has(song.previewUrl) && await probePreviewUrl(song.previewUrl)) return song;
+      if (!options.forceFresh && song.previewUrl && !blockedPreviewUrls.has(song.previewUrl) && await probePreviewUrl(song.previewUrl)) {
+        setResolutionState(songId, { metadataVerified: true, previewFound: true, previewPlayable: true, previewFailed: false });
+        return song;
+      }
 
       const queries = metadataQueries(song);
       const deezerTerms = deezerSearchTerms(song);
@@ -1007,6 +1080,7 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
         .filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
       let ranked = rankedCandidates(song, combined);
       let metadataBest = ranked[0] || null;
+      let previewFound = ranked.some((row) => Boolean(row.item.previewUrl));
       let playableBest = await firstPlayableCandidate(ranked);
 
       // Deep worldwide wave only when the fast wave cannot produce a verified playable sample.
@@ -1028,6 +1102,7 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
           .filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
         ranked = rankedCandidates(song, combined);
         metadataBest = ranked[0] || metadataBest;
+        previewFound = previewFound || ranked.some((row) => Boolean(row.item.previewUrl));
         playableBest = await firstPlayableCandidate(ranked);
       }
 
@@ -1060,13 +1135,21 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
       }));
       const changedSong = changed as MusicAuditionSong | null;
       if (changedSong) {
+        setResolutionState(songId, {
+          metadataVerified: true,
+          previewFound,
+          previewPlayable: Boolean(changedSong.previewUrl),
+          previewFailed: previewFound && !changedSong.previewUrl,
+        });
         if (changedSong.previewUrl) previewFailures.delete(songId);
         else previewFailures.set(songId, now());
         void persistSong(changedSong);
       }
       return changedSong || song;
     } catch {
-      // Keep the imported identity, but never keep weak/wrong provider metadata.
+      // Keep the imported identity and any previously verified metadata. A preview
+      // lookup failure must not make the app pretend the song itself is unverified.
+      const hadVerifiedMetadata = Boolean(song.metadataUpdatedAt);
       let changed: MusicAuditionSong | null = null;
       mutateLocal((current) => ({
         ...current,
@@ -1076,12 +1159,18 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
             ...item,
             // Keep any good artwork/metadata already found. Only invalidate the temporary sample.
             previewUrl: null,
-            metadataUpdatedAt: null,
+            metadataUpdatedAt: item.metadataUpdatedAt,
             updatedAt: now(),
           };
           return changed;
         }),
       }));
+      setResolutionState(songId, {
+        metadataVerified: hadVerifiedMetadata,
+        previewFound: false,
+        previewPlayable: false,
+        previewFailed: true,
+      });
       previewFailures.set(songId, now());
       if (changed) void persistSong(changed);
       return changed || song;
@@ -1132,6 +1221,7 @@ type Props = {
   tracks: MusicTrack[];
   onPreviewStart?: () => void;
   onImportFile?: (file: File, song: MusicAuditionSong) => Promise<MusicTrack | null>;
+  previewVolume?: number;
 };
 
 function listStats(
@@ -1181,7 +1271,7 @@ function defaultListName() {
 
 
 
-export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Props) {
+export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile, previewVolume = 1 }: Props) {
   const [state, setState] = useState(() => listMusicAuditionState());
   const [view, setView] = useState<AuditionView>("lists");
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -1199,8 +1289,10 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const [previewRequestSongId, setPreviewRequestSongId] = useState<string | null>(null);
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
-  const [verifiedMetadataIds, setVerifiedMetadataIds] = useState<Set<string>>(() => new Set());
-  const verifiedMetadataIdsRef = useRef<Set<string>>(new Set());
+  const [metadataVerifiedIds, setMetadataVerifiedIds] = useState<Set<string>>(() => new Set());
+  const [previewFoundIds, setPreviewFoundIds] = useState<Set<string>>(() => new Set());
+  const [previewPlayableIds, setPreviewPlayableIds] = useState<Set<string>>(() => new Set());
+  const [previewFailedIds, setPreviewFailedIds] = useState<Set<string>>(() => new Set());
   const [decisionFlash, setDecisionFlash] = useState<{ songId: string; decision: Exclude<AuditionDecision, null> } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewGenerationRef = useRef(0);
@@ -1210,6 +1302,28 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const pendingFileSongRef = useRef<MusicAuditionSong | null>(null);
 
   const refresh = () => setState(listMusicAuditionState());
+
+  const setFlag = useCallback((setter: Dispatch<SetStateAction<Set<string>>>, songId: string, enabled: boolean) => {
+    setter((previous) => {
+      if (previous.has(songId) === enabled) return previous;
+      const next = new Set(previous);
+      if (enabled) next.add(songId); else next.delete(songId);
+      return next;
+    });
+  }, []);
+
+  const syncResolutionFlags = useCallback((songId: string, song?: MusicAuditionSong | null) => {
+    const resolution = resolutionStateFor(songId, song);
+    setFlag(setMetadataVerifiedIds, songId, resolution.metadataVerified);
+    setFlag(setPreviewFoundIds, songId, resolution.previewFound);
+    setFlag(setPreviewPlayableIds, songId, resolution.previewPlayable);
+    setFlag(setPreviewFailedIds, songId, resolution.previewFailed);
+  }, [setFlag]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.volume = Math.max(0, Math.min(1, Number(previewVolume) || 0));
+  }, [previewVolume]);
 
   useEffect(() => {
     const unsubscribe = subscribeMusicAudition(refresh);
@@ -1227,6 +1341,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         try { audio.load(); } catch { /* Media element already disposed. */ }
       }
       audioRef.current = null;
+      window.dispatchEvent(new CustomEvent("mvp:audition-preview-state", { detail: { playing: false, artworkUrl: null } }));
       if (decisionTimerRef.current) window.clearTimeout(decisionTimerRef.current);
     };
   }, []);
@@ -1294,51 +1409,41 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   useEffect(() => {
     if (!currentSong) return;
     const songId = currentSong.id;
-    if (verifiedMetadataIdsRef.current.has(songId) || verifiedMetadataIds.has(songId)) return;
+    const existingResolution = resolutionStateFor(songId, currentSong);
+    syncResolutionFlags(songId, currentSong);
 
     const failureAt = previewFailures.get(songId) || 0;
-    if (failureAt && now() - failureAt < PREVIEW_FAILURE_RETRY_MS) return;
-
+    const recentFailure = Boolean(failureAt && now() - failureAt < PREVIEW_FAILURE_RETRY_MS);
     const previewAge = currentSong.metadataUpdatedAt ? now() - currentSong.metadataUpdatedAt : Number.POSITIVE_INFINITY;
-    const forceFresh = !currentSong.previewUrl || previewAge > PREVIEW_URL_CACHE_MS;
+    const previewFresh = Boolean(currentSong.previewUrl && previewAge <= PREVIEW_URL_CACHE_MS);
+
+    if (existingResolution.metadataVerified && ((existingResolution.previewPlayable && previewFresh) || recentFailure)) return;
 
     setLookupSongId(songId);
-    void resolveMusicAuditionMetadata(songId, { forceFresh })
-      .then((resolved) => {
-        const playable = Boolean(resolved.previewUrl);
-        if (playable) verifiedMetadataIdsRef.current.add(songId);
-        else verifiedMetadataIdsRef.current.delete(songId);
-        setVerifiedMetadataIds((previous) => {
-          const next = new Set(previous);
-          if (playable) next.add(songId);
-          else next.delete(songId);
-          return next;
-        });
-      })
+    void resolveMusicAuditionMetadata(songId, { forceFresh: !previewFresh })
+      .then((resolved) => syncResolutionFlags(songId, resolved))
       .finally(() => {
         setLookupSongId((id) => id === songId ? null : id);
       });
-  }, [currentSong?.id, currentSong?.metadataUpdatedAt, currentSong?.artworkUrl, currentSong?.previewUrl, currentSong?.album, verifiedMetadataIds]);
+  }, [currentSong?.id, currentSong?.metadataUpdatedAt, currentSong?.previewUrl, syncResolutionFlags]);
 
   useEffect(() => {
     if (!currentSong || !selectedSongs.length) return;
     const timer = window.setTimeout(() => {
       const upcoming = selectedSongs.slice(currentIndex + 1, currentIndex + 6);
       for (const song of upcoming) {
-        if (verifiedMetadataIdsRef.current.has(song.id)) continue;
         const failureAt = previewFailures.get(song.id) || 0;
-        if (failureAt && now() - failureAt < PREVIEW_FAILURE_RETRY_MS) continue;
-
+        const recentFailure = Boolean(failureAt && now() - failureAt < PREVIEW_FAILURE_RETRY_MS);
         const previewAge = song.metadataUpdatedAt ? now() - song.metadataUpdatedAt : Number.POSITIVE_INFINITY;
-        const forceFresh = !song.previewUrl || previewAge > PREVIEW_URL_CACHE_MS;
-        void resolveMusicAuditionMetadata(song.id, { forceFresh }).then((resolved) => {
-          if (resolved.previewUrl) verifiedMetadataIdsRef.current.add(song.id);
-          else verifiedMetadataIdsRef.current.delete(song.id);
-        });
+        const previewFresh = Boolean(song.previewUrl && previewAge <= PREVIEW_URL_CACHE_MS);
+        const resolution = resolutionStateFor(song.id, song);
+        if (resolution.metadataVerified && ((resolution.previewPlayable && previewFresh) || recentFailure)) continue;
+        void resolveMusicAuditionMetadata(song.id, { forceFresh: !previewFresh })
+          .then((resolved) => syncResolutionFlags(song.id, resolved));
       }
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [currentSong?.id, currentIndex, selectedSongs]);
+  }, [currentSong?.id, currentIndex, selectedSongs, syncResolutionFlags]);
 
 
   function openList(list: MusicAuditionList) {
@@ -1347,6 +1452,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     setCurrentIndex(0);
     setView("audition");
     setMessage("");
+  }
+
+  function emitPreviewVisualState(playing: boolean, song?: MusicAuditionSong | null) {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("mvp:audition-preview-state", {
+      detail: { playing, artworkUrl: song?.artworkUrl || null },
+    }));
   }
 
   function stopPreview() {
@@ -1364,6 +1476,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     }
     audioRef.current = null;
     setPreviewSongId(null);
+    emitPreviewVisualState(false);
   }
 
   async function togglePreview(song: MusicAuditionSong) {
@@ -1390,7 +1503,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     const audio = new Audio();
     audio.preload = "auto";
     audio.autoplay = true;
-    audio.volume = 0.95;
+    audio.volume = Math.max(0, Math.min(1, Number(previewVolume) || 0));
     audioRef.current = audio;
 
     const sessionCurrent = () =>
@@ -1405,14 +1518,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
 
     const blockedUrls = new Set<string>();
 
-    const markVerified = (songId: string, playable: boolean) => {
-      if (playable) verifiedMetadataIdsRef.current.add(songId);
-      else verifiedMetadataIdsRef.current.delete(songId);
-      setVerifiedMetadataIds((previous) => {
-        const next = new Set(previous);
-        if (playable) next.add(songId); else next.delete(songId);
-        return next;
-      });
+    const markPreviewState = (songId: string, patch: Partial<MusicAuditionResolutionState>) => {
+      const current = resolutionStateFor(songId, song);
+      const next = setResolutionState(songId, { ...current, ...patch });
+      setFlag(setMetadataVerifiedIds, songId, next.metadataVerified);
+      setFlag(setPreviewFoundIds, songId, next.previewFound);
+      setFlag(setPreviewPlayableIds, songId, next.previewPlayable);
+      setFlag(setPreviewFailedIds, songId, next.previewFailed);
     };
 
     const resolveFresh = async (forceFresh: boolean) => {
@@ -1421,14 +1533,14 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       try {
         const resolved = await resolveMusicAuditionMetadata(song.id, { forceFresh, blockedPreviewUrls: blockedUrls });
         if (!sessionCurrent()) return resolved;
-        markVerified(song.id, Boolean(resolved.previewUrl));
+        syncResolutionFlags(song.id, resolved);
         return resolved;
       } finally {
         if (sessionCurrent()) setLookupSongId((id) => id === song.id ? null : id);
       }
     };
 
-    const failPreview = (messageText = "No embedded sample is available from the preview providers. YouTube exact search is ready.") => {
+    const failPreview = (messageText = "NO EMBEDDED SAMPLE FOUND") => {
       if (!sessionCurrent()) return;
       audio.onended = null;
       audio.onerror = null;
@@ -1438,6 +1550,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       clearRequest();
       audioRef.current = null;
       setPreviewSongId(null);
+      const currentResolution = resolutionStateFor(song.id, song);
+      markPreviewState(song.id, {
+        metadataVerified: currentResolution.metadataVerified,
+        previewPlayable: false,
+        previewFailed: true,
+      });
+      emitPreviewVisualState(false);
       setMessage(messageText);
     };
 
@@ -1450,7 +1569,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       audio.onerror = null;
       audio.loop = false;
       audio.muted = false;
-      audio.volume = 0.95;
+      audio.volume = Math.max(0, Math.min(1, Number(previewVolume) || 0));
       audio.src = url;
 
       try {
@@ -1460,9 +1579,11 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
           return false;
         }
 
+        markPreviewState(song.id, { metadataVerified: true, previewFound: true, previewPlayable: true, previewFailed: false });
         setPreviewSongId(song.id);
         clearRequest();
         setMessage("");
+        emitPreviewVisualState(true, resolved);
 
         audio.onended = () => {
           if (!sessionCurrent()) return;
@@ -1471,12 +1592,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
           setPreviewRequestSongId(null);
           setPreviewSongId(null);
           audioRef.current = null;
+          emitPreviewVisualState(false);
         };
 
         audio.onerror = () => {
           if (!sessionCurrent() || retryDepth >= 4 || blockedUrls.has(url)) return;
           blockedUrls.add(url);
-          markVerified(song.id, false);
+          markPreviewState(song.id, { previewFound: true, previewPlayable: false, previewFailed: true });
           setPreviewSongId(null);
           previewRequestSongIdRef.current = song.id;
           setPreviewRequestSongId(song.id);
@@ -1491,7 +1613,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       } catch (error) {
         if (!sessionCurrent()) return false;
         blockedUrls.add(url);
-        markVerified(song.id, false);
+        markPreviewState(song.id, { previewFound: true, previewPlayable: false, previewFailed: true });
 
         if (retryDepth < 4) {
           previewRequestSongIdRef.current = song.id;
@@ -1519,10 +1641,12 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
             }
             await new Promise<void>((resolve) => window.setTimeout(resolve, 60));
             audio.muted = false;
-            audio.volume = 0.95;
+            audio.volume = Math.max(0, Math.min(1, Number(previewVolume) || 0));
+            markPreviewState(song.id, { metadataVerified: true, previewFound: true, previewPlayable: true, previewFailed: false });
             setPreviewSongId(song.id);
             clearRequest();
             setMessage("");
+            emitPreviewVisualState(true, resolved);
             return true;
           } catch {
             // A genuinely strict browser policy is the only remaining case. Keep
@@ -1567,7 +1691,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       if (!sessionCurrent()) return;
     }
 
-    setMessage("Finding a fresh playable preview…");
+    setMessage("SEARCHING PREVIEW SOURCES…");
     resolved = await resolveFresh(true);
     if (!sessionCurrent()) return;
 
@@ -1699,13 +1823,10 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     };
   }, [state.songs, isInLibraryFast]);
 
-  const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
-  const currentMetadataAvailable = Boolean(
-    currentSong &&
-    currentMetadataVerified &&
-    currentSong.previewUrl,
-  );
-  const currentPreviewReady = Boolean(currentSong?.previewUrl && currentMetadataVerified);
+  const currentMetadataVerified = Boolean(currentSong && (metadataVerifiedIds.has(currentSong.id) || currentSong.metadataUpdatedAt));
+  const currentPreviewFound = Boolean(currentSong && (previewFoundIds.has(currentSong.id) || currentSong.previewUrl));
+  const currentPreviewReady = Boolean(currentSong?.previewUrl && previewPlayableIds.has(currentSong.id));
+  const currentPreviewFailed = Boolean(currentSong && previewFailedIds.has(currentSong.id));
   const currentFlashDecision = currentSong && decisionFlash?.songId === currentSong.id ? decisionFlash.decision : null;
   const currentRemaining = currentStats ? Math.max(0, currentStats.total - currentStats.reviewed) : 0;
 
@@ -1784,22 +1905,25 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         <div className="mvp-auditionSongInfo">
           <div className="mvp-auditionStatusRow">
             <span className={`is-${currentFlashDecision || "new"}`}>{currentFlashDecision ? `${decisionLabel(currentFlashDecision)} SELECTED` : "READY"}</span>
+            <span className={currentMetadataVerified ? "is-verified" : "is-source"}>{currentMetadataVerified ? "✓ SONG VERIFIED" : lookupSongId === currentSong.id ? "VERIFYING SONG" : "UNVERIFIED"}</span>
             {lookupSongId === currentSong.id
-              ? <span className="is-source">FINDING PREVIEW</span>
+              ? <span className="is-source">SEARCHING PREVIEW SOURCES</span>
               : currentPreviewReady
                 ? <span className="is-verified">✓ {previewProviderLabel(currentSong.previewUrl)}</span>
-                : <span className="is-source">YOUTUBE READY</span>}
+                : currentPreviewFailed || (currentMetadataVerified && !currentPreviewFound)
+                  ? <span className="is-source">NO EMBEDDED SAMPLE</span>
+                  : <span className="is-source">PREVIEW NOT VERIFIED</span>}
           </div>
           <h2>{currentSong.title}</h2>
           <h3>{currentSong.artist}</h3>
           <p className="mvp-auditionMeta">
             {lookupSongId === currentSong.id
-              ? "Finding and verifying the best playable sample…"
+              ? currentMetadataVerified ? "Song verified • searching embedded preview sources…" : "Verifying song and searching embedded preview sources…"
               : currentPreviewReady
                 ? [previewProviderLabel(currentSong.previewUrl), currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
-                : currentMetadataAvailable
-                  ? "No embedded sample is available from the preview providers. YouTube exact search is ready."
-                  : "No embedded sample is available from the preview providers. YouTube exact search is ready."}
+                : currentMetadataVerified
+                  ? [currentSong.album, currentSong.releaseYear, "No embedded sample found"].filter(Boolean).join(" • ")
+                  : "Metadata has not been verified yet. YouTube exact search remains available separately."}
           </p>
           <div className="mvp-auditionActionLabel"><span>LISTEN</span><i /></div>
           <div className="mvp-auditionListen">
@@ -1810,7 +1934,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
               <span className="mvp-auditionControlIcon"><PreviewRenderIcon playing={previewSongId === currentSong.id} /></span>
               <span className="mvp-auditionControlCopy">
                 <strong>{previewSongId === currentSong.id ? "STOP PREVIEW" : previewRequestSongId === currentSong.id ? "CANCEL" : currentPreviewReady ? "PREVIEW" : "FIND PREVIEW"}</strong>
-                <small>{previewRequestSongId === currentSong.id ? "Searching worldwide" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Verified preview sources"}</small>
+                <small>{previewRequestSongId === currentSong.id ? "Searching preview sources" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : currentMetadataVerified ? "Song verified • find embedded sample" : "Verify song + sample"}</small>
               </span>
             </button>
             <button className="is-youtube" onClick={() => openYoutube(currentSong)}>

@@ -55,7 +55,7 @@
 .tr10-premiumLibrary .tr10-healthRail button.is-active:after{height:2px;background:linear-gradient(90deg,#31d9ff,#82edff);box-shadow:0 0 16px rgba(55,219,255,.52)}
 .tr10-premiumLibrary .tr10-healthRail button b{font-size:10px!important;color:#f4fbff!important}
 
-/* One continuous tab rail. No individual tab boxes. */
+/* Base tab rail styles. The r12.5e.17 layer below upgrades each tab into a premium instrument control. */
 .tr10-premiumLibrary .tr10-tabs{display:flex!important;grid-template-columns:none!important;gap:0!important;position:relative!important;overflow-x:auto!important;padding:0 8px!important;background:rgba(1,7,11,.56)!important;border:0!important;border-bottom:1px solid rgba(93,213,243,.14)!important;scrollbar-width:none!important}
 .tr10-premiumLibrary .tr10-tabs::-webkit-scrollbar{display:none!important}
 .tr10-premiumLibrary .tr10-tabs button{position:relative!important;flex:1 0 98px!important;min-width:98px!important;height:52px!important;padding:0 12px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;color:#78929d!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.13em!important;transition:color .2s ease,transform .2s ease!important;overflow:hidden!important}
@@ -321,4 +321,134 @@
   .tr10-premiumLibrary .mvp-audition .mvp-auditionListen{grid-template-columns:1fr 1fr!important}
   .tr10-premiumLibrary .mvp-audition .mvp-auditionControlIcon{width:68px!important;height:68px!important}
   .tr10-premiumLibrary .mvp-audition .mvp-auditionDecisionIcon{width:62px!important;height:62px!important}
+}
+
+
+/* === r12.5e.17: PREMIUM TAB INSTRUMENTS + AUDITION VISUAL SYNC === */
+.tr10-premiumLibrary .tr10-tabs{
+  height:66px!important;
+  padding:7px 10px 8px!important;
+  gap:7px!important;
+  align-items:stretch!important;
+  background:linear-gradient(180deg,rgba(1,8,13,.82),rgba(0,5,9,.68))!important;
+  border:0!important;
+  border-bottom:1px solid rgba(105,220,248,.12)!important;
+  scroll-snap-type:x proximity!important;
+  overscroll-behavior-x:contain!important;
+}
+.tr10-premiumLibrary .tr10-tabs button{
+  --tab-a:#2bdcff;
+  --tab-b:#ff9b2a;
+  flex:1 0 108px!important;
+  min-width:108px!important;
+  height:51px!important;
+  padding:0 13px!important;
+  border:1px solid color-mix(in srgb,var(--tab-a) 18%,rgba(255,255,255,.04))!important;
+  border-radius:12px 12px 9px 9px!important;
+  clip-path:polygon(8px 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%,0 8px)!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.055),transparent 18%),
+    radial-gradient(120% 90% at 50% 120%,color-mix(in srgb,var(--tab-a) 8%,transparent),transparent 62%),
+    linear-gradient(180deg,rgba(10,25,33,.86),rgba(3,11,16,.92))!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.075),
+    inset 0 -1px color-mix(in srgb,var(--tab-b) 9%,transparent),
+    0 8px 18px rgba(0,0,0,.14)!important;
+  color:#9cb3bc!important;
+  font-size:9.4px!important;
+  letter-spacing:.145em!important;
+  text-shadow:none!important;
+  scroll-snap-align:center!important;
+  isolation:isolate!important;
+  overflow:hidden!important;
+  transition:transform .18s ease,color .18s ease,border-color .18s ease,box-shadow .22s ease,filter .18s ease!important;
+}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(1){--tab-a:#2bdcff;--tab-b:#ff9b2a}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(2){--tab-a:#62e7ff;--tab-b:#8b66ff}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(3){--tab-a:#45d8ff;--tab-b:#ff7d22}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(4){--tab-a:#36dfff;--tab-b:#f15be2}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(5){--tab-a:#52efbf;--tab-b:#ffbb43}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(6){--tab-a:#43ddff;--tab-b:#ff8a21}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(7){--tab-a:#39e3ff;--tab-b:#f353a6}
+.tr10-premiumLibrary .tr10-tabs button:nth-child(8){--tab-a:#28ddff;--tab-b:#ff8d20}
+.tr10-premiumLibrary .tr10-tabs button:before{
+  content:""!important;
+  position:absolute!important;
+  z-index:-1!important;
+  inset:0!important;
+  background:
+    linear-gradient(115deg,transparent 7%,rgba(255,255,255,.075) 20%,transparent 34%),
+    radial-gradient(85% 65% at 26% 105%,color-mix(in srgb,var(--tab-a) 18%,transparent),transparent 72%),
+    radial-gradient(70% 55% at 92% 112%,color-mix(in srgb,var(--tab-b) 13%,transparent),transparent 72%)!important;
+  opacity:.72!important;
+  transform:none!important;
+  pointer-events:none!important;
+}
+.tr10-premiumLibrary .tr10-tabs button:after{
+  content:""!important;
+  position:absolute!important;
+  left:9px!important;
+  right:9px!important;
+  top:0!important;
+  height:1px!important;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--tab-a) 68%,white 14%),rgba(255,255,255,.55),color-mix(in srgb,var(--tab-b) 58%,white 10%),transparent)!important;
+  opacity:.48!important;
+  box-shadow:0 0 12px color-mix(in srgb,var(--tab-a) 18%,transparent)!important;
+}
+.tr10-premiumLibrary .tr10-tabs button:hover{
+  color:#edfaff!important;
+  transform:translateY(-1px)!important;
+  border-color:color-mix(in srgb,var(--tab-a) 34%,rgba(255,255,255,.08))!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.10),0 10px 24px rgba(0,0,0,.20),0 0 18px color-mix(in srgb,var(--tab-a) 8%,transparent)!important;
+}
+.tr10-premiumLibrary .tr10-tabs button.is-active{
+  color:#fff!important;
+  font-size:9.7px!important;
+  transform:translateY(-1px)!important;
+  border-color:color-mix(in srgb,var(--tab-a) 58%,rgba(255,255,255,.12))!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.09),transparent 22%),
+    radial-gradient(95% 90% at 28% 110%,color-mix(in srgb,var(--tab-a) 24%,transparent),transparent 70%),
+    radial-gradient(82% 76% at 88% 112%,color-mix(in srgb,var(--tab-b) 19%,transparent),transparent 72%),
+    linear-gradient(180deg,rgba(10,31,41,.96),rgba(2,12,18,.97))!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.13),
+    inset 0 -1px color-mix(in srgb,var(--tab-b) 24%,transparent),
+    0 12px 28px rgba(0,0,0,.26),
+    0 0 23px color-mix(in srgb,var(--tab-a) 13%,transparent),
+    0 0 17px color-mix(in srgb,var(--tab-b) 8%,transparent)!important;
+  text-shadow:0 0 14px color-mix(in srgb,var(--tab-a) 34%,transparent)!important;
+}
+.tr10-premiumLibrary .tr10-tabEnergy{
+  left:12px!important;
+  right:12px!important;
+  bottom:0!important;
+  height:2px!important;
+  border-radius:999px!important;
+  background:linear-gradient(90deg,transparent,var(--tab-a) 18%,#effeff 49%,var(--tab-b) 82%,transparent)!important;
+  box-shadow:0 0 13px color-mix(in srgb,var(--tab-a) 44%,transparent),0 0 12px color-mix(in srgb,var(--tab-b) 25%,transparent)!important;
+}
+.tr10-premiumLibrary .mlv-engineArtwork{
+  position:absolute;
+  inset:-8%;
+  background-size:cover;
+  background-position:center;
+  opacity:.075;
+  filter:blur(48px) saturate(1.35) contrast(1.05);
+  transform:scale(1.08);
+  mix-blend-mode:screen;
+  mask-image:radial-gradient(ellipse at 56% 42%,#000 0 34%,transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse at 56% 42%,#000 0 34%,transparent 72%);
+  transition:opacity .28s ease;
+}
+.tr10-premiumLibrary .mlv-engine.is-audition-preview .mlv-engineSheen{opacity:.56!important}
+
+@media(max-width:760px){
+  .tr10-premiumLibrary .tr10-tabs{height:64px!important;padding:7px 8px 8px!important;gap:7px!important;scroll-padding-inline:calc(50vw - 61px)!important}
+  .tr10-premiumLibrary .tr10-tabs button{flex:0 0 116px!important;min-width:116px!important;height:49px!important;font-size:8.8px!important;padding:0 10px!important}
+  .tr10-premiumLibrary .tr10-tabs button.is-active{font-size:9px!important}
+}
+@media(max-width:430px){
+  .tr10-premiumLibrary .tr10-tabs{padding-inline:7px!important}
+  .tr10-premiumLibrary .tr10-tabs button{flex-basis:112px!important;min-width:112px!important}
 }

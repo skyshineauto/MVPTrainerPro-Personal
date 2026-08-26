@@ -521,6 +521,7 @@ function CollectionDetailView({
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
+  const tabNavRef = useRef<HTMLElement | null>(null);
   const player = useMusicPlayer();
 
   const [tab, setTab] = useState<MusicTab>("songs");
@@ -1811,6 +1812,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     }
   }, []);
 
+  useEffect(() => {
+    const activeButton = tabNavRef.current?.querySelector<HTMLElement>(`[data-music-tab="${tab}"]`);
+    if (!activeButton) return;
+    activeButton.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [tab]);
+
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
   return (
@@ -1845,11 +1852,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <nav className="tr10-tabs">
+        <nav ref={tabNavRef} className="tr10-tabs" aria-label="Music library sections">
           {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => (
             <motion.button
               type="button"
               key={value}
+              data-music-tab={value}
+              aria-current={tab === value ? "page" : undefined}
               className={tab === value ? "is-active" : ""}
               onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}
               whileTap={{ scale: 0.985 }}
@@ -1973,7 +1982,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "intelligence" ? (
           <MusicIntelligencePanel tracks={tracks} />
         ) : null}
-        {tab === "audition" ? <MusicAuditionPanel tracks={tracks} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
+        {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
         {tab === "discover" ? <section className="tr10-discover">
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
