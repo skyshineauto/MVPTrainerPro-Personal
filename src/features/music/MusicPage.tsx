@@ -74,6 +74,7 @@ import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
 import { motion } from "motion/react";
+import { createPortal } from "react-dom";
 import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
 import "./premium/MusicLibraryPremium.css";
 
@@ -1912,9 +1913,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span><b className="tr10-energySegments" aria-hidden><i /><i /><i /></b></button>
                 <div className="tr10-actions">
-                  <button className={`tr10-likeAction ${track.favorite ? "is-liked" : ""}`} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title={track.favorite ? "Liked" : "Like"}>👍<span>{track.favorite ? "LIKED" : "LIKE"}</span></button>
-                  <button className={`tr10-lessAction ${track.play_less ? "is-down" : ""}`} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less">👎<span>PLAY LESS</span></button>
-                  <button onClick={() => playMusicNext(track.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(track.id)}>+ QUEUE</button><button onClick={() => openPlaylistModal([track.id])}>+ PLAYLIST</button><button className="is-edit" onClick={() => openDetail(track)}>EDIT</button>
+                  <button type="button" className={`tr10-likeAction ${track.favorite ? "is-liked" : ""}`} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title={track.favorite ? "Liked" : "Like"}><i className="tr10-actionGlyph" aria-hidden="true">♥</i><span>{track.favorite ? "LIKED" : "LIKE"}</span></button>
+                  <button type="button" className={`tr10-lessAction ${track.play_less ? "is-down" : ""}`} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less"><i className="tr10-actionGlyph" aria-hidden="true">−</i><span>PLAY LESS</span></button>
+                  <button type="button" className="tr10-nextAction" onClick={() => playMusicNext(track.id)}><i className="tr10-actionGlyph" aria-hidden="true">▶</i><span>PLAY NEXT</span></button><button type="button" className="tr10-queueAction" onClick={() => addMusicToQueue(track.id)}><i className="tr10-actionGlyph" aria-hidden="true">≡</i><span>QUEUE</span></button><button type="button" className="tr10-playlistAction" onClick={() => openPlaylistModal([track.id])}><i className="tr10-actionGlyph" aria-hidden="true">＋</i><span>PLAYLIST</span></button><button type="button" className="is-edit tr10-editAction" onClick={() => openDetail(track)}><i className="tr10-actionGlyph" aria-hidden="true">✎</i><span>EDIT</span></button>
                 </div>
               </article>;
             })}
@@ -2074,7 +2075,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
       {reviewItems.length && reviewRemainingCount > 0 ? <button className="tr10-reviewDock" onClick={openReviewQueue}>REVIEW {reviewRemainingCount} POSSIBLE MATCH{reviewRemainingCount === 1 ? "" : "ES"} ›</button> : null}
 
-      {detailTrack ? <div className="tr10-modalBack" onMouseDown={closeDetail}><section className="tr10-inspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
+      {detailTrack && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-detailPortal" onMouseDown={closeDetail}><section className="tr10-inspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
         <header><div className="tr10-inspectIdentity"><TrackArtwork track={detailTrack} size="detail" /><div><span>SONG CONTROL</span><h2>{detailTrack.title}</h2><p>{artistLabel(detailTrack)}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "✓ CHANGED" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button onClick={closeDetail}>×</button></header>
         {detailMode === "edit" ? <>
           <div className="tr10-inspectorScroll">
@@ -2089,7 +2090,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const tier = musicMatchTier(candidate.confidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No useful matches found.</div> : null}</div></div>
           <div className="tr10-detailLookupFooter"><div><strong>{detailSelectedCandidate ? `${detailSelectedCandidate.title} • ${detailSelectedCandidate.artist}` : "Select a result"}</strong><small>Nothing changes until you apply the selection.</small></div><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>CANCEL</button><button className="is-primary" disabled={!detailSelectedCandidate || detailSaveState === "saving"} onClick={() => { if (!detailSelectedCandidate) return; if (detailMode === "artwork_results") void applyDetailArtworkCandidate(detailSelectedCandidate); else applyDetailInfoCandidate(detailSelectedCandidate); }}>{detailMode === "artwork_results" ? "USE ARTWORK" : "APPLY MATCH"}</button></div>
         </>}
-      </section></div> : null}
+      </section></div>, document.body) : null}
 
       {reviewTrack ? <div className="tr10-modalBack tr10-reviewBack" onMouseDown={() => setReviewTrackId(null)}><section className="tr10-reviewModal" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
         <header className="tr10-reviewHeader"><div><span>LIBRARY MATCH REVIEW</span><h2>{reviewTrack.title}</h2><p>{artistLabel(reviewTrack)} • {reviewTrack.original_name}</p></div><button onClick={() => setReviewTrackId(null)}>×</button></header>
@@ -3308,6 +3309,34 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         @media(max-width:650px){
           .tr10-discoverType{min-height:21px!important;padding:5px 8px!important;font-size:8.6px!important;letter-spacing:.028em!important}
         }
+
+
+        /* MVP_TRAINER_V5_R12_5E_19_CONTROL_REFINEMENT */
+        .tr10-detailPortal{position:fixed!important;inset:0!important;z-index:2147483000!important;padding:18px 12px!important;display:grid!important;place-items:center!important;background:rgba(0,4,7,.90)!important;backdrop-filter:blur(15px) saturate(125%)!important;-webkit-backdrop-filter:blur(15px) saturate(125%)!important}
+        .tr10-detailPortal .tr10-inspector{position:relative!important;z-index:1!important;border-color:rgba(92,218,255,.38)!important;background:radial-gradient(circle at 12% 0%,rgba(53,202,244,.12),transparent 32%),radial-gradient(circle at 90% 100%,rgba(255,157,37,.07),transparent 32%),linear-gradient(180deg,#0a202a,#040d12)!important;box-shadow:0 40px 120px rgba(0,0,0,.78),0 0 0 1px rgba(255,255,255,.025),0 0 60px rgba(45,198,239,.08)!important}
+        .tr10-detailPortal .tr10-inspector>header{background:linear-gradient(180deg,#0b2530,#07171e)!important}
+        .tr10-detailPortal button:not(:disabled):hover{filter:brightness(1.18)!important;transform:translateY(-1px)!important}
+
+        .tr10-toolbar label{position:relative!important;overflow:visible!important}
+        .tr10-toolbar select{color-scheme:dark!important;appearance:none!important;-webkit-appearance:none!important;cursor:pointer!important;padding-right:24px!important;background-image:linear-gradient(45deg,transparent 50%,#79dff8 50%),linear-gradient(135deg,#79dff8 50%,transparent 50%)!important;background-position:calc(100% - 10px) calc(50% - 2px),calc(100% - 6px) calc(50% - 2px)!important;background-size:4px 4px,4px 4px!important;background-repeat:no-repeat!important}
+        .tr10-toolbar select option{background:#071219!important;color:#eaf8fc!important}
+        .tr10-toolbar label:hover{border-color:rgba(89,219,255,.32)!important;background:linear-gradient(180deg,rgba(7,29,38,.78),rgba(3,15,21,.68))!important;box-shadow:0 0 22px rgba(46,198,239,.055),inset 0 1px rgba(255,255,255,.04)!important}
+
+        .tr10-actions{gap:5px!important;align-items:center!important}
+        .tr10-actions button{position:relative!important;isolation:isolate!important;min-height:31px!important;padding:0 9px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;border-radius:8px!important;border:1px solid rgba(115,185,207,.16)!important;background:linear-gradient(180deg,rgba(8,25,32,.92),rgba(4,13,18,.96))!important;color:#dcecf2!important;box-shadow:inset 0 1px rgba(255,255,255,.03),0 6px 14px rgba(0,0,0,.12)!important;transition:transform .15s ease,border-color .15s ease,background .15s ease,box-shadow .15s ease,color .15s ease!important}
+        .tr10-actions button:after{content:"";position:absolute;left:8px;right:8px;bottom:0;height:1px;border-radius:99px;background:linear-gradient(90deg,transparent,currentColor,transparent);opacity:.32;pointer-events:none}
+        .tr10-actions button:not(:disabled):hover{transform:translateY(-1px)!important;background:linear-gradient(180deg,rgba(16,48,60,.98),rgba(6,22,29,.98))!important;border-color:rgba(109,224,252,.38)!important;color:#fff!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 9px 20px rgba(0,0,0,.19),0 0 20px rgba(55,207,244,.07)!important;filter:none!important}
+        .tr10-actions button:not(:disabled):active{transform:translateY(1px)!important;filter:brightness(1.08)!important}
+        .tr10-actionGlyph{width:15px;height:15px;display:grid;place-items:center;font-style:normal!important;font-size:10px;line-height:1;border-radius:50%;background:rgba(255,255,255,.035);box-shadow:inset 0 1px rgba(255,255,255,.04);color:currentColor}
+        .tr10-likeAction{color:#76efad!important}.tr10-lessAction{color:#ff7d87!important}.tr10-nextAction{color:#7ae8ff!important}.tr10-queueAction{color:#83cfff!important}.tr10-playlistAction{color:#ffbd62!important}.tr10-editAction{color:#d8f8ff!important}
+        .tr10-likeAction.is-liked{border-color:rgba(76,230,150,.42)!important;background:linear-gradient(180deg,rgba(13,70,46,.88),rgba(6,30,20,.92))!important;box-shadow:0 0 20px rgba(65,221,142,.08),inset 0 1px rgba(255,255,255,.04)!important}
+        .tr10-lessAction.is-down{border-color:rgba(255,91,104,.40)!important;background:linear-gradient(180deg,rgba(76,19,29,.88),rgba(31,8,13,.94))!important;box-shadow:0 0 18px rgba(235,68,83,.06),inset 0 1px rgba(255,255,255,.035)!important}
+        .tr10-editAction{border-color:rgba(105,221,250,.25)!important;background:linear-gradient(180deg,rgba(10,38,49,.96),rgba(4,17,23,.98))!important}
+
+        .tr10-headActions button:not(:disabled):hover,.tr10-bulk button:not(:disabled):hover,.tr10-pager button:not(:disabled):hover{background:linear-gradient(180deg,rgba(16,49,61,.98),rgba(6,22,29,.98))!important;border-color:rgba(109,224,252,.38)!important;color:#fff!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 9px 22px rgba(0,0,0,.20),0 0 22px rgba(53,204,242,.07)!important;filter:none!important}
+        .tr10-headActions .is-orange:not(:disabled):hover{background:linear-gradient(180deg,#ffc35d,#f0951b)!important;border-color:#ffd27c!important;color:#071016!important;box-shadow:0 10px 28px rgba(243,148,26,.20),inset 0 1px rgba(255,255,255,.58)!important}
+
+        @media(max-width:650px){.tr10-detailPortal{padding:8px!important}.tr10-actions button{min-height:36px!important;padding:0 8px!important}.tr10-actionGlyph{width:16px;height:16px}}
       `}</style>
     </main>
   );
