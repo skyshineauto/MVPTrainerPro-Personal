@@ -3297,6 +3297,19 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile, previ
       }
       @media(max-width:520px){.mvp-auditionListen{grid-template-columns:1fr!important}.mvp-auditionKeptActions{grid-template-columns:1fr 1fr!important}}
 
+      /* MVP_TRAINER_V5_R12_5E_20_AUDITION_LUMINOUS_HOVER */
+      .mvp-audition button:not(:disabled):hover{filter:brightness(1.16) saturate(1.06)!important}
+      .mvp-auditionListen .is-preview:not(:disabled):hover{background:radial-gradient(180px 82px at 0 45%,rgba(87,226,255,.24),transparent 76%),linear-gradient(180deg,#155064,#0a2b37)!important;border-color:rgba(111,234,255,.62)!important;box-shadow:inset 0 1px rgba(255,255,255,.12),0 12px 28px rgba(0,0,0,.17),0 0 28px rgba(61,211,248,.15)!important}
+      .mvp-auditionListen .is-youtube:not(:disabled):hover{background:radial-gradient(180px 82px at 0 45%,rgba(255,93,108,.20),transparent 76%),linear-gradient(180deg,#4c1a23,#250c12)!important;border-color:rgba(255,120,130,.52)!important;box-shadow:inset 0 1px rgba(255,255,255,.10),0 0 26px rgba(244,73,90,.12)!important}
+      .mvp-auditionDecision .is-keep:not(:disabled):hover{background:radial-gradient(150px 68px at 12% 0%,rgba(83,239,164,.20),transparent 74%),linear-gradient(180deg,#17593c,#0a2b1d)!important;border-color:rgba(92,244,170,.56)!important;box-shadow:inset 0 1px rgba(255,255,255,.10),0 0 25px rgba(64,224,146,.12)!important}
+      .mvp-auditionDecision .is-maybe:not(:disabled):hover{background:radial-gradient(150px 68px at 12% 0%,rgba(255,204,101,.18),transparent 74%),linear-gradient(180deg,#5b4217,#2d1f0a)!important;border-color:rgba(255,211,122,.50)!important;box-shadow:inset 0 1px rgba(255,255,255,.09),0 0 23px rgba(242,177,59,.10)!important}
+      .mvp-auditionDecision .is-pass:not(:disabled):hover{background:radial-gradient(150px 68px at 12% 0%,rgba(255,104,119,.18),transparent 74%),linear-gradient(180deg,#5b1d27,#2d0d14)!important;border-color:rgba(255,122,133,.50)!important;box-shadow:inset 0 1px rgba(255,255,255,.09),0 0 23px rgba(239,70,86,.10)!important}
+      .mvp-auditionKeptActions .mvp-keptAction.is-preview:not(:disabled):hover{background:linear-gradient(180deg,#12475a,#082632)!important;border-color:rgba(104,229,255,.52)!important}
+      .mvp-auditionKeptActions .mvp-keptAction.is-youtube:not(:disabled):hover{background:linear-gradient(180deg,#471820,#230b10)!important;border-color:rgba(255,112,123,.45)!important}
+      .mvp-auditionKeptActions .mvp-keptAction.is-add:not(:disabled):hover{background:linear-gradient(180deg,#5a3c13,#2a1b08)!important;border-color:rgba(255,203,110,.45)!important}
+      .mvp-auditionPager button:not(:disabled):hover,.mvp-auditionNav button:not(:disabled):hover,.mvp-auditionListCard footer button:not(:disabled):hover{background:radial-gradient(130px 50px at 20% 0%,rgba(82,220,255,.16),transparent 76%),linear-gradient(180deg,#113d4d,#08232c)!important;border-color:rgba(103,226,255,.42)!important;color:#fff!important;box-shadow:inset 0 1px rgba(255,255,255,.09),0 0 22px rgba(52,204,243,.09)!important}
+      @media(hover:none){.mvp-audition button:not(:disabled):hover{filter:none!important;transform:none!important}.mvp-audition button:not(:disabled):active{filter:brightness(1.12)!important;transform:scale(.985)!important}}
+
     `}
 
 
