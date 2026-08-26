@@ -2,7 +2,7 @@ import previewPlay from "../../../assets/music-premium/preview-play.webp";
 import previewPause from "../../../assets/music-premium/preview-pause.webp";
 
 export function PreviewRenderIcon({ playing = false }: { playing?: boolean }) {
-  return <img className="mlv-previewRenderIcon" src={playing ? previewPause : previewPlay} alt="" aria-hidden="true" draggable={false} />;
+  return <img className="mlv-previewRenderIcon" src={playing ? previewPlay : previewPause} alt="" aria-hidden="true" draggable={false} />;
 }
 
 export function YouTubePremiumIcon() {

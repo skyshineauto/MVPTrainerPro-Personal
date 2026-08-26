@@ -108,6 +108,8 @@ const SONG_TABLE = "music_audition_songs";
 const LINK_TABLE = "music_audition_list_songs";
 const METADATA_CACHE_MS = 7 * 86400000;
 const metadataRequests = new Map<string, Promise<MusicAuditionSong>>();
+const previewFailures = new Map<string, number>();
+const PREVIEW_FAILURE_RETRY_MS = 15 * 60 * 1000;
 let cloudHydrationPromise: Promise<void> | null = null;
 
 function clean(value: unknown) {
@@ -873,18 +875,19 @@ function previewProviderLabel(url: string | null) {
   return "VERIFIED SAMPLE";
 }
 
-export async function resolveMusicAuditionMetadata(songId: string) {
+export async function resolveMusicAuditionMetadata(songId: string, options: { forceFresh?: boolean; blockedPreviewUrls?: Set<string> } = {}) {
   const state = readLocal();
   const song = state.songs.find((item) => item.id === songId);
   if (!song) throw new Error("Song not found.");
 
+  const blockedPreviewUrls = options.blockedPreviewUrls || new Set<string>();
   const existing = metadataRequests.get(songId);
-  if (existing) return existing;
+  if (existing && !options.forceFresh) return existing;
 
   const request = (async () => {
     try {
-      // Reuse a working cached preview immediately. If it died, continue into the full resolver.
-      if (song.previewUrl && await probePreviewUrl(song.previewUrl)) return song;
+      // Reuse a working cached preview immediately unless this call explicitly asks for a fresh source.
+      if (!options.forceFresh && song.previewUrl && !blockedPreviewUrls.has(song.previewUrl) && await probePreviewUrl(song.previewUrl)) return song;
 
       const queries = metadataQueries(song);
       const primaryTerm = queries[0]?.term || `${song.artist} ${song.title}`;
@@ -897,7 +900,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
         fetchDeezerCandidates(primaryTerm),
       ]);
 
-      let combined = mergeCandidates(firstWave);
+      let combined = mergeCandidates(firstWave).filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
       let ranked = rankedCandidates(song, combined);
       let metadataBest = ranked[0] || null;
       let playableBest = await firstPlayableCandidate(ranked);
@@ -911,7 +914,7 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           queries[2] ? fetchAppleCandidates(queries[2].term, "US", queries[2].attribute) : Promise.resolve([] as PreviewCandidate[]),
           fetchDeezerCandidates(reverseTerm),
         ]);
-        combined = mergeCandidates([combined, ...secondWave]);
+        combined = mergeCandidates([combined, ...secondWave]).filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
         ranked = rankedCandidates(song, combined);
         metadataBest = ranked[0] || metadataBest;
         playableBest = await firstPlayableCandidate(ranked);
@@ -944,7 +947,10 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           return changed;
         }),
       }));
-      if (changed) void persistSong(changed);
+      if (changed) {
+        previewFailures.delete(songId);
+        void persistSong(changed);
+      }
       return changed || song;
     } catch {
       // Keep the imported identity, but never keep weak/wrong provider metadata.
@@ -955,18 +961,15 @@ export async function resolveMusicAuditionMetadata(songId: string) {
           if (item.id !== songId) return item;
           changed = {
             ...item,
-            album: "",
-            releaseYear: null,
-            genre: null,
-            artworkUrl: null,
+            // Keep any good artwork/metadata already found. Only invalidate the temporary sample.
             previewUrl: null,
-            storeUrl: null,
-            metadataUpdatedAt: now(),
+            metadataUpdatedAt: null,
             updatedAt: now(),
           };
           return changed;
         }),
       }));
+      previewFailures.set(songId, now());
       if (changed) void persistSong(changed);
       return changed || song;
     } finally {
@@ -1167,7 +1170,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     const freshCached = Boolean(
       currentSong.metadataUpdatedAt &&
       now() - currentSong.metadataUpdatedAt < METADATA_CACHE_MS &&
-      (currentSong.artworkUrl || currentSong.previewUrl || currentSong.album),
+      currentSong.previewUrl,
     );
 
     if (verifiedMetadataIds.has(songId)) return;
@@ -1206,7 +1209,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
         const freshCached = Boolean(
           song.metadataUpdatedAt &&
           now() - song.metadataUpdatedAt < METADATA_CACHE_MS &&
-          (song.artworkUrl || song.previewUrl || song.album),
+          song.previewUrl,
         );
         if (freshCached || verifiedMetadataIdsRef.current.has(song.id)) {
           verifiedMetadataIdsRef.current.add(song.id);
@@ -1243,44 +1246,93 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       stopPreview();
       return;
     }
+
     stopPreview();
-    let resolved = song;
-    if (!resolved.previewUrl || !verifiedMetadataIds.has(song.id)) {
-      setLookupSongId(song.id);
-      resolved = await resolveMusicAuditionMetadata(song.id);
-      setVerifiedMetadataIds((previous) => {
-        const next = new Set(previous);
-        next.add(song.id);
-        return next;
-      });
-      setLookupSongId(null);
-    }
-    if (!resolved.previewUrl) {
-      setMessage("No playable embedded sample was found across Apple and Deezer for this exact artist/title. YouTube is still available for the full song.");
-      return;
-    }
+    setMessage("");
     onPreviewStart?.();
-    const audio = new Audio(resolved.previewUrl);
+
+    // Create the media element immediately inside the real click event. This preserves
+    // browser user-activation better than waiting for network metadata before creating it.
+    const audio = new Audio();
     audio.preload = "auto";
     audio.volume = 0.95;
-    audio.onended = () => setPreviewSongId(null);
-    audio.onerror = () => {
-      setPreviewSongId(null);
+    audioRef.current = audio;
+
+    const blockedUrls = new Set<string>();
+
+    const markVerified = (songId: string, playable: boolean) => {
+      if (playable) verifiedMetadataIdsRef.current.add(songId);
+      else verifiedMetadataIdsRef.current.delete(songId);
       setVerifiedMetadataIds((previous) => {
         const next = new Set(previous);
-        next.delete(song.id);
+        if (playable) next.add(songId); else next.delete(songId);
         return next;
       });
-      setMessage("That sample expired or failed. MVP will search the other preview sources the next time you press Preview.");
     };
-    audioRef.current = audio;
-    try {
-      await audio.play();
-      setPreviewSongId(song.id);
-      setMessage("");
-    } catch {
-      setMessage("Preview playback was blocked by the browser. Tap Preview again or use YouTube.");
+
+    const resolveFresh = async (forceFresh: boolean) => {
+      setLookupSongId(song.id);
+      try {
+        const resolved = await resolveMusicAuditionMetadata(song.id, { forceFresh, blockedPreviewUrls: blockedUrls });
+        markVerified(song.id, Boolean(resolved.previewUrl));
+        return resolved;
+      } finally {
+        setLookupSongId((id) => id === song.id ? null : id);
+      }
+    };
+
+    const playUrl = async (resolved: MusicAuditionSong, retryDepth = 0): Promise<boolean> => {
+      const url = clean(resolved.previewUrl);
+      if (!url) return false;
+      audio.onerror = null;
+      audio.src = url;
+      audio.muted = false;
+      try {
+        await audio.play();
+        setPreviewSongId(song.id);
+        setMessage("");
+        audio.onended = () => setPreviewSongId(null);
+        audio.onerror = () => {
+          if (retryDepth >= 2 || blockedUrls.has(url)) return;
+          blockedUrls.add(url);
+          markVerified(song.id, false);
+          setMessage("Refreshing preview source…");
+          void resolveFresh(true).then((fresh) => playUrl(fresh, retryDepth + 1)).then((played) => {
+            if (!played) setMessage("No playable preview found. YouTube will search the exact artist + song.");
+          });
+        };
+        return true;
+      } catch (error) {
+        blockedUrls.add(url);
+        markVerified(song.id, false);
+        if (retryDepth < 2) {
+          const fresh = await resolveFresh(true);
+          if (fresh.previewUrl && !blockedUrls.has(fresh.previewUrl)) return playUrl(fresh, retryDepth + 1);
+        }
+        const name = error instanceof DOMException ? error.name : "";
+        if (name === "NotAllowedError") {
+          setMessage("Preview is ready. Tap Preview once more to play it.");
+        } else {
+          setMessage("No playable preview found. YouTube will search the exact artist + song.");
+        }
+        return false;
+      }
+    };
+
+    let resolved = song;
+    const failureAt = previewFailures.get(song.id) || 0;
+    const forceFresh = Boolean(failureAt && now() - failureAt > PREVIEW_FAILURE_RETRY_MS);
+
+    if (resolved.previewUrl && !forceFresh) {
+      if (await playUrl(resolved)) return;
     }
+
+    resolved = await resolveFresh(Boolean(forceFresh || blockedUrls.size));
+    if (!resolved.previewUrl) {
+      setMessage("No playable preview found. YouTube will search the exact artist + song.");
+      return;
+    }
+    await playUrl(resolved);
   }
 
   function openYoutube(song: MusicAuditionSong) {
@@ -1292,12 +1344,13 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
     stopPreview();
     setMessage("");
     setDecisionFlash({ songId: song.id, decision });
+    // Update the local queue immediately. Supabase persistence already runs asynchronously.
+    setMusicAuditionDecision(song.id, decision);
     if (decisionTimerRef.current) window.clearTimeout(decisionTimerRef.current);
     decisionTimerRef.current = window.setTimeout(() => {
-      setMusicAuditionDecision(song.id, decision);
       setDecisionFlash(null);
       decisionTimerRef.current = null;
-    }, 110);
+    }, 180);
   }
 
   function submitImport() {
@@ -1405,7 +1458,7 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
   const currentMetadataAvailable = Boolean(
     currentSong &&
     currentMetadataVerified &&
-    (currentSong.artworkUrl || currentSong.previewUrl || currentSong.album),
+    currentSong.previewUrl,
   );
   const currentPreviewReady = Boolean(currentSong?.previewUrl && currentMetadataVerified);
   const currentFlashDecision = currentSong && decisionFlash?.songId === currentSong.id ? decisionFlash.decision : null;
@@ -1500,20 +1553,20 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
               : currentPreviewReady
                 ? [previewProviderLabel(currentSong.previewUrl), currentSong.album, currentSong.releaseYear].filter(Boolean).join(" • ")
                 : currentMetadataAvailable
-                  ? "Artwork matched, but no playable embedded sample survived verification. Use YouTube for the full song."
-                  : "No playable embedded sample found yet. YouTube always searches the exact imported artist and title."}
+                  ? "No playable preview found. YouTube will search the exact artist + song."
+                  : "No playable preview found. YouTube will search the exact artist + song."}
           </p>
           <div className="mvp-auditionActionLabel"><span>LISTEN</span><i /></div>
           <div className="mvp-auditionListen">
             <button
               className={`is-preview ${previewSongId === currentSong.id ? "is-playing" : ""} ${!currentPreviewReady && lookupSongId !== currentSong.id ? "is-unavailable" : ""}`}
-              disabled={lookupSongId === currentSong.id || (!currentPreviewReady && currentMetadataVerified)}
+              disabled={lookupSongId === currentSong.id}
               onClick={() => void togglePreview(currentSong)}
             >
               <span className="mvp-auditionControlIcon"><PreviewRenderIcon playing={previewSongId === currentSong.id} /></span>
               <span className="mvp-auditionControlCopy">
-                <strong>{lookupSongId === currentSong.id ? "SEARCHING" : previewSongId === currentSong.id ? "STOP PREVIEW" : currentPreviewReady ? "PREVIEW" : "NO SAMPLE"}</strong>
-                <small>{lookupSongId === currentSong.id ? "Apple + Deezer" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Use YouTube"}</small>
+                <strong>{lookupSongId === currentSong.id ? "SEARCHING" : previewSongId === currentSong.id ? "STOP PREVIEW" : currentPreviewReady ? "PREVIEW" : "FIND PREVIEW"}</strong>
+                <small>{lookupSongId === currentSong.id ? "Apple + Deezer" : currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Apple + Deezer"}</small>
               </span>
             </button>
             <button className="is-youtube" onClick={() => openYoutube(currentSong)}>
@@ -2772,6 +2825,36 @@ export function MusicAuditionPanel({ tracks, onPreviewStart, onImportFile }: Pro
       }
       @media(max-width:430px){
         .mvp-auditionListen{grid-template-columns:1fr!important;gap:7px!important}.mvp-auditionListen button{justify-content:flex-start!important}.mvp-auditionDecision{gap:0!important}.mvp-auditionDecision button{min-height:82px!important}.mvp-auditionKeptActions{display:grid!important;grid-template-columns:1fr 1fr 1fr 32px!important}.mvp-keptMore{position:static!important}.mvp-keptMore summary{width:32px!important;height:52px!important}
+      }
+
+      /* v15 correction: rendered controls are the objects. No clipping, no washed-out fake glyphs. */
+      .mvp-auditionStage{border:0!important;background:radial-gradient(760px 360px at 17% 48%,rgba(27,189,232,.09),transparent 63%),radial-gradient(690px 330px at 88% 58%,rgba(255,135,31,.07),transparent 65%),rgba(1,7,11,.36)!important;box-shadow:inset 0 1px rgba(255,255,255,.025),0 28px 80px rgba(0,0,0,.24)!important}
+      .mvp-auditionSongCard{overflow:visible!important;background:transparent!important}
+      .mvp-auditionArtwork{border:0!important;box-shadow:0 28px 60px rgba(0,0,0,.46),0 0 0 1px rgba(255,255,255,.05),-22px 0 70px rgba(31,198,239,.08),22px 0 70px rgba(255,138,31,.055)!important}
+      .mvp-auditionListen{gap:26px!important;border:0!important;overflow:visible!important}
+      .mvp-auditionListen button{min-height:106px!important;padding:7px 12px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important;justify-content:center!important}
+      .mvp-auditionListen button:before{display:none!important}
+      .mvp-auditionListen button:after{content:"";position:absolute!important;left:12%!important;right:12%!important;bottom:5px!important;height:1px!important;background:linear-gradient(90deg,transparent,rgba(70,218,255,.38),transparent)!important;box-shadow:0 0 16px rgba(49,209,249,.12)!important}
+      .mvp-auditionListen button.is-youtube:after{background:linear-gradient(90deg,transparent,rgba(255,56,78,.42),transparent)!important;box-shadow:0 0 16px rgba(255,39,65,.1)!important}
+      .mvp-auditionControlIcon{width:118px!important;height:96px!important;flex:0 0 118px!important;overflow:visible!important}
+      .mvp-auditionControlIcon .mlv-previewRenderIcon{width:112px!important;height:112px!important;max-width:none!important;max-height:none!important;object-fit:contain!important;overflow:visible!important}
+      .mvp-auditionControlIcon .mlv-youtubeSvg{width:80px!important;height:56px!important;overflow:visible!important}
+      .mvp-auditionDecision{border:0!important;gap:22px!important;margin-top:18px!important;overflow:visible!important}
+      .mvp-auditionDecision button{min-height:118px!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important}
+      .mvp-auditionDecisionIcon{width:94px!important;height:78px!important;flex:0 0 94px!important;overflow:visible!important}
+      .mvp-auditionDecisionIcon .mlv-keepSvg{width:88px!important;height:72px!important;opacity:.82!important;filter:drop-shadow(0 8px 18px rgba(0,0,0,.36)) saturate(.86) brightness(.9)!important}
+      .mvp-auditionDecisionIcon .mlv-maybeSvg{width:92px!important;height:70px!important;opacity:.82!important;filter:drop-shadow(0 8px 18px rgba(0,0,0,.36)) saturate(.86) brightness(.9)!important}
+      .mvp-auditionDecisionIcon .mlv-passSvg{width:78px!important;height:78px!important;opacity:.82!important;filter:drop-shadow(0 8px 18px rgba(0,0,0,.36)) saturate(.86) brightness(.9)!important}
+      .mvp-auditionDecision button:hover .mlv-premiumSvg{opacity:1!important;filter:drop-shadow(0 0 18px currentColor) brightness(1.08)!important}
+      .mvp-auditionDecision button.is-active .mlv-premiumSvg{opacity:1!important;filter:drop-shadow(0 0 24px currentColor) brightness(1.14)!important}
+      .mvp-auditionKeptGrid>article{overflow:visible!important;min-height:112px!important}
+      .mvp-auditionKeptActions{overflow:visible!important;gap:24px!important}
+      .mvp-auditionKeptActions .mvp-keptAction{overflow:visible!important;min-height:72px!important}
+      .mvp-keptActionIcon{width:72px!important;height:62px!important;flex:0 0 72px!important;overflow:visible!important}
+      .mvp-keptActionIcon .mlv-previewRenderIcon{width:70px!important;height:70px!important;max-width:none!important;object-fit:contain!important}
+      .mvp-keptActionIcon .mlv-youtubeSvg{width:58px!important;height:42px!important}.mvp-keptActionIcon .mlv-uploadSvg{width:66px!important;height:56px!important;overflow:visible!important}
+      @media(max-width:760px){
+        .mvp-auditionListen button{min-height:92px!important}.mvp-auditionControlIcon{width:86px!important;height:76px!important;flex-basis:86px!important}.mvp-auditionControlIcon .mlv-previewRenderIcon{width:84px!important;height:84px!important}.mvp-auditionDecision{gap:4px!important}.mvp-auditionDecisionIcon{width:58px!important;height:52px!important}.mvp-auditionDecisionIcon .mlv-keepSvg{width:56px!important;height:48px!important}.mvp-auditionDecisionIcon .mlv-maybeSvg{width:58px!important;height:46px!important}.mvp-auditionDecisionIcon .mlv-passSvg{width:49px!important;height:49px!important}.mvp-keptActionIcon{width:48px!important;height:44px!important;flex-basis:48px!important}.mvp-keptActionIcon .mlv-previewRenderIcon{width:50px!important;height:50px!important}
       }
 
     `}

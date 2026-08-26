@@ -141,3 +141,13 @@
   .tr10-premiumLibrary .tr10-row:hover{transform:none!important}
   .tr10-premiumLibrary .tr10-collectionCard:hover,.tr10-premiumLibrary .tr10-radarGrid article:hover,.tr10-premiumLibrary .tr10-discoverGrid article:hover{transform:none!important}
 }
+
+/* v15 visual correction: less card chrome, larger artwork-led controls, no clipped icon assets */
+.tr10-premiumLibrary .mlv-premiumSvg{display:block;width:100%;height:100%;overflow:visible!important;filter:drop-shadow(0 8px 18px rgba(0,0,0,.32))}
+.tr10-premiumLibrary .mlv-previewRenderIcon{display:block;width:100%;height:100%;object-fit:contain!important;object-position:center!important;transform:none!important;clip-path:none!important;filter:drop-shadow(0 12px 26px rgba(22,176,222,.18))}
+.tr10-premiumLibrary .tr10-collectionCard{border-color:rgba(78,198,231,.075)!important;background:linear-gradient(115deg,rgba(6,28,37,.46),rgba(2,10,15,.30))!important;box-shadow:inset 0 1px rgba(255,255,255,.025),0 10px 30px rgba(0,0,0,.12)!important}
+.tr10-premiumLibrary .tr10-collectionCard:hover{border-color:rgba(71,220,255,.24)!important;box-shadow:inset 3px 0 rgba(59,218,255,.5),0 18px 44px rgba(0,0,0,.2)!important}
+.tr10-premiumLibrary .tr10-collectionPlay{border-radius:999px!important;min-width:52px!important;height:34px!important;background:radial-gradient(circle at 30% 20%,rgba(94,226,255,.26),rgba(8,41,54,.82) 62%)!important;border:1px solid rgba(90,220,255,.2)!important}
+.tr10-premiumLibrary .tr10-smartBuild,.tr10-premiumLibrary .tr10-savedMixes,.tr10-premiumLibrary .mvp-v5-hero,.tr10-premiumLibrary .mvp-v5-block,.tr10-premiumLibrary .mvp-v5-dna,.tr10-premiumLibrary .mvp-v5-taste,.tr10-premiumLibrary .mvp-v5-live,.tr10-premiumLibrary .mvp-v5-pr{border-color:rgba(83,207,239,.075)!important;background:linear-gradient(145deg,rgba(4,22,30,.52),rgba(2,9,14,.36))!important;box-shadow:inset 0 1px rgba(255,255,255,.022),0 14px 38px rgba(0,0,0,.13)!important}
+.tr10-premiumLibrary .tr10-smart{gap:18px!important}.tr10-premiumLibrary .tr10-smartLaunch{min-height:48px!important;border-radius:12px!important;font-weight:1000!important;letter-spacing:.08em!important}
+.tr10-premiumLibrary .tr10-tabs button{height:56px!important;font-size:9.5px!important;color:#91a9b2!important}.tr10-premiumLibrary .tr10-tabs button.is-active{color:#fff!important;text-shadow:0 0 18px rgba(66,221,255,.24)!important}
