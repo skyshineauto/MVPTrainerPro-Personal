@@ -146,7 +146,7 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
         <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
           <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.75 : 1.35} height={mobile ? 360 : 560} />
           <Bloom intensity={mobile ? 0.075 : 0.105} luminanceThreshold={0.90} luminanceSmoothing={0.36} mipmapBlur />
-          {!mobile ? <Noise opacity={0.0024} /> : null}
+          <Noise opacity={mobile ? 0 : 0.0024} />
           <Vignette offset={0.28} darkness={mobile ? 0.34 : 0.38} />
         </EffectComposer>
       </Canvas>
