@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { RoundedBox } from "@react-three/drei";
@@ -11,6 +11,22 @@ import {
 } from "./musicLibraryShaders";
 
 function color(value: string) { return new THREE.Color(value); }
+class MusicVisualBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn("MVP music visual engine disabled after a rendering error.", error);
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 
 function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
   tab: MusicLibraryVisualTab;
@@ -132,24 +148,41 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   }, [activeTab]);
 
   const visualPlaying = playing || (activeTab === "audition" && auditionPreviewPlaying);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => setReady(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, []);
 
   return (
     <div className={`mlv-engine ${activeTab === "audition" && auditionPreviewPlaying ? "is-audition-preview" : ""}`} aria-hidden="true">
-      <Canvas
-        dpr={mobile ? [1, 1.55] : [1.2, 2]}
-        gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
-        camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
-        frameloop="demand"
-      >
-        <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
-        <DepthArchitecture mobile={mobile} playing={visualPlaying} />
-        <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
-          <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.75 : 1.35} height={mobile ? 360 : 560} />
-          <Bloom intensity={mobile ? 0.075 : 0.105} luminanceThreshold={0.90} luminanceSmoothing={0.36} mipmapBlur />
-          <Noise opacity={mobile ? 0 : 0.0024} />
-          <Vignette offset={0.28} darkness={mobile ? 0.34 : 0.38} />
-        </EffectComposer>
-      </Canvas>
+      {ready ? (
+        <MusicVisualBoundary>
+          <Canvas
+            dpr={mobile ? [1, 1.5] : [1.1, 1.8]}
+            gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+            camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
+            frameloop="demand"
+            fallback={null}
+          >
+            <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
+            <DepthArchitecture mobile={mobile} playing={visualPlaying} />
+            <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
+              <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.65 : 1.10} height={mobile ? 320 : 520} />
+              <Bloom intensity={mobile ? 0.065 : 0.09} luminanceThreshold={0.92} luminanceSmoothing={0.34} mipmapBlur />
+              <Noise opacity={mobile ? 0 : 0.0020} />
+              <Vignette offset={0.28} darkness={mobile ? 0.30 : 0.34} />
+            </EffectComposer>
+          </Canvas>
+        </MusicVisualBoundary>
+      ) : null}
       {activeTab === "audition" && auditionArtworkUrl ? <div className="mlv-engineArtwork" style={{ backgroundImage: `url("${auditionArtworkUrl}")` }} /> : null}
       <div className="mlv-engineSheen" />
       <div className="mlv-engineGrain" />
