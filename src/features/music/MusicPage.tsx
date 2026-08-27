@@ -3413,6 +3413,57 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           .tr21-playlists{grid-template-columns:1fr;min-height:0}.tr21-playlistDock{border-right:0;border-bottom:1px solid rgba(83,177,207,.11);padding:11px 10px}.tr21-playlistChoices{display:flex;overflow-x:auto;gap:7px;padding-bottom:3px;scroll-snap-type:x proximity;scrollbar-width:none}.tr21-playlistChoices::-webkit-scrollbar{display:none}.tr21-playlistChoices>button{flex:0 0 155px;scroll-snap-align:start}.tr21-playlistStage{padding:10px}.tr21-playlistHero{grid-template-columns:88px minmax(0,1fr);gap:12px;min-height:0;padding:12px}.tr21-playlistArt{width:88px;height:88px}.tr21-playlistHeroCopy h2{font-size:25px}.tr21-playlistHeroCopy>p{font-size:7px}.tr21-playlistMetrics{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:11px;padding-top:9px}.tr21-playlistHeroActions{grid-column:1/-1;grid-template-columns:1fr 1fr 1fr auto}.tr21-playlistHeroActions .is-delete{grid-column:auto;min-height:48px;padding:0 10px}.tr21-playlistHeroActions small{display:none}.tr21-playlistTracks>article{grid-template-columns:22px 40px minmax(0,1fr) auto;gap:7px}.tr21-playlistEnergy,.tr21-playlistDuration{display:none}.tr21-playlistTrackActions{grid-column:3/-1;justify-content:flex-start;padding-top:3px}.tr21-playlistTrackActions button{height:34px;min-width:34px}.tr21-playlistTrackActions .is-remove{margin-left:auto}
         }
         @media(max-width:430px){.tr10-tabs button{flex-basis:124px!important;min-width:124px!important;width:124px!important}.tr21-playlistHero{grid-template-columns:72px minmax(0,1fr)}.tr21-playlistArt{width:72px;height:72px}.tr21-playlistHeroCopy h2{font-size:22px}.tr21-playlistMetrics{grid-template-columns:1fr 1fr}.tr21-playlistHeroActions{grid-template-columns:1fr 1fr}.tr21-playlistHeroActions .is-delete{grid-column:1/-1;min-height:34px}.tr21-playlistRailHead{align-items:stretch;flex-direction:column}.tr21-playlistRailHead>button{width:100%}}
+
+
+        /* MVP_TRAINER_V5_R12_5E_23_LIVE_CONTROL_FOUNDATION */
+        .tr10-premiumLibrary{--m23-blue:#0b7cff;--m23-blueHi:#22a5ed;--m23-orange:#eb8b0f;--m23-orangeHi:#ffae35;--m23-surface:#071018;--m23-raised:#0a151e;--m23-line:rgba(130,177,196,.14);--m23-top:inset 0 1px 0 rgba(255,255,255,.055);--m23-contact:0 8px 20px rgba(0,0,0,.24)}
+        .tr10-premiumLibrary .tr10-headActions button,.tr10-premiumLibrary .tr10-actions button,.tr10-premiumLibrary .tr10-bulk button,.tr10-premiumLibrary .tr10-pager button,.tr10-premiumLibrary .tr10-order button{background:#071018!important;border:1px solid var(--m23-line)!important;color:#dce7eb!important;box-shadow:var(--m23-top),0 5px 12px rgba(0,0,0,.19)!important;filter:none!important;text-shadow:none!important}
+        @media(hover:hover){
+          .tr10-premiumLibrary .tr10-headActions button:not(:disabled):hover,.tr10-premiumLibrary .tr10-actions button:not(:disabled):hover,.tr10-premiumLibrary .tr10-bulk button:not(:disabled):hover,.tr10-premiumLibrary .tr10-pager button:not(:disabled):hover,.tr10-premiumLibrary .tr10-order button:not(:disabled):hover{background:#0b1821!important;border-color:rgba(34,165,237,.34)!important;color:#fff!important;box-shadow:var(--m23-top),0 9px 20px rgba(0,0,0,.25),inset 0 -1px rgba(11,124,255,.28)!important;transform:translateY(-1px)!important;filter:none!important}
+          .tr10-premiumLibrary .tr10-actions .tr10-likeAction:not(:disabled):hover{background:#0b1821!important;border-color:rgba(79,224,154,.36)!important;color:#caffdf!important;box-shadow:var(--m23-top),0 9px 20px rgba(0,0,0,.24),inset 0 -1px rgba(79,224,154,.38)!important}
+          .tr10-premiumLibrary .tr10-actions .tr10-lessAction:not(:disabled):hover{background:#0b1821!important;border-color:rgba(255,104,117,.34)!important;color:#ffd2d7!important;box-shadow:var(--m23-top),0 9px 20px rgba(0,0,0,.24),inset 0 -1px rgba(255,104,117,.34)!important}
+          .tr10-premiumLibrary .tr10-actions .tr10-playlistAction:not(:disabled):hover{background:#0b1821!important;border-color:rgba(235,139,15,.38)!important;color:#ffe5bb!important;box-shadow:var(--m23-top),0 9px 20px rgba(0,0,0,.24),inset 0 -1px rgba(235,139,15,.38)!important}
+        }
+        .tr10-premiumLibrary .tr10-actions .tr10-likeAction.is-liked{background:#09151a!important;border-color:rgba(79,224,154,.32)!important;color:#bfffd7!important;box-shadow:var(--m23-top),inset 0 -2px rgba(79,224,154,.44)!important}
+        .tr10-premiumLibrary .tr10-actions .tr10-lessAction.is-down{background:#09151a!important;border-color:rgba(255,104,117,.30)!important;color:#ffc5cb!important;box-shadow:var(--m23-top),inset 0 -2px rgba(255,104,117,.40)!important}
+        .tr10-premiumLibrary .tr10-actions .tr10-editAction{background:#09141c!important;border-color:rgba(34,165,237,.24)!important;color:#d9f1ff!important}
+        .tr10-premiumLibrary .tr10-actionGlyph{background:#02070b!important;border:1px solid rgba(255,255,255,.035)!important;box-shadow:inset 0 1px rgba(255,255,255,.025)!important}
+        .tr10-premiumLibrary .tr10-headActions .is-orange{background:#d97808!important;border-color:#f3a02b!important;color:#081015!important;box-shadow:inset 0 1px rgba(255,255,255,.28),0 8px 20px rgba(0,0,0,.22)!important}
+        @media(hover:hover){.tr10-premiumLibrary .tr10-headActions .is-orange:not(:disabled):hover{background:#ee8e12!important;border-color:#ffb647!important;color:#071014!important;box-shadow:inset 0 1px rgba(255,255,255,.34),0 10px 24px rgba(0,0,0,.26),0 0 0 1px rgba(235,139,15,.08)!important;transform:translateY(-1px)!important;filter:none!important}}
+        .tr10-premiumLibrary .tr10-headActions .is-orange:not(:disabled):active{background:#cf7306!important;transform:translateY(1px)!important}
+
+        /* Active navigation: precision hardware slot, no glossy fake pill. */
+        .tr10-premiumLibrary .tr10-tabs button{background:#071018!important;border:1px solid rgba(126,174,193,.12)!important;color:#9baab1!important;box-shadow:inset 0 1px rgba(255,255,255,.045),0 4px 10px rgba(0,0,0,.18)!important}
+        @media(hover:hover){.tr10-premiumLibrary .tr10-tabs button:not(.is-active):hover{background:#0a151e!important;border-color:rgba(34,165,237,.26)!important;color:#f2f7f9!important;box-shadow:inset 0 1px rgba(255,255,255,.06),0 8px 18px rgba(0,0,0,.23),inset 0 -1px rgba(11,124,255,.20)!important;filter:none!important}}
+        .tr10-premiumLibrary .tr10-tabs button.is-active{background:#0b1620!important;border-color:rgba(34,165,237,.46)!important;color:#fff!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 10px 24px rgba(0,0,0,.27),inset 0 -2px var(--m23-blue)!important;filter:none!important}
+        .tr10-premiumLibrary .tr10-tabs button.is-active:after{background:linear-gradient(90deg,transparent,var(--m23-blue) 20%,var(--m23-blueHi) 64%,var(--m23-orange) 92%,transparent)!important;opacity:.72!important;filter:none!important}
+
+        /* Readability and density. */
+        .tr10-premiumLibrary .tr10-row{min-height:52px!important}
+        .tr10-premiumLibrary .tr10-trackText strong{font-size:10.5px!important;line-height:1.18!important;color:#f4f8fa!important}.tr10-premiumLibrary .tr10-trackText span{font-size:8px!important;line-height:1.25!important;color:#8fa1a9!important}
+        .tr10-premiumLibrary .tr10-actions button{min-height:31px!important;font-size:7.5px!important;font-weight:850!important;letter-spacing:.035em!important}
+        .tr10-premiumLibrary .tr10-toolbar label>span,.tr10-premiumLibrary .mvpPremiumSelectLabel{font-size:8px!important}
+        .tr10-premiumLibrary .tr10-directoryEyebrow,.tr10-premiumLibrary .tr10-sectionHead span{font-size:8.5px!important}
+        .tr10-premiumLibrary .tr10-stats strong{color:#f2a02b!important}.tr10-premiumLibrary .tr10-directoryEyebrow,.tr10-premiumLibrary .tr10-sectionHead span,.tr10-premiumLibrary .tr10-hero span{color:#68b8ff!important}
+        .tr10-premiumLibrary .tr10-healthRail button.is-review.is-active{border-color:rgba(11,124,255,.38)!important;color:#b8d9ff!important;background:#09141c!important;box-shadow:inset 0 -2px rgba(11,124,255,.38)!important}
+        .tr10-premiumLibrary .tr10-discoverType.is-hidden_gem{color:#ffd49a!important;border-color:rgba(235,139,15,.28)!important}
+
+        /* Keep artwork-led collection views clean and dimensional. */
+        .tr10-premiumLibrary .tr10-collectionCard{background:#050c12!important;border-color:rgba(128,174,193,.10)!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 10px 24px rgba(0,0,0,.20)!important}
+        @media(hover:hover){.tr10-premiumLibrary .tr10-collectionCard:hover{background:#08131b!important;border-color:rgba(34,165,237,.20)!important;transform:translateY(-2px)!important;box-shadow:inset 0 1px rgba(255,255,255,.05),0 16px 32px rgba(0,0,0,.27)!important}}
+        .tr10-premiumLibrary .tr10-collectionCard .tr10-art{box-shadow:0 10px 24px rgba(0,0,0,.34),0 0 0 1px rgba(255,255,255,.06)!important}
+
+        /* Remove decorative bottom-ribbon feel from every tab shell. */
+        .tr10-premiumLibrary:after,.tr10-premiumLibrary .tr10-console:after{display:none!important}
+
+        @media(max-width:650px){
+          .tr10-premiumLibrary .tr10-tabs{gap:7px!important;padding:7px max(10px,calc(env(safe-area-inset-left) + 8px)) 9px!important;scroll-padding-inline:calc(50vw - 56px)!important}
+          .tr10-premiumLibrary .tr10-tabs button{flex:0 0 112px!important;min-width:112px!important;width:112px!important;height:46px!important;font-size:9px!important}
+          .tr10-premiumLibrary .tr10-trackText strong{font-size:12px!important}.tr10-premiumLibrary .tr10-trackText span{font-size:9px!important}
+          .tr10-premiumLibrary .tr10-actions{gap:5px!important}.tr10-premiumLibrary .tr10-actions button{min-height:38px!important;font-size:8px!important;padding:0 9px!important}
+          .tr10-premiumLibrary .tr10-headActions button{min-height:44px!important;font-size:9px!important}
+        }
+
       `}</style>
     </main>
   );

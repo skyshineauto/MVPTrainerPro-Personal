@@ -70,7 +70,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
     pointer.current.lerp(targetPointer.current, mobile ? 0.024 : 0.052);
     uniforms.uPointer.value.copy(pointer.current);
     state.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.01 : 0.94, 0.035);
+    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.00 : 0.96, 0.035);
   });
 
   return <mesh frustumCulled={false}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
@@ -114,22 +114,22 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   return (
     <div className={`mlv-engine ${activeTab === "audition" && auditionPreviewPlaying ? "is-audition-preview" : ""}`} aria-hidden="true">
       <Canvas
-        dpr={mobile ? [0.68, 1] : [0.9, 1.4]}
-        gl={{ alpha: true, antialias: false, powerPreference: "high-performance" }}
+        dpr={mobile ? [0.9, 1.3] : [1, 1.7]}
+        gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
         camera={{ position: [0, 0, 1], fov: 50 }}
         frameloop="demand"
       >
         <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
         {!mobile ? (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.38} luminanceThreshold={0.66} luminanceSmoothing={0.34} mipmapBlur />
-            <Noise opacity={0.008} />
-            <Vignette offset={0.18} darkness={0.72} />
+            <Bloom intensity={0.16} luminanceThreshold={0.82} luminanceSmoothing={0.46} mipmapBlur />
+            <Noise opacity={0.004} />
+            <Vignette offset={0.22} darkness={0.50} />
           </EffectComposer>
         ) : (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.22} luminanceThreshold={0.72} luminanceSmoothing={0.44} mipmapBlur />
-            <Vignette offset={0.19} darkness={0.70} />
+            <Bloom intensity={0.10} luminanceThreshold={0.86} luminanceSmoothing={0.50} mipmapBlur />
+            <Vignette offset={0.24} darkness={0.46} />
           </EffectComposer>
         )}
       </Canvas>

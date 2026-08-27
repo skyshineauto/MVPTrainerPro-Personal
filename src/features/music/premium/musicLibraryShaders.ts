@@ -18,7 +18,6 @@ export const MUSIC_LIBRARY_VERTEX_SHADER = /* glsl */ `
 
 export const MUSIC_LIBRARY_FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
-
   varying vec2 vUv;
   uniform float uTime;
   uniform float uEnergy;
@@ -45,89 +44,64 @@ export const MUSIC_LIBRARY_FRAGMENT_SHADER = /* glsl */ `
   }
 
   float fbm(vec2 p) {
-    float value = 0.0;
-    float amp = 0.5;
+    float v = 0.0;
+    float a = 0.5;
     for (int i = 0; i < 4; i++) {
-      value += amp * noise(p);
-      p = p * 2.06 + vec2(9.7, 6.3);
-      amp *= 0.49;
+      v += noise(p) * a;
+      p = p * 2.04 + vec2(7.4, 9.1);
+      a *= 0.48;
     }
-    return value;
-  }
-
-  float band(float d, float width) {
-    return exp(-abs(d) / max(width, 0.0001));
-  }
-
-  float ring(vec2 p, vec2 scale, float radius, float width) {
-    float d = length(p * scale) - radius;
-    return band(d, width);
+    return v;
   }
 
   void main() {
-    vec2 uv = vUv;
-    vec2 p = uv - 0.5;
-    p.x *= 1.74;
+    vec2 p = vUv - 0.5;
+    p.x *= 1.7;
+    float t = uTime * (0.08 + uEnergy * 0.018);
+    float n = fbm(p * 2.15 + vec2(t * 0.18, -t * 0.12));
+    float fine = fbm(p * 6.0 - vec2(t * 0.07, t * 0.05));
 
-    float t = uTime * (0.18 + uEnergy * 0.05);
-    float n = fbm(p * 2.2 + vec2(t * 0.12, -t * 0.08));
-    float nFine = fbm(p * 5.4 - vec2(t * 0.08, t * 0.06));
+    vec2 pointer = (uPointer - 0.5) * vec2(1.55, 0.95);
+    float pointerPool = exp(-5.8 * dot(p - pointer * 0.25, p - pointer * 0.25));
 
-    vec2 pointer = (uPointer - 0.5) * vec2(1.72, 1.0);
-    float pointerLight = exp(-7.0 * dot(p - pointer * 0.38, p - pointer * 0.38));
+    float bluePool = exp(-5.2 * dot(p - vec2(-0.52, 0.12), p - vec2(-0.52, 0.12)));
+    float orangePool = exp(-6.0 * dot(p - vec2(0.58, -0.12), p - vec2(0.58, -0.12)));
 
-    // Localized orbital energy, not a flat full-card gradient wash.
-    vec2 orbitP = p + vec2(0.16 * sin(t * 0.7), 0.04 * cos(t * 0.9));
-    float orbitA = ring(orbitP + vec2(0.18, 0.02), vec2(0.72, 1.18), 0.58 + n * 0.025, 0.010);
-    float orbitB = ring(orbitP - vec2(0.24, 0.00), vec2(0.82, 1.34), 0.78 + nFine * 0.018, 0.0065);
-    orbitA *= smoothstep(1.15, 0.22, length(p));
-    orbitB *= smoothstep(1.28, 0.28, length(p));
+    float sweepX = p.x + 0.24 * p.y + 0.08 * sin(t + p.y * 3.0);
+    float specular = exp(-pow((sweepX - 0.05) * 7.0, 2.0));
+    specular *= smoothstep(0.52, -0.20, abs(p.y));
 
-    // Spectral horizon and a faint animated waveform ribbon.
-    float horizonY = -0.22 + 0.022 * sin(p.x * 13.0 + t * 2.6) + (n - 0.5) * 0.035;
-    float horizon = band(p.y - horizonY, 0.008 + uEnergy * 0.0025) * smoothstep(1.05, 0.06, abs(p.x));
+    float micro = pow(max(0.0, sin((p.x * 1.8 + p.y * 0.8 + n * 0.25) * 15.0 - t)), 10.0);
 
-    float ribbonY = 0.07 * sin(p.x * 3.7 + t * 1.9) + 0.026 * sin(p.x * 10.0 - t * 2.3 + n * 2.0);
-    float ribbon = band(p.y - ribbonY, 0.012) * 0.66;
-
-    // Metallic caustic pools that create depth behind cards without flattening them.
-    float poolA = exp(-4.6 * dot(p - vec2(-0.48, 0.16), p - vec2(-0.48, 0.16)));
-    float poolB = exp(-5.2 * dot(p - vec2(0.54, -0.08), p - vec2(0.54, -0.08)));
-    float caustic = pow(max(0.0, sin((p.x + p.y * 0.45 + n * 0.32) * 12.0 - t * 1.2)), 7.0);
-
-    vec3 base = vec3(0.0035, 0.010, 0.016);
+    vec3 base = vec3(0.0028, 0.0065, 0.0105);
     vec3 color = base;
+    color += uColorA * bluePool * (0.040 + uEnergy * 0.010);
+    color += uColorB * orangePool * (0.026 + uEnergy * 0.007);
+    color += mix(uColorA, vec3(1.0), 0.16) * specular * 0.014;
+    color += uColorA * pointerPool * 0.008;
+    color += mix(uColorA, uColorB, 0.35) * micro * 0.0025;
 
-    color += uColorA * poolA * (0.13 + uEnergy * 0.025);
-    color += uColorB * poolB * (0.12 + uEnergy * 0.025);
-    color += mix(uColorA, uColorB, 0.38) * orbitA * (0.18 + uEnergy * 0.055);
-    color += mix(uColorB, vec3(1.0), 0.14) * orbitB * (0.10 + uEnergy * 0.035);
-    color += mix(uColorA, uColorB, smoothstep(-0.7, 0.7, p.x)) * horizon * (0.10 + uEnergy * 0.04);
-    color += mix(uColorA, uColorB, 0.52 + 0.45 * sin(t + p.x)) * ribbon * (0.032 + uEnergy * 0.018);
-    color += mix(uColorA, uColorB, 0.5) * caustic * (0.012 + uEnergy * 0.006);
-    color += mix(uColorA, uColorB, 0.5) * pointerLight * 0.035;
+    float center = exp(-2.7 * dot(p * vec2(0.74, 1.0), p * vec2(0.74, 1.0)));
+    color *= 0.78 + (1.0 - center) * 0.20;
 
-    // Keep the center dark enough for typography and artwork to dominate.
-    float centerShade = 1.0 - exp(-3.6 * dot(p, p));
-    color *= 0.72 + centerShade * 0.34;
+    float edge = smoothstep(1.20, 0.24, length(p * vec2(0.82, 1.0)));
+    color *= 0.74 + edge * 0.28;
 
-    // Edge falloff and subtle microtexture.
-    float vignette = smoothstep(1.18, 0.20, length(p * vec2(0.86, 1.0)));
-    color *= 0.56 + vignette * 0.56;
-    float grain = hash21(gl_FragCoord.xy + uTime * 11.0) - 0.5;
-    color += grain * (uMobile > 0.5 ? 0.0035 : 0.0065);
+    float grain = hash21(gl_FragCoord.xy + uTime * 9.0) - 0.5;
+    color += grain * (uMobile > 0.5 ? 0.0020 : 0.0034);
+    color += (fine - 0.5) * 0.0012;
 
-    gl_FragColor = vec4(color, 0.98);
+    gl_FragColor = vec4(color, 0.92);
   }
 `;
 
 export const MUSIC_LIBRARY_TAB_COLORS: Record<MusicLibraryVisualTab, [string, string]> = {
-  songs: ["#31d8ff", "#ff9f2f"],
-  artists: ["#46ddff", "#ff9a2a"],
-  albums: ["#36d8ff", "#ff8928"],
-  playlists: ["#35d7ff", "#ff9d30"],
-  smart: ["#42ddff", "#ffa836"],
-  intelligence: ["#47ddff", "#ff9c2e"],
-  discover: ["#3ddcff", "#ff9630"],
-  audition: ["#32ddff", "#ff982c"],
+  songs: ["#0b7cff", "#eb8b0f"],
+  artists: ["#167fff", "#f09217"],
+  albums: ["#0a6fe6", "#eb8b0f"],
+  playlists: ["#0b7cff", "#f29b20"],
+  smart: ["#1187ff", "#eb8b0f"],
+  intelligence: ["#0b7cff", "#f09217"],
+  discover: ["#1684f5", "#eb8b0f"],
+  audition: ["#0b7cff", "#f09217"],
 };
