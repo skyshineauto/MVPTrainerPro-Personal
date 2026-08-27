@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# MVP updater backups
+.mvp-backups/
+*.bak
+*.backup
+*.orig
+
+# Local repo ZIP snapshots
+/*.zip
+# Local MVP updater/install scripts
+/apply-mvp-trainer-*.mjs
+/scripts/apply-mvp-trainer-*.mjs
