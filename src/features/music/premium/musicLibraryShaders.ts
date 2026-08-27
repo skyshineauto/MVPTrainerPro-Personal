@@ -96,12 +96,12 @@ export const MUSIC_LIBRARY_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 export const MUSIC_LIBRARY_TAB_COLORS: Record<MusicLibraryVisualTab, [string, string]> = {
-  songs: ["#0b7cff", "#eb8b0f"],
-  artists: ["#167fff", "#f09217"],
-  albums: ["#0a6fe6", "#eb8b0f"],
-  playlists: ["#0b7cff", "#f29b20"],
-  smart: ["#1187ff", "#eb8b0f"],
-  intelligence: ["#0b7cff", "#f09217"],
-  discover: ["#1684f5", "#eb8b0f"],
-  audition: ["#0b7cff", "#f09217"],
+  songs: ["#1288f5", "#f39a1f"],
+  artists: ["#1288f5", "#f39a1f"],
+  albums: ["#1288f5", "#f39a1f"],
+  playlists: ["#1288f5", "#f39a1f"],
+  smart: ["#1288f5", "#f39a1f"],
+  intelligence: ["#1288f5", "#f39a1f"],
+  discover: ["#1288f5", "#f39a1f"],
+  audition: ["#1288f5", "#f39a1f"],
 };

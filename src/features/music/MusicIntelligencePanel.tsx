@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R12_5E_23_PRECISION_INTELLIGENCE */
+/* MVP_TRAINER_V5_R12_5E_24_HIFI_INTELLIGENCE */
 import { useMemo, useState, type CSSProperties } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
 import { playMusicAdHocQueue, playMusicTrack, startMvpNeuralRadio, useMusicPlayer } from "../../lib/musicPlayer";
@@ -32,16 +32,16 @@ export function MusicIntelligencePanel({ tracks }: { tracks: MusicTrack[] }) {
   return <section className="mvp-v23-intel">
     <section className="mvp-v23-command">
       <div className="mvp-v23-commandIdentity">
-        <span>MVP MUSIC INTELLIGENCE</span>
-        <h2>Neural Command</h2>
-        <p>Your taste, the live track and workout state feed one decision path.</p>
+        <span>LIVE DECISION ENGINE</span>
+        <h2>MVP Music Intelligence</h2>
+        <p>Your taste, the live track and workout state feed one clear AutoMix decision path.</p>
         <div className="mvp-v23-liveTrack"><i className={player.playing ? "is-live" : ""}><b /></i><div><small>LIVE INPUT</small><strong>{currentTitle}</strong><span>{currentArtist}</span></div></div>
       </div>
       <div className="mvp-v23-commandSignal">
-        <span>DECISION SIGNAL</span>
+        <span>CURRENT DRIVE</span>
         <strong>{dna ? String(drive).padStart(2, "0") : "--"}</strong>
         <i style={{ ["--signal" as string]: `${Math.max(8, drive)}%` } as CSSProperties}><b /></i>
-        <small>{dna ? "LIVE SONG DNA LOCKED" : "WAITING FOR PLAYBACK"}</small>
+        <small>{dna ? "LIVE ANALYSIS LOCKED" : "WAITING FOR PLAYBACK"}</small>
       </div>
       <div className="mvp-v23-commandState">
         <div><span>WORKOUT STAGE</span><strong>{stage.toUpperCase()}</strong></div>
@@ -71,14 +71,14 @@ export function MusicIntelligencePanel({ tracks }: { tracks: MusicTrack[] }) {
         <div className="mvp-v23-memoryActions"><button type="button" disabled={!likedTracks.length} onClick={() => void playMusicAdHocQueue("Liked Songs", likedTracks)}><i>▶</i><span><strong>PLAY LIKED</strong><small>Permanent collection</small></span></button><button type="button" disabled={!likedTracks.length} onClick={() => { const seed = likedTracks[0]; if (!seed) return; const queue = startMvpNeuralRadio(seed.id, "more_like_this"); setMessage(`Liked Radio • ${queue.length} library matches ready`); }}><i>∞</i><span><strong>LIKED RADIO</strong><small>Generate from taste</small></span></button></div>
       </div>
       <div className="mvp-v23-steering">
-        <header><div><span>NEURAL STEERING</span><strong>PLAYER-LINKED VECTOR</strong></div><small><i />LINKED</small></header>
+        <header><div><span>AUTOMIX STEERING</span><strong>PLAYER-LINKED TARGET</strong></div><small><i />LINKED</small></header>
         <div className="mvp-v23-steeringRail"><i /><b style={{ left: `${steeringPosition}%` }} /></div>
         <div className="mvp-v23-steeringBiases">{STEERING_BIASES.map((bias, index) => <span key={bias} className={index === 3 ? "is-anchor" : ""}><i />{bias}</span>)}</div>
       </div>
     </section>
 
     <section className="mvp-v23-tasteField">
-      <header><div><span>SONIC TERRITORY</span><h3>Taste Field</h3><p>Five learned regions from the way your private library actually behaves.</p></div><small>{tracks.length} TRACKS ANALYZED</small></header>
+      <header><div><span>LIBRARY PROFILE</span><h3>Taste Field</h3><p>Five learned regions from the way your private library actually behaves.</p></div><small>{tracks.length} TRACKS ANALYZED</small></header>
       <div className="mvp-v23-fieldRows">{tasteMap.map((cluster, index) => <button type="button" key={cluster.id} disabled={!cluster.tracks.length} style={{ ["--score" as string]: `${Math.max(8, cluster.score)}%` } as CSSProperties} onClick={() => void playMusicAdHocQueue(`Taste Map • ${cluster.label}`, cluster.tracks)}><span>{String(index + 1).padStart(2, "0")}</span><div><small>{cluster.label}</small><strong>{cluster.score}</strong><p>{cluster.subtitle}</p></div><i><b /></i></button>)}</div>
     </section>
 

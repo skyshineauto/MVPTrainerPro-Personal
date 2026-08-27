@@ -142,21 +142,49 @@ function contentTypeFor(extension: string, providedType: string) {
   return "audio/wav";
 }
 
+let cachedMusicUserId: string | null = null;
+let cachedMusicAccessToken: string | null = null;
+
+function isTransientMusicAuthError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror/i.test(message);
+}
+
+async function retryMusicAuth<T>(operation: () => Promise<T>, fallback: () => T | null): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try { return await operation(); }
+    catch (error) {
+      lastError = error;
+      if (!isTransientMusicAuthError(error) || attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, 90 * (attempt + 1)));
+    }
+  }
+  const value = fallback();
+  if (value != null) return value;
+  throw lastError instanceof Error ? lastError : new Error("Music authentication is temporarily unavailable.");
+}
+
 async function requireUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  if (!data.user) throw new Error("Sign in before managing music.");
-  return data.user.id;
+  return retryMusicAuth(async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    if (!data.user) throw new Error("Sign in before managing music.");
+    cachedMusicUserId = data.user.id;
+    return data.user.id;
+  }, () => cachedMusicUserId);
 }
 
 async function requireAccessToken() {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-
-  const accessToken = data.session?.access_token;
-  if (!accessToken) throw new Error("Sign in before playing music.");
-
-  return accessToken;
+  return retryMusicAuth(async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    const accessToken = data.session?.access_token;
+    if (!accessToken) throw new Error("Sign in before playing music.");
+    cachedMusicAccessToken = accessToken;
+    cachedMusicUserId = data.session?.user?.id || cachedMusicUserId;
+    return accessToken;
+  }, () => cachedMusicAccessToken);
 }
 
 async function readWorkerError(response: Response, fallback: string) {

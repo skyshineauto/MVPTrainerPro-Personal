@@ -2585,32 +2585,44 @@ export async function loadMusicLibrary(force = false) {
   if (state.loading) return state.libraryTracks;
   if (state.libraryLoaded && !force) return state.libraryTracks;
   emit({ loading: true, error: null });
-  try {
-    const libraryTracks = await listMusicTracks();
-    const queue = await resolveSavedQueue(libraryTracks);
-    const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
-    const currentTrack =
-      queue.tracks.find((track) => track.id === state.currentTrack?.id) ??
-      queue.tracks.find((track) => track.id === savedTrackId) ??
-      queue.tracks[0] ??
-      null;
-    emit({
-      libraryTracks,
-      tracks: queue.tracks,
-      activePlaylistId: queue.playlistId,
-      activePlaylistName: queue.playlistName,
-      currentTrack,
-      loading: false,
-      libraryLoaded: true,
-      error: null,
-    });
-    configureMediaSession();
-    return libraryTracks;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not load your music library.";
-    emit({ loading: false, libraryLoaded: true, error: message });
-    return [];
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const libraryTracks = await listMusicTracks();
+      const queue = await resolveSavedQueue(libraryTracks);
+      const savedTrackId = readStored(STORAGE_KEYS.currentTrackId);
+      const currentTrack =
+        queue.tracks.find((track) => track.id === state.currentTrack?.id) ??
+        queue.tracks.find((track) => track.id === savedTrackId) ??
+        queue.tracks[0] ??
+        null;
+      emit({
+        libraryTracks,
+        tracks: queue.tracks,
+        activePlaylistId: queue.playlistId,
+        activePlaylistName: queue.playlistName,
+        currentTrack,
+        loading: false,
+        libraryLoaded: true,
+        error: null,
+      });
+      configureMediaSession();
+      return libraryTracks;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error || "");
+      const transient = /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror/i.test(message);
+      if (!transient || attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+    }
   }
+
+  const message = lastError instanceof Error ? lastError.message : "Could not load your music library.";
+  const transient = /lock broken|steal|navigator\.locks|aborterror/i.test(message);
+  // Never blank a working library because a second auth/storage request briefly stole a browser lock.
+  emit({ loading: false, libraryLoaded: state.libraryLoaded || Boolean(state.libraryTracks.length), error: transient ? null : message });
+  return state.libraryTracks;
 }
 
 export function replaceMusicLibrary(libraryTracks: MusicTrack[]) {

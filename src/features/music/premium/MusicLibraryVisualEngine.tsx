@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import {
   MUSIC_LIBRARY_FRAGMENT_SHADER,
@@ -29,7 +30,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
     fragmentShader: MUSIC_LIBRARY_FRAGMENT_SHADER,
     uniforms: {
       uTime: { value: 0 },
-      uEnergy: { value: playing ? 1 : 0.34 },
+      uEnergy: { value: playing ? 1 : 0.32 },
       uColorA: { value: color(palette[0]) },
       uColorB: { value: color(palette[1]) },
       uPointer: { value: pointer.current },
@@ -56,7 +57,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
 
   useEffect(() => {
     if (reducedMotion) { invalidate(); return; }
-    const fps = mobile ? (playing ? 28 : 18) : (playing ? 48 : 28);
+    const fps = mobile ? (playing ? 34 : 24) : (playing ? 60 : 36);
     const timer = window.setInterval(() => invalidate(), Math.round(1000 / fps));
     return () => window.clearInterval(timer);
   }, [invalidate, mobile, playing, reducedMotion]);
@@ -66,14 +67,35 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
   useFrame((state, delta) => {
     const uniforms = material.uniforms;
     if (!reducedMotion) uniforms.uTime.value += Math.min(delta, 0.034);
-    uniforms.uEnergy.value += ((playing ? 1 : 0.34) - uniforms.uEnergy.value) * 0.05;
-    pointer.current.lerp(targetPointer.current, mobile ? 0.024 : 0.052);
+    uniforms.uEnergy.value += ((playing ? 1 : 0.32) - uniforms.uEnergy.value) * 0.045;
+    pointer.current.lerp(targetPointer.current, mobile ? 0.022 : 0.046);
     uniforms.uPointer.value.copy(pointer.current);
     state.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.00 : 0.96, 0.035);
+    state.gl.outputColorSpace = THREE.SRGBColorSpace;
+    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.02 : 0.97, 0.035);
   });
 
-  return <mesh frustumCulled={false}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
+  return <mesh frustumCulled={false} position={[0, 0, -0.12]}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
+}
+
+function DepthArchitecture({ mobile, playing }: { mobile: boolean; playing: boolean }) {
+  const blue = "#1288f5";
+  const orange = "#f39a1f";
+  const alpha = mobile ? 0.030 : 0.045;
+  return <group>
+    <ambientLight intensity={0.14} />
+    <pointLight position={[-2.8, 1.6, 1.2]} color={blue} intensity={playing ? 1.8 : 1.15} distance={5} decay={2.2} />
+    <pointLight position={[3.0, -1.8, 0.8]} color={orange} intensity={playing ? 1.05 : 0.62} distance={5} decay={2.3} />
+    <RoundedBox args={[3.6, 0.42, 0.08]} radius={0.12} smoothness={8} position={[-0.8, 0.86, -1.2]} rotation={[0.08, 0.12, -0.07]}>
+      <meshPhysicalMaterial color="#06111a" roughness={0.34} metalness={0.34} clearcoat={0.55} clearcoatRoughness={0.27} transparent opacity={alpha} emissive={blue} emissiveIntensity={0.055} />
+    </RoundedBox>
+    <RoundedBox args={[3.1, 0.34, 0.07]} radius={0.11} smoothness={8} position={[1.15, -0.70, -1.8]} rotation={[-0.06, -0.18, 0.08]}>
+      <meshPhysicalMaterial color="#090f15" roughness={0.38} metalness={0.30} clearcoat={0.42} clearcoatRoughness={0.31} transparent opacity={alpha * 0.82} emissive={orange} emissiveIntensity={0.045} />
+    </RoundedBox>
+    <RoundedBox args={[2.2, 0.22, 0.05]} radius={0.09} smoothness={6} position={[-1.35, -1.32, -2.45]} rotation={[0.04, 0.22, -0.10]}>
+      <meshPhysicalMaterial color="#061018" roughness={0.44} metalness={0.24} transparent opacity={alpha * 0.62} emissive={blue} emissiveIntensity={0.035} />
+    </RoundedBox>
+  </group>;
 }
 
 export function MusicLibraryVisualEngine({ activeTab, playing }: {
@@ -114,24 +136,19 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   return (
     <div className={`mlv-engine ${activeTab === "audition" && auditionPreviewPlaying ? "is-audition-preview" : ""}`} aria-hidden="true">
       <Canvas
-        dpr={mobile ? [0.9, 1.3] : [1, 1.7]}
+        dpr={mobile ? [1, 1.55] : [1.2, 2]}
         gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
-        camera={{ position: [0, 0, 1], fov: 50 }}
+        camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
         frameloop="demand"
       >
         <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
-        {!mobile ? (
-          <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.16} luminanceThreshold={0.82} luminanceSmoothing={0.46} mipmapBlur />
-            <Noise opacity={0.004} />
-            <Vignette offset={0.22} darkness={0.50} />
-          </EffectComposer>
-        ) : (
-          <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.10} luminanceThreshold={0.86} luminanceSmoothing={0.50} mipmapBlur />
-            <Vignette offset={0.24} darkness={0.46} />
-          </EffectComposer>
-        )}
+        <DepthArchitecture mobile={mobile} playing={visualPlaying} />
+        <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
+          <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.75 : 1.35} height={mobile ? 360 : 560} />
+          <Bloom intensity={mobile ? 0.075 : 0.105} luminanceThreshold={0.90} luminanceSmoothing={0.36} mipmapBlur />
+          {!mobile ? <Noise opacity={0.0024} /> : null}
+          <Vignette offset={0.28} darkness={mobile ? 0.34 : 0.38} />
+        </EffectComposer>
       </Canvas>
       {activeTab === "audition" && auditionArtworkUrl ? <div className="mlv-engineArtwork" style={{ backgroundImage: `url("${auditionArtworkUrl}")` }} /> : null}
       <div className="mlv-engineSheen" />

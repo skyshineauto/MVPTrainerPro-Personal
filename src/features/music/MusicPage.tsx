@@ -77,6 +77,7 @@ import { motion } from "motion/react";
 import { createPortal } from "react-dom";
 import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
 import { MusicPremiumSelect } from "./premium/MusicPremiumSelect";
+import { MusicTabVisualRail } from "./premium/MusicTabVisualRail";
 import "./premium/MusicLibraryPremium.css";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
@@ -527,6 +528,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const player = useMusicPlayer();
 
   const [tab, setTab] = useState<MusicTab>("songs");
+  const [hoveredTab, setHoveredTab] = useState<MusicTab | null>(null);
   const [collectionDetail, setCollectionDetail] = useState<LibraryCollectionDetail | null>(null);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [drafts, setDrafts] = useState<DraftMap>({});
@@ -783,21 +785,48 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setResolvedArtworkIds(found);
   }
 
+  function isTransientLibraryError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror/i.test(message);
+  }
   async function refreshTracks() {
-    const rows = await listMusicTracks();
-    setTracks(rows); setDrafts(buildDraftMap(rows)); replaceMusicLibrary(rows);
-    void hydrateArtworkPresence(rows);
-    return rows;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const rows = await listMusicTracks();
+        setTracks(rows); setDrafts(buildDraftMap(rows)); replaceMusicLibrary(rows);
+        void hydrateArtworkPresence(rows);
+        return rows;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientLibraryError(error) || attempt === 3) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 120 * (attempt + 1)));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Could not refresh your music library.");
   }
   async function refreshPlaylists(preferredId?: string | null) {
-    const rows = await listMusicPlaylists();
-    const entries = await Promise.all(rows.map(async (playlist) => [playlist.id, (await listMusicPlaylistTrackLinks(playlist.id)).map((link) => link.track_id)] as const));
-    setPlaylists(rows); setPlaylistTrackIds(Object.fromEntries(entries));
-    const regularRows = rows.filter((playlist) => !isSmartMixPlaylist(playlist));
-    setSelectedPlaylistId((current) => preferredId && regularRows.some((p) => p.id === preferredId) ? preferredId : current && regularRows.some((p) => p.id === current) ? current : regularRows[0]?.id || null);
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const rows = await listMusicPlaylists();
+        const entries = await Promise.all(rows.map(async (playlist) => [playlist.id, (await listMusicPlaylistTrackLinks(playlist.id)).map((link) => link.track_id)] as const));
+        setPlaylists(rows); setPlaylistTrackIds(Object.fromEntries(entries));
+        const regularRows = rows.filter((playlist) => !isSmartMixPlaylist(playlist));
+        setSelectedPlaylistId((current) => preferredId && regularRows.some((p) => p.id === preferredId) ? preferredId : current && regularRows.some((p) => p.id === current) ? current : regularRows[0]?.id || null);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientLibraryError(error) || attempt === 3) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 120 * (attempt + 1)));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Could not refresh playlists.");
   }
   useEffect(() => {
-    void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary()]).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load your music library.")).finally(() => setLoading(false));
+    void Promise.all([refreshTracks(), refreshPlaylists(), loadMusicLibrary()]).catch((caught) => {
+      if (!isTransientLibraryError(caught)) setError(caught instanceof Error ? caught.message : "Could not load your music library.");
+    }).finally(() => setLoading(false));
   }, []);
   useEffect(() => {
     const refreshDiscovery = () => {
@@ -1004,9 +1033,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setBusyId(track.id); setDetailSaveState("saving"); setDetailStatusText("Saving changes to your library…"); setError("");
     try {
       let updated = await updateMusicTrack(track.id, { title: draft.title, artist: draft.artist, album: draft.album, release_year: draft.releaseYear ? Number(draft.releaseYear) : null, genre: draft.genre, metadata_status: "manual", metadata_confidence: 1, metadata_source: detailPendingCandidate?.source || "manual", metadata_updated_at: new Date().toISOString() });
-      if (detailPendingCandidate?.artworkUrl && needsMusicArtwork(updated)) updated = await uploadRemoteMusicArtwork(updated, detailPendingCandidate.artworkUrl);
-      replaceTrackLocally(updated); setDetailPendingCandidate(null); setDetailSaveState("changed"); setDetailStatusText("✓ CHANGED");
-      window.setTimeout(() => setDetailTrackId((current) => current === track.id ? null : current), 1200);
+      // Song Info is a complete identification workflow: metadata and the matched album artwork travel together.
+      // A confident provider match is authoritative for this edit, so its artwork may replace stale/incorrect art.
+      if (detailPendingCandidate?.artworkUrl) updated = await uploadRemoteMusicArtwork(updated, detailPendingCandidate.artworkUrl);
+      replaceTrackLocally(updated); setDetailPendingCandidate(null); setDetailSaveState("changed"); setDetailStatusText("SAVED ✓ • SONG INFO + ARTWORK UPDATED");
+      setMessage(`${updated.title} saved.`);
+      window.setTimeout(() => { closeDetail(); }, 620);
     } catch (caught) { setDetailSaveState("error"); setDetailStatusText(caught instanceof Error ? caught.message : "Could not save song information."); }
     finally { setBusyId(null); }
   }
@@ -1047,7 +1079,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   function applyDetailInfoCandidate(candidate: MusicMetadataCandidate) {
     if (!detailTrack) return;
     setDrafts((current) => ({ ...current, [detailTrack.id]: { title: candidate.title, artist: candidate.artist, album: candidate.album, releaseYear: candidate.releaseYear ? String(candidate.releaseYear) : "", genre: candidate.genre || "" } }));
-    setDetailPendingCandidate(candidate); setDetailMode("edit"); setDetailSaveState("idle"); setDetailStatusText(`Match loaded • ${musicMatchTier(candidate.confidence)} • Review it, then SAVE CHANGES.`);
+    setDetailPendingCandidate(candidate); setDetailMode("edit"); setDetailSaveState("idle"); setDetailStatusText(`Match loaded • ${musicMatchTier(candidate.confidence)}${candidate.artworkUrl ? " • ALBUM ART INCLUDED" : ""} • Review, then SAVE.`);
   }
   async function applyDetailArtworkCandidate(candidate: MusicMetadataCandidate) {
     if (!detailTrack || !candidate.artworkUrl) { setDetailStatusText("That result has no usable artwork."); return; }
@@ -1858,6 +1890,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section>
 
         <nav ref={tabNavRef} className="tr10-tabs" aria-label="Music library sections">
+          <MusicTabVisualRail activeTab={tab} hoveredTab={hoveredTab} />
           {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => (
             <motion.button
               type="button"
@@ -1865,11 +1898,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               data-music-tab={value}
               aria-current={tab === value ? "page" : undefined}
               className={tab === value ? "is-active" : ""}
+              onPointerEnter={() => setHoveredTab(value)}
+              onPointerLeave={() => setHoveredTab((current) => current === value ? null : current)}
+              onFocus={() => setHoveredTab(value)}
+              onBlur={() => setHoveredTab((current) => current === value ? null : current)}
               onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}
-              whileTap={{ scale: 0.985 }}
-              transition={{ type: "spring", stiffness: 460, damping: 34, mass: 0.42 }}
+              whileTap={{ scale: 0.982, y: 1 }}
+              transition={{ type: "spring", stiffness: 520, damping: 36, mass: 0.38 }}
             >
-              {tab === value ? <motion.span className="tr10-tabEnergy" layoutId="music-library-active-tab" transition={{ type: "spring", stiffness: 410, damping: 34 }} /> : null}
+              {tab === value ? <motion.span className="tr10-tabEnergy" layoutId="music-library-active-tab" transition={{ type: "spring", stiffness: 450, damping: 36 }} /> : null}
               <span>{label}</span>
             </motion.button>
           ))}
@@ -2092,7 +2129,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       {reviewItems.length && reviewRemainingCount > 0 ? <button className="tr10-reviewDock" onClick={openReviewQueue}>REVIEW {reviewRemainingCount} POSSIBLE MATCH{reviewRemainingCount === 1 ? "" : "ES"} ›</button> : null}
 
       {detailTrack && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-detailPortal" onMouseDown={closeDetail}><section className="tr10-inspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()}>
-        <header><div className="tr10-inspectIdentity"><TrackArtwork track={detailTrack} size="detail" /><div><span>SONG CONTROL</span><h2>{detailTrack.title}</h2><p>{artistLabel(detailTrack)}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "✓ CHANGED" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button onClick={closeDetail}>×</button></header>
+        <header><div className="tr10-inspectIdentity">{detailPendingCandidate?.artworkUrl ? <img className="tr10-detailPreviewArt" src={detailPendingCandidate.artworkUrl} alt="" /> : <TrackArtwork track={detailTrack} size="detail" />}<div><span>SONG CONTROL</span><h2>{detailTrack.title}</h2><p>{artistLabel(detailTrack)}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button onClick={closeDetail}>×</button></header>
         {detailMode === "edit" ? <>
           <div className="tr10-inspectorScroll">
             <div className="tr10-inspectCommands"><button disabled={detailSaveState === "searching"} onClick={() => void findDetailMatches(detailTrack,"info_results")}>{detailSaveState === "searching" ? "SEARCHING…" : "FIND SONG INFO"}</button><button disabled={detailSaveState === "searching"} onClick={() => void findDetailMatches(detailTrack,"artwork_results")}>FIND ARTWORK</button><button onClick={() => playMusicNext(detailTrack.id)}>PLAY NEXT</button><button onClick={() => addMusicToQueue(detailTrack.id)}>ADD TO QUEUE</button><button className={detailTrack.favorite ? "is-liked" : ""} onClick={() => void changePreference(detailTrack, detailTrack.favorite ? "neutral" : "like")}>👍 {detailTrack.favorite ? "LIKED" : "LIKE"}</button><button className={detailTrack.play_less ? "is-down" : ""} onClick={() => void changePreference(detailTrack, detailTrack.play_less ? "neutral" : "play_less")}>👎 PLAY LESS</button></div>
@@ -2100,7 +2137,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             <div className="tr10-inspectGrid"><label><span>TITLE</span><input value={drafts[detailTrack.id]?.title || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],title:event.target.value}}))} /></label><label><span>ARTIST</span><input value={drafts[detailTrack.id]?.artist || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],artist:event.target.value}}))} /></label><label><span>ALBUM</span><input value={drafts[detailTrack.id]?.album || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],album:event.target.value}}))} /></label><label><span>YEAR</span><input inputMode="numeric" value={drafts[detailTrack.id]?.releaseYear || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],releaseYear:event.target.value}}))} /></label><label><span>GENRE</span><input value={drafts[detailTrack.id]?.genre || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],genre:event.target.value}}))} /></label><div className="tr10-artControls"><input ref={artworkInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void replaceArtwork(detailTrack,event.target.files?.[0] || null)} /><span>ARTWORK</span><button onClick={() => artworkInputRef.current?.click()}>{needsMusicArtwork(detailTrack) ? "+ ADD" : "REPLACE"}</button>{!needsMusicArtwork(detailTrack) ? <button className="is-danger" onClick={() => void clearArtwork(detailTrack)}>REMOVE</button> : null}</div></div>
             <dl className="tr10-meta"><div><dt>PLAYS</dt><dd>{detailTrack.play_count}</dd></div><div><dt>COMPLETED</dt><dd>{detailTrack.completed_play_count}</dd></div><div><dt>SKIPS</dt><dd>{detailTrack.skip_count}</dd></div><div><dt>LAST PLAYED</dt><dd>{formatDate(detailTrack.last_played_at)}</dd></div><div><dt>MATCH</dt><dd>{detailTrack.metadata_status.toUpperCase()}</dd></div><div><dt>FILE</dt><dd title={detailTrack.original_name}>{detailTrack.original_name}</dd></div></dl>
           </div>
-          <footer><button onClick={() => openPlaylistModal([detailTrack.id])}>+ PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => void deleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "✓ CHANGED" : "SAVE CHANGES"}</button></footer>
+          <footer><button onClick={() => openPlaylistModal([detailTrack.id])}>+ PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => void deleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : "SAVE CHANGES"}</button></footer>
         </> : <>
           <div className="tr10-detailLookup"><div className="tr10-detailLookupHead"><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>← BACK TO SONG</button><div><span>{detailMode === "artwork_results" ? "ARTWORK RESULTS" : "SONG MATCH RESULTS"}</span><h3>{detailMode === "artwork_results" ? "Choose the correct cover" : "Choose the correct recording"}</h3><p>{detailStatusText}</p></div></div>
           <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const tier = musicMatchTier(candidate.confidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No useful matches found.</div> : null}</div></div>

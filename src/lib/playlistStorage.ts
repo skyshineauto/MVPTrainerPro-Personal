@@ -18,11 +18,30 @@ export type MusicPlaylistTrackLink = {
   added_at: string;
 };
 
+let cachedPlaylistUserId: string | null = null;
+
+function isTransientPlaylistAuthError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror/i.test(message);
+}
+
 async function requireUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  if (!data.user) throw new Error("Sign in before managing playlists.");
-  return data.user.id;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      if (!data.user) throw new Error("Sign in before managing playlists.");
+      cachedPlaylistUserId = data.user.id;
+      return data.user.id;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientPlaylistAuthError(error) || attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+  if (cachedPlaylistUserId) return cachedPlaylistUserId;
+  throw lastError instanceof Error ? lastError : new Error("Playlist authentication is temporarily unavailable.");
 }
 
 export async function listMusicPlaylists(): Promise<MusicPlaylist[]> {
