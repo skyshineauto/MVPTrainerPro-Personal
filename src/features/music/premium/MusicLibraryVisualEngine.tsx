@@ -70,7 +70,7 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
     pointer.current.lerp(targetPointer.current, mobile ? 0.024 : 0.052);
     uniforms.uPointer.value.copy(pointer.current);
     state.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.08 : 0.96, 0.035);
+    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.01 : 0.94, 0.035);
   });
 
   return <mesh frustumCulled={false}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
@@ -122,13 +122,13 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
         <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
         {!mobile ? (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.72} luminanceThreshold={0.54} luminanceSmoothing={0.30} mipmapBlur />
-            <Noise opacity={0.012} />
-            <Vignette offset={0.16} darkness={0.76} />
+            <Bloom intensity={0.38} luminanceThreshold={0.66} luminanceSmoothing={0.34} mipmapBlur />
+            <Noise opacity={0.008} />
+            <Vignette offset={0.18} darkness={0.72} />
           </EffectComposer>
         ) : (
           <EffectComposer multisampling={0} enableNormalPass={false}>
-            <Bloom intensity={0.34} luminanceThreshold={0.64} luminanceSmoothing={0.42} mipmapBlur />
+            <Bloom intensity={0.22} luminanceThreshold={0.72} luminanceSmoothing={0.44} mipmapBlur />
             <Vignette offset={0.19} darkness={0.70} />
           </EffectComposer>
         )}
