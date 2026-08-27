@@ -1,4 +1,4 @@
-/* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
+/* MVP_TRAINER_V5_R12_5E_21_NEURAL_COMMAND_SURFACE */
 import { useMemo, useState, type CSSProperties } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
 import {
@@ -16,35 +16,28 @@ import {
   setAutoMixEnabled,
 } from "../../lib/musicIntelligence";
 
-export function MusicIntelligencePanel({
-  tracks,
-}: {
-  tracks: MusicTrack[];
-}) {
+const STEERING_BIASES = ["HARDER", "HEAVIER", "FASTER", "MORE LIKE THIS", "MELODIC", "DARKER", "SURPRISE"] as const;
+const NODE_POSITIONS = [
+  [16, 35],
+  [36, 18],
+  [62, 24],
+  [78, 55],
+  [47, 70],
+] as const;
+
+export function MusicIntelligencePanel({ tracks }: { tracks: MusicTrack[] }) {
   const player = useMusicPlayer();
   const [autoMix, setAutoMix] = useState(() => isAutoMixEnabled());
   const [message, setMessage] = useState("");
 
   const likedTracks = useMemo(
-    () =>
-      tracks
-        .filter((track) => track.favorite)
-        .sort(
-          (a, b) =>
-            new Date(b.updated_at).getTime() -
-            new Date(a.updated_at).getTime(),
-        ),
+    () => tracks.filter((track) => track.favorite).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
     [tracks],
   );
 
   const dna = useMemo(
     () => (player.currentTrack ? getSongDna(player.currentTrack) : null),
-    [
-      player.currentTrack?.id,
-      player.currentTrack?.updated_at,
-      player.currentTrack?.favorite,
-      player.currentTrack?.play_less,
-    ],
+    [player.currentTrack?.id, player.currentTrack?.updated_at, player.currentTrack?.favorite, player.currentTrack?.play_less],
   );
 
   const tasteMap = useMemo(() => buildTasteMap(tracks), [tracks]);
@@ -53,6 +46,8 @@ export function MusicIntelligencePanel({
   const currentTitle = player.currentTrack?.title || "No active track";
   const currentArtist = player.currentTrack?.artist || "Start playback to activate live analysis";
   const likedPercent = tracks.length ? Math.min(100, Math.round((likedTracks.length / tracks.length) * 100)) : 0;
+  const workoutFit = dna?.workoutFit ?? 0;
+  const drive = dna?.drive ?? 0;
 
   const toggleAutoMix = () => {
     const next = !autoMix;
@@ -62,189 +57,108 @@ export function MusicIntelligencePanel({
   };
 
   return (
-    <section className="mvp-v5-intel mvp-v20-intel">
-      <header className="mvp-v20-command">
-        <div className="mvp-v20-commandCopy">
-          <span className="mvp-v20-kicker">MVP MUSIC INTELLIGENCE</span>
-          <h2>Intelligence Core</h2>
-          <p>
-            Adaptive taste memory, live Song DNA, workout context, PR soundtrack history,
-            and AutoMix working as one system.
-          </p>
-          <div className="mvp-v20-liveTrack">
-            <i aria-hidden />
-            <div>
-              <small>LIVE ANALYSIS</small>
-              <strong>{currentTitle}</strong>
-              <span>{currentArtist}</span>
-            </div>
+    <section className="mvp-v21-intel">
+      <section className="mvp-v21-coreField">
+        <div className="mvp-v21-coreCopy">
+          <span className="mvp-v21-kicker">MVP MUSIC INTELLIGENCE</span>
+          <h2>Neural Command</h2>
+          <p>Your taste memory, live track signal, workout state and AutoMix steering converge here.</p>
+          <div className="mvp-v21-nowSignal">
+            <span className={player.playing ? "is-live" : ""}><i /></span>
+            <div><small>LIVE INPUT</small><strong>{currentTitle}</strong><b>{currentArtist}</b></div>
           </div>
         </div>
 
-        <div className="mvp-v20-core" aria-label="Intelligence core status">
-          <div className={`mvp-v20-coreOrb ${autoMix ? "is-on" : ""}`} aria-hidden>
-            <span className="mvp-v20-orbit is-one" />
-            <span className="mvp-v20-orbit is-two" />
-            <span className="mvp-v20-corePulse" />
-            <b>AI</b>
-          </div>
-          <div className="mvp-v20-coreData">
-            <div><small>WORKOUT STAGE</small><strong>{stage.toUpperCase()}</strong></div>
-            <div><small>FLOW ENGINE</small><strong>{autoMix ? "ACTIVE" : "MANUAL"}</strong></div>
-          </div>
-          <button type="button" className={autoMix ? "is-on" : ""} onClick={toggleAutoMix}>
-            <span>{autoMix ? "AUTOMIX ACTIVE" : "ENABLE AUTOMIX"}</span>
-            <i aria-hidden><b /></i>
-          </button>
+        <div className={`mvp-v21-neuralCore ${autoMix ? "is-active" : ""}`} aria-label="MVP neural core">
+          <span className="mvp-v21-coreHalo is-a" />
+          <span className="mvp-v21-coreHalo is-b" />
+          <span className="mvp-v21-coreHalo is-c" />
+          <span className="mvp-v21-coreBeam is-one" />
+          <span className="mvp-v21-coreBeam is-two" />
+          <div><small>FLOW</small><b>{autoMix ? "AI" : "M"}</b><strong>{autoMix ? "ACTIVE" : "MANUAL"}</strong></div>
         </div>
-      </header>
 
-      {message ? <div className="mvp-v20-message">{message}</div> : null}
-
-      <section className="mvp-v20-neural" aria-label="Neural steering location">
-        <div className="mvp-v20-neuralIcon" aria-hidden>
-          <i/><i/><i/><i/><i/>
-        </div>
-        <div className="mvp-v20-neuralCopy">
-          <span>NEURAL STEERING</span>
-          <strong>Player-linked steering is online</strong>
-          <small>HARDER · HEAVIER · FASTER · MORE LIKE THIS · MELODIC · DARKER · SURPRISE ME</small>
-        </div>
-        <div className="mvp-v20-neuralState"><i /> LINKED</div>
-      </section>
-
-      <section className="mvp-v20-dual">
-        <article className="mvp-v20-memory">
-          <header>
-            <div><span>TASTE MEMORY</span><h3>Liked Songs</h3><p>Your permanent signal. Manual playlists stay untouched.</p></div>
-            <b>{likedTracks.length}</b>
-          </header>
-          <div className="mvp-v20-memoryGauge">
-            <div><span style={{ width: `${Math.max(3, likedPercent)}%` }} /></div>
-            <small>{likedPercent}% OF LIBRARY MARKED AS HIGH-CONFIDENCE TASTE</small>
-          </div>
-          <div className="mvp-v20-actions">
-            <button type="button" disabled={!likedTracks.length} onClick={() => void playMusicAdHocQueue("Liked Songs", likedTracks)}>
-              <i className="is-play" aria-hidden />
-              <span><strong>PLAY LIKED</strong><small>Start permanent collection</small></span>
-            </button>
-            <button type="button" disabled={!likedTracks.length} onClick={() => {
-              const seed = likedTracks[0];
-              if (!seed) return;
-              const queue = startMvpNeuralRadio(seed.id, "more_like_this");
-              setMessage(`Liked Radio • ${queue.length} library matches ready`);
-            }}>
-              <i className="is-radio" aria-hidden />
-              <span><strong>LIKED RADIO</strong><small>Generate from your taste</small></span>
-            </button>
-          </div>
-        </article>
-
-        <article className="mvp-v20-dnaPanel">
-          <header>
-            <div><span>LIVE SONG DNA</span><h3>{dna ? "Signal Profile" : "Waiting for Playback"}</h3><p>{dna ? `${currentTitle} · ${currentArtist}` : "Play a song to expose its intelligence signature."}</p></div>
-            <div className={`mvp-v20-analysisDot ${dna ? "is-live" : ""}`}><i />{dna ? "LIVE" : "IDLE"}</div>
-          </header>
-          {dna ? (
-            <div className="mvp-v20-dna">
-              {([
-                ["ENERGY", dna.energy],
-                ["HEAVY", dna.heavy],
-                ["MELODIC", dna.melodic],
-                ["DARK", dna.dark],
-                ["DRIVE", dna.drive],
-                ["WORKOUT FIT", dna.workoutFit],
-              ] as Array<[string, number]>).map(([label, value], index) => (
-                <div key={label} style={{ ["--dna" as string]: `${value}%`, ["--dna-i" as string]: index } as CSSProperties}>
-                  <span>{label}</span>
-                  <strong>{String(value).padStart(2, "0")}</strong>
-                  <i><b /></i>
-                </div>
-              ))}
-            </div>
-          ) : <div className="mvp-v20-empty">LIVE DNA WILL APPEAR HERE</div>}
-        </article>
-      </section>
-
-      <section className="mvp-v20-territory">
-        <header>
-          <div><span>SONIC TERRITORY</span><h3>Taste Map</h3><p>Five character zones derived from the way your library actually behaves.</p></div>
-          <small>{tracks.length} TRACKS ANALYZED</small>
-        </header>
-        <div className="mvp-v20-taste">
-          {tasteMap.map((cluster, index) => (
-            <button type="button" key={cluster.id} disabled={!cluster.tracks.length} style={{ ["--cluster" as string]: index } as CSSProperties} onClick={() => void playMusicAdHocQueue(`Taste Map • ${cluster.label}`, cluster.tracks)}>
-              <span className="mvp-v20-clusterIndex">0{index + 1}</span>
-              <div><span>{cluster.label}</span><strong>{cluster.score}</strong><small>{cluster.subtitle}</small></div>
-              <i><b style={{ width: `${Math.min(100, Math.max(4, cluster.score))}%` }} /></i>
-            </button>
-          ))}
+        <div className="mvp-v21-coreTelemetry">
+          <div><span>WORKOUT STAGE</span><strong>{stage.toUpperCase()}</strong><i style={{ ["--meter" as string]: `${Math.max(18, workoutFit)}%` } as CSSProperties}><b /></i></div>
+          <div><span>SIGNAL DRIVE</span><strong>{dna ? String(drive).padStart(2, "0") : "--"}</strong><i style={{ ["--meter" as string]: `${Math.max(8, drive)}%` } as CSSProperties}><b /></i></div>
+          <button type="button" className={autoMix ? "is-on" : ""} onClick={toggleAutoMix}><span><small>AUTOMIX</small><strong>{autoMix ? "ACTIVE" : "ENABLE"}</strong></span><i><b /></i></button>
         </div>
       </section>
 
-      <section className="mvp-v20-pr">
-        <header>
-          <div><span>PERFORMANCE MEMORY</span><h3>PR Soundtrack</h3><p>The songs tied to your strongest recorded moments.</p></div>
-          <b>{prSoundtracks.length}</b>
-        </header>
-        {prSoundtracks.length ? (
-          <div className="mvp-v20-prGrid">
-            {prSoundtracks.slice(0, 12).map((record, index) => (
-              <article key={record.id}>
-                <span className="mvp-v20-prIndex">{String(index + 1).padStart(2, "0")}</span>
-                <div><strong>{record.title}</strong><span>{record.artist}</span><small>{record.exerciseName} · SET {record.setNumber} · {record.records.join(" + ")}</small></div>
-                <button type="button" aria-label={`Play ${record.title}`} onClick={() => void playMusicTrack(record.trackId, 0)}><i aria-hidden /></button>
-              </article>
-            ))}
+      {message ? <div className="mvp-v21-message">{message}<button type="button" aria-label="Dismiss" onClick={() => setMessage("")}>×</button></div> : null}
+
+      <section className="mvp-v21-steering">
+        <div className="mvp-v21-steeringTitle"><span>NEURAL STEERING</span><strong>PLAYER-LINKED VECTOR</strong></div>
+        <div className="mvp-v21-steeringLine"><i /><b /></div>
+        <div className="mvp-v21-steeringBiases">{STEERING_BIASES.map((bias, index) => <span key={bias} className={index === 3 ? "is-anchor" : ""}><i />{bias}</span>)}</div>
+        <div className="mvp-v21-linked"><i /> LINKED</div>
+      </section>
+
+      <section className="mvp-v21-signalBridge">
+        <div className="mvp-v21-memoryNode">
+          <span>TASTE MEMORY</span>
+          <div className="mvp-v21-memoryCount"><strong>{likedTracks.length}</strong><small>LIKED SONGS</small></div>
+          <p>Your permanent high-confidence taste signal. Manual playlists stay untouched.</p>
+          <div className="mvp-v21-memoryRail"><i><b style={{ width: `${Math.max(3, likedPercent)}%` }} /></i><small>{likedPercent}% LIBRARY CONFIDENCE</small></div>
+          <div className="mvp-v21-memoryActions">
+            <button type="button" disabled={!likedTracks.length} onClick={() => void playMusicAdHocQueue("Liked Songs", likedTracks)}><i>▶</i><span><strong>PLAY LIKED</strong><small>Permanent collection</small></span></button>
+            <button type="button" disabled={!likedTracks.length} onClick={() => { const seed = likedTracks[0]; if (!seed) return; const queue = startMvpNeuralRadio(seed.id, "more_like_this"); setMessage(`Liked Radio • ${queue.length} library matches ready`); }}><i>∞</i><span><strong>LIKED RADIO</strong><small>Generate from taste</small></span></button>
           </div>
-        ) : (
-          <div className="mvp-v20-empty">PR songs will populate automatically when a PR is detected while music is playing.</div>
-        )}
+        </div>
+
+        <div className="mvp-v21-conduit" aria-hidden><span>TASTE</span><i><b /></i><span>LIVE SIGNAL</span></div>
+
+        <div className="mvp-v21-dnaNode">
+          <header><div><span>LIVE SONG DNA</span><strong>{dna ? "SIGNAL PROFILE" : "WAITING FOR PLAYBACK"}</strong></div><small className={dna ? "is-live" : ""}><i />{dna ? "LIVE" : "IDLE"}</small></header>
+          {dna ? <div className="mvp-v21-channels">{([
+            ["ENERGY", dna.energy], ["HEAVY", dna.heavy], ["MELODIC", dna.melodic], ["DARK", dna.dark], ["DRIVE", dna.drive], ["WORKOUT FIT", dna.workoutFit],
+          ] as Array<[string, number]>).map(([label, value]) => <div key={label} style={{ ["--value" as string]: `${value}%` } as CSSProperties}><span>{label}</span><strong>{String(value).padStart(2, "0")}</strong><i><b /></i></div>)}</div> : <div className="mvp-v21-idleSignal"><i /><span>PLAY A SONG TO OPEN THE LIVE SIGNAL BANK</span></div>}
+        </div>
+      </section>
+
+      <section className="mvp-v21-topology">
+        <header><div><span>SONIC TERRITORY</span><h3>Taste Topology</h3><p>Library character rendered as connected signal zones, not isolated scores.</p></div><small>{tracks.length} TRACKS ANALYZED</small></header>
+        <div className="mvp-v21-mapField">
+          <svg viewBox="0 0 100 78" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="mvpV21Link" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#40d9ff" stopOpacity=".16"/><stop offset=".5" stopColor="#8deeff" stopOpacity=".34"/><stop offset="1" stopColor="#ff9f2f" stopOpacity=".18"/></linearGradient></defs>
+            <path d="M16 35 L36 18 L62 24 L78 55 L47 70 L16 35 M36 18 L47 70 M62 24 L47 70 M16 35 L62 24" stroke="url(#mvpV21Link)" strokeWidth=".35" fill="none" />
+            <path d="M7 64 C26 50 35 55 47 70 C60 83 79 64 94 49" stroke="url(#mvpV21Link)" strokeWidth=".22" fill="none" strokeDasharray="1.4 1.7" />
+          </svg>
+          <div className="mvp-v21-mapPulse" aria-hidden />
+          {tasteMap.map((cluster, index) => {
+            const [left, top] = NODE_POSITIONS[index] || [50, 50];
+            return <button type="button" key={cluster.id} disabled={!cluster.tracks.length} style={{ left: `${left}%`, top: `${top}%`, ["--score" as string]: `${Math.max(12, cluster.score)}%` } as CSSProperties} onClick={() => void playMusicAdHocQueue(`Taste Map • ${cluster.label}`, cluster.tracks)}><i /><span>{cluster.label}</span><strong>{cluster.score}</strong><small>{cluster.subtitle}</small></button>;
+          })}
+          <div className="mvp-v21-currentPoint" style={{ ["--x" as string]: `${30 + Math.min(45, (dna?.melodic || 40) * .42)}%`, ["--y" as string]: `${24 + Math.min(38, (dna?.dark || 35) * .35)}%` } as CSSProperties}><i />CURRENT SONG</div>
+        </div>
+      </section>
+
+      <section className={`mvp-v21-pr ${prSoundtracks.length ? "has-records" : "is-empty"}`}>
+        <header><div><span>PERFORMANCE MEMORY</span><h3>PR Soundtrack</h3></div><b>{prSoundtracks.length}</b></header>
+        {prSoundtracks.length ? <div className="mvp-v21-prRail">{prSoundtracks.slice(0, 12).map((record, index) => <article key={record.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{record.title}</strong><b>{record.artist}</b><small>{record.exerciseName} · SET {record.setNumber} · {record.records.join(" + ")}</small></div><button type="button" aria-label={`Play ${record.title}`} onClick={() => void playMusicTrack(record.trackId, 0)}>▶</button></article>)}</div> : <p>No PR soundtrack moments captured yet. This rail expands automatically when a PR lands while music is playing.</p>}
       </section>
 
       <style>{`
-        .mvp-v20-intel{--i-cyan:#4bdcff;--i-blue:#128fc8;--i-orange:#ff9f28;--i-green:#4ee6a0;--i-ink:#02080c;padding:16px!important;display:grid!important;gap:14px!important;background:radial-gradient(900px 430px at -5% 18%,rgba(27,184,225,.11),transparent 64%),radial-gradient(720px 420px at 106% 46%,rgba(255,135,27,.07),transparent 66%),linear-gradient(180deg,#02090d,#02070a)!important}
-        .mvp-v20-intel button{font:inherit}
-        .mvp-v20-command{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(290px,.65fr);gap:28px;align-items:stretch;padding:28px 30px;border:1px solid rgba(83,197,231,.18);border-radius:20px;background:radial-gradient(650px 260px at 10% 0%,rgba(42,203,245,.12),transparent 64%),radial-gradient(430px 230px at 94% 110%,rgba(255,153,36,.10),transparent 72%),linear-gradient(135deg,rgba(7,27,36,.98),rgba(2,10,15,.99) 70%);box-shadow:0 28px 70px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.03)}
-        .mvp-v20-command:after{content:"";position:absolute;left:28px;right:28px;bottom:0;height:1px;background:linear-gradient(90deg,transparent,var(--i-cyan),rgba(255,255,255,.82),var(--i-orange),transparent);opacity:.72;box-shadow:0 0 18px rgba(71,219,255,.18)}
-        .mvp-v20-commandCopy{min-width:0;align-self:center}.mvp-v20-kicker,.mvp-v20-intel header>div>span,.mvp-v20-neuralCopy>span{display:block;color:#62dcfb;font-size:7px;font-weight:1000;letter-spacing:.19em}
-        .mvp-v20-command h2{margin:7px 0 9px;color:#f6fdff;font-size:clamp(36px,4.6vw,60px);line-height:.92;letter-spacing:-.065em;text-shadow:0 12px 36px rgba(0,0,0,.35)}
-        .mvp-v20-commandCopy>p{max-width:720px;margin:0;color:#829ba5;font-size:10px;line-height:1.6;font-weight:750}
-        .mvp-v20-liveTrack{margin-top:22px;display:flex;align-items:center;gap:12px;max-width:680px;padding:11px 14px;border-left:2px solid rgba(79,220,255,.74);background:linear-gradient(90deg,rgba(12,53,67,.36),transparent 78%)}
-        .mvp-v20-liveTrack>i{width:33px;height:25px;display:flex;align-items:center;justify-content:center;gap:3px}.mvp-v20-liveTrack>i:before,.mvp-v20-liveTrack>i:after{content:"";width:3px;border-radius:99px;background:linear-gradient(180deg,#8cecff,#25bce9);box-shadow:0 0 10px rgba(67,214,251,.25);animation:mvpIntelPulse 1.1s ease-in-out infinite}.mvp-v20-liveTrack>i:before{height:12px}.mvp-v20-liveTrack>i:after{height:21px;animation-delay:-.45s}
-        @keyframes mvpIntelPulse{0%,100%{transform:scaleY(.55);opacity:.55}50%{transform:scaleY(1.15);opacity:1}}
-        .mvp-v20-liveTrack div{display:grid;gap:1px;min-width:0}.mvp-v20-liveTrack small{color:#62d9f8;font-size:6px;font-weight:1000;letter-spacing:.15em}.mvp-v20-liveTrack strong{color:#f2fbfe;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v20-liveTrack span{color:#78939d;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .mvp-v20-core{position:relative;display:grid;grid-template-columns:128px 1fr;grid-template-rows:1fr auto;gap:12px 16px;align-items:center;padding:16px 17px;border:1px solid rgba(103,188,213,.13);border-radius:17px;background:linear-gradient(180deg,rgba(7,22,28,.76),rgba(2,9,13,.88));box-shadow:inset 0 1px rgba(255,255,255,.024)}
-        .mvp-v20-coreOrb{position:relative;grid-row:1/3;width:118px;height:118px;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 45% 40%,rgba(87,224,255,.24),rgba(4,24,33,.94) 48%,#02090d 70%);box-shadow:inset 0 0 0 1px rgba(93,220,250,.18),inset 0 0 32px rgba(46,196,233,.08),0 0 0 8px rgba(60,205,241,.018)}
-        .mvp-v20-coreOrb:before{content:"";position:absolute;inset:12px;border-radius:50%;border:1px dashed rgba(93,219,249,.22);animation:mvpIntelSpin 14s linear infinite}.mvp-v20-coreOrb.is-on{box-shadow:inset 0 0 0 1px rgba(89,230,255,.28),inset 0 0 38px rgba(44,205,244,.16),0 0 34px rgba(43,197,236,.10),0 0 0 8px rgba(60,205,241,.02)}
-        .mvp-v20-coreOrb b{font-size:28px;letter-spacing:-.06em;color:#e9fbff;text-shadow:0 0 22px rgba(70,221,255,.42)}.mvp-v20-orbit{position:absolute;border-radius:50%;border:1px solid rgba(75,209,246,.13)}.mvp-v20-orbit.is-one{inset:3px 21px;transform:rotate(62deg)}.mvp-v20-orbit.is-two{inset:21px 3px;transform:rotate(-42deg);border-color:rgba(255,161,48,.10)}.mvp-v20-corePulse{position:absolute;width:7px;height:7px;border-radius:50%;background:#6de5ff;box-shadow:0 0 14px #55d9ff;transform:translate(39px,-29px)}@keyframes mvpIntelSpin{to{transform:rotate(360deg)}}
-        .mvp-v20-coreData{display:grid;gap:9px}.mvp-v20-coreData>div{padding-bottom:7px;border-bottom:1px solid rgba(105,168,188,.09);display:grid;gap:2px}.mvp-v20-coreData small{font-size:5.8px;color:#6e8791;font-weight:1000;letter-spacing:.13em}.mvp-v20-coreData strong{font-size:12px;color:#eefbff;letter-spacing:.025em}
-        .mvp-v20-core>button{grid-column:2;min-height:42px;padding:0 11px;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(88,195,225,.20);border-radius:10px;background:linear-gradient(180deg,#09212b,#05141a);color:#bcefff;font-size:7px;font-weight:1000;letter-spacing:.09em;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.03);transition:.18s ease}.mvp-v20-core>button>i{width:34px;height:17px;padding:2px;display:flex;align-items:center;border-radius:99px;background:#041015;border:1px solid rgba(99,166,187,.16)}.mvp-v20-core>button>i b{width:11px;height:11px;border-radius:50%;background:#66828d;transition:.18s ease}.mvp-v20-core>button.is-on{border-color:rgba(74,224,165,.32);color:#c7ffe3;background:linear-gradient(180deg,#0a3022,#061910);box-shadow:0 0 22px rgba(55,218,143,.06),inset 0 1px rgba(255,255,255,.04)}.mvp-v20-core>button.is-on>i{border-color:rgba(64,221,147,.25);background:#061c12}.mvp-v20-core>button.is-on>i b{transform:translateX(17px);background:#5aeca2;box-shadow:0 0 10px rgba(73,234,156,.35)}
-        .mvp-v20-message{padding:9px 12px;border-left:2px solid var(--i-cyan);background:linear-gradient(90deg,rgba(9,44,57,.54),rgba(3,13,18,.35));color:#aeefff;font-size:8px;font-weight:850}
-        .mvp-v20-neural{min-height:68px;padding:11px 15px;display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:13px;align-items:center;border:1px solid rgba(77,194,229,.14);border-radius:14px;background:linear-gradient(90deg,rgba(7,30,40,.84),rgba(3,12,17,.94) 65%);box-shadow:inset 0 1px rgba(255,255,255,.02)}
-        .mvp-v20-neuralIcon{height:38px;display:flex;align-items:center;justify-content:center;gap:4px}.mvp-v20-neuralIcon i{width:3px;height:14px;border-radius:99px;background:linear-gradient(180deg,#87ecff,#28bce8);animation:mvpIntelPulse 1.2s ease-in-out infinite}.mvp-v20-neuralIcon i:nth-child(2){height:28px;animation-delay:-.2s}.mvp-v20-neuralIcon i:nth-child(3){height:20px;animation-delay:-.6s}.mvp-v20-neuralIcon i:nth-child(4){height:32px;animation-delay:-.38s}.mvp-v20-neuralIcon i:nth-child(5){height:17px;animation-delay:-.75s}
-        .mvp-v20-neuralCopy{display:grid;gap:2px}.mvp-v20-neuralCopy strong{font-size:12px;color:#f3fbfe}.mvp-v20-neuralCopy small{font-size:6.4px;color:#66828d;font-weight:850;letter-spacing:.035em}.mvp-v20-neuralState{display:flex;align-items:center;gap:7px;color:#86f0b4;font-size:6.5px;font-weight:1000;letter-spacing:.12em}.mvp-v20-neuralState i{width:7px;height:7px;border-radius:50%;background:#52e79c;box-shadow:0 0 10px rgba(73,232,153,.35)}
-        .mvp-v20-dual{display:grid;grid-template-columns:.82fr 1.18fr;gap:14px}.mvp-v20-memory,.mvp-v20-dnaPanel,.mvp-v20-territory,.mvp-v20-pr{border:1px solid rgba(92,171,197,.12);border-radius:16px;background:linear-gradient(180deg,rgba(5,17,23,.92),rgba(2,9,13,.97));box-shadow:inset 0 1px rgba(255,255,255,.018);overflow:hidden}
-        .mvp-v20-memory>header,.mvp-v20-dnaPanel>header,.mvp-v20-territory>header,.mvp-v20-pr>header{min-height:78px;padding:15px 17px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid rgba(103,166,186,.08);background:linear-gradient(90deg,rgba(12,43,54,.24),transparent 72%)}
-        .mvp-v20-intel header h3{margin:4px 0 3px;color:#f3fbfe;font-size:18px;letter-spacing:-.03em}.mvp-v20-intel header p{margin:0;color:#738d97;font-size:8px;line-height:1.45}.mvp-v20-memory>header>b,.mvp-v20-pr>header>b{font-size:31px;color:#63e5ff;letter-spacing:-.06em}
-        .mvp-v20-memoryGauge{padding:17px 17px 6px;display:grid;gap:7px}.mvp-v20-memoryGauge>div{height:5px;border-radius:99px;background:#02080b;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.55)}.mvp-v20-memoryGauge>div span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#35c9f1,#69e6ff 70%,#ff9f2b);box-shadow:0 0 13px rgba(61,211,246,.26)}.mvp-v20-memoryGauge small{font-size:5.8px;color:#5f7781;letter-spacing:.1em;font-weight:900}
-        .mvp-v20-actions{padding:12px 17px 17px;display:grid;grid-template-columns:1fr 1fr;gap:8px}.mvp-v20-actions button{min-height:54px;padding:0 11px;display:flex;align-items:center;gap:9px;border:1px solid rgba(93,185,214,.16);border-radius:11px;background:linear-gradient(180deg,#081c24,#041117);color:#e8faff;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.025);transition:.16s ease}.mvp-v20-actions button>i{width:29px;height:29px;display:grid;place-items:center;border-radius:50%;background:#06151c;border:1px solid rgba(80,200,234,.20)}.mvp-v20-actions .is-play:before{content:"";display:block;margin-left:2px;border-left:8px solid #71e2ff;border-top:5px solid transparent;border-bottom:5px solid transparent}.mvp-v20-actions .is-radio:before{content:"∞";color:#ffb550;font-size:17px;font-weight:900}.mvp-v20-actions button>span{display:grid;gap:1px;text-align:left}.mvp-v20-actions strong{font-size:7.3px;letter-spacing:.09em}.mvp-v20-actions small{font-size:5.8px;color:#637d87}.mvp-v20-actions button:disabled{opacity:.32;cursor:default}
-        .mvp-v20-analysisDot{display:flex;align-items:center;gap:6px;color:#718993;font-size:6px;font-weight:1000;letter-spacing:.1em}.mvp-v20-analysisDot i{width:7px;height:7px;border-radius:50%;background:#607580}.mvp-v20-analysisDot.is-live{color:#81edb1}.mvp-v20-analysisDot.is-live i{background:#50e59b;box-shadow:0 0 10px rgba(72,229,153,.34)}
-        .mvp-v20-dna{padding:13px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mvp-v20-dna>div{min-height:74px;padding:10px 11px;border:1px solid rgba(101,167,188,.10);border-radius:10px;background:linear-gradient(180deg,#06151b,#030c10);position:relative;overflow:hidden}.mvp-v20-dna>div:before{content:"";position:absolute;inset:auto 0 0;height:1px;background:linear-gradient(90deg,transparent,#42d7ff,transparent);opacity:calc(.20 + var(--dna-i) * .04)}.mvp-v20-dna span{display:block;color:#718b95;font-size:6px;font-weight:1000;letter-spacing:.1em}.mvp-v20-dna strong{display:block;margin:6px 0 8px;color:#f7fdff;font-size:22px;line-height:1;letter-spacing:-.04em}.mvp-v20-dna i{height:3px;display:block;border-radius:99px;background:#02070a;overflow:hidden}.mvp-v20-dna i b{display:block;width:var(--dna);height:100%;border-radius:inherit;background:linear-gradient(90deg,#24a8d2,#64e1ff 70%,#ff9d2c);box-shadow:0 0 9px rgba(66,211,246,.22)}
-        .mvp-v20-territory>header>small{font-size:6px;color:#617984;font-weight:1000;letter-spacing:.11em}.mvp-v20-taste{padding:13px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.mvp-v20-taste button{position:relative;min-height:128px;padding:12px 11px 11px;display:grid;grid-template-rows:auto 1fr auto;gap:9px;text-align:left;border:1px solid rgba(101,173,196,.10);border-radius:11px;background:radial-gradient(170px 90px at 20% 0%,rgba(51,197,236,.08),transparent 70%),linear-gradient(180deg,#06141a,#030b0f);color:#eefaff;cursor:pointer;overflow:hidden;transition:.16s ease}.mvp-v20-taste button:nth-child(2n){background:radial-gradient(170px 90px at 20% 0%,rgba(255,151,36,.06),transparent 70%),linear-gradient(180deg,#06141a,#030b0f)}.mvp-v20-clusterIndex{font-size:6px;color:#5c737d;font-weight:1000;letter-spacing:.11em}.mvp-v20-taste button>div{align-self:end;display:grid;gap:2px}.mvp-v20-taste button>div>span{font-size:7px;font-weight:1000;letter-spacing:.08em;color:#9fdff0}.mvp-v20-taste button strong{font-size:28px;line-height:1;color:#fff;letter-spacing:-.05em}.mvp-v20-taste button small{font-size:6px;color:#647d87;line-height:1.35}.mvp-v20-taste button>i{height:2px;border-radius:99px;background:#02080b;overflow:hidden}.mvp-v20-taste button>i b{height:100%;display:block;background:linear-gradient(90deg,#3ccff6,#70e6ff 72%,#ff9d2c)}
-        .mvp-v20-prGrid{padding:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.mvp-v20-prGrid article{min-height:62px;padding:8px 9px;display:grid;grid-template-columns:28px minmax(0,1fr) 38px;gap:9px;align-items:center;border:1px solid rgba(101,165,185,.09);border-radius:10px;background:linear-gradient(180deg,#06141a,#030c10)}.mvp-v20-prIndex{font-size:8px;color:#58717b;font-weight:1000}.mvp-v20-prGrid article>div{min-width:0;display:grid;gap:1px}.mvp-v20-prGrid strong{font-size:10px;color:#f1fbfe;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v20-prGrid article>div>span{font-size:7px;color:#8fc0ce}.mvp-v20-prGrid small{font-size:5.8px;color:#5e7882;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v20-prGrid button{width:35px;height:35px;border:1px solid rgba(75,199,236,.20);border-radius:50%;background:#061820;display:grid;place-items:center;cursor:pointer}.mvp-v20-prGrid button i{margin-left:2px;border-left:7px solid #78e3ff;border-top:4px solid transparent;border-bottom:4px solid transparent}
-        .mvp-v20-empty{min-height:120px;display:grid;place-items:center;padding:18px;color:#607984;font-size:7px;font-weight:900;letter-spacing:.10em;text-align:center}
-
-        /* R20 luminous interaction rule: hover must add light, never subtract it. */
-        .mvp-v20-intel button:not(:disabled):hover{transform:translateY(-1px);filter:brightness(1.16) saturate(1.06);border-color:rgba(105,226,255,.34)!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 10px 24px rgba(0,0,0,.18),0 0 23px rgba(58,207,245,.08)!important}
-        .mvp-v20-actions button:not(:disabled):hover{background:linear-gradient(180deg,#0d3442,#071c24)!important}.mvp-v20-core>button:not(:disabled):hover{background:linear-gradient(180deg,#0d3441,#071b23)!important}.mvp-v20-core>button.is-on:not(:disabled):hover{background:linear-gradient(180deg,#10432e,#082219)!important}
-        .mvp-v20-taste button:not(:disabled):hover{background:radial-gradient(190px 100px at 20% 0%,rgba(73,218,255,.16),transparent 70%),linear-gradient(180deg,#0a2530,#051218)!important}.mvp-v20-prGrid button:not(:disabled):hover{background:#0b2f3b!important}
-        .mvp-v20-intel button:not(:disabled):active{transform:translateY(1px);filter:brightness(1.08)}
-
-        @media(max-width:900px){.mvp-v20-command{grid-template-columns:1fr}.mvp-v20-core{grid-template-columns:112px 1fr}.mvp-v20-coreOrb{width:104px;height:104px}.mvp-v20-dual{grid-template-columns:1fr}.mvp-v20-taste{grid-template-columns:repeat(3,1fr)}.mvp-v20-taste button:nth-last-child(-n+2){min-height:105px}}
-        @media(max-width:760px){.mvp-v20-intel{padding:9px!important;gap:10px!important}.mvp-v20-command{padding:18px 15px;gap:18px;border-radius:15px}.mvp-v20-command:after{left:15px;right:15px}.mvp-v20-command h2{font-size:36px}.mvp-v20-commandCopy>p{font-size:9px}.mvp-v20-core{grid-template-columns:92px 1fr;padding:12px;gap:10px}.mvp-v20-coreOrb{width:84px;height:84px}.mvp-v20-coreOrb b{font-size:22px}.mvp-v20-corePulse{transform:translate(28px,-22px)}.mvp-v20-core>button{min-height:40px}.mvp-v20-neural{grid-template-columns:42px 1fr;padding:10px}.mvp-v20-neuralState{grid-column:2}.mvp-v20-neuralCopy small{white-space:normal;line-height:1.5}.mvp-v20-dna{grid-template-columns:repeat(3,1fr);padding:9px}.mvp-v20-dna>div{min-height:68px;padding:8px}.mvp-v20-dna strong{font-size:19px}.mvp-v20-taste{grid-template-columns:repeat(2,1fr);padding:9px}.mvp-v20-taste button{min-height:108px}.mvp-v20-prGrid{grid-template-columns:1fr}.mvp-v20-actions{grid-template-columns:1fr 1fr;padding:10px 12px 13px}.mvp-v20-memory>header,.mvp-v20-dnaPanel>header,.mvp-v20-territory>header,.mvp-v20-pr>header{padding:13px}.mvp-v20-memoryGauge{padding:13px 13px 5px}}
-        @media(max-width:430px){.mvp-v20-command h2{font-size:32px}.mvp-v20-liveTrack{padding-left:10px}.mvp-v20-core{grid-template-columns:78px 1fr}.mvp-v20-coreOrb{width:72px;height:72px}.mvp-v20-coreOrb:before{inset:8px}.mvp-v20-coreData strong{font-size:10px}.mvp-v20-core>button{grid-column:1/-1}.mvp-v20-actions{grid-template-columns:1fr}.mvp-v20-dna{grid-template-columns:repeat(2,1fr)}.mvp-v20-taste{grid-template-columns:1fr 1fr}.mvp-v20-taste button{min-height:100px}.mvp-v20-intel header h3{font-size:16px}}
-        @media(hover:none){.mvp-v20-intel button:not(:disabled):hover{transform:none;filter:none}.mvp-v20-intel button:not(:disabled):active{transform:scale(.985);filter:brightness(1.12)}}
+        .mvp-v21-intel{--n-cyan:#48ddff;--n-orange:#ff9f2c;--n-green:#50e79d;display:grid;gap:11px;padding:13px;background:radial-gradient(850px 400px at -5% 25%,rgba(31,190,230,.10),transparent 66%),radial-gradient(700px 430px at 106% 45%,rgba(255,139,30,.065),transparent 68%),linear-gradient(180deg,#02090d,#02070a);color:#edfaff}
+        .mvp-v21-intel button{font:inherit}
+        .mvp-v21-coreField{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.2fr) 220px minmax(190px,.48fr);gap:24px;align-items:center;min-height:255px;padding:26px 28px;border:1px solid rgba(79,190,224,.14);border-radius:18px;background:radial-gradient(590px 260px at 0 0,rgba(45,204,244,.12),transparent 70%),radial-gradient(430px 240px at 100% 100%,rgba(255,148,34,.08),transparent 72%),linear-gradient(135deg,rgba(6,24,32,.97),rgba(2,9,13,.99));box-shadow:0 24px 60px rgba(0,0,0,.26),inset 0 1px rgba(255,255,255,.025)}
+        .mvp-v21-coreField:before{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(110deg,transparent 0 36%,rgba(87,224,255,.035) 49%,transparent 61%),repeating-linear-gradient(90deg,transparent 0 86px,rgba(72,194,228,.018) 87px,transparent 88px)}
+        .mvp-v21-coreField:after{content:"";position:absolute;left:28px;right:28px;bottom:0;height:1px;background:linear-gradient(90deg,transparent,var(--n-cyan),rgba(255,255,255,.36),var(--n-orange),transparent);box-shadow:0 0 18px rgba(68,217,255,.16)}
+        .mvp-v21-kicker{font-size:6.5px;font-weight:1000;letter-spacing:.19em;color:#63dcf9}.mvp-v21-coreCopy h2{margin:6px 0 7px;font-size:clamp(32px,4.1vw,52px);line-height:.92;letter-spacing:-.065em;color:#f8fdff}.mvp-v21-coreCopy>p{max-width:590px;margin:0;color:#7e98a2;font-size:8.5px;line-height:1.55}.mvp-v21-nowSignal{margin-top:22px;display:flex;align-items:center;gap:10px;padding-left:13px;border-left:2px solid rgba(69,214,252,.68)}.mvp-v21-nowSignal>span{width:27px;height:27px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(83,197,231,.18);background:#06151b}.mvp-v21-nowSignal>span i{width:6px;height:6px;border-radius:50%;background:#617a84}.mvp-v21-nowSignal>span.is-live i{background:#53e6a0;box-shadow:0 0 11px rgba(73,229,153,.4)}.mvp-v21-nowSignal>div{display:grid;gap:1px;min-width:0}.mvp-v21-nowSignal small{font-size:5.8px;font-weight:1000;letter-spacing:.13em;color:#5fcde9}.mvp-v21-nowSignal strong{font-size:10px;color:#eaf9fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v21-nowSignal b{font-size:7px;color:#7d9aa5;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .mvp-v21-neuralCore{position:relative;width:190px;height:190px;margin:auto;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle,#0b2834 0 24%,#04131a 25% 45%,transparent 46%);filter:drop-shadow(0 20px 45px rgba(0,0,0,.32))}.mvp-v21-neuralCore:after{content:"";position:absolute;inset:31%;border-radius:50%;border:1px solid rgba(111,234,255,.38);box-shadow:0 0 22px rgba(60,213,250,.12),inset 0 0 20px rgba(61,210,247,.08)}.mvp-v21-coreHalo{position:absolute;inset:10%;border:1px solid rgba(72,210,248,.14);border-radius:50%;animation:mvpV21Orbit 11s linear infinite}.mvp-v21-coreHalo.is-b{inset:2%;border-style:dashed;border-color:rgba(255,162,49,.12);animation-duration:18s;animation-direction:reverse}.mvp-v21-coreHalo.is-c{inset:22%;border-color:rgba(120,239,255,.20);animation-duration:7s}.mvp-v21-coreBeam{position:absolute;left:50%;top:50%;width:46%;height:1px;transform-origin:left;background:linear-gradient(90deg,rgba(82,221,255,.65),transparent)}.mvp-v21-coreBeam.is-one{transform:rotate(28deg)}.mvp-v21-coreBeam.is-two{transform:rotate(196deg);background:linear-gradient(90deg,rgba(255,161,49,.38),transparent)}.mvp-v21-neuralCore>div{z-index:2;display:grid;place-items:center;gap:1px}.mvp-v21-neuralCore small{font-size:5px;letter-spacing:.18em;color:#5d7a85}.mvp-v21-neuralCore b{font-size:31px;line-height:1;color:#eafcff;text-shadow:0 0 24px rgba(64,219,255,.22)}.mvp-v21-neuralCore strong{font-size:6px;letter-spacing:.13em;color:#74a0ae}.mvp-v21-neuralCore.is-active b{color:#bdf9ff}.mvp-v21-neuralCore.is-active:after{border-color:rgba(92,236,255,.68);box-shadow:0 0 30px rgba(57,218,255,.18),inset 0 0 24px rgba(68,219,255,.12)}@keyframes mvpV21Orbit{to{transform:rotate(360deg)}}
+        .mvp-v21-coreTelemetry{display:grid;gap:12px}.mvp-v21-coreTelemetry>div{display:grid;grid-template-columns:1fr auto;gap:5px}.mvp-v21-coreTelemetry span{font-size:5.8px;font-weight:1000;letter-spacing:.12em;color:#627d88}.mvp-v21-coreTelemetry>div strong{font-size:10px;color:#e7f7fb}.mvp-v21-coreTelemetry>div>i{grid-column:1/-1;height:2px;background:#02070a;overflow:hidden}.mvp-v21-coreTelemetry>div>i b{display:block;width:var(--meter);height:100%;background:linear-gradient(90deg,#36c9f1,#77e9ff 72%,#ff9f2d)}.mvp-v21-coreTelemetry>button{min-height:52px;padding:0 11px;display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(85,184,214,.18);border-radius:10px;background:linear-gradient(180deg,#071820,#041016);color:#a9c2cb;cursor:pointer}.mvp-v21-coreTelemetry>button>span{display:grid;gap:2px}.mvp-v21-coreTelemetry button small{font-size:5.8px}.mvp-v21-coreTelemetry button strong{font-size:9px;color:#edfaff}.mvp-v21-coreTelemetry>button>i{width:35px;height:18px;padding:2px;border-radius:99px;background:#06141a;border:1px solid rgba(91,174,203,.17)}.mvp-v21-coreTelemetry>button>i b{display:block;width:12px;height:12px;border-radius:50%;background:#647b85;transition:.18s ease}.mvp-v21-coreTelemetry>button.is-on{border-color:rgba(67,224,147,.30);background:linear-gradient(180deg,#0b2a1c,#06150f)}.mvp-v21-coreTelemetry>button.is-on strong{color:#92f5bd}.mvp-v21-coreTelemetry>button.is-on>i b{transform:translateX(15px);background:#59eca4;box-shadow:0 0 10px rgba(70,229,151,.4)}
+        .mvp-v21-message{min-height:34px;padding:0 11px;display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(76,193,229,.14);border-radius:8px;background:#06151b;color:#9fc1cc;font-size:7px}.mvp-v21-message button{border:0;background:transparent;color:#92b1bc;font-size:16px;cursor:pointer}
+        .mvp-v21-steering{position:relative;display:grid;grid-template-columns:150px minmax(100px,.6fr) minmax(0,1.4fr) 70px;gap:12px;align-items:center;min-height:64px;padding:10px 14px;border-top:1px solid rgba(83,183,214,.10);border-bottom:1px solid rgba(83,183,214,.10);background:linear-gradient(90deg,rgba(8,31,40,.56),rgba(2,10,14,.48) 55%,rgba(31,20,8,.30))}.mvp-v21-steeringTitle{display:grid;gap:2px}.mvp-v21-steeringTitle span{font-size:5.8px;font-weight:1000;letter-spacing:.16em;color:#60d5f3}.mvp-v21-steeringTitle strong{font-size:8px;color:#d5e7ed}.mvp-v21-steeringLine{position:relative;height:1px;background:linear-gradient(90deg,rgba(70,211,248,.15),rgba(93,231,255,.55),rgba(255,162,46,.24))}.mvp-v21-steeringLine i{position:absolute;width:6px;height:6px;border-radius:50%;left:48%;top:-2.5px;background:#83edff;box-shadow:0 0 12px rgba(84,225,255,.55)}.mvp-v21-steeringLine b{position:absolute;left:0;top:-9px;width:1px;height:18px;background:rgba(81,205,241,.22)}.mvp-v21-steeringBiases{display:flex;align-items:center;justify-content:space-between;gap:7px}.mvp-v21-steeringBiases span{display:flex;align-items:center;gap:4px;font-size:5.3px;font-weight:1000;letter-spacing:.07em;color:#627c86;white-space:nowrap}.mvp-v21-steeringBiases span i{width:4px;height:4px;border-radius:50%;background:#415a64}.mvp-v21-steeringBiases span.is-anchor{color:#b7f4ff}.mvp-v21-steeringBiases span.is-anchor i{background:#59dcfb;box-shadow:0 0 8px rgba(74,218,251,.45)}.mvp-v21-linked{display:flex;justify-content:flex-end;align-items:center;gap:6px;font-size:5.8px;font-weight:1000;letter-spacing:.1em;color:#80eaae}.mvp-v21-linked i{width:6px;height:6px;border-radius:50%;background:#4ee09a;box-shadow:0 0 9px rgba(72,224,151,.35)}
+        .mvp-v21-signalBridge{display:grid;grid-template-columns:minmax(260px,.72fr) 70px minmax(0,1.28fr);gap:0;align-items:stretch;border:1px solid rgba(86,170,198,.11);border-radius:15px;background:linear-gradient(180deg,rgba(4,15,20,.89),rgba(2,8,12,.96));overflow:hidden}.mvp-v21-memoryNode,.mvp-v21-dnaNode{padding:16px}.mvp-v21-memoryNode>span,.mvp-v21-dnaNode header span{font-size:5.8px;font-weight:1000;letter-spacing:.16em;color:#5fcfe9}.mvp-v21-memoryCount{display:flex;align-items:end;gap:8px;margin:7px 0 6px}.mvp-v21-memoryCount strong{font-size:35px;line-height:.9;color:#67e3ff;letter-spacing:-.06em}.mvp-v21-memoryCount small{font-size:6px;font-weight:1000;letter-spacing:.09em;color:#708992}.mvp-v21-memoryNode>p{margin:0;color:#708993;font-size:7px;line-height:1.5}.mvp-v21-memoryRail{display:grid;gap:5px;margin-top:13px}.mvp-v21-memoryRail>i{height:3px;border-radius:99px;background:#02070a;overflow:hidden}.mvp-v21-memoryRail>i b{display:block;height:100%;background:linear-gradient(90deg,#36cef4,#6ee6ff 70%,#ff9f2e)}.mvp-v21-memoryRail small{font-size:5.4px;color:#58717b;letter-spacing:.08em}.mvp-v21-memoryActions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}.mvp-v21-memoryActions button{min-height:46px;padding:0 9px;display:flex;align-items:center;gap:8px;border:1px solid rgba(85,177,207,.13);border-radius:9px;background:#06141a;color:#9bc0cb;cursor:pointer}.mvp-v21-memoryActions button>i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;font-style:normal;color:#67dfff;border:1px solid rgba(73,197,237,.18)}.mvp-v21-memoryActions button>span{display:grid;gap:1px;text-align:left}.mvp-v21-memoryActions strong{font-size:6.4px;color:#eaf9fd;letter-spacing:.08em}.mvp-v21-memoryActions small{font-size:5.2px;color:#617984}.mvp-v21-memoryActions button:disabled{opacity:.3}
+        .mvp-v21-conduit{display:grid;grid-template-rows:auto 1fr auto;place-items:center;padding:16px 0;border-left:1px solid rgba(82,170,199,.07);border-right:1px solid rgba(82,170,199,.07);background:linear-gradient(90deg,transparent,rgba(68,207,245,.025),transparent)}.mvp-v21-conduit span{font-size:4.8px;font-weight:1000;letter-spacing:.12em;color:#4e6872;writing-mode:vertical-rl}.mvp-v21-conduit>i{width:1px;height:100%;min-height:70px;background:linear-gradient(180deg,rgba(62,207,244,.12),rgba(83,226,255,.64),rgba(255,156,41,.18));position:relative}.mvp-v21-conduit>i b{position:absolute;width:7px;height:7px;border-radius:50%;left:-3px;top:34%;background:#76e9ff;box-shadow:0 0 12px rgba(72,220,255,.52);animation:mvpV21Signal 2.7s ease-in-out infinite}@keyframes mvpV21Signal{0%,100%{top:18%;opacity:.5}50%{top:72%;opacity:1}}
+        .mvp-v21-dnaNode header{display:flex;align-items:center;justify-content:space-between;gap:10px}.mvp-v21-dnaNode header>div{display:grid;gap:3px}.mvp-v21-dnaNode header strong{font-size:9px;color:#e9f8fc;letter-spacing:.04em}.mvp-v21-dnaNode header>small{display:flex;align-items:center;gap:5px;font-size:5.4px;font-weight:1000;letter-spacing:.1em;color:#617984}.mvp-v21-dnaNode header>small i{width:6px;height:6px;border-radius:50%;background:#576f79}.mvp-v21-dnaNode header>small.is-live{color:#80ecaf}.mvp-v21-dnaNode header>small.is-live i{background:#50e59c;box-shadow:0 0 9px rgba(72,226,150,.36)}.mvp-v21-channels{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:18px}.mvp-v21-channels>div{min-width:0;display:grid;gap:7px;padding:2px 4px}.mvp-v21-channels span{font-size:5.2px;font-weight:1000;letter-spacing:.08em;color:#617d88;white-space:nowrap}.mvp-v21-channels strong{font-size:21px;line-height:1;color:#f3fbfe;letter-spacing:-.045em}.mvp-v21-channels>div>i{height:55px;width:5px;background:#02070a;display:flex;align-items:end;border-radius:99px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}.mvp-v21-channels>div>i b{width:100%;height:var(--value);background:linear-gradient(180deg,#8ff0ff,#39c9f2 70%,#ff9e2c);box-shadow:0 0 10px rgba(62,211,246,.2)}.mvp-v21-idleSignal{min-height:100px;display:grid;place-content:center;justify-items:center;gap:8px;color:#5b747e;font-size:5.8px;font-weight:1000;letter-spacing:.1em}.mvp-v21-idleSignal i{width:80px;height:1px;background:linear-gradient(90deg,transparent,#47d9ff,transparent);animation:mvpV21Idle 1.8s ease-in-out infinite}@keyframes mvpV21Idle{50%{width:130px;filter:brightness(1.4)}}
+        .mvp-v21-topology{border-top:1px solid rgba(82,178,209,.10);border-bottom:1px solid rgba(82,178,209,.10);background:linear-gradient(180deg,rgba(3,13,18,.76),rgba(2,8,11,.91));overflow:hidden}.mvp-v21-topology>header{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:15px 17px 5px}.mvp-v21-topology header span{font-size:5.8px;font-weight:1000;letter-spacing:.16em;color:#5ecde8}.mvp-v21-topology h3{margin:3px 0 2px;font-size:18px;color:#effaff;letter-spacing:-.035em}.mvp-v21-topology p{margin:0;color:#6c858f;font-size:7px}.mvp-v21-topology header>small{font-size:5.5px;font-weight:1000;letter-spacing:.1em;color:#5d747e}.mvp-v21-mapField{position:relative;height:300px;margin:0 12px 12px;overflow:hidden;background:radial-gradient(circle at 48% 45%,rgba(47,192,231,.07),transparent 30%),radial-gradient(circle at 82% 65%,rgba(255,145,31,.04),transparent 28%)}.mvp-v21-mapField>svg{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 8px rgba(66,208,245,.07))}.mvp-v21-mapPulse{position:absolute;left:49%;top:48%;width:130px;height:130px;border:1px solid rgba(70,209,248,.08);border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 28px rgba(56,204,243,.014),0 0 0 58px rgba(255,145,34,.008)}.mvp-v21-mapField>button{position:absolute;transform:translate(-50%,-50%);width:112px;height:112px;padding:10px;display:grid;place-content:center;justify-items:center;gap:2px;border:1px solid rgba(86,183,214,.15);border-radius:50%;background:radial-gradient(circle at 35% 28%,rgba(67,210,248,.11),transparent 45%),radial-gradient(circle,#071a22,#031016 72%);color:#dff8ff;cursor:pointer;box-shadow:0 14px 32px rgba(0,0,0,.20),inset 0 1px rgba(255,255,255,.025);transition:.16s ease}.mvp-v21-mapField>button:before{content:"";position:absolute;inset:6px;border:1px dashed rgba(78,200,237,.10);border-radius:50%}.mvp-v21-mapField>button>i{position:absolute;left:50%;bottom:9px;width:calc(var(--score) * .65);max-width:65px;height:2px;transform:translateX(-50%);background:linear-gradient(90deg,#42d7ff,#78eaff 70%,#ff9e2e);border-radius:99px}.mvp-v21-mapField button span{font-size:6px;font-weight:1000;letter-spacing:.09em;color:#85cfe0}.mvp-v21-mapField button strong{font-size:25px;line-height:1;color:#f8fdff}.mvp-v21-mapField button small{max-width:82px;font-size:5px;line-height:1.25;color:#637b84;text-align:center}.mvp-v21-mapField button:disabled{opacity:.28}.mvp-v21-currentPoint{position:absolute;left:var(--x);top:var(--y);transform:translate(-50%,-50%);display:flex;align-items:center;gap:5px;font-size:4.8px;font-weight:1000;letter-spacing:.09em;color:#ffca74;pointer-events:none}.mvp-v21-currentPoint i{width:7px;height:7px;border-radius:50%;background:#ffab3f;box-shadow:0 0 14px rgba(255,155,42,.48)}
+        .mvp-v21-pr{min-height:55px;display:grid;grid-template-columns:auto 1fr;align-items:center;border:1px solid rgba(84,169,197,.10);border-radius:11px;background:#030d11}.mvp-v21-pr>header{display:flex;align-items:center;gap:13px;padding:10px 13px}.mvp-v21-pr header>div{display:grid;gap:2px}.mvp-v21-pr header span{font-size:5.5px;font-weight:1000;letter-spacing:.15em;color:#5dcce7}.mvp-v21-pr header h3{margin:0;font-size:12px;color:#dff1f6}.mvp-v21-pr header>b{font-size:19px;color:#58dfff}.mvp-v21-pr>p{margin:0;padding:0 14px;color:#607984;font-size:6.3px;text-align:right}.mvp-v21-pr.has-records{display:block;padding-bottom:8px}.mvp-v21-prRail{display:flex;gap:6px;overflow-x:auto;padding:0 9px 3px;scrollbar-width:none}.mvp-v21-prRail::-webkit-scrollbar{display:none}.mvp-v21-prRail article{flex:0 0 260px;min-height:56px;padding:7px 8px;display:grid;grid-template-columns:22px minmax(0,1fr) 32px;gap:7px;align-items:center;border:1px solid rgba(87,160,184,.09);border-radius:8px;background:#051319}.mvp-v21-prRail article>span{font-size:6px;color:#4f6872}.mvp-v21-prRail article>div{min-width:0;display:grid;gap:1px}.mvp-v21-prRail strong{font-size:8px;color:#e5f6fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v21-prRail b{font-size:6.5px;color:#88b7c4}.mvp-v21-prRail small{font-size:5.2px;color:#5c747e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mvp-v21-prRail button{width:30px;height:30px;border-radius:50%;border:1px solid rgba(72,198,237,.18);background:#06171e;color:#70def8;cursor:pointer}
+        @media(hover:hover){.mvp-v21-intel button:not(:disabled):hover{filter:brightness(1.17) saturate(1.05);transform:translateY(-1px)}.mvp-v21-mapField>button:not(:disabled):hover{border-color:rgba(88,226,255,.38);box-shadow:0 18px 38px rgba(0,0,0,.22),0 0 30px rgba(52,205,244,.09),inset 0 1px rgba(255,255,255,.05)}.mvp-v21-memoryActions button:not(:disabled):hover,.mvp-v21-coreTelemetry>button:hover{background:linear-gradient(180deg,#0b2d39,#061820);border-color:rgba(83,215,252,.32)}}
+        @media(max-width:900px){.mvp-v21-coreField{grid-template-columns:minmax(0,1fr) 170px}.mvp-v21-neuralCore{width:150px;height:150px}.mvp-v21-coreTelemetry{grid-column:1/-1;grid-template-columns:1fr 1fr 180px}.mvp-v21-signalBridge{grid-template-columns:1fr}.mvp-v21-conduit{display:none}.mvp-v21-channels{grid-template-columns:repeat(6,1fr)}.mvp-v21-steering{grid-template-columns:135px 1fr 64px}.mvp-v21-steeringBiases{grid-column:1/-1;grid-row:2;justify-content:flex-start;flex-wrap:wrap}.mvp-v21-mapField{height:330px}.mvp-v21-mapField>button{width:102px;height:102px}}
+        @media(max-width:650px){.mvp-v21-intel{padding:8px;gap:8px}.mvp-v21-coreField{grid-template-columns:1fr;gap:15px;min-height:0;padding:17px 14px}.mvp-v21-coreField:after{left:14px;right:14px}.mvp-v21-coreCopy h2{font-size:34px}.mvp-v21-coreCopy>p{font-size:8px}.mvp-v21-nowSignal{margin-top:14px}.mvp-v21-neuralCore{width:128px;height:128px}.mvp-v21-coreTelemetry{grid-column:auto;grid-template-columns:1fr 1fr}.mvp-v21-coreTelemetry>button{grid-column:1/-1}.mvp-v21-steering{grid-template-columns:1fr auto;gap:8px;padding:10px}.mvp-v21-steeringLine{display:none}.mvp-v21-steeringBiases{grid-column:1/-1;overflow-x:auto;flex-wrap:nowrap;justify-content:flex-start;padding-top:3px;scrollbar-width:none}.mvp-v21-steeringBiases::-webkit-scrollbar{display:none}.mvp-v21-steeringBiases span{flex:0 0 auto}.mvp-v21-memoryNode,.mvp-v21-dnaNode{padding:13px}.mvp-v21-channels{grid-template-columns:repeat(3,1fr);gap:10px}.mvp-v21-channels>div>i{height:38px}.mvp-v21-topology>header{padding:13px 12px 4px}.mvp-v21-topology header>small{display:none}.mvp-v21-mapField{height:360px;margin:0 4px 8px}.mvp-v21-mapField>button{width:92px;height:92px}.mvp-v21-mapField button strong{font-size:21px}.mvp-v21-pr{grid-template-columns:1fr}.mvp-v21-pr>p{text-align:left;padding:0 13px 11px;line-height:1.4}}
+        @media(max-width:430px){.mvp-v21-coreCopy h2{font-size:31px}.mvp-v21-memoryActions{grid-template-columns:1fr}.mvp-v21-mapField{height:330px}.mvp-v21-mapField>button{width:82px;height:82px}.mvp-v21-mapField button small{display:none}.mvp-v21-mapField button strong{font-size:19px}.mvp-v21-channels{grid-template-columns:repeat(2,1fr)}}
+        @media(hover:none){.mvp-v21-intel button:not(:disabled):hover{filter:none;transform:none}.mvp-v21-intel button:not(:disabled):active{filter:brightness(1.12);transform:scale(.985)}}
       `}</style>
     </section>
   );
