@@ -105,7 +105,6 @@ import {
 import { discoverMoreFromTrack, requestMusicRediscoverFocus } from "../../lib/musicDiscovery";
 import {
   getActiveRadioMode,
-  clearRadioSession,
   isAdaptiveRadioName,
   radioModeLabel,
   type MusicRadioMode,
@@ -1709,16 +1708,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     if (!currentTrack) return;
 
     try {
-      // Pressing the active steering command again returns to the full library.
-      // This keeps the controls genuinely stateful instead of acting like one-shot decorations.
-      if (isAdaptiveRadioName(player.activePlaylistName) && getActiveRadioMode() === mode) {
-        clearRadioSession();
-        activateAllMusicTracks();
-        setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} OFF`);
-      } else {
-        startMvpNeuralRadio(currentTrack.id, mode);
-        setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
-      }
+      startMvpNeuralRadio(currentTrack.id, mode);
+      setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
       if (neuralMessageTimerRef.current != null) {
         window.clearTimeout(neuralMessageTimerRef.current);
       }
@@ -12133,98 +12124,6 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         @media(prefers-reduced-motion:reduce){
           .tr-playerCompactTrigger,.tr-compactNowTransport button,.tr-compactNowUtilities button,.tr-compactNowSeek::-webkit-slider-thumb{transition:none!important}
           .tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowArtwork,.tr-audioDeck--pro7.is-compact-player.is-playing .tr-compactNowActivity i,.tr-audioDeck--pro7.is-compact-player.is-playing>.tr-compactNowPlaying::after{animation:none!important}
-        }
-
-        /* MVP_TRAINER_V5_R12_5E_25_PLAYER_CONTROL_FOUNDATION */
-        .tr-audioDeck--pro7 .tr-heroPrefButton,
-        .tr-audioDeck--pro7 .tr-heroPrefButton:nth-child(n){
-          background:linear-gradient(180deg,rgba(22,29,36,.98),rgba(8,12,17,.995))!important;
-          border:1px solid rgba(111,148,174,.24)!important;
-          color:#f7fbff!important;
-          filter:none!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.075),inset 0 -1px 0 rgba(0,0,0,.58),0 7px 16px rgba(0,0,0,.30)!important;
-          transform:none!important;
-          transition:transform .14s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease,filter .16s ease!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled){
-          background:linear-gradient(180deg,rgba(29,39,49,.995),rgba(10,16,22,.998))!important;
-          border-color:rgba(66,165,239,.52)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.11),inset 0 -1px 0 rgba(0,0,0,.52),0 9px 18px rgba(0,0,0,.34),0 0 13px rgba(11,124,255,.09)!important;
-          filter:brightness(1.06)!important;
-          transform:translateY(-1px)!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton:active:not(:disabled){transform:translateY(1px) scale(.992)!important}
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike.is-liked,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike[aria-pressed="true"]{
-          background:linear-gradient(180deg,rgba(20,34,34,.99),rgba(8,17,18,.998))!important;
-          border-color:rgba(65,221,164,.74)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 0 0 1px rgba(65,221,164,.13),0 0 14px rgba(65,221,164,.13),0 8px 17px rgba(0,0,0,.32)!important;
-          transform:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike.is-liked .tr-heroPrefIcon,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLike[aria-pressed="true"] .tr-heroPrefIcon{color:#54e8ad!important;filter:drop-shadow(0 0 6px rgba(65,221,164,.34))!important}
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess.is-disliked,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess[aria-pressed="true"]{
-          background:linear-gradient(180deg,rgba(37,24,27,.99),rgba(18,10,13,.998))!important;
-          border-color:rgba(255,91,105,.72)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 0 1px rgba(255,91,105,.12),0 0 14px rgba(255,91,105,.12),0 8px 17px rgba(0,0,0,.32)!important;
-          transform:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess.is-disliked .tr-heroPrefIcon,
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefLess[aria-pressed="true"] .tr-heroPrefIcon{color:#ff6d79!important;filter:drop-shadow(0 0 6px rgba(255,91,105,.30))!important}
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover{
-          background:linear-gradient(180deg,rgba(20,29,39,.99),rgba(8,13,19,.998))!important;
-          border-color:rgba(11,124,255,.38)!important;
-        }
-        .tr-audioDeck--pro7 .tr-heroPrefButton.tr-prefDiscover:hover:not(:disabled){border-color:rgba(11,124,255,.70)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.11),0 0 13px rgba(11,124,255,.12),0 8px 17px rgba(0,0,0,.32)!important}
-
-        .tr-audioDeck--pro7 .tr-neuralCommand{
-          --neural-rgb:11,124,255!important;
-          --neural-accent:#0b7cff!important;
-          background:
-            radial-gradient(120% 90% at 50% -18%,rgba(var(--neural-rgb),.11),transparent 48%),
-            linear-gradient(180deg,rgba(27,33,40,.995),rgba(10,13,18,.998))!important;
-          border:1px solid rgba(116,143,164,.22)!important;
-          color:#f7fbff!important;
-          filter:none!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.075),inset 0 -1px 0 rgba(0,0,0,.62),0 8px 17px rgba(0,0,0,.30)!important;
-          transform:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-harder,
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-surprise{--neural-rgb:235,139,15!important;--neural-accent:#eb8b0f!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-heavier,
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-faster,
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-more_like_this,
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-darker{--neural-rgb:11,124,255!important;--neural-accent:#0b7cff!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-melodic{--neural-rgb:235,139,15!important;--neural-accent:#eb8b0f!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled){
-          background:
-            radial-gradient(120% 90% at 50% -18%,rgba(var(--neural-rgb),.16),transparent 50%),
-            linear-gradient(180deg,rgba(34,42,51,.998),rgba(12,17,23,.999))!important;
-          border-color:rgba(var(--neural-rgb),.52)!important;
-          filter:brightness(1.06)!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.11),0 10px 19px rgba(0,0,0,.34),0 0 13px rgba(var(--neural-rgb),.10)!important;
-          transform:translateY(-1px)!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active,
-        .tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"]{
-          background:
-            radial-gradient(115% 86% at 50% -10%,rgba(var(--neural-rgb),.20),transparent 49%),
-            linear-gradient(180deg,rgba(30,38,47,.998),rgba(10,15,21,.999))!important;
-          border-color:rgba(var(--neural-rgb),.88)!important;
-          filter:none!important;
-          box-shadow:inset 0 1px 0 rgba(255,255,255,.13),inset 0 -1px 0 rgba(0,0,0,.58),0 0 0 1px rgba(var(--neural-rgb),.15),0 0 16px rgba(var(--neural-rgb),.16),0 9px 18px rgba(0,0,0,.34)!important;
-          transform:none!important;
-        }
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandIcon,
-        .tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"] .tr-neuralCommandIcon{color:rgb(var(--neural-rgb))!important;filter:drop-shadow(0 0 7px rgba(var(--neural-rgb),.34))!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active .tr-neuralCommandLabel,
-        .tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"] .tr-neuralCommandLabel{color:#fff!important;text-shadow:0 1px 0 rgba(0,0,0,.88),0 0 6px rgba(var(--neural-rgb),.16)!important}
-        .tr-audioDeck--pro7 .tr-neuralCommand.is-active::before,
-        .tr-audioDeck--pro7 .tr-neuralCommand[aria-pressed="true"]::before{display:block!important;content:""!important;position:absolute!important;left:18%!important;right:18%!important;top:auto!important;bottom:-1px!important;height:2px!important;border-radius:999px!important;background:rgb(var(--neural-rgb))!important;box-shadow:0 0 8px rgba(var(--neural-rgb),.58)!important;opacity:1!important}
-        @media(hover:none){
-          .tr-audioDeck--pro7 .tr-heroPrefButton:hover:not(:disabled),
-          .tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled){transform:none!important;filter:none!important}
         }
 
       `}

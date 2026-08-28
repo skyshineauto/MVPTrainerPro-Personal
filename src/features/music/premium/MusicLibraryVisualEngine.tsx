@@ -1,7 +1,7 @@
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
-import { Environment, Lightformer, RoundedBox } from "@react-three/drei";
+import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import {
   MUSIC_LIBRARY_FRAGMENT_SHADER,
@@ -95,18 +95,13 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
 }
 
 function DepthArchitecture({ mobile, playing }: { mobile: boolean; playing: boolean }) {
-  const blue = "#0361DF";
-  const orange = "#EB8B0F";
+  const blue = "#1288f5";
+  const orange = "#f39a1f";
   const alpha = mobile ? 0.030 : 0.045;
   return <group>
     <ambientLight intensity={0.14} />
     <pointLight position={[-2.8, 1.6, 1.2]} color={blue} intensity={playing ? 1.8 : 1.15} distance={5} decay={2.2} />
     <pointLight position={[3.0, -1.8, 0.8]} color={orange} intensity={playing ? 1.05 : 0.62} distance={5} decay={2.3} />
-    <Environment resolution={mobile ? 64 : 128}>
-      <Lightformer form="rect" color={blue} intensity={mobile ? 1.1 : 1.55} position={[-2.8, 2.2, 2.8]} rotation={[0.15, 0.28, 0]} scale={[4.2, 1.2, 1]} />
-      <Lightformer form="rect" color={orange} intensity={mobile ? 0.65 : 0.9} position={[3.0, -1.8, 2.2]} rotation={[-0.12, -0.34, 0.08]} scale={[3.2, 0.9, 1]} />
-      <Lightformer form="ring" color="#DCEEFF" intensity={0.32} position={[0.6, 1.4, -0.5]} scale={[1.8, 1.8, 1]} />
-    </Environment>
     <RoundedBox args={[3.6, 0.42, 0.08]} radius={0.12} smoothness={8} position={[-0.8, 0.86, -1.2]} rotation={[0.08, 0.12, -0.07]}>
       <meshPhysicalMaterial color="#06111a" roughness={0.34} metalness={0.34} clearcoat={0.55} clearcoatRoughness={0.27} transparent opacity={alpha} emissive={blue} emissiveIntensity={0.055} />
     </RoundedBox>
@@ -171,7 +166,7 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
       {ready ? (
         <MusicVisualBoundary>
           <Canvas
-            dpr={mobile ? [1, 1.55] : [1.25, 2]}
+            dpr={mobile ? [1, 1.5] : [1.1, 1.8]}
             gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
             camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
             frameloop="demand"
@@ -180,8 +175,8 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
             <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
             <DepthArchitecture mobile={mobile} playing={visualPlaying} />
             <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
-              <DepthOfField focusDistance={0.014} focalLength={mobile ? 0.020 : 0.026} bokehScale={reducedMotion ? 0 : mobile ? 0.55 : 0.9} height={mobile ? 360 : 600} />
-              <Bloom intensity={mobile ? 0.045 : 0.065} luminanceThreshold={0.94} luminanceSmoothing={0.28} mipmapBlur />
+              <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.65 : 1.10} height={mobile ? 320 : 520} />
+              <Bloom intensity={mobile ? 0.065 : 0.09} luminanceThreshold={0.92} luminanceSmoothing={0.34} mipmapBlur />
               <Noise opacity={mobile ? 0 : 0.0020} />
               <Vignette offset={0.28} darkness={mobile ? 0.30 : 0.34} />
             </EffectComposer>

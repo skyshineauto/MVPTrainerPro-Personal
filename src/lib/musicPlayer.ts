@@ -2374,16 +2374,7 @@ function ensureAudioElement() {
         emit({ loading: false, playing: true, error: null });
       } catch {
         suppressNextRecoveredPlayCount = false;
-        emit({ loading: false, playing: false, error: null });
-        if (playbackIntent) {
-          try {
-            await nextMusicTrack(true);
-          } catch {
-            emit({ loading: false, playing: false, error: "COULDN'T RECOVER PLAYBACK • TAP PLAY" });
-          }
-        } else {
-          emit({ loading: false, playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
-        }
+        emit({ loading: false, playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
       } finally {
         mediaErrorRecoveryInFlight = false;
       }
@@ -2491,7 +2482,7 @@ function nextShuffleIndex() {
 function nextTransitionCandidate() {
   if (!state.tracks.length || state.repeat === "one") return null;
   if (state.currentTrack && isAdaptiveRadioName(state.activePlaylistName)) {
-    return chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks, { remember: false }) ?? null;
+    return chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks) ?? null;
   }
   // A shuffled next choice is intentionally selected at transition time, not preloaded early.
   if (state.shuffle) return null;
@@ -2516,12 +2507,9 @@ async function preloadNextTransitionTrack() {
   if (state.transitionMode === "off") return;
   const next = nextTransitionCandidate();
   if (!next || next.id === transitionPreloadTrackId) return;
-  const currentIdAtStart = state.currentTrack?.id ?? null;
   try {
     const url = await resolveTrackUrl(next, false);
-    // Do not run the adaptive chooser a second time here. The old verification
-    // call mutated recent-memory and frequently invalidated its own preload.
-    if ((state.currentTrack?.id ?? null) !== currentIdAtStart) return;
+    if (next.id !== nextTransitionCandidate()?.id) return;
     clearTransitionPreload();
     const preload = new Audio();
     preload.preload = "auto";
@@ -2554,30 +2542,9 @@ async function handleTrackEnded() {
     musicGain.gain.cancelScheduledValues(audioContext.currentTime);
     musicGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
   }
-  try {
-    await nextMusicTrack(true);
-  } catch {
-    // Never strand the workout because one next-track URL failed. Walk forward
-    // through a few alternate queue candidates; loadTrack already refreshes a
-    // stale signed URL once per candidate.
-    const start = Math.max(-1, getCurrentIndex());
-    let recovered = false;
-    for (let step = 1; step <= Math.min(5, state.tracks.length); step += 1) {
-      const candidate = state.tracks[(start + step) % Math.max(1, state.tracks.length)];
-      if (!candidate || candidate.id === state.currentTrack?.id) continue;
-      try {
-        await playMusicTrack(candidate.id, 0);
-        recovered = true;
-        break;
-      } catch {
-        signedUrlCache.delete(candidate.id);
-        clearMusicUrlCache(candidate.id);
-      }
-    }
-    if (!recovered) emit({ playing: false, loading: false, error: "PLAYBACK RECOVERY NEEDED • TAP PLAY" });
-  }
+  await nextMusicTrack(true);
   clearTransitionPreload();
-  if (up > 0 && musicGain && audioContext && state.playing) await fadeOutputTo(originalGain, up);
+  if (up > 0 && musicGain && audioContext) await fadeOutputTo(originalGain, up);
   void preloadNextTransitionTrack();
 }
 
@@ -2906,74 +2873,37 @@ export async function setPlayerMusicPreference(
   preference: "neutral" | "like" | "play_less",
 ) {
   const wasCurrent = state.currentTrack?.id === trackId;
-  const original = state.libraryTracks.find((track) => track.id === trackId)
-    ?? state.tracks.find((track) => track.id === trackId)
-    ?? (wasCurrent ? state.currentTrack : null);
+  const updated = await setMusicTrackPreference(trackId, preference);
+  const patchTrack = (track: MusicTrack) =>
+    track.id === trackId ? updated : track;
 
-  if (!original) {
-    throw new Error("Song not found in your music library.");
-  }
+  const nextLibrary = state.libraryTracks.map(patchTrack);
+  const nextQueue = state.tracks.map(patchTrack);
 
-  const optimistic: MusicTrack = {
-    ...original,
-    favorite: preference === "like",
-    play_less: preference === "play_less",
-  };
-
-  const patchOptimistic = (track: MusicTrack) =>
-    track.id === trackId ? optimistic : track;
-
-  // Update the player immediately so LIKE / PLAY LESS always latch visually
-  // without waiting on storage/network round-trips.
   emit({
-    libraryTracks: state.libraryTracks.map(patchOptimistic),
-    tracks: state.tracks.map(patchOptimistic),
-    currentTrack: wasCurrent ? optimistic : state.currentTrack,
+    libraryTracks: nextLibrary,
+    tracks: nextQueue,
+    currentTrack: wasCurrent ? updated : state.currentTrack,
   });
 
-  try {
-    const updated = await setMusicTrackPreference(trackId, preference);
-    const patchTrack = (track: MusicTrack) =>
-      track.id === trackId ? updated : track;
+  void syncLikedSongsPlaylist(nextLibrary).catch((error) => {
+    console.warn("Could not synchronize Liked Songs.", error);
+  });
 
-    const nextLibrary = state.libraryTracks.map(patchTrack);
-    const nextQueue = state.tracks.map(patchTrack);
+  if (preference === "like" && wasCurrent) {
+    const radio = startRadioSession(
+      updated,
+      nextLibrary,
+      "more_like_this",
+    );
 
-    emit({
-      libraryTracks: nextLibrary,
-      tracks: nextQueue,
-      currentTrack: wasCurrent ? updated : state.currentTrack,
-    });
-
-    void syncLikedSongsPlaylist(nextLibrary).catch((error) => {
-      console.warn("Could not synchronize Liked Songs.", error);
-    });
-
-    if (preference === "like" && wasCurrent) {
-      const radio = startRadioSession(
-        updated,
-        nextLibrary,
-        "more_like_this",
-      );
-
-      activateMusicAdHocQueue(
-        `Like Radio • ${updated.title}`,
-        radio,
-      );
-      void preloadNextTransitionTrack();
-    }
-
-    return updated;
-  } catch (error) {
-    const restore = (track: MusicTrack) =>
-      track.id === trackId ? original : track;
-    emit({
-      libraryTracks: state.libraryTracks.map(restore),
-      tracks: state.tracks.map(restore),
-      currentTrack: wasCurrent ? original : state.currentTrack,
-    });
-    throw error;
+    activateMusicAdHocQueue(
+      `Like Radio • ${updated.title}`,
+      radio,
+    );
   }
+
+  return updated;
 }
 
 export function startMvpNeuralRadio(
@@ -2998,10 +2928,6 @@ export function startMvpNeuralRadio(
     adaptiveRadioQueueName(seed, mode),
     queue,
   );
-
-  // Steering should affect the very next transition, not wait until the
-  // current song ends before preparing a candidate.
-  void preloadNextTransitionTrack();
 
   return queue;
 }
