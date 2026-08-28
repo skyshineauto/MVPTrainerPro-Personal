@@ -839,7 +839,12 @@ let mediaErrorRecoveryInFlight = false;
 let lastMediaErrorRecoveryAt = 0;
 let lastMediaErrorRecoveryTrackId = "";
 let suppressNextRecoveredPlayCount = false;
+let playbackStallRecoveryInFlight = false;
+let playbackStallHeartbeat: number | null = null;
+let lastPlaybackProgressAt = 0;
+let lastPlaybackPosition = 0;
 const MEDIA_ERROR_AUTO_RETRY_COOLDOWN_MS = 20_000;
+const PLAYBACK_STALL_RECOVERY_MS = 10_000;
 let lastDspStatus: MusicDspStatus = "recovering";
 let lastHeadroom = -1;
 let lastEffectivePreamp = Number.NaN;
@@ -2288,6 +2293,40 @@ function savePlaybackPosition() {
   savePlayerSetting(STORAGE_KEYS.currentTime, String(audioElement.currentTime || 0));
 }
 
+async function recoverStalledPlayback(audio: HTMLAudioElement) {
+  if (audio !== audioElement || playbackStallRecoveryInFlight || mediaErrorRecoveryInFlight || state.loading) return;
+  const track = state.currentTrack;
+  if (!track || !playbackIntent || audio.paused || audio.ended) return;
+
+  playbackStallRecoveryInFlight = true;
+  const resumeAt = Math.max(0, Number(audio.currentTime || state.currentTime || 0));
+  emit({ loading: true, error: null });
+  try {
+    signedUrlCache.delete(track.id);
+    clearMusicUrlCache(track.id);
+    await loadTrack(track, resumeAt);
+    if (!playbackIntent || state.currentTrack?.id !== track.id) return;
+    suppressNextRecoveredPlayCount = true;
+    const recovered = ensureAudioElement();
+    await recovered.play();
+    lastPlaybackProgressAt = Date.now();
+    lastPlaybackPosition = Number(recovered.currentTime || 0);
+    emit({ loading: false, playing: true, error: null });
+  } catch {
+    suppressNextRecoveredPlayCount = false;
+    emit({ loading: false, playing: false, error: null });
+    if (playbackIntent) {
+      try {
+        await nextMusicTrack(true);
+      } catch {
+        emit({ loading: false, playing: false, error: "PLAYBACK STALLED • TAP PLAY TO RETRY" });
+      }
+    }
+  } finally {
+    playbackStallRecoveryInFlight = false;
+  }
+}
+
 function ensureAudioElement() {
   if (audioElement) return audioElement;
   const audio = new Audio();
@@ -2297,6 +2336,8 @@ function ensureAudioElement() {
   audio.addEventListener("play", () => {
     if (audio !== audioElement) return;
     playbackIntent = true;
+    lastPlaybackProgressAt = Date.now();
+    lastPlaybackPosition = Number(audio.currentTime || 0);
     emit({ playing: true, error: null });
     configureMediaSession();
     const trackId = audio.dataset.trackId;
@@ -2309,7 +2350,23 @@ function ensureAudioElement() {
       void recordMusicTrackPlayed(trackId).catch(() => undefined);
     }
   });
-  audio.addEventListener("pause", () => { if (audio === audioElement) emit({ playing: false }); });
+  audio.addEventListener("pause", () => {
+    if (audio !== audioElement) return;
+    emit({ playing: false });
+  });
+  audio.addEventListener("playing", () => {
+    if (audio !== audioElement) return;
+    lastPlaybackProgressAt = Date.now();
+    lastPlaybackPosition = Number(audio.currentTime || 0);
+  });
+  audio.addEventListener("waiting", () => {
+    if (audio !== audioElement || !playbackIntent) return;
+    if (!lastPlaybackProgressAt) lastPlaybackProgressAt = Date.now();
+  });
+  audio.addEventListener("stalled", () => {
+    if (audio !== audioElement || !playbackIntent) return;
+    if (!lastPlaybackProgressAt) lastPlaybackProgressAt = Date.now();
+  });
   audio.addEventListener("loadedmetadata", () => {
     if (audio !== audioElement) return;
     const duration = Number(audio.duration);
@@ -2322,7 +2379,12 @@ function ensureAudioElement() {
   });
   audio.addEventListener("timeupdate", () => {
     if (audio !== audioElement) return;
-    emit({ currentTime: audio.currentTime || 0 });
+    const currentPosition = Number(audio.currentTime || 0);
+    emit({ currentTime: currentPosition });
+    if (Math.abs(currentPosition - lastPlaybackPosition) >= 0.08) {
+      lastPlaybackPosition = currentPosition;
+      lastPlaybackProgressAt = Date.now();
+    }
     savePlaybackPosition();
     const duration = Number(audio.duration);
     const remaining = duration - Number(audio.currentTime || 0);
@@ -2374,13 +2436,36 @@ function ensureAudioElement() {
         emit({ loading: false, playing: true, error: null });
       } catch {
         suppressNextRecoveredPlayCount = false;
-        emit({ loading: false, playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
+        emit({ loading: false, playing: false, error: null });
+        if (playbackIntent) {
+          try {
+            await nextMusicTrack(true);
+          } catch {
+            emit({ loading: false, playing: false, error: "COULDN'T RECOVER PLAYBACK • TAP PLAY" });
+          }
+        } else {
+          emit({ loading: false, playing: false, error: "COULDN'T PLAY THIS TRACK • RETRY" });
+        }
       } finally {
         mediaErrorRecoveryInFlight = false;
       }
     })();
   });
   audioElement = audio;
+  if (playbackStallHeartbeat == null && typeof window !== "undefined") {
+    playbackStallHeartbeat = window.setInterval(() => {
+      const active = audioElement;
+      if (!active || !playbackIntent || !state.playing || state.loading || active.paused || active.ended) return;
+      if (!lastPlaybackProgressAt) {
+        lastPlaybackProgressAt = Date.now();
+        lastPlaybackPosition = Number(active.currentTime || 0);
+        return;
+      }
+      if (Date.now() - lastPlaybackProgressAt >= PLAYBACK_STALL_RECOVERY_MS) {
+        void recoverStalledPlayback(active);
+      }
+    }, 2500);
+  }
   return audio;
 }
 
@@ -2482,7 +2567,7 @@ function nextShuffleIndex() {
 function nextTransitionCandidate() {
   if (!state.tracks.length || state.repeat === "one") return null;
   if (state.currentTrack && isAdaptiveRadioName(state.activePlaylistName)) {
-    return chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks) ?? null;
+    return chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks, { remember: false }) ?? null;
   }
   // A shuffled next choice is intentionally selected at transition time, not preloaded early.
   if (state.shuffle) return null;
@@ -2507,9 +2592,12 @@ async function preloadNextTransitionTrack() {
   if (state.transitionMode === "off") return;
   const next = nextTransitionCandidate();
   if (!next || next.id === transitionPreloadTrackId) return;
+  const currentIdAtStart = state.currentTrack?.id ?? null;
   try {
     const url = await resolveTrackUrl(next, false);
-    if (next.id !== nextTransitionCandidate()?.id) return;
+    // Do not run the adaptive chooser a second time here. The old verification
+    // call mutated recent-memory and frequently invalidated its own preload.
+    if ((state.currentTrack?.id ?? null) !== currentIdAtStart) return;
     clearTransitionPreload();
     const preload = new Audio();
     preload.preload = "auto";
@@ -2542,9 +2630,30 @@ async function handleTrackEnded() {
     musicGain.gain.cancelScheduledValues(audioContext.currentTime);
     musicGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
   }
-  await nextMusicTrack(true);
+  try {
+    await nextMusicTrack(true);
+  } catch {
+    // Never strand the workout because one next-track URL failed. Walk forward
+    // through a few alternate queue candidates; loadTrack already refreshes a
+    // stale signed URL once per candidate.
+    const start = Math.max(-1, getCurrentIndex());
+    let recovered = false;
+    for (let step = 1; step <= Math.min(5, state.tracks.length); step += 1) {
+      const candidate = state.tracks[(start + step) % Math.max(1, state.tracks.length)];
+      if (!candidate || candidate.id === state.currentTrack?.id) continue;
+      try {
+        await playMusicTrack(candidate.id, 0);
+        recovered = true;
+        break;
+      } catch {
+        signedUrlCache.delete(candidate.id);
+        clearMusicUrlCache(candidate.id);
+      }
+    }
+    if (!recovered) emit({ playing: false, loading: false, error: "PLAYBACK RECOVERY NEEDED • TAP PLAY" });
+  }
   clearTransitionPreload();
-  if (up > 0 && musicGain && audioContext) await fadeOutputTo(originalGain, up);
+  if (up > 0 && musicGain && audioContext && state.playing) await fadeOutputTo(originalGain, up);
   void preloadNextTransitionTrack();
 }
 
@@ -2873,37 +2982,74 @@ export async function setPlayerMusicPreference(
   preference: "neutral" | "like" | "play_less",
 ) {
   const wasCurrent = state.currentTrack?.id === trackId;
-  const updated = await setMusicTrackPreference(trackId, preference);
-  const patchTrack = (track: MusicTrack) =>
-    track.id === trackId ? updated : track;
+  const original = state.libraryTracks.find((track) => track.id === trackId)
+    ?? state.tracks.find((track) => track.id === trackId)
+    ?? (wasCurrent ? state.currentTrack : null);
 
-  const nextLibrary = state.libraryTracks.map(patchTrack);
-  const nextQueue = state.tracks.map(patchTrack);
-
-  emit({
-    libraryTracks: nextLibrary,
-    tracks: nextQueue,
-    currentTrack: wasCurrent ? updated : state.currentTrack,
-  });
-
-  void syncLikedSongsPlaylist(nextLibrary).catch((error) => {
-    console.warn("Could not synchronize Liked Songs.", error);
-  });
-
-  if (preference === "like" && wasCurrent) {
-    const radio = startRadioSession(
-      updated,
-      nextLibrary,
-      "more_like_this",
-    );
-
-    activateMusicAdHocQueue(
-      `Like Radio • ${updated.title}`,
-      radio,
-    );
+  if (!original) {
+    throw new Error("Song not found in your music library.");
   }
 
-  return updated;
+  const optimistic: MusicTrack = {
+    ...original,
+    favorite: preference === "like",
+    play_less: preference === "play_less",
+  };
+
+  const patchOptimistic = (track: MusicTrack) =>
+    track.id === trackId ? optimistic : track;
+
+  // Update the player immediately so LIKE / PLAY LESS always latch visually
+  // without waiting on storage/network round-trips.
+  emit({
+    libraryTracks: state.libraryTracks.map(patchOptimistic),
+    tracks: state.tracks.map(patchOptimistic),
+    currentTrack: wasCurrent ? optimistic : state.currentTrack,
+  });
+
+  try {
+    const updated = await setMusicTrackPreference(trackId, preference);
+    const patchTrack = (track: MusicTrack) =>
+      track.id === trackId ? updated : track;
+
+    const nextLibrary = state.libraryTracks.map(patchTrack);
+    const nextQueue = state.tracks.map(patchTrack);
+
+    emit({
+      libraryTracks: nextLibrary,
+      tracks: nextQueue,
+      currentTrack: wasCurrent ? updated : state.currentTrack,
+    });
+
+    void syncLikedSongsPlaylist(nextLibrary).catch((error) => {
+      console.warn("Could not synchronize Liked Songs.", error);
+    });
+
+    if (preference === "like" && wasCurrent) {
+      const radio = startRadioSession(
+        updated,
+        nextLibrary,
+        "more_like_this",
+      );
+
+      activateMusicAdHocQueue(
+        `Like Radio • ${updated.title}`,
+        radio,
+      );
+      void preloadNextTransitionTrack();
+    }
+
+    return updated;
+  } catch (error) {
+    const restore = (track: MusicTrack) =>
+      track.id === trackId ? original : track;
+    emit({
+      libraryTracks: state.libraryTracks.map(restore),
+      tracks: state.tracks.map(restore),
+      currentTrack: wasCurrent ? original : state.currentTrack,
+    });
+    throw error;
+  }
 }
 
 export function startMvpNeuralRadio(
@@ -2928,6 +3074,10 @@ export function startMvpNeuralRadio(
     adaptiveRadioQueueName(seed, mode),
     queue,
   );
+
+  // Steering should affect the very next transition, not wait until the
+  // current song ends before preparing a candidate.
+  void preloadNextTransitionTrack();
 
   return queue;
 }

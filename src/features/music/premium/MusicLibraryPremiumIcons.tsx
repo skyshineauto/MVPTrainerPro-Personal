@@ -1,27 +1,87 @@
-import type { ReactNode } from "react";
-function IconShell({ className, viewBox = "0 0 64 64", children }: { className: string; viewBox?: string; children: ReactNode }) {
-  return <svg className={`mlv-premiumSvg ${className}`} viewBox={viewBox} fill="none" aria-hidden="true" focusable="false">{children}</svg>;
+import type { ReactNode, SVGProps } from "react";
+
+type BaseIconProps = SVGProps<SVGSVGElement> & { title?: string };
+
+function Icon({ children, title, className = "", viewBox = "0 0 24 24", ...props }: BaseIconProps & { children: ReactNode; viewBox?: string }) {
+  return (
+    <svg
+      viewBox={viewBox}
+      fill="none"
+      aria-hidden={title ? undefined : true}
+      aria-label={title}
+      role={title ? "img" : undefined}
+      focusable="false"
+      className={`mlv-icon ${className}`.trim()}
+      {...props}
+    >
+      {children}
+    </svg>
+  );
 }
 
-export function PreviewRenderIcon({ playing = false }: { playing?: boolean }) {
-  return <IconShell className={`mlv-previewRenderIcon ${playing ? "is-playing" : "is-idle"}`}>
-    <defs>
-      <linearGradient id="mlvPreviewEdge" x1="11" y1="8" x2="53" y2="56" gradientUnits="userSpaceOnUse"><stop stopColor="#e7f4ff"/><stop offset=".46" stopColor="#1288f5"/><stop offset="1" stopColor="#f39a1f"/></linearGradient>
-      <radialGradient id="mlvPreviewCore" cx="0" cy="0" r="1" gradientTransform="translate(22 17) rotate(47) scale(47)"><stop stopColor="#153948"/><stop offset=".58" stopColor="#07171f"/><stop offset="1" stopColor="#02080c"/></radialGradient>
-      <filter id="mlvPreviewGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    </defs>
-    <circle cx="32" cy="32" r="27" fill="url(#mlvPreviewCore)" stroke="rgba(255,255,255,.08)" />
-    <circle cx="32" cy="32" r="26" stroke="url(#mlvPreviewEdge)" strokeWidth="1.4" opacity=".9" />
-    <path d="M15 17.5C21 11 29 8 37 9" stroke="#fff" strokeOpacity=".2" strokeWidth="1.5" strokeLinecap="round" />
-    {playing ? <g filter="url(#mlvPreviewGlow)"><rect x="24" y="20" width="6" height="24" rx="2" fill="#dffaff"/><rect x="34" y="20" width="6" height="24" rx="2" fill="#6ebeff"/></g> : <path d="M26 20.5 43 32 26 43.5V20.5Z" fill="#e9fcff" stroke="#5bb1ff" strokeWidth="1" filter="url(#mlvPreviewGlow)"/>}
-    {playing ? <g opacity=".75"><rect x="16" y="48" width="3" height="5" rx="1.5" fill="#1288f5"/><rect x="21" y="45" width="3" height="8" rx="1.5" fill="#65b8ff"/><rect x="26" y="47" width="3" height="6" rx="1.5" fill="#1288f5"/><rect x="31" y="43" width="3" height="10" rx="1.5" fill="#f4fdff"/><rect x="36" y="46" width="3" height="7" rx="1.5" fill="#68baff"/><rect x="41" y="44" width="3" height="9" rx="1.5" fill="#ffb64d"/><rect x="46" y="48" width="3" height="5" rx="1.5" fill="#f39a1f"/></g> : null}
-  </IconShell>;
+const line = { stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+
+export function PlayPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M9 7.25 17 12l-8 4.75V7.25Z" fill="currentColor" /><circle cx="12" cy="12" r="9" {...line} opacity=".35" /></Icon>;
+}
+export function PausePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><rect x="8.2" y="7" width="2.6" height="10" rx="1" fill="currentColor"/><rect x="13.2" y="7" width="2.6" height="10" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="9" {...line} opacity=".35" /></Icon>;
+}
+export function HeartPremiumIcon({ filled = false, ...props }: BaseIconProps & { filled?: boolean }) {
+  return <Icon {...props}><path d="M20.2 8.8c0 5-8.2 9.6-8.2 9.6S3.8 13.8 3.8 8.8A4.2 4.2 0 0 1 12 7.45 4.2 4.2 0 0 1 20.2 8.8Z" {...line} fill={filled ? "currentColor" : "none"}/></Icon>;
+}
+export function PlayLessPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M5.2 8.2h13.6" {...line}/><path d="m8.1 12.1 3.9 3.9 3.9-3.9" {...line}/></Icon>;
+}
+export function NextPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="m7.5 6.8 7.1 5.2-7.1 5.2V6.8Z" fill="currentColor"/><path d="M16.8 7.2v9.6" {...line}/></Icon>;
+}
+export function QueuePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M5 7h10M5 12h10M5 17h7" {...line}/><path d="m16.5 14.5 3 2-3 2v-4Z" fill="currentColor"/></Icon>;
+}
+export function PlaylistPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M5 7h8M5 11h8M5 15h5" {...line}/><path d="M17 10v8M13 14h8" {...line}/></Icon>;
+}
+export function EditPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="m6 17 1-4 8.9-8.9a1.6 1.6 0 0 1 2.3 0l1.7 1.7a1.6 1.6 0 0 1 0 2.3L11 17l-5 1Z" {...line}/><path d="m14.8 5.2 4 4" {...line}/></Icon>;
+}
+export function ChevronUpPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="m7 14.5 5-5 5 5" {...line}/></Icon>;
+}
+export function ChevronDownPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="m7 9.5 5 5 5-5" {...line}/></Icon>;
+}
+export function ShufflePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M4 7h2.2c4.7 0 4.9 10 9.6 10H20" {...line}/><path d="m17 14 3 3-3 3M4 17h2.2c1.1 0 2-.55 2.8-1.35M15.2 7.5c.25-.25.5-.5.8-.5H20" {...line}/><path d="m17 4 3 3-3 3" {...line}/></Icon>;
+}
+export function SparkPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="M12 3.8 13.5 9l4.7 1.5-4.7 1.5L12 17.2 10.5 12l-4.7-1.5L10.5 9 12 3.8Z" {...line}/><path d="m18.2 15.8.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1Z" {...line} opacity=".65"/></Icon>;
+}
+export function MorePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><circle cx="5" cy="12" r="1.35" fill="currentColor"/><circle cx="12" cy="12" r="1.35" fill="currentColor"/><circle cx="19" cy="12" r="1.35" fill="currentColor"/></Icon>;
+}
+export function ClosePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props}><path d="m7 7 10 10M17 7 7 17" {...line}/></Icon>;
 }
 
-export function YouTubePremiumIcon() { return <IconShell className="mlv-youtubeRender"><rect x="9" y="17" width="46" height="30" rx="10" fill="#12070a" stroke="#ff5e6d" strokeWidth="2"/><path d="M28 24.5 42 32 28 39.5v-15Z" fill="#fff"/><path d="M14 19h25" stroke="#fff" strokeOpacity=".15" strokeLinecap="round"/></IconShell>; }
-export function KeepPremiumIcon() { return <IconShell className="mlv-keepRender"><path d="M13 34 26 46 52 18" stroke="#63f0a2" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 31 26 42 48 20" stroke="#eafff3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity=".75"/></IconShell>; }
-export function MaybePremiumIcon() { return <IconShell className="mlv-maybeRender"><path d="M14 15h36v27H31l-11 8v-8h-6V15Z" stroke="#f3bc55" strokeWidth="3" strokeLinejoin="round"/><path d="M24 28h16M24 34h10" stroke="#fff1c7" strokeWidth="2.5" strokeLinecap="round"/></IconShell>; }
-export function PassPremiumIcon() { return <IconShell className="mlv-passRender"><path d="M18 18 46 46M46 18 18 46" stroke="#ff6674" strokeWidth="6" strokeLinecap="round"/><path d="M20 18 46 44" stroke="#ffd8dc" strokeWidth="1.5" strokeLinecap="round" opacity=".55"/></IconShell>; }
-export function UploadPremiumIcon() { return <IconShell className="mlv-uploadRender"><path d="M32 43V14M20 26l12-12 12 12" stroke="#3aa7ff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 39v9h36v-9" stroke="#ffb64d" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/></IconShell>; }
-export function ChevronPremiumIcon({ direction }: { direction: "left" | "right" }) { return <IconShell className="mlv-chevronRender" viewBox="0 0 24 40"><path d={direction === "left" ? "M17 6 6 20l11 14" : "M7 6l11 14L7 34"} stroke="#d7ecff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d={direction === "left" ? "M15 9 8 20l7 11" : "M9 9l7 11-7 11"} stroke="#1288f5" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity=".72"/></IconShell>; }
-export function MorePremiumIcon() { return <IconShell className="mlv-moreRender" viewBox="0 0 72 24"><circle cx="12" cy="12" r="3" fill="#66baff"/><circle cx="36" cy="12" r="3" fill="#d7ecff"/><circle cx="60" cy="12" r="3" fill="#ffb64d"/></IconShell>; }
+export function PreviewRenderIcon({ playing = false, ...props }: BaseIconProps & { playing?: boolean }) {
+  return playing ? <PausePremiumIcon {...props} className={`mlv-previewRenderIcon ${props.className ?? ""}`} /> : <PlayPremiumIcon {...props} className={`mlv-previewRenderIcon ${props.className ?? ""}`} />;
+}
+export function YouTubePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props} className={`mlv-youtubeRender ${props.className ?? ""}`}><rect x="3.1" y="6.1" width="17.8" height="11.8" rx="4" {...line}/><path d="m10 9.2 5 2.8-5 2.8V9.2Z" fill="currentColor"/></Icon>;
+}
+export function KeepPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props} className={`mlv-keepRender ${props.className ?? ""}`}><path d="m5 12.4 4.2 4.1L19.3 6.8" {...line}/></Icon>;
+}
+export function MaybePremiumIcon(props: BaseIconProps) {
+  return <Icon {...props} className={`mlv-maybeRender ${props.className ?? ""}`}><path d="M5 5.5h14v10H11l-4.5 3v-3H5v-10Z" {...line}/><path d="M9 9h6M9 12h4" {...line}/></Icon>;
+}
+export function PassPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props} className={`mlv-passRender ${props.className ?? ""}`}><path d="m6.2 6.2 11.6 11.6M17.8 6.2 6.2 17.8" {...line}/></Icon>;
+}
+export function UploadPremiumIcon(props: BaseIconProps) {
+  return <Icon {...props} className={`mlv-uploadRender ${props.className ?? ""}`}><path d="M12 16V5m0 0L8.4 8.6M12 5l3.6 3.6M5 15v4h14v-4" {...line}/></Icon>;
+}
+export function ChevronPremiumIcon({ direction, ...props }: BaseIconProps & { direction: "left" | "right" }) {
+  return <Icon {...props} className={`mlv-chevronRender ${props.className ?? ""}`}><path d={direction === "left" ? "m14.5 6-6 6 6 6" : "m9.5 6 6 6-6 6"} {...line}/></Icon>;
+}

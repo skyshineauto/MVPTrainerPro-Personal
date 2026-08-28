@@ -95,9 +95,9 @@ function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
 }
 
 function DepthArchitecture({ mobile, playing }: { mobile: boolean; playing: boolean }) {
-  const blue = "#1288f5";
-  const orange = "#f39a1f";
-  const alpha = mobile ? 0.030 : 0.045;
+  const blue = "#0361DF";
+  const orange = "#EB8B0F";
+  const alpha = mobile ? 0.018 : 0.028;
   return <group>
     <ambientLight intensity={0.14} />
     <pointLight position={[-2.8, 1.6, 1.2]} color={blue} intensity={playing ? 1.8 : 1.15} distance={5} decay={2.2} />
@@ -166,7 +166,7 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
       {ready ? (
         <MusicVisualBoundary>
           <Canvas
-            dpr={mobile ? [1, 1.5] : [1.1, 1.8]}
+            dpr={mobile ? [1, 1.6] : [1.15, 2]}
             gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
             camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
             frameloop="demand"
@@ -175,8 +175,8 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
             <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
             <DepthArchitecture mobile={mobile} playing={visualPlaying} />
             <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
-              <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.65 : 1.10} height={mobile ? 320 : 520} />
-              <Bloom intensity={mobile ? 0.065 : 0.09} luminanceThreshold={0.92} luminanceSmoothing={0.34} mipmapBlur />
+              <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.42 : 0.72} height={mobile ? 320 : 520} />
+              <Bloom intensity={mobile ? 0.045 : 0.065} luminanceThreshold={0.92} luminanceSmoothing={0.34} mipmapBlur />
               <Noise opacity={mobile ? 0 : 0.0020} />
               <Vignette offset={0.28} darkness={mobile ? 0.30 : 0.34} />
             </EffectComposer>
