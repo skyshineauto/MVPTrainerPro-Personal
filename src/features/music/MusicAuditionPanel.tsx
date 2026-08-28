@@ -1308,12 +1308,21 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     setLookupSongId(songId);
     void resolveMusicAuditionMetadata(songId, { forceFresh })
       .then((resolved) => {
-        const playable = Boolean(resolved.previewUrl);
-        if (playable) verifiedMetadataIdsRef.current.add(songId);
+        // Artwork/metadata resolution is independent from embedded-preview availability.
+        // A provider can return the correct cover even when no playable sample exists.
+        const metadataResolved = Boolean(
+          resolved.metadataUpdatedAt ||
+          resolved.artworkUrl ||
+          resolved.album ||
+          resolved.releaseYear ||
+          resolved.genre ||
+          resolved.storeUrl
+        );
+        if (metadataResolved) verifiedMetadataIdsRef.current.add(songId);
         else verifiedMetadataIdsRef.current.delete(songId);
         setVerifiedMetadataIds((previous) => {
           const next = new Set(previous);
-          if (playable) next.add(songId);
+          if (metadataResolved) next.add(songId);
           else next.delete(songId);
           return next;
         });
@@ -1335,7 +1344,15 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
         const previewAge = song.metadataUpdatedAt ? now() - song.metadataUpdatedAt : Number.POSITIVE_INFINITY;
         const forceFresh = !song.previewUrl || previewAge > PREVIEW_URL_CACHE_MS;
         void resolveMusicAuditionMetadata(song.id, { forceFresh }).then((resolved) => {
-          if (resolved.previewUrl) verifiedMetadataIdsRef.current.add(song.id);
+          const metadataResolved = Boolean(
+            resolved.metadataUpdatedAt ||
+            resolved.artworkUrl ||
+            resolved.album ||
+            resolved.releaseYear ||
+            resolved.genre ||
+            resolved.storeUrl
+          );
+          if (metadataResolved) verifiedMetadataIdsRef.current.add(song.id);
           else verifiedMetadataIdsRef.current.delete(song.id);
         });
       }
@@ -1703,12 +1720,12 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   }, [state.songs, isInLibraryFast]);
 
   const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
+  const currentArtworkReady = Boolean(currentSong?.artworkUrl);
   const currentMetadataAvailable = Boolean(
     currentSong &&
-    currentMetadataVerified &&
-    currentSong.previewUrl,
+    (currentMetadataVerified || currentSong.artworkUrl || currentSong.album || currentSong.releaseYear || currentSong.genre),
   );
-  const currentPreviewReady = Boolean(currentSong?.previewUrl && currentMetadataVerified);
+  const currentPreviewReady = Boolean(currentSong?.previewUrl);
   const currentFlashDecision = currentSong && decisionFlash?.songId === currentSong.id ? decisionFlash.decision : null;
   const currentRemaining = currentStats ? Math.max(0, currentStats.total - currentStats.reviewed) : 0;
 
@@ -1773,15 +1790,15 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
       <div className="mvp-auditionStageBar"><i style={{ width: `${currentStats.total ? Math.round(currentStats.progress * 100) : currentStats.skipped ? 100 : 0}%` }} /></div>
       {currentSong ? <AnimatePresence mode="wait" initial={false}><motion.article
         key={currentSong.id}
-        className={`mvp-auditionSongCard ${currentMetadataVerified && currentSong.artworkUrl ? "has-art" : "no-art"}`}
+        className={`mvp-auditionSongCard ${currentArtworkReady ? "has-art" : "no-art"}`}
         initial={{ opacity: 0, x: 18, scale: 0.992 }}
         animate={{ opacity: 1, x: 0, scale: 1 }}
         exit={{ opacity: 0, x: -14, scale: 0.994 }}
         transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="mvp-auditionAmbient" aria-hidden="true" style={currentMetadataVerified && currentSong.artworkUrl ? { backgroundImage: `url("${currentSong.artworkUrl}")` } : undefined} />
+        <div className="mvp-auditionAmbient" aria-hidden="true" style={currentArtworkReady ? { backgroundImage: `url("${currentSong.artworkUrl}")` } : undefined} />
         <div className="mvp-auditionArtwork">
-          {currentMetadataVerified && currentSong.artworkUrl ? <img src={currentSong.artworkUrl} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "FINDING PREVIEW" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
+          {currentArtworkReady ? <img src={currentSong.artworkUrl || ""} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "FINDING PREVIEW" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
         </div>
         <div className="mvp-auditionSongInfo">

@@ -1961,7 +1961,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className={`tr10-table ${libraryView === "grid" ? "is-grid" : "is-list"}`}>
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
-              <span>TRACK</span><span>TIME</span><span>ENERGY</span>
+              <span className="tr10-trackHead">TRACK</span><span className="tr10-timeHead">TIME</span><span className="tr10-energyHead">ENERGY</span>
               <span className="tr10-actionsHead">ACTIONS<button type="button" className="tr10-viewToggle" onClick={() => setLibraryView((current) => current === "list" ? "grid" : "list")} aria-label={libraryView === "list" ? "Switch song library to grid view" : "Switch song library to list view"} title={libraryView === "list" ? "Grid view" : "List view"}>{libraryView === "list" ? "▦" : "▤"}</button></span>
             </div>
             <div className="tr10-mobileViewBar"><span>ACTIONS</span><button type="button" className="tr10-viewToggle" onClick={() => setLibraryView((current) => current === "list" ? "grid" : "list")} aria-label={libraryView === "list" ? "Switch song library to grid view" : "Switch song library to list view"} title={libraryView === "list" ? "Grid view" : "List view"}>{libraryView === "list" ? "▦" : "▤"}</button></div>
