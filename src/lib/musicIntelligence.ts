@@ -246,6 +246,12 @@ export function getActiveRadioSteeringRemaining() {
   return Math.max(0, readRadioState()?.steeringRemaining ?? 0);
 }
 
+export function clearRadioSession() {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.removeItem(KEYS.radio); } catch { /* radio state is optional */ }
+  try { window.localStorage.removeItem(LEGACY_KEYS.radio); } catch { /* legacy cleanup */ }
+}
+
 export function adaptiveRadioQueueName(
   seed: MusicTrack,
   mode: MusicRadioMode,
@@ -295,15 +301,17 @@ export function getWorkoutMusicStage(): WorkoutMusicStage {
 }
 
 function recentIds() {
+  // Keep a long workout/session memory. With a 500+ song library there is no
+  // reason to recycle the same 20–30 tracks aggressively.
   const current = readJson<string[]>(KEYS.recent, []);
-  if (current.length) return current.slice(0, 32);
-  return readJson<string[]>(LEGACY_KEYS.recent, []).slice(0, 32);
+  if (current.length) return current.slice(0, 72);
+  return readJson<string[]>(LEGACY_KEYS.recent, []).slice(0, 72);
 }
 
 function rememberTrack(trackId: string) {
   writeJson(
     KEYS.recent,
-    [trackId, ...recentIds().filter((id) => id !== trackId)].slice(0, 32),
+    [trackId, ...recentIds().filter((id) => id !== trackId)].slice(0, 72),
   );
 }
 
@@ -372,32 +380,46 @@ function candidateScore(
   }
 
   const seedDna = getSongDna(seed);
+  const currentDna = getSongDna(current);
   const candidateDna = getSongDna(candidate);
 
   const surpriseSimilarityScale = mode === "surprise" ? 0.58 : 1;
   let score = 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
 
   if (normalizedArtist(seed) === normalizedArtist(candidate)) {
-    score += mode === "surprise" ? -8 : 20;
+    score += mode === "surprise" ? -12 : 8;
   }
-  if (normalizedArtist(current) === normalizedArtist(candidate)) score -= 34;
+  // Strong artist cooldown. Repeating an artist immediately should be rare.
+  if (normalizedArtist(current) === normalizedArtist(candidate)) score -= 95;
 
-  if (recent.has(candidate.id)) score -= 130;
-  if (recentArtists.has(normalizedArtist(candidate))) score -= 24;
+  // Recent tracks are effectively excluded, while recent artists carry a
+  // strong cooldown. This is the anti-repeat layer the player was missing.
+  if (recent.has(candidate.id)) score -= 1000;
+  if (recentArtists.has(normalizedArtist(candidate))) score -= 62;
 
+  // Steering commands are directional from the song playing NOW, not merely
+  // similarity tags relative to the original radio seed. This makes a tap on
+  // HEAVIER / FASTER / HARDER audibly change what comes next.
   if (mode === "harder") {
-    score += Math.max(0, candidateDna.energy - seedDna.energy) * 0.7;
-    score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 0.5;
-    score += Math.max(0, candidateDna.drive - seedDna.drive) * 0.4;
+    const gain = (candidateDna.energy - currentDna.energy) * 1.15 + (candidateDna.heavy - currentDna.heavy) * 1.05 + (candidateDna.drive - currentDna.drive) * 0.85;
+    score += gain;
+    if (candidateDna.energy <= currentDna.energy && candidateDna.heavy <= currentDna.heavy) score -= 42;
   } else if (mode === "heavier") {
-    score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 1.05;
+    const delta = candidateDna.heavy - currentDna.heavy;
+    score += delta * 1.85;
+    if (delta <= 0) score -= 36;
   } else if (mode === "faster") {
-    score += Math.max(0, candidateDna.drive - seedDna.drive) * 1.05;
+    const delta = candidateDna.drive - currentDna.drive;
+    score += delta * 1.75;
+    if (delta <= 0) score -= 34;
   } else if (mode === "melodic") {
-    score += Math.max(0, candidateDna.melodic - seedDna.melodic) * 1.05;
+    const delta = candidateDna.melodic - currentDna.melodic;
+    score += delta * 1.65;
+    if (delta <= 0) score -= 24;
   } else if (mode === "darker") {
-    score += Math.max(0, candidateDna.dark - seedDna.dark) * 1.08;
-    score += Math.max(0, candidateDna.heavy - seedDna.heavy) * 0.18;
+    const delta = candidateDna.dark - currentDna.dark;
+    score += delta * 1.70 + Math.max(0, candidateDna.heavy - currentDna.heavy) * 0.30;
+    if (delta <= 0) score -= 28;
   } else if (mode === "surprise") {
     const lowPlayBoost = Math.max(0, 10 - Math.min(10, candidate.play_count)) * 1.25;
     score += lowPlayBoost;
@@ -473,6 +495,7 @@ export function startRadioSession(
 export function chooseAdaptiveNextTrack(
   current: MusicTrack,
   library: MusicTrack[],
+  options: { remember?: boolean } = {},
 ) {
   const radio = readRadioState();
   if (!radio) return null;
@@ -504,7 +527,7 @@ export function chooseAdaptiveNextTrack(
       }))
       .sort((a, b) => b.score - a.score)[0]?.track ?? null;
 
-  if (next) {
+  if (next && options.remember !== false) {
     rememberTrack(next.id);
   }
 
