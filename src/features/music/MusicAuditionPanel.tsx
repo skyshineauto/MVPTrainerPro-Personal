@@ -1766,7 +1766,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   const currentFlashDecision = currentSong && decisionFlash?.songId === currentSong.id ? decisionFlash.decision : null;
   const currentRemaining = currentStats ? Math.max(0, currentStats.total - currentStats.reviewed) : 0;
 
-  return <section className="mvp-audition">
+  return <section className="m36-audition mvp-audition">
     <input ref={fileInputRef} hidden type="file" accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void handleFileChange(event)} />
 
     <header className="mvp-auditionHero">

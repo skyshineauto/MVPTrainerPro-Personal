@@ -73,17 +73,16 @@ import {
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
-import { motion } from "motion/react";
 import { createPortal } from "react-dom";
 import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
 import { MusicPremiumSelect } from "./premium/MusicPremiumSelect";
+import { MvpAction, MvpDensityPicker, MvpMoreMenu, MvpMusicTabs } from "./premium/MusicUiPrimitives";
 import {
   ChevronDownPremiumIcon,
   ChevronUpPremiumIcon,
   EditPremiumIcon,
   HeartPremiumIcon,
   NextPremiumIcon,
-  MorePremiumIcon,
   PausePremiumIcon,
   PlayLessPremiumIcon,
   PlayPremiumIcon,
@@ -93,6 +92,7 @@ import {
   SparkPremiumIcon,
 } from "./premium/MusicLibraryPremiumIcons";
 import "./premium/MusicLibraryPremium.css";
+import "./premium/MusicUiSystem.css";
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -541,21 +541,11 @@ function readCollectionView(key: string, fallback: CollectionView = "grid8"): Co
   return value === "list" || value === "grid4" || value === "grid8" || value === "grid16" ? value : fallback;
 }
 
-function ViewModeIcon({ mode }: { mode: CollectionView }) {
-  if (mode === "list") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 7h3M11 7h8M5 12h3M11 12h8M5 17h3M11 17h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
-  const count = mode === "grid4" ? 2 : mode === "grid8" ? 3 : 4;
-  const cells = Array.from({ length: count * count });
-  const size = count === 2 ? 6.2 : count === 3 ? 4.2 : 3;
-  const gap = count === 2 ? 2.2 : count === 3 ? 1.8 : 1.5;
-  const total = count * size + (count - 1) * gap;
-  const start = (24 - total) / 2;
-  return <svg viewBox="0 0 24 24" aria-hidden>{cells.map((_, index) => { const row=Math.floor(index/count); const col=index%count; return <rect key={index} x={start+col*(size+gap)} y={start+row*(size+gap)} width={size} height={size} rx=".8" fill="currentColor"/>; })}</svg>;
-}
 
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
-  const tabNavRef = useRef<HTMLElement | null>(null);
+  const tabNavRef = useRef<HTMLDivElement | null>(null);
   const player = useMusicPlayer();
 
   const [tab, setTab] = useState<MusicTab>("songs");
@@ -1953,28 +1943,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <nav ref={tabNavRef} className="tr10-tabs" aria-label="Music library sections">
-          {([ ["songs","SONGS"], ["artists","ARTISTS"], ["albums","ALBUMS"], ["playlists","PLAYLISTS"], ["smart","SMART MIX"], ["intelligence","INTELLIGENCE"], ["discover","DISCOVER"], ["audition","AUDITION"] ] as Array<[MusicTab,string]>).map(([value,label]) => (
-            <motion.button
-              type="button"
-              key={value}
-              data-music-tab={value}
-              aria-current={tab === value ? "page" : undefined}
-              className={tab === value ? "is-active" : ""}
-              onClick={() => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }}
-              whileTap={{ scale: 0.982, y: 1 }}
-              transition={{ type: "spring", stiffness: 520, damping: 36, mass: 0.38 }}
-            >
-              <span>{label}</span>
-            </motion.button>
-          ))}
-        </nav>
+        <div ref={tabNavRef}><MvpMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }} /></div>
 
         {message ? <div className="tr10-message">{message}</div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
 
         {tab === "songs" ? <>
-          <div className="tr10-toolbar">
+          <div className="m36-toolbar tr10-toolbar">
             <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
             <MusicPremiumSelect label="ENERGY" value={energyFilter} onChange={(next) => setEnergyFilter(next as EnergyFilter)} options={[{value:"all",label:"All energy"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]} />
             <MusicPremiumSelect label="SORT" value={songSort} onChange={(next) => setSongSort(next as SongSort)} options={(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => ({ value: sort, label: songSortLabel(sort) }))} />
@@ -1983,7 +1958,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
-          <div className="tr10-table is-list">
+          <div className="m36-songTable tr10-table is-list">
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
               <span className="tr10-trackHead">TRACK</span><span className="tr10-timeHead">TIME</span><span className="tr10-energyHead">ENERGY</span>
@@ -2010,21 +1985,18 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span></button>
-                <div className="tr10-actions">
-                  <button type="button" className={`tr10-likeAction ${track.favorite ? "is-liked" : ""}`} aria-pressed={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} title={track.favorite ? "Liked" : "Like"}><HeartPremiumIcon filled={track.favorite} /><span>{track.favorite ? "LIKED" : "LIKE"}</span></button>
-                  <button type="button" className={`tr10-lessAction ${track.play_less ? "is-down" : ""}`} aria-pressed={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} title="Play less"><PlayLessPremiumIcon /><span>PLAY LESS</span></button>
-                  <button type="button" className="tr10-nextAction" onClick={() => playMusicNext(track.id)}><NextPremiumIcon /><span>PLAY NEXT</span></button>
-                  <button type="button" className="tr10-queueAction" onClick={() => addMusicToQueue(track.id)}><QueuePremiumIcon /><span>QUEUE</span></button>
-                  <button type="button" className="tr10-playlistAction" onClick={() => openPlaylistModal([track.id])}><PlaylistPremiumIcon /><span>PLAYLIST</span></button>
-                  <button type="button" className="is-edit tr10-editAction" onClick={() => openDetail(track)}><EditPremiumIcon /><span>EDIT</span></button>
-                  <details className="tr10-moreActions">
-                    <summary><MorePremiumIcon /><span>MORE</span></summary>
-                    <div>
-                      <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); addMusicToQueue(track.id); }}><QueuePremiumIcon /><span>QUEUE</span></button>
-                      <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); openPlaylistModal([track.id]); }}><PlaylistPremiumIcon /><span>PLAYLIST</span></button>
-                      <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); openDetail(track); }}><EditPremiumIcon /><span>EDIT</span></button>
-                    </div>
-                  </details>
+                <div className="m36-trackActions">
+                  <MvpAction icon={<HeartPremiumIcon filled={track.favorite} />} label={track.favorite ? "LIKED" : "LIKE"} tone="green" active={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} />
+                  <MvpAction icon={<PlayLessPremiumIcon />} label="PLAY LESS" tone="red" active={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} />
+                  <MvpAction icon={<NextPremiumIcon />} label="PLAY NEXT" tone="blue" onClick={() => playMusicNext(track.id)} />
+                  <MvpAction icon={<QueuePremiumIcon />} label="QUEUE" className="m36-queuePrimary" onClick={() => addMusicToQueue(track.id)} />
+                  <div className="m36-wideOnly"><MvpAction icon={<PlaylistPremiumIcon />} label="PLAYLIST" tone="amber" onClick={() => openPlaylistModal([track.id])} /></div>
+                  <div className="m36-wideOnly"><MvpAction icon={<EditPremiumIcon />} label="EDIT" onClick={() => openDetail(track)} /></div>
+                  <MvpMoreMenu items={[
+                    { label: "QUEUE", icon: <QueuePremiumIcon />, onClick: () => addMusicToQueue(track.id) },
+                    { label: "PLAYLIST", icon: <PlaylistPremiumIcon />, tone: "amber", onClick: () => openPlaylistModal([track.id]) },
+                    { label: "EDIT", icon: <EditPremiumIcon />, onClick: () => openDetail(track) },
+                  ]} />
                 </div>
               </article>;
             })}
@@ -2051,8 +2023,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onPlaylist={(track) => openPlaylistModal([track.id])}
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
-          <header className="tr34-collectionTools"><div><span>ARTIST DIRECTORY</span><h3>{artistGroups.length} artists</h3></div><div className="tr34-density" role="group" aria-label="Artist view density">{(["list","grid4","grid8","grid16"] as CollectionView[]).map((mode) => <button key={mode} type="button" className={artistView===mode ? "is-active" : ""} aria-pressed={artistView===mode} onClick={() => setArtistView(mode)}><ViewModeIcon mode={mode}/><span>{mode === "list" ? "LIST" : mode.replace("grid","") + "×" + mode.replace("grid","")}</span></button>)}</div></header>
-          <div className={`tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
+          <header className="tr34-collectionTools"><div><span>ARTIST DIRECTORY</span><h3>{artistGroups.length} artists</h3></div><MvpDensityPicker value={artistView} onChange={(mode) => setArtistView(mode as CollectionView)} label="Artist view density" /></header>
+          <div className={`m36-collectionGrid tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
             <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`} title={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div></button>
             <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}><PlayPremiumIcon /><span>PLAY</span></button>
           </article>)}</div>
@@ -2076,14 +2048,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onPlaylist={(track) => openPlaylistModal([track.id])}
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
-          <header className="tr34-collectionTools"><div><span>ALBUM DIRECTORY</span><h3>{albumGroups.length} albums</h3></div><div className="tr34-density" role="group" aria-label="Album view density">{(["list","grid4","grid8","grid16"] as CollectionView[]).map((mode) => <button key={mode} type="button" className={albumView===mode ? "is-active" : ""} aria-pressed={albumView===mode} onClick={() => setAlbumView(mode)}><ViewModeIcon mode={mode}/><span>{mode === "list" ? "LIST" : mode.replace("grid","") + "×" + mode.replace("grid","")}</span></button>)}</div></header>
-          <div className={`tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
+          <header className="tr34-collectionTools"><div><span>ALBUM DIRECTORY</span><h3>{albumGroups.length} albums</h3></div><MvpDensityPicker value={albumView} onChange={(mode) => setAlbumView(mode as CollectionView)} label="Album view density" /></header>
+          <div className={`m36-collectionGrid tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
             <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`} title={`${group.album} • ${group.artist}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div></button>
             <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}><PlayPremiumIcon /><span>PLAY</span></button>
           </article>)}</div>
         </section> : null}
 
-        {tab === "playlists" ? <section className="tr21-playlists">
+        {tab === "playlists" ? <section className="m36-playlists tr21-playlists">
           <aside className="tr21-playlistDock">
             <div className="tr21-playlistDockHead"><span>YOUR COLLECTIONS</span><b>{regularPlaylists.length}</b></div>
             <div className="tr21-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="Name a new playlist" onKeyDown={(event) => { if (event.key === "Enter") void createPlaylist(); }} /><button type="button" onClick={() => void createPlaylist()} aria-label="Create playlist">+</button></div>
@@ -2100,7 +2072,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </> : <div className="tr21-playlistEmpty is-stage"><b>BUILD YOUR FIRST COLLECTION</b><span>Create a playlist on the left to turn your library into a dedicated listening collection.</span></div>}</section>
         </section> : null}
 
-        {tab === "smart" ? <section className="tr34-smart">
+        {tab === "smart" ? <section className="m36-smart tr34-smart">
           <header className="tr34-smartHead"><div><span>SMART MIX</span><h2>Build a workout soundtrack</h2><p>Choose the training character and length. MVP ranks the unplayed pool first, so steering never forces early repeats.</p></div><div><strong>{smartEligibleCount}</strong><span>ELIGIBLE SONGS</span></div></header>
           <div className="tr34-smartModes">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => { const copy = value === "high" ? "Aggressive, heavy, high-drive" : value === "balanced" ? "Strong energy with more variation" : "Lower intensity and smoother pacing"; const dna = value === "high" ? "ENERGY 90 • HEAVY 82 • DRIVE 92" : value === "balanced" ? "ENERGY 72 • HEAVY 62 • DRIVE 74" : "ENERGY 52 • MELODIC 72 • DRIVE 55"; return <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}><span>{value.toUpperCase()}</span><strong>{copy}</strong><small>{dna}</small></button>; })}</div>
           <div className="tr34-smartBuildRow">
@@ -2117,7 +2089,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         ) : null}
         {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
-        {tab === "discover" ? <section className="tr10-discover">
+        {tab === "discover" ? <section className="m36-discover tr10-discover">
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
             <header className="tr10-radarHead">
               <div><span>DISCOVERY RADAR</span><h2>Your library, resurfaced intelligently</h2><p>Forgotten favorites, deep cuts, long-unplayed tracks, recent Likes, and high-energy music worth bringing back.</p></div>
