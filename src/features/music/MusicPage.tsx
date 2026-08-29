@@ -74,9 +74,10 @@ import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
 import { createPortal } from "react-dom";
+import { motion } from "motion/react";
 import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
 import { MusicPremiumSelect } from "./premium/MusicPremiumSelect";
-import { MvpAction, MvpDensityPicker, MvpMoreMenu, MvpMusicTabs } from "./premium/MusicUiPrimitives";
+import { MvpAction, MvpDensityPicker, MvpMusicTabs, MvpPrimaryAction } from "./premium/MusicUiPrimitives";
 import {
   ChevronDownPremiumIcon,
   ChevronUpPremiumIcon,
@@ -402,24 +403,19 @@ function DiscoveryCard({
 }) {
   const previewing = previewingId === item.id;
   const previewError = previewErrorId === item.id;
-  return <article className={item.inLibrary ? "is-owned" : ""}>
-    {item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}
-    <div>
-      <small className={`tr10-discoverType is-${item.discoveryType}`}>{discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
+  return <article className={`m37-discoveryCard ${item.inLibrary ? "is-owned" : ""}`}>
+    <div className="m37-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}</div>
+    <div className="m37-discoveryCopy">
       <strong>{item.title}</strong>
       <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
-      <p>{item.reason}</p>
+      <small>{item.reason || discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
     </div>
-    <footer>
-      {item.previewUrl
-        ? <button className={`tr10-previewButton ${previewing ? "is-playing" : ""}`} onClick={() => onPreview(item)}>{previewing ? <><PausePremiumIcon /><span>STOP PREVIEW</span></> : previewError ? <><SparkPremiumIcon /><span>RETRY PREVIEW</span></> : <><PlayPremiumIcon /><span>PREVIEW</span></>}</button>
-        : <span className="tr10-previewUnavailable">PREVIEW UNAVAILABLE</span>}
-      {item.inLibrary
-        ? <b>✓ IN YOUR LIBRARY</b>
-        : <button className={saved ? "is-toAdd" : ""} disabled={saved || saving} onClick={() => onSave(item)}>{saved ? "✓ SAVED" : saving ? "SAVING…" : "MARK TO ADD"}</button>}
-      <button onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}>NOT INTERESTED</button>
-      {item.storeUrl ? <a className="tr10-storeLink" href={item.storeUrl} target="_blank" rel="noreferrer">APPLE MUSIC</a> : null}
-    </footer>
+    <div className="m37-discoveryActions">
+      {item.previewUrl ? <button type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></button> : <span className="is-disabled"><PlayPremiumIcon /><span>NO PREVIEW</span></span>}
+      {item.inLibrary ? <span className="is-owned"><HeartPremiumIcon filled /><span>IN LIBRARY</span></span> : <button type="button" className={`is-add ${saved ? "is-active" : ""}`} disabled={saved || saving} onClick={() => onSave(item)}><PlaylistPremiumIcon /><span>{saved ? "ADDED" : saving ? "ADDING…" : "ADD"}</span></button>}
+      <button type="button" className="is-dismiss" onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}><PlayLessPremiumIcon /><span>NOT INTERESTED</span></button>
+      {item.storeUrl ? <a className="is-store" href={item.storeUrl} target="_blank" rel="noreferrer"><SparkPremiumIcon /><span>APPLE MUSIC</span></a> : null}
+    </div>
   </article>;
 }
 
@@ -441,23 +437,17 @@ function SavedSongCard({
 }) {
   const previewing = previewingId === item.id;
   const previewError = previewErrorId === item.id;
-  return <article className={item.inLibrary ? "is-owned" : ""}>
-    {item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div className="tr10-discoverArt">♫</div>}
-    <div>
-      <small className={`tr10-discoverType is-${item.discoveryType}`}>{discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
-      <strong>{item.title}</strong>
-      <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
-      <p>Saved from {item.seedTrackTitle}{item.seedTrackArtist ? ` • ${item.seedTrackArtist}` : ""}</p>
+  return <article className={`m37-discoveryCard is-saved ${item.inLibrary ? "is-owned" : ""}`}>
+    <div className="m37-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}</div>
+    <div className="m37-discoveryCopy"><strong>{item.title}</strong><span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span><small>Saved from {item.seedTrackTitle}</small></div>
+    <div className="m37-discoveryActions">
+      {item.previewUrl ? <button type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></button> : null}
+      {item.storeUrl ? <a className="is-store" href={item.storeUrl} target="_blank" rel="noreferrer"><SparkPremiumIcon /><span>APPLE MUSIC</span></a> : null}
+      <button type="button" className="is-dismiss" disabled={removing} onClick={() => onDelete(item)}><PlayLessPremiumIcon /><span>{removing ? "REMOVING…" : "REMOVE"}</span></button>
     </div>
-    <footer>
-      {item.previewUrl
-        ? <button className={`tr10-previewButton ${previewing ? "is-playing" : ""}`} onClick={() => onPreview(item)}>{previewing ? <><PausePremiumIcon /><span>STOP PREVIEW</span></> : previewError ? <><SparkPremiumIcon /><span>RETRY PREVIEW</span></> : <><PlayPremiumIcon /><span>PREVIEW</span></>}</button>
-        : <span className="tr10-previewUnavailable">PREVIEW UNAVAILABLE</span>}
-      {item.storeUrl ? <a className="tr10-storeLink" href={item.storeUrl} target="_blank" rel="noreferrer">APPLE MUSIC</a> : null}
-      <button className="tr10-savedDelete" disabled={removing} onClick={() => onDelete(item)}>{removing ? "DELETING…" : "DELETE"}</button>
-    </footer>
   </article>;
 }
+
 
 
 type CollectionDetailViewProps = {
@@ -586,6 +576,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [reviewSavedIds, setReviewSavedIds] = useState<Set<string>>(new Set());
   const [reviewSkippedIds, setReviewSkippedIds] = useState<Set<string>>(new Set());
   const [smartMinutes, setSmartMinutes] = useState(60);
+  const [smartCustom, setSmartCustom] = useState(false);
   const [smartIntensity, setSmartIntensity] = useState<SmartIntensity>("high");
   const [discoverySeeds, setDiscoverySeeds] = useState<MusicDiscoverySeed[]>(() => listMusicDiscoverySeeds());
   const [savedDiscoverySongs, setSavedDiscoverySongs] = useState<MusicDiscoverySavedSong[]>(() => listMusicDiscoverySavedSongs());
@@ -1949,7 +1940,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {error ? <div className="tr10-error">{error}</div> : null}
 
         {tab === "songs" ? <>
-          <div className="m36-toolbar tr10-toolbar">
+          <div className="m37-toolbar tr10-toolbar">
             <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
             <MusicPremiumSelect label="ENERGY" value={energyFilter} onChange={(next) => setEnergyFilter(next as EnergyFilter)} options={[{value:"all",label:"All energy"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]} />
             <MusicPremiumSelect label="SORT" value={songSort} onChange={(next) => setSongSort(next as SongSort)} options={(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => ({ value: sort, label: songSortLabel(sort) }))} />
@@ -1958,7 +1949,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
-          <div className="m36-songTable tr10-table is-list">
+          <div className="m37-songTable tr10-table is-list">
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
               <span className="tr10-trackHead">TRACK</span><span className="tr10-timeHead">TIME</span><span className="tr10-energyHead">ENERGY</span>
@@ -1985,18 +1976,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span></button>
-                <div className="m36-trackActions">
+                <div className="m37-trackActions">
                   <MvpAction icon={<HeartPremiumIcon filled={track.favorite} />} label={track.favorite ? "LIKED" : "LIKE"} tone="green" active={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} />
                   <MvpAction icon={<PlayLessPremiumIcon />} label="PLAY LESS" tone="red" active={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} />
                   <MvpAction icon={<NextPremiumIcon />} label="PLAY NEXT" tone="blue" onClick={() => playMusicNext(track.id)} />
-                  <MvpAction icon={<QueuePremiumIcon />} label="QUEUE" className="m36-queuePrimary" onClick={() => addMusicToQueue(track.id)} />
-                  <div className="m36-wideOnly"><MvpAction icon={<PlaylistPremiumIcon />} label="PLAYLIST" tone="amber" onClick={() => openPlaylistModal([track.id])} /></div>
-                  <div className="m36-wideOnly"><MvpAction icon={<EditPremiumIcon />} label="EDIT" onClick={() => openDetail(track)} /></div>
-                  <MvpMoreMenu items={[
-                    { label: "QUEUE", icon: <QueuePremiumIcon />, onClick: () => addMusicToQueue(track.id) },
-                    { label: "PLAYLIST", icon: <PlaylistPremiumIcon />, tone: "amber", onClick: () => openPlaylistModal([track.id]) },
-                    { label: "EDIT", icon: <EditPremiumIcon />, onClick: () => openDetail(track) },
-                  ]} />
+                  <MvpAction icon={<QueuePremiumIcon />} label="QUEUE" onClick={() => addMusicToQueue(track.id)} />
+                  <MvpAction icon={<PlaylistPremiumIcon />} label="PLAYLIST" tone="amber" onClick={() => openPlaylistModal([track.id])} />
+                  <MvpAction icon={<EditPremiumIcon />} label="EDIT" onClick={() => openDetail(track)} />
                 </div>
               </article>;
             })}
@@ -2024,7 +2010,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
           <header className="tr34-collectionTools"><div><span>ARTIST DIRECTORY</span><h3>{artistGroups.length} artists</h3></div><MvpDensityPicker value={artistView} onChange={(mode) => setArtistView(mode as CollectionView)} label="Artist view density" /></header>
-          <div className={`m36-collectionGrid tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
+          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
             <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`} title={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div></button>
             <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}><PlayPremiumIcon /><span>PLAY</span></button>
           </article>)}</div>
@@ -2049,13 +2035,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
           <header className="tr34-collectionTools"><div><span>ALBUM DIRECTORY</span><h3>{albumGroups.length} albums</h3></div><MvpDensityPicker value={albumView} onChange={(mode) => setAlbumView(mode as CollectionView)} label="Album view density" /></header>
-          <div className={`m36-collectionGrid tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
+          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
             <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`} title={`${group.album} • ${group.artist}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div></button>
             <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}><PlayPremiumIcon /><span>PLAY</span></button>
           </article>)}</div>
         </section> : null}
 
-        {tab === "playlists" ? <section className="m36-playlists tr21-playlists">
+        {tab === "playlists" ? <section className="m37-playlists tr21-playlists">
           <aside className="tr21-playlistDock">
             <div className="tr21-playlistDockHead"><span>YOUR COLLECTIONS</span><b>{regularPlaylists.length}</b></div>
             <div className="tr21-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="Name a new playlist" onKeyDown={(event) => { if (event.key === "Enter") void createPlaylist(); }} /><button type="button" onClick={() => void createPlaylist()} aria-label="Create playlist">+</button></div>
@@ -2065,22 +2051,25 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             <header className="tr21-playlistHero">
               <div className="tr21-playlistArt">{selectedPlaylistTracks[0] ? <TrackArtwork track={selectedPlaylistTracks[0]} size="card" /> : <span>♫</span>}<i aria-hidden /></div>
               <div className="tr21-playlistHeroCopy"><small>MVP COLLECTION</small><h2>{selectedPlaylist.name}</h2><p>{selectedPlaylistTracks.length ? `${selectedPlaylistTracks.length} tracks curated from your private library.` : "This collection is ready for its first tracks."}</p><div className="tr21-playlistMetrics"><span><b>{selectedPlaylistTracks.length}</b><small>TRACKS</small></span><span><b>{formatLongDuration(selectedPlaylistDurationSeconds)}</b><small>PLAY TIME</small></span><span><b>{selectedPlaylistHighEnergy}</b><small>HIGH ENERGY</small></span><span><b>{selectedPlaylistLiked}</b><small>LIKED</small></span></div></div>
-              <div className="tr21-playlistHeroActions"><button type="button" className="is-play" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()}><i aria-hidden><PlayPremiumIcon /></i><span><strong>PLAY</strong><small>Start collection</small></span></button><button type="button" className="is-shuffle" disabled={!selectedPlaylistTracks.length} onClick={() => void playCollectionShuffle(`Playlist • ${selectedPlaylist.name}`, selectedPlaylistTracks)}><i aria-hidden><ShufflePremiumIcon /></i><span><strong>MIX</strong><small>Shuffle intelligently</small></span></button><button type="button" className="is-export" disabled={!selectedPlaylistTracks.length} onClick={openBurnStudio}><i aria-hidden><SparkPremiumIcon /></i><span><strong>EXPORT</strong><small>Burn / export CD</small></span></button><button type="button" className="is-delete" onClick={() => void removePlaylist(selectedPlaylist)} aria-label={`Delete ${selectedPlaylist.name}`}>DELETE</button></div>
+              <div className="m37-playlistActions tr21-playlistHeroActions"><motion.button type="button" className="is-play" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()} whileTap={{scale:.97}}><PlayPremiumIcon /><strong>PLAY</strong></motion.button><motion.button type="button" className="is-shuffle" disabled={!selectedPlaylistTracks.length} onClick={() => void playCollectionShuffle(`Playlist • ${selectedPlaylist.name}`, selectedPlaylistTracks)} whileTap={{scale:.97}}><ShufflePremiumIcon /><strong>MIX</strong></motion.button><motion.button type="button" className="is-export" disabled={!selectedPlaylistTracks.length} onClick={openBurnStudio} whileTap={{scale:.97}}><SparkPremiumIcon /><strong>EXPORT</strong></motion.button><button type="button" className="is-delete" onClick={() => void removePlaylist(selectedPlaylist)} aria-label={`Delete ${selectedPlaylist.name}`}>DELETE</button></div>
             </header>
             <div className="tr21-playlistRailHead"><div><span>TRACKS</span><strong>{selectedPlaylistTracks.length} SONG{selectedPlaylistTracks.length===1?"":"S"}</strong></div><button type="button" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED</button></div>
             <div className="tr21-playlistTracks">{selectedPlaylistTracks.length ? selectedPlaylistTracks.map((track,index) => <article key={track.id} className={player.currentTrack?.id===track.id ? "is-current" : ""}><span className="tr21-trackNumber">{String(index+1).padStart(2,"0")}</span><TrackArtwork track={track} /><div className="tr21-playlistTrackCopy"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span></div><span className={`tr21-playlistEnergy is-${track.energy_level}`}><i />{track.energy_level.toUpperCase()}</span><span className="tr21-playlistDuration">{formatDuration(track.duration_seconds)}</span><div className="tr21-playlistTrackActions"><button type="button" className="is-trackPlay" onClick={() => void playSelectedPlaylist(track.id)} aria-label={`Play ${track.title}`}><PlayPremiumIcon /></button><button type="button" disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }} aria-label={`Move ${track.title} up`}><ChevronUpPremiumIcon /></button><button type="button" disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }} aria-label={`Move ${track.title} down`}><ChevronDownPremiumIcon /></button><button type="button" className="is-remove" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></div></article>) : <div className="tr21-playlistEmpty"><b>EMPTY COLLECTION</b><span>Select songs in the Songs tab, then route them here.</span></div>}</div>
           </> : <div className="tr21-playlistEmpty is-stage"><b>BUILD YOUR FIRST COLLECTION</b><span>Create a playlist on the left to turn your library into a dedicated listening collection.</span></div>}</section>
         </section> : null}
 
-        {tab === "smart" ? <section className="m36-smart tr34-smart">
-          <header className="tr34-smartHead"><div><span>SMART MIX</span><h2>Build a workout soundtrack</h2><p>Choose the training character and length. MVP ranks the unplayed pool first, so steering never forces early repeats.</p></div><div><strong>{smartEligibleCount}</strong><span>ELIGIBLE SONGS</span></div></header>
-          <div className="tr34-smartModes">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => { const copy = value === "high" ? "Aggressive, heavy, high-drive" : value === "balanced" ? "Strong energy with more variation" : "Lower intensity and smoother pacing"; const dna = value === "high" ? "ENERGY 90 • HEAVY 82 • DRIVE 92" : value === "balanced" ? "ENERGY 72 • HEAVY 62 • DRIVE 74" : "ENERGY 52 • MELODIC 72 • DRIVE 55"; return <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}><span>{value.toUpperCase()}</span><strong>{copy}</strong><small>{dna}</small></button>; })}</div>
-          <div className="tr34-smartBuildRow">
-            <section><span>SESSION LENGTH</span><div className="tr34-durationChoices">{[45,60,75,90].map((minutes) => <button key={minutes} className={smartMinutes===minutes ? "is-active" : ""} onClick={() => setSmartMinutes(minutes)}>{minutes}<small>MIN</small></button>)}<label><input type="number" min={15} max={240} step={5} value={smartMinutes} onChange={(event) => setSmartMinutes(Math.max(15,Math.min(240,Number(event.target.value)||60)))} /><small>CUSTOM</small></label></div></section>
-            <section className="tr34-smartSummary"><span>BUILDING FROM</span><div><b>{smartEligibleCount}</b><small>ELIGIBLE</small></div><div><b>{likedCount}</b><small>LIKED</small></div><div><b>{smartEstimatedSongs}</b><small>EST. TRACKS</small></div><div><b>ON</b><small>NO-REPEAT CYCLE</small></div></section>
-          </div>
-          <button className="tr34-smartLaunch" onClick={() => void buildAndPlaySmartMix(smartIntensity)}><SparkPremiumIcon /><span>BUILD {smartIntensity.toUpperCase()} MIX</span><small>{smartMinutes} min • ~{smartEstimatedSongs} tracks • repeat protected</small></button>
-          <section className="tr34-savedMixes"><header><span>SAVED MIXES</span><b>{smartMixPlaylists.length}</b></header><div>{(["high","balanced","recovery"] as SmartIntensity[]).map((mode) => { const name=SMART_MIX_NAMES[mode]; const playlist=smartMixPlaylists.find((item)=>item.name===name); const ids=playlist ? playlistTrackIds[playlist.id] || [] : []; const duration=ids.reduce((sum,id)=>{ const found=tracks.find((track)=>track.id===id); return sum+(found ? trackDuration(found) : 0); },0); return <article key={mode}><div><small>{mode.toUpperCase()}</small><h3>{name}</h3><p>{playlist ? `${ids.length} tracks • ${formatLongDuration(duration)}` : "Not built yet"}</p></div><div>{playlist ? <><button onClick={() => void playSavedSmartMix(playlist)}><PlayPremiumIcon /><span>PLAY</span></button><button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>REBUILD</button></> : <button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>BUILD</button>}</div></article>; })}</div></section>
+        {tab === "smart" ? <section className="m37-smart">
+          <header className="m37-smartHead"><div><span>SMART MIX</span><h2>Workout Soundtrack</h2></div><strong>{smartEligibleCount}<small>ELIGIBLE</small></strong></header>
+          <section className="m37-smartModes" aria-label="Smart Mix mode">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => {
+            const title = value === "high" ? "Maximum drive" : value === "balanced" ? "Sustained energy" : "Smooth pacing";
+            const copy = value === "high" ? "Hard sets and finishers" : value === "balanced" ? "Strong training with more variety" : "Warm-ups, lighter work and cooldowns";
+            const dna = value === "high" ? "ENERGY 90  •  HEAVY 82  •  DRIVE 92" : value === "balanced" ? "ENERGY 72  •  HEAVY 62  •  DRIVE 74" : "ENERGY 52  •  MELODIC 72  •  DRIVE 55";
+            return <motion.button key={value} type="button" className={smartIntensity===value ? "is-active" : ""} aria-pressed={smartIntensity===value} onClick={() => setSmartIntensity(value)} whileTap={{scale:.975}}><span>{value.toUpperCase()}</span><strong>{title}</strong><p>{copy}</p><small>{dna}</small></motion.button>;
+          })}</section>
+          <section className="m37-smartLength"><header><span>SESSION LENGTH</span><b>~{smartEstimatedSongs} TRACKS</b></header><div className="m37-smartLengthChoices">{[45,60,75,90].map((minutes) => <motion.button key={minutes} type="button" className={!smartCustom && smartMinutes===minutes ? "is-active" : ""} aria-pressed={!smartCustom && smartMinutes===minutes} onClick={() => {setSmartCustom(false);setSmartMinutes(minutes);}} whileTap={{scale:.97}}><strong>{minutes}</strong><small>MIN</small></motion.button>)}<motion.button type="button" className={smartCustom ? "is-active is-custom" : "is-custom"} aria-pressed={smartCustom} onClick={() => {setSmartCustom(true);if ([45,60,75,90].includes(smartMinutes)) setSmartMinutes(105);}} whileTap={{scale:.97}}><strong>CUSTOM</strong><small>{smartCustom ? `${smartMinutes} MIN` : "SET TIME"}</small></motion.button></div>{smartCustom ? <div className="m37-smartStepper"><button type="button" onClick={() => setSmartMinutes((value) => Math.max(15,value-5))}>−</button><strong>{smartMinutes}<small>MIN</small></strong><button type="button" onClick={() => setSmartMinutes((value) => Math.min(240,value+5))}>+</button></div> : null}</section>
+          <div className="m37-smartInputs"><span>{smartEligibleCount} eligible</span><span>{likedCount} liked</span><span>~{smartEstimatedSongs} tracks</span><span className="is-on">Repeat protection ON</span></div>
+          <MvpPrimaryAction className="m37-smartBuild" icon={<SparkPremiumIcon />} onClick={() => void buildAndPlaySmartMix(smartIntensity)}>BUILD {smartIntensity.toUpperCase()} MIX</MvpPrimaryAction>
+          <section className="m37-savedMixes"><header><h3>SAVED MIXES</h3><span>{smartMixPlaylists.length} SAVED</span></header><div>{(["high","balanced","recovery"] as SmartIntensity[]).map((mode) => { const name=SMART_MIX_NAMES[mode]; const playlist=smartMixPlaylists.find((item)=>item.name===name); const ids=playlist ? playlistTrackIds[playlist.id] || [] : []; const duration=ids.reduce((sum,id)=>{ const found=tracks.find((track)=>track.id===id); return sum+(found ? trackDuration(found) : 0); },0); return <article key={mode}><div><small>{mode.toUpperCase()}</small><strong>{name}</strong><span>{playlist ? `${ids.length} tracks • ${formatLongDuration(duration)}` : "Not built yet"}</span></div><div>{playlist ? <><motion.button type="button" className="is-play" onClick={() => void playSavedSmartMix(playlist)} whileTap={{scale:.96}}><PlayPremiumIcon /><b>PLAY</b></motion.button><motion.button type="button" className="is-rebuild" onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}} whileTap={{scale:.96}}><SparkPremiumIcon /><b>REBUILD</b></motion.button></> : <motion.button type="button" className="is-build" onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}} whileTap={{scale:.96}}><SparkPremiumIcon /><b>BUILD</b></motion.button>}</div></article>; })}</div></section>
         </section> : null}
 
         {/* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: INTELLIGENCE PANEL */}
@@ -2089,10 +2078,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         ) : null}
         {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
-        {tab === "discover" ? <section className="m36-discover tr10-discover">
+        {tab === "discover" ? <section className="m37-discover tr10-discover">
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
             <header className="tr10-radarHead">
-              <div><span>DISCOVERY RADAR</span><h2>Your library, resurfaced intelligently</h2><p>Forgotten favorites, deep cuts, long-unplayed tracks, recent Likes, and high-energy music worth bringing back.</p></div>
+              <div><span>DISCOVERY RADAR</span><h2>Library Radar</h2></div>
               <strong>{discoveryRadar.reduce((sum, lane) => sum + lane.tracks.length, 0)}</strong>
             </header>
             <div className="tr10-radarGrid">
@@ -2104,8 +2093,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </section>
 
           <header className="tr10-discoverHead">
-            <div><span>REDISCOVER ARCHIVE</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Your saved music discovery library"}</h2><p>{discoveryView === "saved" ? "Songs you marked to get later. Preview them again, then delete them when you are done." : "More from the seed artist, genuinely similar current music, same-era matches, and hidden gems across eras. Saved to your account so you can come back later."}</p></div>
-            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? "5 SONGS PER PAGE" : `${discoverySeeds.length} SAVED SEED${discoverySeeds.length === 1 ? "" : "S"} • 4 CURATED LANES`}</small></div>
+            <div><span>REDISCOVER</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Discover"}</h2></div>
+            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? `${savedDiscoverySongs.length} TOTAL` : `${discoverySeeds.length} SEED${discoverySeeds.length === 1 ? "" : "S"}`}</small></div>
           </header>
 
           {(discoverySeeds.length || savedDiscoverySongs.length) ? <div className="tr10-discoverArchiveTools">
