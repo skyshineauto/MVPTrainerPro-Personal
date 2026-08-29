@@ -22,10 +22,10 @@ function Icon({ children, title, className = "", viewBox = "0 0 24 24", ...props
 const line = { stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
 export function PlayPremiumIcon(props: BaseIconProps) {
-  return <Icon {...props}><path d="M9 7.25 17 12l-8 4.75V7.25Z" fill="currentColor" /><circle cx="12" cy="12" r="9" {...line} opacity=".35" /></Icon>;
+  return <Icon {...props}><path d="M8.1 6.2 18 12 8.1 17.8V6.2Z" fill="currentColor" /><path d="M5.6 7.2v9.6" {...line} opacity=".42" /></Icon>;
 }
 export function PausePremiumIcon(props: BaseIconProps) {
-  return <Icon {...props}><rect x="8.2" y="7" width="2.6" height="10" rx="1" fill="currentColor"/><rect x="13.2" y="7" width="2.6" height="10" rx="1" fill="currentColor"/><circle cx="12" cy="12" r="9" {...line} opacity=".35" /></Icon>;
+  return <Icon {...props}><rect x="7.2" y="6.1" width="3.35" height="11.8" rx="1.2" fill="currentColor"/><rect x="13.45" y="6.1" width="3.35" height="11.8" rx="1.2" fill="currentColor"/></Icon>;
 }
 export function HeartPremiumIcon({ filled = false, ...props }: BaseIconProps & { filled?: boolean }) {
   return <Icon {...props}><path d="M20.2 8.8c0 5-8.2 9.6-8.2 9.6S3.8 13.8 3.8 8.8A4.2 4.2 0 0 1 12 7.45 4.2 4.2 0 0 1 20.2 8.8Z" {...line} fill={filled ? "currentColor" : "none"}/></Icon>;

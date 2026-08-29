@@ -120,6 +120,7 @@ type SongSort =
   | "energy_low";
 type EnergyFilter = "all" | MusicEnergyLevel;
 type LibraryView = "list" | "grid";
+type CollectionView = "list" | "grid4" | "grid8" | "grid16";
 type PageSize = 12 | 24 | 48;
 type DetailMode = "edit" | "info_results" | "artwork_results";
 type DetailSaveState = "idle" | "searching" | "saving" | "changed" | "error";
@@ -534,6 +535,23 @@ function CollectionDetailView({
   </section>;
 }
 
+function readCollectionView(key: string, fallback: CollectionView = "grid8"): CollectionView {
+  if (typeof window === "undefined") return fallback;
+  const value = window.localStorage.getItem(key);
+  return value === "list" || value === "grid4" || value === "grid8" || value === "grid16" ? value : fallback;
+}
+
+function ViewModeIcon({ mode }: { mode: CollectionView }) {
+  if (mode === "list") return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 7h3M11 7h8M5 12h3M11 12h8M5 17h3M11 17h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
+  const count = mode === "grid4" ? 2 : mode === "grid8" ? 3 : 4;
+  const cells = Array.from({ length: count * count });
+  const size = count === 2 ? 6.2 : count === 3 ? 4.2 : 3;
+  const gap = count === 2 ? 2.2 : count === 3 ? 1.8 : 1.5;
+  const total = count * size + (count - 1) * gap;
+  const start = (24 - total) / 2;
+  return <svg viewBox="0 0 24 24" aria-hidden>{cells.map((_, index) => { const row=Math.floor(index/count); const col=index%count; return <rect key={index} x={start+col*(size+gap)} y={start+row*(size+gap)} width={size} height={size} rx=".8" fill="currentColor"/>; })}</svg>;
+}
+
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
@@ -551,6 +569,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [songSearch, setSongSearch] = useState("");
   const [songSort, setSongSort] = useState<SongSort>("library");
   const [libraryView, setLibraryView] = useState<LibraryView>("list");
+  const [artistView, setArtistView] = useState<CollectionView>(() => readCollectionView("mvp_music_artist_view_v1", "grid8"));
+  const [albumView, setAlbumView] = useState<CollectionView>(() => readCollectionView("mvp_music_album_view_v1", "grid8"));
   const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
   const [healthFilter, setHealthFilter] = useState<LibraryHealth>("all");
   const [pageSize, setPageSize] = useState<PageSize>(24);
@@ -1893,10 +1913,17 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     activeButton.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   }, [tab]);
 
+  useEffect(() => { try { window.localStorage.setItem("mvp_music_artist_view_v1", artistView); } catch {} }, [artistView]);
+  useEffect(() => { try { window.localStorage.setItem("mvp_music_album_view_v1", albumView); } catch {} }, [albumView]);
+
+  const averageTrackSeconds = tracks.length ? tracks.reduce((sum, track) => sum + Math.max(120, Number(track.duration_seconds || 210)), 0) / tracks.length : 210;
+  const smartEstimatedSongs = Math.max(1, Math.round((smartMinutes * 60) / averageTrackSeconds));
+  const smartEligibleCount = tracks.filter((track) => !track.play_less).length;
+
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
   return (
-    <main className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><MusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
+    <main data-mvp-music="flagship" className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><MusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
       <section className="tr10-hero">
         <div><h1>My Music</h1></div>
         <button type="button" onClick={goBack}>BACK TO TRAINER</button>
@@ -1939,7 +1966,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               whileTap={{ scale: 0.982, y: 1 }}
               transition={{ type: "spring", stiffness: 520, damping: 36, mass: 0.38 }}
             >
-              {tab === value ? <motion.span className="tr10-tabEnergy" layoutId="music-library-active-tab" transition={{ type: "spring", stiffness: 450, damping: 36 }} /> : null}
               <span>{label}</span>
             </motion.button>
           ))}
@@ -2018,10 +2044,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onPlayLess={(track) => void changePreference(track, track.play_less ? "neutral" : "play_less")}
           onPlaylist={(track) => openPlaylistModal([track.id])}
           onEdit={openDetail}
-        /> : <div className="tr10-cardGrid">{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
-          <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div><span className="tr10-collectionChevron" aria-hidden>›</span></button>
-          <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}><PlayPremiumIcon /><span>PLAY</span></button>
-        </article>)}</div> : null}
+        /> : <section className="tr34-collectionBrowse">
+          <header className="tr34-collectionTools"><div><span>ARTIST DIRECTORY</span><h3>{artistGroups.length} artists</h3></div><div className="tr34-density" role="group" aria-label="Artist view density">{(["list","grid4","grid8","grid16"] as CollectionView[]).map((mode) => <button key={mode} type="button" className={artistView===mode ? "is-active" : ""} aria-pressed={artistView===mode} onClick={() => setArtistView(mode)}><ViewModeIcon mode={mode}/><span>{mode === "list" ? "LIST" : mode.replace("grid","") + "×" + mode.replace("grid","")}</span></button>)}</div></header>
+          <div className={`tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
+            <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div></button>
+            <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}><PlayPremiumIcon /><span>PLAY</span></button>
+          </article>)}</div>
+        </section> : null}
 
         {tab === "albums" ? activeAlbumDetail ? <CollectionDetailView
           kind="album"
@@ -2040,10 +2069,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onPlayLess={(track) => void changePreference(track, track.play_less ? "neutral" : "play_less")}
           onPlaylist={(track) => openPlaylistModal([track.id])}
           onEdit={openDetail}
-        /> : <div className="tr10-cardGrid">{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
-          <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div><span className="tr10-collectionChevron" aria-hidden>›</span></button>
-          <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}><PlayPremiumIcon /><span>PLAY</span></button>
-        </article>)}</div> : null}
+        /> : <section className="tr34-collectionBrowse">
+          <header className="tr34-collectionTools"><div><span>ALBUM DIRECTORY</span><h3>{albumGroups.length} albums</h3></div><div className="tr34-density" role="group" aria-label="Album view density">{(["list","grid4","grid8","grid16"] as CollectionView[]).map((mode) => <button key={mode} type="button" className={albumView===mode ? "is-active" : ""} aria-pressed={albumView===mode} onClick={() => setAlbumView(mode)}><ViewModeIcon mode={mode}/><span>{mode === "list" ? "LIST" : mode.replace("grid","") + "×" + mode.replace("grid","")}</span></button>)}</div></header>
+          <div className={`tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
+            <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div></button>
+            <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}><PlayPremiumIcon /><span>PLAY</span></button>
+          </article>)}</div>
+        </section> : null}
 
         {tab === "playlists" ? <section className="tr21-playlists">
           <aside className="tr21-playlistDock">
@@ -2062,10 +2094,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </> : <div className="tr21-playlistEmpty is-stage"><b>BUILD YOUR FIRST COLLECTION</b><span>Create a playlist on the left to turn your library into a dedicated listening collection.</span></div>}</section>
         </section> : null}
 
-        {tab === "smart" ? <section className="tr10-smart">
-          <div className="tr10-smartBuild"><span>SMART WORKOUT MIX</span><h2>Build or refresh a saved Smart Mix</h2><p>Uses energy, likes, completed plays, skips and recent playback. Play Less tracks are excluded. Your current queue stays stable until you rebuild it.</p><label><span>WORKOUT LENGTH</span><input type="number" min={15} max={240} step={5} value={smartMinutes} onChange={(event) => setSmartMinutes(Math.max(15,Math.min(240,Number(event.target.value)||60)))} /><b>MINUTES</b></label><div className="tr10-intensity">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}>{value.toUpperCase()}</button>)}</div><button className="tr10-smartLaunch" onClick={() => void buildAndPlaySmartMix(smartIntensity)}>BUILD & PLAY {smartIntensity.toUpperCase()}</button></div>
-          <div className="tr10-savedMixes"><div className="tr10-savedMixHead"><span>YOUR SMART MIXES</span><b>{smartMixPlaylists.length}</b></div>{(["high","balanced","recovery"] as SmartIntensity[]).map((mode) => { const name=SMART_MIX_NAMES[mode]; const playlist=smartMixPlaylists.find((item)=>item.name===name); const ids=playlist ? playlistTrackIds[playlist.id] || [] : []; const duration=ids.reduce((sum,id)=>{ const found=tracks.find((track)=>track.id===id); return sum+(found ? trackDuration(found) : 0); },0); return <article key={mode} className={player.activePlaylistId===playlist?.id ? "is-playing" : ""}><div><small>{mode.toUpperCase()}</small><h3>{name}</h3><p>{playlist ? `${ids.length} songs • ${formatLongDuration(duration)}` : "Not built yet"}</p></div><div>{playlist ? <><button className="is-primary" onClick={() => void playSavedSmartMix(playlist)}><PlayPremiumIcon /> <span>PLAY</span></button><button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>REBUILD</button></> : <button onClick={() => {setSmartIntensity(mode);}}>SELECT</button>}</div></article>; })}</div>
-          <div className="tr10-smartCollections"><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("high_rotation");}}>LIKED TRACKS <b>{likedCount}</b></button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("most_played");}}>MOST PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("recently_played");}}>RECENTLY PLAYED</button><button onClick={() => {setTab("songs");setHealthFilter("all");setSongSort("high_rotation");}}>HIGH ROTATION</button><button onClick={() => {setTab("songs");setHealthFilter("liked");setSongSort("least_played");}}>REDISCOVER</button></div>
+        {tab === "smart" ? <section className="tr34-smart">
+          <header className="tr34-smartHead"><div><span>SMART MIX</span><h2>Build a workout soundtrack</h2><p>Choose the training character and length. MVP ranks the unplayed pool first, so steering never forces early repeats.</p></div><div><strong>{smartEligibleCount}</strong><span>ELIGIBLE SONGS</span></div></header>
+          <div className="tr34-smartModes">{(["high","balanced","recovery"] as SmartIntensity[]).map((value) => { const copy = value === "high" ? "Aggressive, heavy, high-drive" : value === "balanced" ? "Strong energy with more variation" : "Lower intensity and smoother pacing"; const dna = value === "high" ? "ENERGY 90 • HEAVY 82 • DRIVE 92" : value === "balanced" ? "ENERGY 72 • HEAVY 62 • DRIVE 74" : "ENERGY 52 • MELODIC 72 • DRIVE 55"; return <button key={value} className={smartIntensity===value ? "is-active" : ""} onClick={() => setSmartIntensity(value)}><span>{value.toUpperCase()}</span><strong>{copy}</strong><small>{dna}</small></button>; })}</div>
+          <div className="tr34-smartBuildRow">
+            <section><span>SESSION LENGTH</span><div className="tr34-durationChoices">{[45,60,75,90].map((minutes) => <button key={minutes} className={smartMinutes===minutes ? "is-active" : ""} onClick={() => setSmartMinutes(minutes)}>{minutes}<small>MIN</small></button>)}<label><input type="number" min={15} max={240} step={5} value={smartMinutes} onChange={(event) => setSmartMinutes(Math.max(15,Math.min(240,Number(event.target.value)||60)))} /><small>CUSTOM</small></label></div></section>
+            <section className="tr34-smartSummary"><span>BUILDING FROM</span><div><b>{smartEligibleCount}</b><small>ELIGIBLE</small></div><div><b>{likedCount}</b><small>LIKED</small></div><div><b>{smartEstimatedSongs}</b><small>EST. TRACKS</small></div><div><b>ON</b><small>NO-REPEAT CYCLE</small></div></section>
+          </div>
+          <button className="tr34-smartLaunch" onClick={() => void buildAndPlaySmartMix(smartIntensity)}><SparkPremiumIcon /><span>BUILD {smartIntensity.toUpperCase()} MIX</span><small>{smartMinutes} min • ~{smartEstimatedSongs} tracks • repeat protected</small></button>
+          <section className="tr34-savedMixes"><header><span>SAVED MIXES</span><b>{smartMixPlaylists.length}</b></header><div>{(["high","balanced","recovery"] as SmartIntensity[]).map((mode) => { const name=SMART_MIX_NAMES[mode]; const playlist=smartMixPlaylists.find((item)=>item.name===name); const ids=playlist ? playlistTrackIds[playlist.id] || [] : []; const duration=ids.reduce((sum,id)=>{ const found=tracks.find((track)=>track.id===id); return sum+(found ? trackDuration(found) : 0); },0); return <article key={mode}><div><small>{mode.toUpperCase()}</small><h3>{name}</h3><p>{playlist ? `${ids.length} tracks • ${formatLongDuration(duration)}` : "Not built yet"}</p></div><div>{playlist ? <><button onClick={() => void playSavedSmartMix(playlist)}><PlayPremiumIcon /><span>PLAY</span></button><button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>REBUILD</button></> : <button onClick={() => {setSmartIntensity(mode);void buildAndPlaySmartMix(mode);}}>BUILD</button>}</div></article>; })}</div></section>
         </section> : null}
 
         {/* MVP_TRAINER_V5_R6_MUSIC_INTELLIGENCE_SUITE: INTELLIGENCE PANEL */}

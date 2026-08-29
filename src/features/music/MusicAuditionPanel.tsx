@@ -9,6 +9,7 @@ import {
   MorePremiumIcon,
   PassPremiumIcon,
   PlayPremiumIcon,
+  QueuePremiumIcon,
   PreviewRenderIcon,
   UploadPremiumIcon,
   YouTubePremiumIcon,
@@ -1747,10 +1748,10 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     </header>
 
     <nav className="mvp-auditionNav">
-      <button className={view === "lists" ? "is-active" : ""} onClick={() => { stopPreview(); setView("lists"); }}>AUDITION LISTS</button>
-      <button className={view === "audition" ? "is-active" : ""} disabled={!selectedList} onClick={() => selectedList && setView("audition")}>NOW AUDITIONING</button>
-      <button className={view === "kept" ? "is-active" : ""} onClick={() => { stopPreview(); setView("kept"); }}>🔥 KEPT SONGS <b>{keptSongs.length}</b></button>
-      <button className="is-import" onClick={() => { setImportError(""); setImportOpen(true); }}>+ IMPORT LIST</button>
+      <button className={view === "lists" ? "is-active" : ""} onClick={() => { stopPreview(); setView("lists"); }}><QueuePremiumIcon /><span>AUDITION LISTS</span></button>
+      <button className={view === "audition" ? "is-active" : ""} disabled={!selectedList} onClick={() => selectedList && setView("audition")}><PlayPremiumIcon /><span>NOW AUDITIONING</span></button>
+      <button className={view === "kept" ? "is-active" : ""} onClick={() => { stopPreview(); setView("kept"); }}><KeepPremiumIcon /><span>KEPT SONGS</span><b>{keptSongs.length}</b></button>
+      <button className="is-import" onClick={() => { setImportError(""); setImportOpen(true); }}><UploadPremiumIcon /><span>IMPORT LIST</span></button>
     </nav>
 
     {message ? <div className="mvp-auditionMessage">{message}<button type="button" onClick={() => setMessage("")}>×</button></div> : null}

@@ -50,6 +50,7 @@ const KEYS = {
   stage: "mvp_music_workout_stage_v2",
   autoMix: "mvp_music_automix_v2",
   prSoundtrack: "mvp_music_pr_soundtrack_v2",
+  playbackCycle: "mvp_music_playback_cycle_v1",
 };
 
 const LEGACY_KEYS = {
@@ -63,6 +64,69 @@ type RadioState = {
   startedAt: string;
   steeringRemaining: number;
 };
+
+
+type PlaybackCycleState = {
+  playedIds: string[];
+  completedCycles: number;
+  updatedAt: number;
+};
+
+function readPlaybackCycle(): PlaybackCycleState {
+  return readJson<PlaybackCycleState>(KEYS.playbackCycle, { playedIds: [], completedCycles: 0, updatedAt: Date.now() });
+}
+
+function writePlaybackCycle(state: PlaybackCycleState) {
+  writeJson(KEYS.playbackCycle, state);
+}
+
+function markCyclePlayed(trackId: string) {
+  const cycle = readPlaybackCycle();
+  if (cycle.playedIds.includes(trackId)) return;
+  writePlaybackCycle({ ...cycle, playedIds: [...cycle.playedIds, trackId], updatedAt: Date.now() });
+}
+
+function restartPlaybackCycle(currentTrackId?: string) {
+  const cycle = readPlaybackCycle();
+  writePlaybackCycle({
+    playedIds: currentTrackId ? [currentTrackId] : [],
+    completedCycles: cycle.completedCycles + 1,
+    updatedAt: Date.now(),
+  });
+}
+
+export function getPlaybackCycleStatus(library: MusicTrack[]) {
+  const eligible = library.filter((track) => !track.play_less);
+  const ids = new Set(eligible.map((track) => track.id));
+  const cycle = readPlaybackCycle();
+  const played = cycle.playedIds.filter((id) => ids.has(id));
+  return {
+    played: played.length,
+    remaining: Math.max(0, eligible.length - played.length),
+    eligible: eligible.length,
+    completedCycles: cycle.completedCycles,
+  };
+}
+
+export function chooseCycleSafeTrack(library: MusicTrack[], currentTrackId?: string | null, remember = true) {
+  const eligible = library.filter((track) => !track.play_less && track.id !== currentTrackId);
+  if (!eligible.length) return null;
+  const cycle = readPlaybackCycle();
+  const played = new Set(cycle.playedIds);
+  let available = eligible.filter((track) => !played.has(track.id));
+  if (!available.length) {
+    restartPlaybackCycle(currentTrackId || undefined);
+    available = eligible;
+  }
+  const next = available[Math.floor(Math.random() * available.length)] ?? null;
+  if (next && remember) markCyclePlayed(next.id);
+  return next;
+}
+
+export function rememberPlaybackCycleTrack(trackId: string) {
+  markCyclePlayed(trackId);
+  rememberTrack(trackId);
+}
 
 function clamp(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -471,6 +535,7 @@ export function startRadioSession(
 
   writeJson(KEYS.radio, radio);
   rememberTrack(seed.id);
+  markCyclePlayed(seed.id);
 
   const recent = new Set(recentIds());
   const recentArtists = new Set<string>();
@@ -497,16 +562,11 @@ export function startRadioSession(
   return [seed, ...ranked];
 }
 
-export function chooseAdaptiveNextTrack(
-  current: MusicTrack,
-  library: MusicTrack[],
-  options: { remember?: boolean } = {},
-) {
+function rankedAdaptiveCandidates(current: MusicTrack, library: MusicTrack[]) {
   const radio = readRadioState();
-  if (!radio) return null;
+  if (!radio) return [] as Array<{ track: MusicTrack; score: number }>;
 
-  const seed =
-    library.find((track) => track.id === radio.seedTrackId) ?? current;
+  const seed = library.find((track) => track.id === radio.seedTrackId) ?? current;
   const recentList = recentIds();
   const recent = new Set(recentList);
   const recentTracks = recentList
@@ -515,25 +575,55 @@ export function chooseAdaptiveNextTrack(
   const recentArtists = new Set(recentTracks.map(normalizedArtist));
   const recentAlbums = new Set(recentTracks.map(normalizedAlbum).filter(Boolean));
 
-  const next =
-    library
-      .filter((track) => track.id !== current.id && !track.play_less)
-      .map((track) => ({
-        track,
-        score: candidateScore(
-          seed,
-          current,
-          track,
-          radio.mode,
-          recent,
-          recentArtists,
-          recentAlbums,
-        ),
-      }))
-      .sort((a, b) => b.score - a.score)[0]?.track ?? null;
+  const eligible = library.filter((track) => track.id !== current.id && !track.play_less);
+  const cycle = readPlaybackCycle();
+  const played = new Set(cycle.playedIds);
+  let available = eligible.filter((track) => !played.has(track.id));
+
+  // A track is never eligible again until every other playable track in the
+  // current library pool has been exhausted. Only then do we open a new cycle.
+  if (!available.length && eligible.length) {
+    restartPlaybackCycle(current.id);
+    available = eligible;
+  }
+
+  return available
+    .map((track) => ({
+      track,
+      score: candidateScore(seed, current, track, radio.mode, recent, recentArtists, recentAlbums),
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+export function getAdaptiveDecisionPreview(current: MusicTrack, library: MusicTrack[], limit = 3) {
+  return rankedAdaptiveCandidates(current, library).slice(0, Math.max(1, limit));
+}
+
+export function chooseAdaptiveNextTrack(
+  current: MusicTrack,
+  library: MusicTrack[],
+  options: { remember?: boolean } = {},
+) {
+  const ranked = rankedAdaptiveCandidates(current, library);
+  if (!ranked.length) return null;
+
+  // Do not deterministically hammer the single highest score. Randomize within
+  // the best unplayed candidates while preserving the steering bias.
+  const poolSize = Math.min(10, Math.max(3, Math.ceil(Math.sqrt(ranked.length))));
+  const pool = ranked.slice(0, poolSize);
+  const floor = pool[pool.length - 1]?.score ?? 0;
+  const weighted = pool.map((entry) => ({ ...entry, weight: Math.max(1, entry.score - floor + 6) }));
+  const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = Math.random() * totalWeight;
+  let next = weighted[0]?.track ?? null;
+  for (const entry of weighted) {
+    roll -= entry.weight;
+    if (roll <= 0) { next = entry.track; break; }
+  }
 
   if (next && options.remember !== false) {
     rememberTrack(next.id);
+    markCyclePlayed(next.id);
   }
 
   return next;

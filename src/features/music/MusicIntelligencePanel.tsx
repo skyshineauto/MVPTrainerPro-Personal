@@ -1,38 +1,47 @@
-/* MVP_TRAINER_V5_R12_5E_25_INTELLIGENCE_COMMAND_SURFACE */
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
 import { playMusicAdHocQueue, playMusicTrack, startMvpNeuralRadio, useMusicPlayer } from "../../lib/musicPlayer";
-import { buildTasteMap, getSongDna, getWorkoutMusicStage, isAutoMixEnabled, listPrSoundtracks, setAutoMixEnabled } from "../../lib/musicIntelligence";
+import {
+  getActiveRadioMode,
+  getAdaptiveDecisionPreview,
+  getPlaybackCycleStatus,
+  getSongDna,
+  getWorkoutMusicStage,
+  isAutoMixEnabled,
+  listPrSoundtracks,
+  radioModeLabel,
+  setAutoMixEnabled,
+} from "../../lib/musicIntelligence";
 import { PlayPremiumIcon, SparkPremiumIcon } from "./premium/MusicLibraryPremiumIcons";
 
-const CHANNELS = ["ENERGY", "HEAVY", "MELODIC", "DARK", "DRIVE", "WORKOUT FIT"] as const;
-
-function pad(value: number) {
-  return String(Math.max(0, Math.round(value))).padStart(2, "0");
+function reasonForCandidate(track: MusicTrack, current: MusicTrack, mode: ReturnType<typeof getActiveRadioMode>) {
+  const dna = getSongDna(track);
+  const currentDna = getSongDna(current);
+  if (mode === "heavier") return `Heavier profile • ${dna.heavy} heavy • unplayed this cycle`;
+  if (mode === "harder") return `Harder workout fit • ${dna.workoutFit} fit • unplayed this cycle`;
+  if (mode === "faster") return `Higher drive • ${dna.drive} drive • unplayed this cycle`;
+  if (mode === "melodic") return `More melodic • ${dna.melodic} melodic • unplayed this cycle`;
+  if (mode === "darker") return `Darker profile • ${dna.dark} dark • unplayed this cycle`;
+  if (mode === "surprise") return `Fresh contrast • ${dna.workoutFit} workout fit • unplayed this cycle`;
+  const delta = Math.abs(dna.workoutFit - currentDna.workoutFit);
+  return `Taste match • ${dna.workoutFit} workout fit • ${delta <= 12 ? "close energy" : "fresh variation"}`;
 }
 
 export function MusicIntelligencePanel({ tracks }: { tracks: MusicTrack[] }) {
   const player = useMusicPlayer();
   const [autoMix, setAutoMix] = useState(() => isAutoMixEnabled());
   const [message, setMessage] = useState("");
-
-  const likedTracks = useMemo(
-    () => tracks.filter((track) => track.favorite).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
-    [tracks],
-  );
-  const dna = useMemo(
-    () => (player.currentTrack ? getSongDna(player.currentTrack) : null),
-    [player.currentTrack?.id, player.currentTrack?.updated_at, player.currentTrack?.favorite, player.currentTrack?.play_less],
-  );
-  const tasteMap = useMemo(() => buildTasteMap(tracks), [tracks]);
-  const prSoundtracks = listPrSoundtracks();
+  const current = player.currentTrack;
+  const mode = getActiveRadioMode();
   const stage = getWorkoutMusicStage();
-  const likedPercent = tracks.length ? Math.min(100, Math.round((likedTracks.length / tracks.length) * 100)) : 0;
-  const currentTitle = player.currentTrack?.title || "No active track";
-  const currentArtist = player.currentTrack?.artist || "Start playback to activate live analysis";
-  const currentValues = dna
-    ? [dna.energy, dna.heavy, dna.melodic, dna.dark, dna.drive, dna.workoutFit]
-    : [0, 0, 0, 0, 0, 0];
+  const cycle = useMemo(() => getPlaybackCycleStatus(tracks), [tracks, player.currentTrack?.id]);
+  const candidates = useMemo(
+    () => current ? getAdaptiveDecisionPreview(current, tracks, 3) : [],
+    [current?.id, current?.updated_at, tracks, mode],
+  );
+  const liked = useMemo(() => tracks.filter((track) => track.favorite), [tracks]);
+  const dna = current ? getSongDna(current) : null;
+  const prSoundtracks = listPrSoundtracks();
 
   function toggleAutoMix() {
     const next = !autoMix;
@@ -41,99 +50,60 @@ export function MusicIntelligencePanel({ tracks }: { tracks: MusicTrack[] }) {
     setMessage(next ? "AutoMix is active." : "AutoMix is paused.");
   }
 
-  return (
-    <section className="mvp25-intel" aria-label="MVP Music Intelligence">
-      <header className="mvp25-intelHero">
-        <div className="mvp25-intelIdentity">
-          <span className="mvp25-kicker">MVP MUSIC INTELLIGENCE</span>
-          <h2>Decision Engine</h2>
-          <p>Your permanent taste, the live song and workout stage converge into the next-song decision.</p>
-        </div>
-        <div className="mvp25-intelStatus">
-          <div><span>WORKOUT STAGE</span><strong>{stage === "off" ? "READY" : stage.toUpperCase()}</strong></div>
-          <button type="button" className={autoMix ? "is-on" : ""} onClick={toggleAutoMix} aria-pressed={autoMix}>
-            <span>AUTOMIX</span><strong>{autoMix ? "ACTIVE" : "OFF"}</strong><i aria-hidden><b /></i>
-          </button>
-        </div>
-      </header>
+  const why = current && dna ? [
+    `${dna.workoutFit} workout-fit score`,
+    stage === "off" ? "Library listening mode" : `${stage} workout stage`,
+    current.favorite ? "Liked-song preference boost" : "Taste profile match",
+    "Repeat protection confirmed",
+  ] : [];
 
-      {message ? <div className="mvp25-intelMessage" role="status">{message}<button type="button" onClick={() => setMessage("")} aria-label="Dismiss">×</button></div> : null}
+  return <section className="tr34-intel" aria-label="MVP Music Intelligence">
+    <header className="tr34-intelHead">
+      <div><span>MVP MUSIC INTELLIGENCE</span><h2>What MVP is doing right now</h2><p>See why the current song was chosen, what is influencing the next choice, and what remains before anything can repeat.</p></div>
+      <button type="button" className={autoMix ? "is-active" : ""} onClick={toggleAutoMix} aria-pressed={autoMix}>
+        <SparkPremiumIcon /><span>AutoMix</span><b>{autoMix ? "ACTIVE" : "OFF"}</b>
+      </button>
+    </header>
 
-      <section className="mvp25-intelFlow" aria-label="Taste to decision flow">
-        <article>
-          <span>01 · YOUR TASTE</span>
-          <strong>{likedTracks.length}</strong>
-          <b>LIKED SONGS</b>
-          <small>{likedPercent}% high-confidence library signal</small>
-        </article>
-        <i aria-hidden>›</i>
-        <article className="is-current">
-          <span>02 · CURRENT SONG</span>
-          <strong className="is-title">{currentTitle}</strong>
-          <b>{currentArtist}</b>
-          <small>{dna ? "LIVE SIGNAL LOCKED" : "WAITING FOR PLAYBACK"}</small>
-        </article>
-        <i aria-hidden>›</i>
-        <article>
-          <span>03 · NEXT DECISION</span>
-          <strong className="is-title">{autoMix ? (stage === "off" ? "LIBRARY FIT" : stage.toUpperCase()) : "MANUAL"}</strong>
-          <b>{autoMix ? "PLAYER-LINKED TARGET" : "AUTOMIX PAUSED"}</b>
-          <small>{autoMix ? "Steering and anti-repeat memory active" : "Enable AutoMix to resume steering"}</small>
-        </article>
-      </section>
+    {message ? <div className="tr34-intelMessage">{message}<button onClick={() => setMessage("")}>×</button></div> : null}
 
-      <section className="mvp25-intelSignal">
-        <header><div><span className="mvp25-kicker">LIVE SONG DNA</span><h3>Signal Channels</h3></div><small className={dna ? "is-live" : ""}><i />{dna ? "LIVE" : "IDLE"}</small></header>
-        <div className="mvp25-intelChannels">
-          {CHANNELS.map((label, index) => {
-            const value = currentValues[index];
-            return <div key={label} style={{ ["--mvp25-value" as string]: `${Math.max(2, value)}%` } as CSSProperties}>
-              <span>{label}</span><strong>{dna ? pad(value) : "--"}</strong><i aria-hidden><b /></i>
-            </div>;
-          })}
-        </div>
-      </section>
+    <div className="tr34-intelNow">
+      <article className="is-now">
+        <span>NOW</span>
+        <h3>{current?.title || "Nothing playing"}</h3>
+        <p>{current?.artist || "Start a song to open the decision engine."}</p>
+        <div className="tr34-intelTags"><b>{stage === "off" ? "READY" : stage.toUpperCase()}</b><b>{mode ? radioModeLabel(mode).toUpperCase() : "NO STEERING"}</b></div>
+      </article>
+      <article>
+        <span>WHY</span>
+        {why.length ? <ul>{why.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Playback data will explain the current decision here.</p>}
+      </article>
+      <article>
+        <span>REPEAT PROTECTION</span>
+        <strong>{cycle.remaining}</strong><h4>SONGS REMAINING</h4>
+        <p>{cycle.played} played this cycle • {cycle.eligible} eligible</p>
+        <small>Nothing repeats until the remaining eligible pool is exhausted.</small>
+      </article>
+    </div>
 
-      <section className="mvp25-intelControl">
-        <div className="mvp25-intelMemory">
-          <span className="mvp25-kicker">TASTE MEMORY</span>
-          <h3>{likedTracks.length} Liked Songs</h3>
-          <p>Permanent high-confidence taste. Manual playlists remain untouched.</p>
-          <div className="mvp25-confidence"><span>LIBRARY CONFIDENCE</span><i><b style={{ width: `${Math.max(3, likedPercent)}%` }} /></i><strong>{likedPercent}%</strong></div>
-          <div className="mvp25-intelActions">
-            <button type="button" disabled={!likedTracks.length} onClick={() => void playMusicAdHocQueue("Liked Songs", likedTracks)}><PlayPremiumIcon /><span>PLAY LIKED</span></button>
-            <button type="button" disabled={!likedTracks.length} onClick={() => {
-              const seed = likedTracks[0];
-              if (!seed) return;
-              const queue = startMvpNeuralRadio(seed.id, "more_like_this");
-              setMessage(`Liked Radio ready · ${queue.length} tracks`);
-            }}><SparkPremiumIcon /><span>LIKED RADIO</span></button>
-          </div>
-        </div>
-        <div className="mvp25-intelTarget">
-          <span className="mvp25-kicker">AUTOMIX TARGET</span>
-          <h3>{dna ? "Player-linked steering" : "Waiting for a song"}</h3>
-          <p>{dna ? "The active track is being scored against workout stage, taste memory, steering bias and recent-play history." : "Start playback to open the decision engine."}</p>
-          <div className="mvp25-targetRail" aria-hidden><i /><b style={{ left: `${dna ? Math.max(7, Math.min(93, (dna.drive + dna.workoutFit) / 2)) : 50}%` }} /></div>
-          <div className="mvp25-targetLabels"><span>HEAVIER</span><span>LIKE THIS</span><span>FASTER</span></div>
-        </div>
-      </section>
-
-      <section className="mvp25-tasteField">
-        <header><div><span className="mvp25-kicker">LIBRARY PROFILE</span><h3>Taste Field</h3><p>Five learned regions from the way your private library actually behaves.</p></div><small>{tracks.length} TRACKS ANALYZED</small></header>
-        <div className="mvp25-tasteRows">
-          {tasteMap.map((cluster, index) => (
-            <button type="button" key={cluster.id} disabled={!cluster.tracks.length} onClick={() => void playMusicAdHocQueue(`Taste Field · ${cluster.label}`, cluster.tracks)} style={{ ["--mvp25-score" as string]: `${Math.max(5, cluster.score)}%` } as CSSProperties}>
-              <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{cluster.label}</strong><small>{cluster.subtitle}</small></div><b>{cluster.score}</b><i aria-hidden><em /></i>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={`mvp25-pr ${prSoundtracks.length ? "has-records" : "is-empty"}`}>
-        <header><div><span className="mvp25-kicker">PERFORMANCE MEMORY</span><h3>PR Soundtrack</h3></div><b>{prSoundtracks.length}</b></header>
-        {prSoundtracks.length ? <div>{prSoundtracks.slice(0, 12).map((record) => <article key={record.id}><div><strong>{record.title}</strong><span>{record.artist}</span><small>{record.exerciseName} · SET {record.setNumber} · {record.records.join(" + ")}</small></div><button type="button" onClick={() => void playMusicTrack(record.trackId, 0)} aria-label={`Play ${record.title}`}><PlayPremiumIcon /></button></article>)}</div> : <p>No PR soundtrack moments captured yet. This section will expand automatically when PR music history exists.</p>}
-      </section>
+    <section className="tr34-intelNext">
+      <header><div><span>NEXT DECISION</span><h3>Top candidates right now</h3></div><small>{mode ? `${radioModeLabel(mode)} steering active` : "Taste + workout fit"}</small></header>
+      <div className="tr34-candidateGrid">
+        {current && candidates.length ? candidates.map((entry, index) => <article key={entry.track.id}>
+          <b>{String(index + 1).padStart(2, "0")}</b>
+          <div><strong>{entry.track.title}</strong><span>{entry.track.artist || "Unknown Artist"}</span><small>{reasonForCandidate(entry.track, current, mode)}</small></div>
+          <em>{Math.round(entry.score)}</em>
+          <button type="button" onClick={() => void playMusicTrack(entry.track.id, 0)} aria-label={`Play ${entry.track.title}`}><PlayPremiumIcon /></button>
+        </article>) : <div className="tr34-intelEmpty">Start an adaptive radio or Like Radio session to see live next-song candidates.</div>}
+      </div>
     </section>
-  );
+
+    <section className="tr34-intelInfluence">
+      <article><span>ACTIVE STEERING</span><h3>{mode ? radioModeLabel(mode) : "None"}</h3><p>{mode ? "Steering ranks only songs that have not played in the current cycle." : "MVP is using workout fit, taste, variety and repeat protection."}</p></article>
+      <article><span>WHAT MVP HAS LEARNED</span><h3>{liked.length} liked songs</h3><p>{liked.length ? "Liked tracks are a strong taste signal, but they cannot bypass repeat protection." : "Like songs to strengthen your permanent taste profile."}</p><button disabled={!liked.length} onClick={() => liked[0] && startMvpNeuralRadio(liked[0].id, "more_like_this")}><SparkPremiumIcon /><span>START LIKED RADIO</span></button></article>
+      <article><span>PERFORMANCE MEMORY</span><h3>{prSoundtracks.length} PR moments</h3><p>{prSoundtracks.length ? "MVP can reconnect songs with your strongest training moments." : "PR soundtrack moments will appear automatically as you train."}</p>{prSoundtracks[0] ? <button onClick={() => void playMusicTrack(prSoundtracks[0].trackId, 0)}><PlayPremiumIcon /><span>PLAY LATEST PR</span></button> : null}</article>
+    </section>
+
+    {liked.length ? <button className="tr34-intelLiked" onClick={() => void playMusicAdHocQueue("Liked Songs", liked)}><PlayPremiumIcon /><span>PLAY LIKED SONGS</span></button> : null}
+  </section>;
 }

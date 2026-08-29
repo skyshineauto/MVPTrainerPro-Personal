@@ -25,6 +25,8 @@ import {
 import {
   adaptiveRadioQueueName,
   chooseAdaptiveNextTrack,
+  chooseCycleSafeTrack,
+  rememberPlaybackCycleTrack,
   isAdaptiveRadioName,
   isAutoMixEnabled,
   startRadioSession,
@@ -2347,6 +2349,7 @@ function ensureAudioElement() {
       recordedPlayToken = token;
     } else if (trackId && token !== recordedPlayToken) {
       recordedPlayToken = token;
+      rememberPlaybackCycleTrack(trackId);
       void recordMusicTrackPlayed(trackId).catch(() => undefined);
     }
   });
@@ -2559,10 +2562,8 @@ function nextSequentialIndex(direction: 1 | -1) {
 function nextShuffleIndex() {
   const count = state.tracks.length;
   if (count <= 1) return count ? 0 : -1;
-  const current = getCurrentIndex();
-  let next = current;
-  while (next === current) next = Math.floor(Math.random() * count);
-  return next;
+  const next = chooseCycleSafeTrack(state.tracks, state.currentTrack?.id ?? null, false);
+  return next ? state.tracks.findIndex((track) => track.id === next.id) : -1;
 }
 function nextTransitionCandidate() {
   if (!state.tracks.length || state.repeat === "one") return null;
@@ -2696,7 +2697,7 @@ export async function loadMusicLibrary(force = false) {
   emit({ loading: true, error: null });
 
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       const libraryTracks = await listMusicTracks();
       const queue = await resolveSavedQueue(libraryTracks);
@@ -2722,15 +2723,16 @@ export async function loadMusicLibrary(force = false) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error || "");
       const transient = /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror/i.test(message);
-      if (!transient || attempt === 3) break;
-      await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+      if (!transient || attempt === 5) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1500, 180 * 2 ** attempt)));
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : "Could not load your music library.";
-  const transient = /lock broken|steal|navigator\.locks|aborterror/i.test(message);
-  // Never blank a working library because a second auth/storage request briefly stole a browser lock.
-  emit({ loading: false, libraryLoaded: state.libraryLoaded || Boolean(state.libraryTracks.length), error: transient ? null : message });
+  const transient = /lock broken|steal|navigator\.locks|aborterror|failed to fetch|networkerror|timeout/i.test(message);
+  // Never blank a working library because a transient auth/storage/network request failed.
+  const hasCachedLibrary = Boolean(state.libraryTracks.length);
+  emit({ loading: false, libraryLoaded: state.libraryLoaded || hasCachedLibrary, error: transient && hasCachedLibrary ? null : message });
   return state.libraryTracks;
 }
 
@@ -2908,6 +2910,7 @@ export async function nextMusicTrack(fromEnded = false) {
     const adaptive = chooseAdaptiveNextTrack(
       state.currentTrack,
       state.libraryTracks,
+      { remember: false },
     );
 
     if (adaptive) {
