@@ -115,7 +115,7 @@ export function MusicPremiumSelect<T extends string | number>({
         ref={menuRef}
         id={listId}
         role="listbox"
-        className={`m37-selectMenu is-${placement.side}`}
+        className={`m37-selectMenu m38-selectMenu is-${placement.side}`}
         style={{
           position: "fixed",
           left: placement.left,
@@ -165,12 +165,12 @@ export function MusicPremiumSelect<T extends string | number>({
     document.body,
   ) : null;
 
-  return <div ref={rootRef} className={`m37-select ${open ? "is-open" : ""} ${disabled ? "is-disabled" : ""} ${className}`.trim()}>
-    {label ? <span className="m37-selectLabel">{label}</span> : null}
+  return <div ref={rootRef} className={`m37-select m38-select ${open ? "is-open" : ""} ${disabled ? "is-disabled" : ""} ${className}`.trim()}>
+    {label ? <span className="m37-selectLabel m38-selectLabel">{label}</span> : null}
     <button
       ref={triggerRef}
       type="button"
-      className="m37-selectTrigger"
+      className="m37-selectTrigger m38-selectTrigger"
       aria-label={ariaLabel || label}
       aria-haspopup="listbox"
       aria-expanded={open}
@@ -184,8 +184,8 @@ export function MusicPremiumSelect<T extends string | number>({
         }
       }}
     >
-      <span className="m37-selectValue">{selected?.label ?? String(value)}</span>
-      <span className="m37-selectChevron" aria-hidden>⌄</span>
+      <span className="m37-selectValue m38-selectValue">{selected?.label ?? String(value)}</span>
+      <span className="m37-selectChevron m38-selectChevron" aria-hidden><svg viewBox="0 0 20 20"><path d="m5.5 7.5 4.5 4.5 4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
     </button>
     {menu}
   </div>;

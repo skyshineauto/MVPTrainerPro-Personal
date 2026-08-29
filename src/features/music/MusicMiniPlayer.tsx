@@ -119,6 +119,8 @@ import {
   type MusicSourceUpgradeComparison,
 } from "../../lib/musicSourceUpgrade";
 
+import { MusicTodayAi } from "./premium/MusicTodayAi";
+
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
 const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
@@ -1995,6 +1997,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <strong ref={heroTitleRef}>{track?.title || (player.loading ? "Loading music…" : "Music")}</strong>
             <small ref={heroArtistRef}>{track?.artist || "Unknown Artist"}</small>
           </button>
+          {/* MVP_MUSIC_TODAY_AI_R39 */}
+          <MusicTodayAi />
         </div>
         <button
           type="button"

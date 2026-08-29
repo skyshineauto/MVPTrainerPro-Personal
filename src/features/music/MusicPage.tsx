@@ -4,6 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
+  type CSSProperties,
   type MouseEvent,
 } from "react";
 import {
@@ -91,6 +93,7 @@ import {
   QueuePremiumIcon,
   ShufflePremiumIcon,
   SparkPremiumIcon,
+  YouTubePremiumIcon,
 } from "./premium/MusicLibraryPremiumIcons";
 import "./premium/MusicLibraryPremium.css";
 import "./premium/MusicUiSystem.css";
@@ -100,7 +103,7 @@ type PlaylistTrackMap = Record<string, string[]>;
 type MusicTab = "songs" | "artists" | "albums" | "playlists" | "smart" | "intelligence" | "discover" | "audition";
 type DiscoverySort = "newest" | "oldest" | "artist" | "most";
 type DiscoveryFilter = "all" | "artist_catalog" | "new_current" | "same_era" | "hidden" | "unowned";
-type DiscoveryView = "archive" | "saved";
+type DiscoveryView = "discoveries" | "added" | "not_interested" | "in_library";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
 type SongSort =
@@ -347,6 +350,7 @@ function discoverySectionsForFilter(filter: DiscoveryFilter) {
 
 const DISCOVERY_SEED_UI_KEY = "mvp_rediscover_expanded_seeds_v1";
 const DISCOVERY_LANE_UI_KEY = "mvp_rediscover_expanded_lanes_v1";
+const DISCOVERY_DELETED_UI_KEY = "mvp_rediscover_deleted_recommendations_v1";
 
 function readUiSet(key: string) {
   if (typeof window === "undefined") return new Set<string>();
@@ -390,6 +394,8 @@ function DiscoveryCard({
   saving,
   onPreview,
   onSave,
+  onDismiss,
+  onYoutube,
 }: {
   seedId: string;
   item: MusicDiscoveryRecommendation;
@@ -399,24 +405,28 @@ function DiscoveryCard({
   saving: boolean;
   onPreview: (item: MusicDiscoveryRecommendation) => void;
   onSave: (item: MusicDiscoveryRecommendation) => void;
+  onDismiss: (seedId: string, item: MusicDiscoveryRecommendation) => void;
+  onYoutube: (item: { title: string; artist: string }) => void;
   key?: string;
 }) {
   const previewing = previewingId === item.id;
   const previewError = previewErrorId === item.id;
-  return <article className={`m37-discoveryCard ${item.inLibrary ? "is-owned" : ""}`}>
-    <div className="m37-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}</div>
-    <div className="m37-discoveryCopy">
+  return <motion.article layout className={`m37-discoveryCard m38-discoveryCard ${item.inLibrary ? "is-owned" : ""}`}>
+    <div className="m37-discoveryArt m38-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}<span className="m38-artSheen" aria-hidden/></div>
+    <div className="m37-discoveryCopy m38-discoveryCopy">
+      <small>{discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
       <strong>{item.title}</strong>
       <span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span>
-      <small>{item.reason || discoveryTypeLabel(item)}{item.year ? ` • ${item.year}` : ""}</small>
+      <p>{item.reason || "Matches your current discovery direction."}</p>
     </div>
-    <div className="m37-discoveryActions">
-      {item.previewUrl ? <button type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></button> : <span className="is-disabled"><PlayPremiumIcon /><span>NO PREVIEW</span></span>}
-      {item.inLibrary ? <span className="is-owned"><HeartPremiumIcon filled /><span>IN LIBRARY</span></span> : <button type="button" className={`is-add ${saved ? "is-active" : ""}`} disabled={saved || saving} onClick={() => onSave(item)}><PlaylistPremiumIcon /><span>{saved ? "ADDED" : saving ? "ADDING…" : "ADD"}</span></button>}
-      <button type="button" className="is-dismiss" onClick={() => setDiscoveryRecommendationState(seedId,item.id,{dismissed:true})}><PlayLessPremiumIcon /><span>NOT INTERESTED</span></button>
-      {item.storeUrl ? <a className="is-store" href={item.storeUrl} target="_blank" rel="noreferrer"><SparkPremiumIcon /><span>APPLE MUSIC</span></a> : null}
+    <div className="m37-discoveryActions m38-discoveryActions">
+      {item.previewUrl ? <motion.button whileTap={{scale:.96}} type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></motion.button> : <span className="is-disabled"><PlayPremiumIcon /><span>NO PREVIEW</span></span>}
+      <motion.button whileTap={{scale:.96}} type="button" className="is-youtube" onClick={() => onYoutube(item)}><YouTubePremiumIcon/><span>YOUTUBE</span></motion.button>
+      {item.inLibrary ? <span className="is-owned"><HeartPremiumIcon filled /><span>IN LIBRARY</span></span> : <motion.button whileTap={{scale:.96}} type="button" className={`is-add ${saved ? "is-active" : ""}`} disabled={saved || saving} onClick={() => onSave(item)}><PlaylistPremiumIcon /><span>{saved ? "ADDED" : saving ? "ADDING…" : "ADD"}</span></motion.button>}
+      <motion.button whileTap={{scale:.96}} type="button" className="is-dismiss" onClick={() => onDismiss(seedId,item)}><PlayLessPremiumIcon /><span>NOT INTERESTED</span></motion.button>
+      <details className="m38-cardMore"><summary aria-label={`More options for ${item.title}`}>•••</summary><div>{item.storeUrl ? <a href={item.storeUrl} target="_blank" rel="noreferrer">OPEN APPLE MUSIC</a> : null}<span>{item.reason || discoveryTypeLabel(item)}</span></div></details>
     </div>
-  </article>;
+  </motion.article>;
 }
 
 function SavedSongCard({
@@ -426,6 +436,8 @@ function SavedSongCard({
   removing,
   onPreview,
   onDelete,
+  onYoutube,
+  onImport,
 }: {
   item: MusicDiscoverySavedSong;
   previewingId: string | null;
@@ -433,19 +445,45 @@ function SavedSongCard({
   removing: boolean;
   onPreview: (item: MusicDiscoverySavedSong) => void;
   onDelete: (item: MusicDiscoverySavedSong) => void;
+  onYoutube: (item: { title: string; artist: string }) => void;
+  onImport: (item: MusicDiscoverySavedSong) => void;
   key?: string;
 }) {
   const previewing = previewingId === item.id;
   const previewError = previewErrorId === item.id;
-  return <article className={`m37-discoveryCard is-saved ${item.inLibrary ? "is-owned" : ""}`}>
-    <div className="m37-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}</div>
-    <div className="m37-discoveryCopy"><strong>{item.title}</strong><span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span><small>Saved from {item.seedTrackTitle}</small></div>
-    <div className="m37-discoveryActions">
-      {item.previewUrl ? <button type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></button> : null}
-      {item.storeUrl ? <a className="is-store" href={item.storeUrl} target="_blank" rel="noreferrer"><SparkPremiumIcon /><span>APPLE MUSIC</span></a> : null}
-      <button type="button" className="is-dismiss" disabled={removing} onClick={() => onDelete(item)}><PlayLessPremiumIcon /><span>{removing ? "REMOVING…" : "REMOVE"}</span></button>
+  return <motion.article layout className={`m37-discoveryCard m38-discoveryCard is-saved ${item.inLibrary ? "is-owned" : ""}`}>
+    <div className="m37-discoveryArt m38-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}<span className="m38-artSheen" aria-hidden/></div>
+    <div className="m37-discoveryCopy m38-discoveryCopy"><small>ADDED FROM DISCOVERY</small><strong>{item.title}</strong><span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span><p>Saved from {item.seedTrackTitle}{item.seedTrackArtist ? ` • ${item.seedTrackArtist}` : ""}</p></div>
+    <div className="m37-discoveryActions m38-discoveryActions">
+      {item.previewUrl ? <motion.button whileTap={{scale:.96}} type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP" : previewError ? "RETRY" : "PREVIEW"}</span></motion.button> : <span className="is-disabled"><PlayPremiumIcon/><span>NO PREVIEW</span></span>}
+      <motion.button whileTap={{scale:.96}} type="button" className="is-youtube" onClick={() => onYoutube(item)}><YouTubePremiumIcon/><span>YOUTUBE</span></motion.button>
+      {item.inLibrary ? <span className="is-owned"><HeartPremiumIcon filled/><span>IN LIBRARY</span></span> : <motion.button whileTap={{scale:.96}} type="button" className="is-import" onClick={() => onImport(item)}><PlaylistPremiumIcon/><span>ADD TO LIBRARY</span></motion.button>}
+      <motion.button whileTap={{scale:.96}} type="button" className="is-delete" disabled={removing} onClick={() => onDelete(item)}><span className="m38-deleteX">×</span><span>{removing ? "DELETING…" : "DELETE"}</span></motion.button>
     </div>
-  </article>;
+  </motion.article>;
+}
+
+function DismissedDiscoveryCard({ seed, item, previewingId, previewErrorId, onPreview, onYoutube, onAdd, onDelete }: {
+  seed: MusicDiscoverySeed;
+  item: MusicDiscoveryRecommendation;
+  previewingId: string | null;
+  previewErrorId: string | null;
+  onPreview: (item: MusicDiscoveryRecommendation) => void;
+  onYoutube: (item: {title:string;artist:string}) => void;
+  onAdd: (seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) => void;
+  onDelete: (seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) => void;
+}) {
+  const previewing = previewingId === item.id;
+  return <motion.article layout className="m38-discoveryCard is-dismissed">
+    <div className="m38-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt=""/> : <div>♫</div>}</div>
+    <div className="m38-discoveryCopy"><small>NOT INTERESTED</small><strong>{item.title}</strong><span>{item.artist}</span><p>Originally discovered from {seed.trackTitle}</p></div>
+    <div className="m38-discoveryActions">
+      {item.previewUrl ? <motion.button whileTap={{scale:.96}} className={`is-preview ${previewing?"is-active":""}`} onClick={()=>onPreview(item)}>{previewing?<PausePremiumIcon/>:<PlayPremiumIcon/>}<span>{previewing?"STOP":previewErrorId===item.id?"RETRY":"PREVIEW"}</span></motion.button> : null}
+      <motion.button whileTap={{scale:.96}} className="is-youtube" onClick={()=>onYoutube(item)}><YouTubePremiumIcon/><span>YOUTUBE</span></motion.button>
+      <motion.button whileTap={{scale:.96}} className="is-add" onClick={()=>onAdd(seed,item)}><PlaylistPremiumIcon/><span>ADD</span></motion.button>
+      <motion.button whileTap={{scale:.96}} className="is-delete" onClick={()=>onDelete(seed,item)}><span className="m38-deleteX">×</span><span>DELETE</span></motion.button>
+    </div>
+  </motion.article>;
 }
 
 
@@ -535,6 +573,7 @@ function readCollectionView(key: string, fallback: CollectionView = "grid8"): Co
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
+  const discoveryImportInputRef = useRef<HTMLInputElement | null>(null);
   const tabNavRef = useRef<HTMLDivElement | null>(null);
   const player = useMusicPlayer();
 
@@ -580,7 +619,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [smartIntensity, setSmartIntensity] = useState<SmartIntensity>("high");
   const [discoverySeeds, setDiscoverySeeds] = useState<MusicDiscoverySeed[]>(() => listMusicDiscoverySeeds());
   const [savedDiscoverySongs, setSavedDiscoverySongs] = useState<MusicDiscoverySavedSong[]>(() => listMusicDiscoverySavedSongs());
-  const [discoveryView, setDiscoveryView] = useState<DiscoveryView>("archive");
+  const [discoveryView, setDiscoveryView] = useState<DiscoveryView>("discoveries");
+  const [pendingDiscoveryImport, setPendingDiscoveryImport] = useState<MusicDiscoverySavedSong | null>(null);
   const [savedSongsPage, setSavedSongsPage] = useState(1);
   const [savingRecommendationId, setSavingRecommendationId] = useState<string | null>(null);
   const [removingSavedSongId, setRemovingSavedSongId] = useState<string | null>(null);
@@ -590,6 +630,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [discoveryFilter, setDiscoveryFilter] = useState<DiscoveryFilter>("all");
   const [expandedDiscoverySeedIds, setExpandedDiscoverySeedIds] = useState<Set<string>>(() => readUiSet(DISCOVERY_SEED_UI_KEY));
   const [expandedDiscoveryLaneIds, setExpandedDiscoveryLaneIds] = useState<Set<string>>(() => readUiSet(DISCOVERY_LANE_UI_KEY));
+  const [deletedDiscoveryIds, setDeletedDiscoveryIds] = useState<Set<string>>(() => readUiSet(DISCOVERY_DELETED_UI_KEY));
   const discoveryDefaultsInitializedRef = useRef(false);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewStopTimerRef = useRef<number | null>(null);
@@ -693,7 +734,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const discoveryArchive = useMemo(() => {
     const query = discoverySearch.trim().toLowerCase();
     const filtered = discoverySeeds.filter((seed) => {
-      const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item) => !item.dismissed), discoveryFilter);
+      const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item) => !item.dismissed && !deletedDiscoveryIds.has(item.id) && !savedDiscoverySongs.some((song) => song.id === item.id)), discoveryFilter);
       if (!visible.length) return false;
       if (!query) return true;
       const haystack = [
@@ -713,17 +754,24 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       }
       return b.refreshedAt - a.refreshedAt;
     });
-  }, [discoverySeeds, discoverySearch, discoverySort, discoveryFilter]);
+  }, [discoverySeeds, savedDiscoverySongs, discoverySearch, discoverySort, discoveryFilter, deletedDiscoveryIds]);
 
   const discoveryCount = useMemo(
-    () => discoverySeeds.reduce((sum, seed) => sum + seed.recommendations.filter((item) => !item.dismissed).length, 0),
-    [discoverySeeds],
+    () => discoverySeeds.reduce((sum, seed) => sum + seed.recommendations.filter((item) => !item.dismissed && !deletedDiscoveryIds.has(item.id) && !savedDiscoverySongs.some((song) => song.id === item.id)).length, 0),
+    [discoverySeeds, savedDiscoverySongs, deletedDiscoveryIds],
   );
 
   const savedDiscoverySongIds = useMemo(() => new Set(savedDiscoverySongs.map((song) => song.id)), [savedDiscoverySongs]);
+  const addedDiscoverySongs = useMemo(() => savedDiscoverySongs.filter((song) => !song.inLibrary), [savedDiscoverySongs]);
+  const inLibraryDiscoverySongs = useMemo(() => savedDiscoverySongs.filter((song) => song.inLibrary), [savedDiscoverySongs]);
+  const notInterestedDiscoveryItems = useMemo(() => discoverySeeds.flatMap((seed) => seed.recommendations
+    .filter((item) => item.dismissed && !deletedDiscoveryIds.has(item.id))
+    .map((item) => ({ seed, item }))), [discoverySeeds, deletedDiscoveryIds]);
+
   const savedSongsFiltered = useMemo(() => {
     const query = discoverySearch.trim().toLowerCase();
-    const filtered = savedDiscoverySongs.filter((song) => !query || [
+    const source = discoveryView === "in_library" ? inLibraryDiscoverySongs : addedDiscoverySongs;
+    const filtered = source.filter((song) => !query || [
       song.title,
       song.artist,
       song.album,
@@ -735,10 +783,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       if (discoverySort === "artist") return a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title);
       return b.savedAt - a.savedAt;
     });
-  }, [savedDiscoverySongs, discoverySearch, discoverySort]);
-  const savedSongsPageCount = Math.max(1, Math.ceil(savedSongsFiltered.length / 5));
+  }, [addedDiscoverySongs, inLibraryDiscoverySongs, discoveryView, discoverySearch, discoverySort]);
+  const notInterestedFiltered = useMemo(() => {
+    const query = discoverySearch.trim().toLowerCase();
+    const filtered = notInterestedDiscoveryItems.filter(({ seed, item }) => !query || [item.title,item.artist,item.album,item.reason,seed.trackTitle,seed.trackArtist].join(" ").toLowerCase().includes(query));
+    return [...filtered].sort((a,b) => discoverySort === "oldest" ? a.seed.createdAt - b.seed.createdAt : discoverySort === "artist" ? a.item.artist.localeCompare(b.item.artist) || a.item.title.localeCompare(b.item.title) : b.seed.refreshedAt - a.seed.refreshedAt);
+  }, [notInterestedDiscoveryItems, discoverySearch, discoverySort]);
+  const savedSongsPageCount = Math.max(1, Math.ceil(savedSongsFiltered.length / 8));
   const safeSavedSongsPage = Math.min(savedSongsPage, savedSongsPageCount);
-  const pagedSavedSongs = savedSongsFiltered.slice((safeSavedSongsPage - 1) * 5, safeSavedSongsPage * 5);
+  const pagedSavedSongs = savedSongsFiltered.slice((safeSavedSongsPage - 1) * 8, safeSavedSongsPage * 8);
 
   const filteredTracks = useMemo(() => {
     const query = songSearch.trim().toLowerCase();
@@ -1772,7 +1825,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (!seedId) return;
     setTab("discover");
     setCollectionDetail(null);
-    setDiscoveryView("archive");
+    setDiscoveryView("discoveries");
     setDiscoverySearch("");
     setDiscoverySort("newest");
     setDiscoveryFilter("all");
@@ -1869,6 +1922,80 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setRemovingSavedSongId(null);
   }
 
+  function openDiscoveryYoutube(item: { title: string; artist: string }) {
+    const query = `${item.artist} ${item.title}`.trim();
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function markDiscoveryNotInterested(seedId: string, item: MusicDiscoveryRecommendation) {
+    stopDiscoveryPreview();
+    setDiscoveryRecommendationState(seedId, item.id, { dismissed: true });
+    setDiscoverySeeds(listMusicDiscoverySeeds());
+  }
+
+  async function restoreDismissedDiscovery(seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) {
+    setDiscoveryRecommendationState(seed.id, item.id, { dismissed: false });
+    setDiscoverySeeds(listMusicDiscoverySeeds());
+    if (!savedDiscoverySongIds.has(item.id)) await saveDiscoveryRecommendation(seed, item);
+    setDiscoveryView("added");
+  }
+
+  function deleteDismissedDiscovery(seed: MusicDiscoverySeed, item: MusicDiscoveryRecommendation) {
+    if (!window.confirm(`Delete ${item.artist} - ${item.title} from Discovery history?`)) return;
+    stopDiscoveryPreview();
+    setDeletedDiscoveryIds((current) => {
+      const next = new Set(current);
+      next.add(item.id);
+      writeUiSet(DISCOVERY_DELETED_UI_KEY, next);
+      return next;
+    });
+    setDiscoveryRecommendationState(seed.id, item.id, { dismissed: true });
+  }
+
+  function requestDiscoveryImport(item: MusicDiscoverySavedSong) {
+    setPendingDiscoveryImport(item);
+    if (discoveryImportInputRef.current) {
+      discoveryImportInputRef.current.value = "";
+      discoveryImportInputRef.current.click();
+    }
+  }
+
+  async function handleDiscoveryImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] || null;
+    const item = pendingDiscoveryImport;
+    if (!file || !item) { setPendingDiscoveryImport(null); return; }
+    setUploading(true); setError(""); setMessage(`Adding ${item.artist} - ${item.title} to My Music…`);
+    try {
+      let uploaded = await uploadMusicTrack(file, tracks.length);
+      uploaded = await updateMusicTrack(uploaded.id, {
+        title: item.title,
+        artist: item.artist,
+        album: item.album || uploaded.album || undefined,
+        release_year: item.year ?? uploaded.release_year ?? undefined,
+        external_artwork_url: item.artworkUrl || uploaded.external_artwork_url || undefined,
+        metadata_status: "manual",
+        metadata_confidence: 1,
+        metadata_source: "discovery",
+        metadata_updated_at: new Date().toISOString(),
+      });
+      const rows = await refreshTracks();
+      await loadMusicLibrary(true);
+      refreshDiscoveryLibraryFlags(rows);
+      setSavedDiscoverySongs(listMusicDiscoverySavedSongs());
+      setDiscoverySeeds(listMusicDiscoverySeeds());
+      setDiscoveryView("in_library");
+      setMessage(`${item.title} added to My Music.`);
+    } catch (caught) {
+      const raw = caught instanceof Error ? caught.message : "Music upload failed.";
+      setError(/unsupported|audio type|file type/i.test(raw) ? "THIS AUDIO FORMAT IS NOT SUPPORTED FOR UPLOAD" : raw);
+    } finally {
+      setUploading(false);
+      setPendingDiscoveryImport(null);
+      event.target.value = "";
+    }
+  }
+
   useEffect(() => {
     if (discoveryDefaultsInitializedRef.current || !discoverySeeds.length) return;
     discoveryDefaultsInitializedRef.current = true;
@@ -1906,7 +2033,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     <main data-mvp-music="flagship" className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><MusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
       <section className="tr10-hero">
         <div><h1>My Music</h1></div>
-        <button type="button" onClick={goBack}>BACK TO TRAINER</button>
+        <motion.button type="button" className="m38-backToTrainer" onClick={goBack} whileTap={{scale:.97}}><span>‹</span><b>BACK TO TRAINER</b></motion.button>
       </section>
 
       <section className="tr10-stats">
@@ -1918,8 +2045,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div><span className="tr10-directoryEyebrow">DIRECTORY</span><h2>Song Library</h2></div>
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
-            <button type="button" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || trackNeedsArtwork(track)))}>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</button>
-            <button type="button" className="is-orange" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
+            <motion.button type="button" className="m38-libraryUtility is-enrich" disabled={enrichment.running} onClick={() => void enrichTracks(tracks.filter((track) => needsMusicMetadata(track) || trackNeedsArtwork(track)))} whileTap={{scale:.97}}><SparkPremiumIcon/><span>{enrichment.running ? "SCANNING…" : "ENRICH LIBRARY"}</span></motion.button>
+            <motion.button type="button" className="m38-libraryUtility is-upload" disabled={uploading} onClick={() => inputRef.current?.click()} whileTap={{scale:.97}}><span className="m38-uploadPlus">+</span><span>{uploading ? "UPLOADING…" : "UPLOAD SONGS"}</span></motion.button>
           </div>
         </header>
 
@@ -1934,7 +2061,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <div ref={tabNavRef}><MvpMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }} /></div>
+        <div ref={tabNavRef}><MvpMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("discoveries"); }} /></div>
 
         {message ? <div className="tr10-message">{message}</div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
@@ -1976,13 +2103,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span></button>
-                <div className="m37-trackActions">
+                <div className="m37-trackActions m38-trackActions">
                   <MvpAction icon={<HeartPremiumIcon filled={track.favorite} />} label={track.favorite ? "LIKED" : "LIKE"} tone="green" active={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} />
                   <MvpAction icon={<PlayLessPremiumIcon />} label="PLAY LESS" tone="red" active={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} />
-                  <MvpAction icon={<NextPremiumIcon />} label="PLAY NEXT" tone="blue" onClick={() => playMusicNext(track.id)} />
-                  <MvpAction icon={<QueuePremiumIcon />} label="QUEUE" onClick={() => addMusicToQueue(track.id)} />
-                  <MvpAction icon={<PlaylistPremiumIcon />} label="PLAYLIST" tone="amber" onClick={() => openPlaylistModal([track.id])} />
-                  <MvpAction icon={<EditPremiumIcon />} label="EDIT" onClick={() => openDetail(track)} />
+                  <details className="m38-trackMore"><summary aria-label={`More actions for ${track.title}`}><span>•••</span><b>MORE</b></summary><div>
+                    <button onClick={() => playMusicNext(track.id)}><NextPremiumIcon/><span>PLAY NEXT</span></button>
+                    <button onClick={() => addMusicToQueue(track.id)}><QueuePremiumIcon/><span>ADD TO QUEUE</span></button>
+                    <button onClick={() => openPlaylistModal([track.id])}><PlaylistPremiumIcon/><span>ADD TO PLAYLIST</span></button>
+                    <button onClick={() => openDetail(track)}><EditPremiumIcon/><span>EDIT SONG</span></button>
+                  </div></details>
                 </div>
               </article>;
             })}
@@ -2051,10 +2180,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             <header className="tr21-playlistHero">
               <div className="tr21-playlistArt">{selectedPlaylistTracks[0] ? <TrackArtwork track={selectedPlaylistTracks[0]} size="card" /> : <span>♫</span>}<i aria-hidden /></div>
               <div className="tr21-playlistHeroCopy"><small>MVP COLLECTION</small><h2>{selectedPlaylist.name}</h2><p>{selectedPlaylistTracks.length ? `${selectedPlaylistTracks.length} tracks curated from your private library.` : "This collection is ready for its first tracks."}</p><div className="tr21-playlistMetrics"><span><b>{selectedPlaylistTracks.length}</b><small>TRACKS</small></span><span><b>{formatLongDuration(selectedPlaylistDurationSeconds)}</b><small>PLAY TIME</small></span><span><b>{selectedPlaylistHighEnergy}</b><small>HIGH ENERGY</small></span><span><b>{selectedPlaylistLiked}</b><small>LIKED</small></span></div></div>
-              <div className="m37-playlistActions tr21-playlistHeroActions"><motion.button type="button" className="is-play" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()} whileTap={{scale:.97}}><PlayPremiumIcon /><strong>PLAY</strong></motion.button><motion.button type="button" className="is-shuffle" disabled={!selectedPlaylistTracks.length} onClick={() => void playCollectionShuffle(`Playlist • ${selectedPlaylist.name}`, selectedPlaylistTracks)} whileTap={{scale:.97}}><ShufflePremiumIcon /><strong>MIX</strong></motion.button><motion.button type="button" className="is-export" disabled={!selectedPlaylistTracks.length} onClick={openBurnStudio} whileTap={{scale:.97}}><SparkPremiumIcon /><strong>EXPORT</strong></motion.button><button type="button" className="is-delete" onClick={() => void removePlaylist(selectedPlaylist)} aria-label={`Delete ${selectedPlaylist.name}`}>DELETE</button></div>
+              <div className="m37-playlistActions tr21-playlistHeroActions m38-playlistHeroActions"><motion.button type="button" className="is-play" disabled={!selectedPlaylistTracks.length} onClick={() => void playSelectedPlaylist()} whileTap={{scale:.97}}><PlayPremiumIcon /><strong>PLAY</strong></motion.button><motion.button type="button" className="is-shuffle" disabled={!selectedPlaylistTracks.length} onClick={() => void playCollectionShuffle(`Playlist • ${selectedPlaylist.name}`, selectedPlaylistTracks)} whileTap={{scale:.97}}><ShufflePremiumIcon /><strong>MIX</strong></motion.button><motion.button type="button" className="is-export" disabled={!selectedPlaylistTracks.length} onClick={openBurnStudio} whileTap={{scale:.97}}><SparkPremiumIcon /><strong>EXPORT</strong></motion.button><details className="m38-playlistMore"><summary aria-label={`More actions for ${selectedPlaylist.name}`}>•••</summary><div><button type="button" className="is-delete" onClick={() => void removePlaylist(selectedPlaylist)}>DELETE PLAYLIST</button></div></details></div>
             </header>
             <div className="tr21-playlistRailHead"><div><span>TRACKS</span><strong>{selectedPlaylistTracks.length} SONG{selectedPlaylistTracks.length===1?"":"S"}</strong></div><button type="button" disabled={!selectedSongIds.size} onClick={() => openPlaylistModal([...selectedSongIds])}>+ ADD {selectedSongIds.size || ""} SELECTED</button></div>
-            <div className="tr21-playlistTracks">{selectedPlaylistTracks.length ? selectedPlaylistTracks.map((track,index) => <article key={track.id} className={player.currentTrack?.id===track.id ? "is-current" : ""}><span className="tr21-trackNumber">{String(index+1).padStart(2,"0")}</span><TrackArtwork track={track} /><div className="tr21-playlistTrackCopy"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span></div><span className={`tr21-playlistEnergy is-${track.energy_level}`}><i />{track.energy_level.toUpperCase()}</span><span className="tr21-playlistDuration">{formatDuration(track.duration_seconds)}</span><div className="tr21-playlistTrackActions"><button type="button" className="is-trackPlay" onClick={() => void playSelectedPlaylist(track.id)} aria-label={`Play ${track.title}`}><PlayPremiumIcon /></button><button type="button" disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }} aria-label={`Move ${track.title} up`}><ChevronUpPremiumIcon /></button><button type="button" disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }} aria-label={`Move ${track.title} down`}><ChevronDownPremiumIcon /></button><button type="button" className="is-remove" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}>REMOVE</button></div></article>) : <div className="tr21-playlistEmpty"><b>EMPTY COLLECTION</b><span>Select songs in the Songs tab, then route them here.</span></div>}</div>
+            <div className="tr21-playlistTracks">{selectedPlaylistTracks.length ? selectedPlaylistTracks.map((track,index) => <article key={track.id} className={player.currentTrack?.id===track.id ? "is-current" : ""}><span className="tr21-trackNumber">{String(index+1).padStart(2,"0")}</span><TrackArtwork track={track} /><div className="tr21-playlistTrackCopy"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span></div><span className={`tr21-playlistEnergy is-${track.energy_level}`}><i />{track.energy_level.toUpperCase()}</span><span className="tr21-playlistDuration">{formatDuration(track.duration_seconds)}</span><div className="tr21-playlistTrackActions m38-playlistTrackActions"><motion.button type="button" className="is-trackPlay" onClick={() => void playSelectedPlaylist(track.id)} aria-label={`Play ${track.title}`} whileTap={{scale:.94}}><PlayPremiumIcon /></motion.button><details className="m38-trackMore"><summary aria-label={`More actions for ${track.title}`}>•••</summary><div><button type="button" disabled={index===0} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index-1],next[index]]=[next[index],next[index-1]]; void savePlaylistOrder(next); }}><ChevronUpPremiumIcon /><span>MOVE UP</span></button><button type="button" disabled={index===selectedPlaylistTracks.length-1} onClick={() => { const next=[...selectedPlaylistTracks]; [next[index+1],next[index]]=[next[index],next[index+1]]; void savePlaylistOrder(next); }}><ChevronDownPremiumIcon /><span>MOVE DOWN</span></button><button type="button" className="is-remove" onClick={() => void savePlaylistOrder(selectedPlaylistTracks.filter((item) => item.id !== track.id))}><span>×</span><span>REMOVE</span></button></div></details></div></article>) : <div className="tr21-playlistEmpty"><b>EMPTY COLLECTION</b><span>Select songs in the Songs tab, then route them here.</span></div>}</div>
           </> : <div className="tr21-playlistEmpty is-stage"><b>BUILD YOUR FIRST COLLECTION</b><span>Create a playlist on the left to turn your library into a dedicated listening collection.</span></div>}</section>
         </section> : null}
 
@@ -2078,83 +2207,73 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         ) : null}
         {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
-        {tab === "discover" ? <section className="m37-discover tr10-discover">
-          <section className="tr10-radarPanel" aria-label="Discovery Radar">
-            <header className="tr10-radarHead">
-              <div><span>DISCOVERY RADAR</span><h2>Library Radar</h2></div>
-              <strong>{discoveryRadar.reduce((sum, lane) => sum + lane.tracks.length, 0)}</strong>
-            </header>
-            <div className="tr10-radarGrid">
-              {discoveryRadar.map((lane) => <article key={lane.id}>
-                <div><small>{lane.tracks.length} TRACKS</small><h3>{lane.title}</h3><p>{lane.subtitle}</p></div>
-                <button type="button" disabled={!lane.tracks.length} onClick={() => void playMusicAdHocQueue(`Radar • ${lane.title}`, lane.tracks)}><PlayPremiumIcon /> <span>PLAY</span></button>
-              </article>)}
-            </div>
-          </section>
+        {tab === "discover" ? <section className="m37-discover m38-discover tr10-discover">
+          <input ref={discoveryImportInputRef} hidden type="file" accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void handleDiscoveryImportFile(event)} />
 
-          <header className="tr10-discoverHead">
-            <div><span>REDISCOVER</span><h2>{discoveryView === "saved" ? "Saved Songs" : "Discover"}</h2></div>
-            <div className="tr10-discoverSummary"><strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong><span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span><small>{discoveryView === "saved" ? `${savedDiscoverySongs.length} TOTAL` : `${discoverySeeds.length} SEED${discoverySeeds.length === 1 ? "" : "S"}`}</small></div>
+          <header className="m38-discoverHero">
+            <div><span>MVP DISCOVERY</span><h2>Find what your library is missing.</h2><p>Rediscover old favorites, surface deep cuts and keep a clear trail of every song you add or reject.</p></div>
+            <div className="m38-discoverHeroStats"><span><b>{discoveryCount}</b><small>DISCOVERIES</small></span><span><b>{addedDiscoverySongs.length}</b><small>ADDED</small></span><span><b>{notInterestedDiscoveryItems.length}</b><small>NOT INTERESTED</small></span><span><b>{inLibraryDiscoverySongs.length}</b><small>IN LIBRARY</small></span></div>
           </header>
 
-          {(discoverySeeds.length || savedDiscoverySongs.length) ? <div className="tr10-discoverArchiveTools">
-            <label className="tr10-discoverSearch"><span>{discoveryView === "saved" ? "SEARCH SAVED SONGS" : "SEARCH ARCHIVE"}</span><input value={discoverySearch} onChange={(event) => setDiscoverySearch(event.target.value)} placeholder={discoveryView === "saved" ? "Song, artist, or source" : "Song, artist, or recommendation"} /></label>
-            <MusicPremiumSelect label="SORT" value={discoverySort} onChange={(next) => setDiscoverySort(next as DiscoverySort)} options={[{value:"newest",label:"Newest"},{value:"oldest",label:"Oldest"},{value:"artist",label:"Artist A–Z"},...(discoveryView === "archive" ? [{value:"most" as DiscoverySort,label:"Most discoveries"}] : [])]} />
-            <MusicPremiumSelect label="FILTER" value={discoveryFilter} disabled={discoveryView === "saved"} onChange={(next) => setDiscoveryFilter(next as DiscoveryFilter)} options={[{value:"all",label:discoveryView === "saved" ? "Saved songs" : "All discoveries"},{value:"artist_catalog",label:"Has More From Artist"},{value:"new_current",label:"Has New & Current"},{value:"same_era",label:"Has Same-Era Matches"},{value:"hidden",label:"Has Hidden Gems"},{value:"unowned",label:"Has New-to-You Tracks"}]} />
-            <button type="button" className={`tr10-savedSongsButton ${discoveryView === "saved" ? "is-active" : ""}`} aria-pressed={discoveryView === "saved"} onClick={() => setDiscoveryView((current) => current === "saved" ? "archive" : "saved")}>Saved Songs</button>
-          </div> : null}
+          <nav className="m38-discoveryStateTabs" aria-label="Discovery workflow">
+            {[
+              ["discoveries", "DISCOVERIES", discoveryCount],
+              ["added", "ADDED", addedDiscoverySongs.length],
+              ["not_interested", "NOT INTERESTED", notInterestedDiscoveryItems.length],
+              ["in_library", "IN LIBRARY", inLibraryDiscoverySongs.length],
+            ].map(([value,label,count]) => <motion.button key={String(value)} type="button" className={discoveryView===value ? "is-active" : ""} aria-current={discoveryView===value ? "page" : undefined} onClick={()=>setDiscoveryView(value as DiscoveryView)} whileTap={{scale:.97}}><span>{label}</span><b>{count}</b>{discoveryView===value ? <motion.i layoutId="m38-discovery-state"/> : null}</motion.button>)}
+          </nav>
 
-          {discoveryView === "saved" ? <>
-            {!savedDiscoverySongs.length ? <div className="tr10-empty">Songs you mark to add will appear here.</div> : !savedSongsFiltered.length ? <div className="tr10-empty">No Saved Songs match this search.</div> : <>
-              <div className="tr10-discoverGrid tr10-savedSongsGrid">
-                {pagedSavedSongs.map((item) => <SavedSongCard key={item.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} removing={removingSavedSongId === item.id} onPreview={toggleDiscoveryPreview} onDelete={(song) => void deleteSavedDiscoverySong(song)} />)}
-              </div>
-              <div className="tr10-savedSongsPager">
-                <button type="button" disabled={safeSavedSongsPage <= 1} onClick={() => setSavedSongsPage((value) => Math.max(1, value - 1))}>PREVIOUS</button>
-                <span>{safeSavedSongsPage} / {savedSongsPageCount}</span>
-                <button type="button" disabled={safeSavedSongsPage >= savedSongsPageCount} onClick={() => setSavedSongsPage((value) => Math.min(savedSongsPageCount, value + 1))}>NEXT</button>
-              </div>
+          {discoveryView === "discoveries" ? <section className="m38-radar" aria-label="Discovery Radar">
+            <header><div><span>LIBRARY RADAR</span><h3>{discoveryRadar.reduce((sum, lane) => sum + lane.tracks.length, 0)} opportunities in your library</h3></div><small>LIVE SIGNALS</small></header>
+            <div className="m38-radarSignals">{discoveryRadar.map((lane,index) => <motion.button type="button" key={lane.id} disabled={!lane.tracks.length} onClick={() => void playMusicAdHocQueue(`Radar • ${lane.title}`, lane.tracks)} whileTap={{scale:.97}} style={{"--m38-radar-index":index} as CSSProperties}><span>{lane.title}</span><b>{lane.tracks.length}</b><small>{lane.subtitle}</small><i aria-hidden/></motion.button>)}</div>
+          </section> : null}
+
+          <div className="m38-discoveryCommand">
+            <label><span>{discoveryView === "discoveries" ? "SEARCH OR ASK MVP" : discoveryView === "not_interested" ? "SEARCH NOT INTERESTED" : discoveryView === "in_library" ? "SEARCH DISCOVERED LIBRARY" : "SEARCH ADDED"}</span><input value={discoverySearch} onChange={(event)=>setDiscoverySearch(event.target.value)} placeholder={discoveryView === "discoveries" ? "Song, artist, recommendation, or discovery idea…" : "Song, artist, or source…"}/></label>
+            <MusicPremiumSelect label="SORT" value={discoverySort} onChange={(next)=>setDiscoverySort(next as DiscoverySort)} options={[{value:"newest",label:"Newest"},{value:"oldest",label:"Oldest"},{value:"artist",label:"Artist A–Z"},...(discoveryView === "discoveries" ? [{value:"most" as DiscoverySort,label:"Most discoveries"}] : [])]} />
+            <MusicPremiumSelect label="FILTER" value={discoveryFilter} disabled={discoveryView !== "discoveries"} onChange={(next)=>setDiscoveryFilter(next as DiscoveryFilter)} options={[{value:"all",label:"All discoveries"},{value:"artist_catalog",label:"More From Artist"},{value:"new_current",label:"New & Current"},{value:"same_era",label:"Same Era"},{value:"hidden",label:"Hidden Gems"},{value:"unowned",label:"New to You"}]} />
+          </div>
+
+          {discoveryView === "added" || discoveryView === "in_library" ? <>
+            {!savedSongsFiltered.length ? <div className="tr10-empty">{discoveryView === "added" ? "Songs you add from Discovery will stay here until you put them in My Music." : "Songs added to My Music from Discovery will appear here."}</div> : <>
+              <div className="m38-discoveryGrid">{pagedSavedSongs.map((item)=><SavedSongCard key={item.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} removing={removingSavedSongId===item.id} onPreview={toggleDiscoveryPreview} onDelete={(song)=>void deleteSavedDiscoverySong(song)} onYoutube={openDiscoveryYoutube} onImport={requestDiscoveryImport}/>)}</div>
+              {savedSongsPageCount > 1 ? <div className="m38-discoveryPager"><button disabled={safeSavedSongsPage<=1} onClick={()=>setSavedSongsPage((v)=>Math.max(1,v-1))}>PREVIOUS</button><span>{safeSavedSongsPage} / {savedSongsPageCount}</span><button disabled={safeSavedSongsPage>=savedSongsPageCount} onClick={()=>setSavedSongsPage((v)=>Math.min(savedSongsPageCount,v+1))}>NEXT</button></div> : null}
             </>}
-          </> : <>
-            {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : !discoveryArchive.length ? <div className="tr10-empty">No saved Rediscover results match these filters.</div> : discoveryArchive.map((seed) => {
-              const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item)=>!item.dismissed), discoveryFilter);
+          </> : null}
+
+          {discoveryView === "not_interested" ? <>
+            {!notInterestedFiltered.length ? <div className="tr10-empty">Songs you mark Not Interested remain reviewable here.</div> : <div className="m38-discoveryGrid">{notInterestedFiltered.map(({seed,item})=><DismissedDiscoveryCard key={`${seed.id}:${item.id}`} seed={seed} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} onPreview={toggleDiscoveryPreview} onYoutube={openDiscoveryYoutube} onAdd={(source,recommendation)=>void restoreDismissedDiscovery(source,recommendation)} onDelete={deleteDismissedDiscovery}/>)}</div>}
+          </> : null}
+
+          {discoveryView === "discoveries" ? <>
+            {!discoverySeeds.length ? <div className="tr10-empty">Play a song you like and press REDISCOVER in the player.</div> : !discoveryArchive.length ? <div className="tr10-empty">No active recommendations match this view.</div> : discoveryArchive.map((seed) => {
+              const visible = filterDiscoveryRecommendations(seed.recommendations.filter((item)=>!item.dismissed && !deletedDiscoveryIds.has(item.id) && !savedDiscoverySongIds.has(item.id)), discoveryFilter);
               const seedExpanded = expandedDiscoverySeedIds.has(seed.id);
               const wasRefreshed = seed.refreshedAt - seed.createdAt > 60000;
-              return <section className={`tr10-discoverSeed ${seedExpanded ? "is-expanded" : "is-collapsed"}`} data-rediscover-seed-id={seed.id} key={seed.id}>
-                <header className="tr10-discoverSeedHead">
-                  <button type="button" className="tr10-discoverSeedToggle" onClick={() => toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
-                    <div className="tr10-discoverSeedIdentity"><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p><time>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</time></div>
-                    <div className="tr10-discoverSeedStats"><strong>{visible.length}</strong><span>DISCOVERIES</span><small>3 CURATED LANES</small></div>
-                    <span className="tr10-discoverChevron" aria-hidden>{seedExpanded ? "⌃" : "⌄"}</span>
+              return <motion.section layout className={`m38-discoverySession ${seedExpanded ? "is-expanded" : "is-collapsed"}`} data-rediscover-seed-id={seed.id} key={seed.id}>
+                <header className="m38-discoverySessionHead">
+                  <button type="button" className="m38-discoverySessionToggle" onClick={()=>toggleDiscoverySeed(seed.id)} aria-expanded={seedExpanded}>
+                    <div><small>BASED ON</small><h3>{seed.trackTitle}</h3><p>{seed.trackArtist}{seed.seedYear ? ` • ${seed.seedYear}` : ""}</p></div>
+                    <span>{wasRefreshed ? "Updated" : "Rediscovered"} {formatDiscoveryDate(wasRefreshed ? seed.refreshedAt : seed.createdAt)}</span>
+                    <b>{visible.length}<small>DISCOVERIES</small></b>
+                    <i aria-hidden>{seedExpanded ? "⌃" : "⌄"}</i>
                   </button>
-                  <button type="button" className="tr10-discoverRemove" disabled={removingDiscoverySeedId === seed.id} onClick={() => void (async () => {
-                    stopDiscoveryPreview();
-                    setRemovingDiscoverySeedId(seed.id);
-                    const removed = await removeDiscoverySeed(seed.id);
-                    setDiscoverySeeds(listMusicDiscoverySeeds());
-                    setExpandedDiscoverySeedIds((current) => { const next = new Set(current); next.delete(seed.id); return next; });
-                    setExpandedDiscoveryLaneIds((current) => new Set([...current].filter((key) => !key.startsWith(`${seed.id}|`))));
-                    if (!removed) setError("Rediscover was removed from this device, but cloud deletion could not be confirmed. Check your connection and try again.");
-                    setRemovingDiscoverySeedId(null);
-                  })()}>{removingDiscoverySeedId === seed.id ? "REMOVING…" : "REMOVE"}</button>
+                  <details className="m38-sessionMore"><summary aria-label={`More actions for ${seed.trackTitle}`}>•••</summary><div><button disabled={removingDiscoverySeedId===seed.id} onClick={()=>void(async()=>{ stopDiscoveryPreview();setRemovingDiscoverySeedId(seed.id);const removed=await removeDiscoverySeed(seed.id);setDiscoverySeeds(listMusicDiscoverySeeds());setExpandedDiscoverySeedIds((current)=>{const next=new Set(current);next.delete(seed.id);return next;});if(!removed)setError("Rediscover was removed locally, but cloud deletion could not be confirmed.");setRemovingDiscoverySeedId(null);})()}>{removingDiscoverySeedId===seed.id?"REMOVING…":"REMOVE SESSION"}</button></div></details>
                 </header>
-                {seedExpanded ? (visible.length ? <div className="tr10-discoverSections">
-                  {discoverySectionsForFilter(discoveryFilter).map((section) => {
-                    const items = visible.filter((item) => item.category === section.key);
-                    const laneKey = discoveryLaneKey(seed.id, section.key);
-                    const laneExpanded = expandedDiscoveryLaneIds.has(laneKey);
-                    const sectionTitle = section.key === "artist_catalog" ? `More From ${seed.trackArtist}` : section.title;
-                    return <section className={`tr10-discoverCategory is-${section.tone} ${laneExpanded ? "is-expanded" : "is-collapsed"}`} key={section.key}>
-                      <button type="button" className="tr10-discoverCategoryToggle" onClick={() => toggleDiscoveryLane(seed.id, section.key)} aria-expanded={laneExpanded}>
-                        <div><span>{sectionTitle}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i aria-hidden>{laneExpanded ? "⌃" : "⌄"}</i>
-                      </button>
-                      {laneExpanded ? (items.length ? <div className="tr10-discoverGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} saved={savedDiscoverySongIds.has(item.id)} saving={savingRecommendationId === item.id} onPreview={toggleDiscoveryPreview} onSave={(recommendation) => void saveDiscoveryRecommendation(seed, recommendation)} />)}</div> : <div className="tr10-discoverLaneEmpty">Press Rediscover again to refresh and widen this lane.</div>) : null}
-                    </section>;
-                  })}
-                </div> : <div className="tr10-discoverConfidence">Rediscover could not build a useful set from the available music services this time. Press Rediscover again to refresh the search.</div>) : null}
-              </section>;
+                {seedExpanded ? <div className="m38-discoveryLanes">{discoverySectionsForFilter(discoveryFilter).map((section)=>{
+                  const items=visible.filter((item)=>item.category===section.key);
+                  const laneKey=discoveryLaneKey(seed.id,section.key);
+                  const laneExpanded=expandedDiscoveryLaneIds.has(laneKey);
+                  const sectionTitle=section.key==="artist_catalog"?`More From ${seed.trackArtist}`:section.title;
+                  return <section className={`m38-discoveryLane is-${section.tone}`} key={section.key}>
+                    <button className="m38-discoveryLaneHead" onClick={()=>toggleDiscoveryLane(seed.id,section.key)} aria-expanded={laneExpanded}><div><span>{sectionTitle}</span><small>{section.subtitle}</small></div><b>{items.length}</b><i>{laneExpanded?"⌃":"⌄"}</i></button>
+                    {laneExpanded ? items.length ? <div className="m38-discoveryGrid">{items.map((item)=><DiscoveryCard key={item.id} seedId={seed.id} item={item} previewingId={previewingRecommendationId} previewErrorId={previewErrorRecommendationId} saved={savedDiscoverySongIds.has(item.id)} saving={savingRecommendationId===item.id} onPreview={toggleDiscoveryPreview} onSave={(recommendation)=>void saveDiscoveryRecommendation(seed,recommendation)} onDismiss={markDiscoveryNotInterested} onYoutube={openDiscoveryYoutube}/>)}</div> : <div className="tr10-empty">No useful matches in this lane yet.</div> : null}
+                  </section>;
+                })}</div> : null}
+              </motion.section>;
             })}
-          </>}
+          </> : null}
         </section> : null}
       </section>
 
