@@ -1,0 +1,8 @@
+R43 VALIDATION
+- Patch scope: one file only, src/features/music/premium/MusicTodayAi.css
+- R42 source checksum: 78b062bd3f49a3b64714c670603ba575ac5995d403fbb45c6a48b2b53b227bdc
+- R43 payload checksum: 292e02292163474169f43cb20233c977da6fd072ab892a89e738847b0742954a
+- Installer refuses unknown CSS revisions.
+- Installer creates a backup before replacement.
+- Installer is idempotent.
+- No TypeScript or behavior file is changed.

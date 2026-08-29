@@ -1,0 +1,12 @@
+{
+  "version": "r43-ai-today-dense-3d",
+  "requires": "r42-ai-today-depth",
+  "scope": "AI Today CSS dense 3D visual polish only",
+  "files": [
+    {
+      "path": "src/features/music/premium/MusicTodayAi.css",
+      "fromSha256": "78b062bd3f49a3b64714c670603ba575ac5995d403fbb45c6a48b2b53b227bdc",
+      "toSha256": "292e02292163474169f43cb20233c977da6fd072ab892a89e738847b0742954a"
+    }
+  ]
+}
