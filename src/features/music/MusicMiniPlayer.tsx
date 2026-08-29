@@ -119,6 +119,9 @@ import {
   type MusicSourceUpgradeComparison,
 } from "../../lib/musicSourceUpgrade";
 
+import { MusicTodayAi } from "./premium/MusicTodayAi";
+import { steerMusicToday } from "../../lib/musicToday";
+
 const PLAYLISTS_CHANGED_EVENT = "mvp:music-playlists-changed";
 const DSP_PROFILE_STORAGE_KEY = "mvp_music_dsp_profiles_v1";
 const DSP_SLOTS: MusicCustomPresetSlot[] = ["custom_1", "custom_2", "custom_3"];
@@ -1704,6 +1707,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
   }
 
   function steerNeuralRadio(mode: MusicRadioMode) {
+    /* MVP_MUSIC_TODAY_STEERING_R40 */
+    if (steerMusicToday(mode)) {
+      setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} • TODAY`);
+      if (neuralMessageTimerRef.current != null) {
+        window.clearTimeout(neuralMessageTimerRef.current);
+      }
+      neuralMessageTimerRef.current = window.setTimeout(() => {
+        setNeuralMessage("");
+        neuralMessageTimerRef.current = null;
+      }, 2400);
+      return;
+    }
+
     const currentTrack = player.currentTrack;
     if (!currentTrack) return;
 
@@ -1996,7 +2012,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <small ref={heroArtistRef}>{track?.artist || "Unknown Artist"}</small>
           </button>
         </div>
-        <button
+                {/* MVP_MUSIC_TODAY_AI_R40 */}
+        <MusicTodayAi />
+<button
           type="button"
           data-profile={player.outputProfile}
           className={`tr-dspPlayerCornerDock ${eqOpen ? "is-active" : ""}`}

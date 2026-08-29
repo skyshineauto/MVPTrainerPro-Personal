@@ -1,0 +1,33 @@
+{
+  "version": "r40-ai-today-only",
+  "scope": "AI Today only",
+  "created": "2026-08-29",
+  "new_files": [
+    "src/lib/musicToday.ts",
+    "src/features/music/premium/MusicTodayAi.tsx",
+    "src/features/music/premium/MusicTodayAi.css"
+  ],
+  "patched_files": [
+    "src/features/music/MusicMiniPlayer.tsx"
+  ],
+  "untouched_explicitly": [
+    "src/features/music/MusicPage.tsx",
+    "src/features/music/MusicAuditionPanel.tsx",
+    "src/features/music/MusicIntelligencePanel.tsx",
+    "src/lib/musicPlayer.ts",
+    "src/lib/musicIntelligence.ts"
+  ],
+  "payload_sha256": {
+    "src/lib/musicToday.ts": "83b44c9ab55129e44cc58591eaa52f5015218b685d2bf02bd785593d2558edfc",
+    "src/features/music/premium/MusicTodayAi.tsx": "38519e51282edf78edcdc5bce828e0624bc4b059429251aa230d4e34d685e8a9",
+    "src/features/music/premium/MusicTodayAi.css": "b1daf4c56751cca13722f32c2490aa7e671930eb5806f1a567403a2a93c6bca8"
+  },
+  "behavior": {
+    "prompt_driven_only": true,
+    "uses_likes_or_listening_history": false,
+    "auto_play_after_submit": true,
+    "change_rebuilds_and_auto_switches": true,
+    "steering_rebuilds_active_today_queue": true,
+    "repeat_rule": "shuffle forced off; repeat-all used so a unique generated queue is exhausted before looping"
+  }
+}

@@ -1,0 +1,25 @@
+MVP TRAINER PRO R40 - VALIDATION
+August 29, 2026
+
+PASS - installer syntax: node --check
+PASS - clean synthetic install
+PASS - second installer run: idempotent, no changes
+PASS - TypeScript 5.8.3 strict/noUnused stub harness for:
+       src/lib/musicToday.ts
+       src/features/music/premium/MusicTodayAi.tsx
+PASS - TypeScript transpile syntax validation
+PASS - runtime behavior harness:
+       prompt "today sore from injury but relaxing and motivated"
+       -> Sore | Relaxed | Motivated
+       -> queue name MVP Today · Sore + Relaxed + Motivated
+       -> shuffle false, repeat all
+       -> playback starts automatically
+       -> steering rebuild changes the playing song
+       -> generated queue IDs are unique
+PASS - static contamination check: AI Today ranking code contains no favorite,
+       play_less, play_count, skip_count, completed_play_count, or last_played_at fields.
+
+NOT CLAIMED
+-----------
+The complete live GitHub repository is not mounted in this runtime, so a full repository
+npm run build cannot be truthfully claimed here. Run npm run build after installing R40.
