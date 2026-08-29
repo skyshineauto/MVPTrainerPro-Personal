@@ -567,22 +567,6 @@ export function markMusicAuditionSongInLibrary(songId: string, libraryTrackId: s
   return changed;
 }
 
-export async function deleteMusicAuditionSong(songId: string) {
-  mutateLocal((state) => ({
-    ...state,
-    songs: state.songs.filter((song) => song.id !== songId),
-    lists: state.lists.map((list) => ({ ...list, songIds: list.songIds.filter((id) => id !== songId), updatedAt: now() })),
-  }));
-  try {
-    const userId = await currentUserId();
-    if (!userId) return;
-    await supabase.from(LINK_TABLE).delete().eq("user_id", userId).eq("song_id", songId);
-    await supabase.from(SONG_TABLE).delete().eq("user_id", userId).eq("song_id", songId);
-  } catch {
-    // Local removal remains authoritative until a later cloud refresh.
-  }
-}
-
 
 function tokenSimilarity(a: string, b: string) {
   const left = new Set(normalize(a).split(" ").filter(Boolean));
@@ -1788,24 +1772,22 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   return <section className="m37-audition mvp-audition">
     <input ref={fileInputRef} hidden type="file" accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void handleFileChange(event)} />
 
-    <header className="m37-auditionHero m38-auditionHero">
-      <div><span>AUDITION</span><h2>Audition Queue</h2><p>Listen, decide, revisit and move the right songs into My Music.</p></div>
-      <div className="m37-auditionGlobal m38-auditionTelemetry" aria-label="Audition totals">
-        <span className="is-keep"><b>{globalCounts.keep}</b><small>KEPT</small></span>
-        <span className="is-maybe"><b>{globalCounts.maybe}</b><small>MAYBE</small></span>
-        <span className="is-pass"><b>{globalCounts.pass}</b><small>PASSED</small></span>
-        <span><b>{state.lists.length}</b><small>LISTS</small></span>
+    <header className="m37-auditionHero">
+      <div><span>AUDITION</span><h2>Audition Queue</h2></div>
+      <div className="m37-auditionGlobal" aria-label="Audition totals">
+        <button type="button" className="is-keep" onClick={() => { stopPreview(); setResultDecision("keep"); setView("results"); }}><b>{globalCounts.keep}</b><span>KEPT</span></button>
+        <button type="button" className="is-maybe" onClick={() => { stopPreview(); setResultDecision("maybe"); setView("results"); }}><b>{globalCounts.maybe}</b><span>MAYBE</span></button>
+        <button type="button" className="is-pass" onClick={() => { stopPreview(); setResultDecision("pass"); setView("results"); }}><b>{globalCounts.pass}</b><span>PASS</span></button>
+        <button type="button" onClick={() => { stopPreview(); setView("lists"); }}><b>{state.lists.length}</b><span>LISTS</span></button>
       </div>
     </header>
 
-    <nav className="m37-auditionNav m38-auditionNav" aria-label="Audition views">
-      <motion.button whileTap={{scale:.97}} className={view === "lists" ? "is-active" : ""} onClick={() => { stopPreview(); setView("lists"); }}><QueuePremiumIcon /><span>LISTS</span><b>{state.lists.length}</b></motion.button>
-      <motion.button whileTap={{scale:.97}} className={view === "audition" ? "is-active" : ""} disabled={!selectedList} onClick={() => selectedList && setView("audition")}><PlayPremiumIcon /><span>NOW AUDITIONING</span></motion.button>
-      <motion.button whileTap={{scale:.97}} className={view === "kept" ? "is-active" : ""} onClick={() => { stopPreview(); setView("kept"); }}><KeepPremiumIcon /><span>KEPT</span><b>{globalCounts.keep}</b></motion.button>
-      <motion.button whileTap={{scale:.97}} className={view === "results" && resultDecision === "maybe" ? "is-active is-maybe" : "is-maybe"} onClick={() => { stopPreview(); setResultDecision("maybe"); setView("results"); }}><MaybePremiumIcon /><span>MAYBE</span><b>{globalCounts.maybe}</b></motion.button>
-      <motion.button whileTap={{scale:.97}} className={view === "results" && resultDecision === "pass" ? "is-active is-pass" : "is-pass"} onClick={() => { stopPreview(); setResultDecision("pass"); setView("results"); }}><PassPremiumIcon /><span>PASSED</span><b>{globalCounts.pass}</b></motion.button>
-      <motion.button whileTap={{scale:.97}} className={view === "history" ? "is-active" : ""} onClick={() => { stopPreview(); setView("history"); }}><SparkPremiumIcon /><span>HISTORY</span></motion.button>
-      <motion.button whileTap={{scale:.97}} className="is-import" onClick={() => { setImportError(""); setImportOpen(true); }}><UploadPremiumIcon /><span>IMPORT</span></motion.button>
+    <nav className="m37-auditionNav">
+      <button className={view === "lists" ? "is-active" : ""} onClick={() => { stopPreview(); setView("lists"); }}><QueuePremiumIcon /><span>AUDITION LISTS</span></button>
+      <button className={view === "audition" ? "is-active" : ""} disabled={!selectedList} onClick={() => selectedList && setView("audition")}><PlayPremiumIcon /><span>NOW AUDITIONING</span></button>
+      <button className={view === "kept" ? "is-active" : ""} onClick={() => { stopPreview(); setView("kept"); }}><KeepPremiumIcon /><span>KEPT SONGS</span></button>
+      <button className={view === "history" ? "is-active" : ""} onClick={() => { stopPreview(); setView("history"); }}><SparkPremiumIcon /><span>HISTORY</span></button>
+      <button className="is-import" onClick={() => { setImportError(""); setImportOpen(true); }}><UploadPremiumIcon /><span>IMPORT LIST</span></button>
     </nav>
 
     {message ? <div className="mvp-auditionMessage">{message}<button type="button" onClick={() => setMessage("")}>×</button></div> : null}
@@ -1820,7 +1802,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
           return <article key={list.id} className="m37-auditionListCard">
             <header><div className="m37-auditionListIcon">♫</div><div>{renameListId === list.id ? <div className="mvp-auditionRename"><input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveRename(); if (event.key === "Escape") setRenameListId(null); }} /><button onClick={saveRename}>SAVE</button><button onClick={() => setRenameListId(null)}>CANCEL</button></div> : <><h3>{list.name}</h3><small>{dateLabel(list.createdAt).toUpperCase()}</small></>}</div><b>{percent}%</b></header>
             <div className="m37-auditionListStats"><span><b>{remaining}</b><small>REMAINING</small></span><span><b>{stats.reviewed}</b><small>REVIEWED</small></span><span className="is-keep"><b>{stats.keep}</b><small>KEEP</small></span><span className="is-maybe"><b>{stats.maybe}</b><small>MAYBE</small></span><span className="is-pass"><b>{stats.pass}</b><small>PASS</small></span></div>
-            <footer className="m38-auditionListFooter"><motion.button type="button" className="is-open" onClick={() => openList(list)} whileTap={{scale:.97}}><PlayPremiumIcon /><span>{stats.reviewed ? "CONTINUE" : "START"}</span></motion.button><details className="m38-moreMenu"><summary aria-label={`More actions for ${list.name}`}><span>•••</span><b>MORE</b></summary><div><button onClick={() => startRename(list)}>RENAME</button><button onClick={() => duplicateList(list)}>DUPLICATE</button><button onClick={() => setMergeSourceId(list.id)} disabled={state.lists.length < 2}>MERGE</button><button className="is-danger" onClick={() => void deleteList(list)}>DELETE LIST</button></div></details></footer>
+            <footer><motion.button type="button" className="is-open" onClick={() => openList(list)} whileTap={{scale:.97}}><PlayPremiumIcon /><span>{stats.reviewed ? "CONTINUE" : "START"}</span></motion.button><button onClick={() => startRename(list)}>RENAME</button><button onClick={() => duplicateList(list)}>DUPLICATE</button><button onClick={() => setMergeSourceId(list.id)} disabled={state.lists.length < 2}>MERGE</button><button className="is-danger" onClick={() => void deleteList(list)}>DELETE</button></footer>
           </article>;
         })}
       </div>}
@@ -1831,51 +1813,24 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
       {!historyLists.length ? <div className="m37-auditionEmpty"><b>NO COMPLETED AUDITIONS</b></div> : <div>{historyLists.map((list) => { const stats=listStats(list,songsById,isInLibraryFast); return <article key={list.id}><div><strong>{list.name}</strong><span>{dateLabel(list.updatedAt)}</span></div><div><span><b>{stats.reviewed}</b> REVIEWED</span><span className="is-keep"><b>{stats.keep}</b> KEPT</span><span className="is-maybe"><b>{stats.maybe}</b> MAYBE</span><span className="is-pass"><b>{stats.pass}</b> PASS</span></div><div><button onClick={() => duplicateList(list)}>DUPLICATE</button><button className="is-danger" onClick={() => void deleteList(list)}>DELETE</button></div></article>; })}</div>}
     </section> : null}
 
-    {view === "results" ? <section className="m37-auditionResults m38-auditionResults">
-      <header><div><span>DECISION HISTORY</span><h3>{decisionLabel(resultDecision)} Songs</h3><p>Every decision stays reviewable. Preview again, use YouTube, or change your mind.</p></div><b>{resultSongs.length}</b></header>
-      {!resultSongs.length ? <div className="m37-auditionEmpty"><b>NO {decisionLabel(resultDecision)} SONGS</b></div> : <div className="m37-auditionResultGrid">{resultSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <motion.article layout key={song.id}>
-        <div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div>
-        <div className="m38-resultCopy"><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ") || "Audition history"}</small></div>
-        <div className="m37-auditionResultActions">
-          <motion.button whileTap={{scale:.96}} className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></motion.button>
-          <motion.button whileTap={{scale:.96}} className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></motion.button>
-          {resultDecision !== "keep" ? <motion.button whileTap={{scale:.96}} className="is-keep" onClick={() => {setMusicAuditionDecision(song.id,"keep");refresh();}}><KeepPremiumIcon/><span>KEEP</span></motion.button> : null}
-          {resultDecision !== "maybe" ? <motion.button whileTap={{scale:.96}} className="is-maybe" onClick={() => {setMusicAuditionDecision(song.id,"maybe");refresh();}}><MaybePremiumIcon/><span>MAYBE</span></motion.button> : null}
-          {resultDecision !== "pass" ? <motion.button whileTap={{scale:.96}} className="is-pass" onClick={() => {setMusicAuditionDecision(song.id,"pass");refresh();}}><PassPremiumIcon/><span>PASS</span></motion.button> : null}
-          <motion.button whileTap={{scale:.96}} className="is-delete" onClick={() => void (async()=>{ if (!window.confirm(`Delete ${song.artist} - ${song.title} from Audition history? This will not delete a song already in My Music.`)) return; stopPreview(); await deleteMusicAuditionSong(song.id); refresh(); })()}><span className="m38-deleteX">×</span><span>DELETE</span></motion.button>
-        </div>
-      </motion.article>; })}</div>}
+    {view === "results" ? <section className="m37-auditionResults">
+      <header><div><span>ALL AUDITIONS</span><h3>{decisionLabel(resultDecision)} Songs</h3></div><b>{resultSongs.length}</b></header>
+      {!resultSongs.length ? <div className="m37-auditionEmpty"><b>NO {decisionLabel(resultDecision)} SONGS</b></div> : <div className="m37-auditionResultGrid">{resultSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className={song.decision==="keep" ? "is-active is-keep" : "is-keep"} onClick={() => {setMusicAuditionDecision(song.id,"keep");refresh();}}><KeepPremiumIcon/><span>KEEP</span></button><button className={song.decision==="maybe" ? "is-active is-maybe" : "is-maybe"} onClick={() => {setMusicAuditionDecision(song.id,"maybe");refresh();}}><MaybePremiumIcon/><span>MAYBE</span></button><button className={song.decision==="pass" ? "is-active is-pass" : "is-pass"} onClick={() => {setMusicAuditionDecision(song.id,"pass");refresh();}}><PassPremiumIcon/><span>PASS</span></button></div></article>; })}</div>}
     </section> : null}
-
 
     {view === "audition" && selectedList && currentStats ? <div className="m37-auditionStage">
       <header className="m37-auditionStageHead"><button onClick={() => { stopPreview(); setView("lists"); }}>‹ LISTS</button><div><span>NOW AUDITIONING</span><h3>{selectedList.name}</h3></div><div><b>{currentRemaining}</b><span>REMAINING</span></div></header>
-      {currentSong ? <AnimatePresence mode="wait" initial={false}><motion.article key={currentSong.id} className={`m37-auditionSong m38-auditionSong ${currentArtworkReady ? "has-art" : "no-art"}`} initial={{opacity:0,x:18}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-14}} transition={{duration:.22,ease:[.22,1,.36,1]}}>
-        {currentArtworkReady ? <div className="m38-auditionAmbient" aria-hidden style={{backgroundImage:`url("${currentSong.artworkUrl}")`}}/> : null}
-        <div className="m37-auditionArtwork m38-auditionArtwork">{currentArtworkReady ? <img src={currentSong.artworkUrl || ""} alt="" onError={() => handleArtworkFailure(currentSong,currentSong.artworkUrl || "")} /> : <div><b>{currentSong.artist.split(/\s+/).slice(0,2).map((part)=>part[0]).join("").toUpperCase()}</b><small>{lookupSongId===currentSong.id ? "SEARCHING" : "NO ART"}</small></div>}<span className="m38-artReflection" aria-hidden/></div>
-        <div className="m37-auditionSongInfo m38-auditionSongInfo">
-          <div className="m37-auditionSongStatus"><span className={`is-${currentFlashDecision || "new"}`}>{currentFlashDecision ? decisionLabel(currentFlashDecision) : "READY"}</span>{currentPreviewReady ? <span>{previewProviderLabel(currentSong.previewUrl)}</span> : <span>YOUTUBE READY</span>}</div>
-          <div className="m38-auditionIdentity"><span>CURRENT SONG</span><h2>{currentSong.title}</h2><h3>{currentSong.artist}</h3><p>{[currentSong.album,currentSong.releaseYear].filter(Boolean).join(" • ") || "Metadata ready when available"}</p></div>
-          <div className="m38-auditionListenLabel">LISTEN</div>
-          <div className="m37-auditionListen"><motion.button whileTap={{scale:.97}} className={`is-preview ${previewSongId===currentSong.id ? "is-active" : ""}`} onClick={() => void togglePreview(currentSong)}><PreviewRenderIcon playing={previewSongId===currentSong.id}/><span><b>{previewSongId===currentSong.id ? "STOP PREVIEW" : previewRequestSongId===currentSong.id ? "CANCEL" : currentPreviewReady ? "PREVIEW" : "FIND PREVIEW"}</b><small>{currentPreviewReady ? previewProviderLabel(currentSong.previewUrl) : "Search preview sources"}</small></span></motion.button><motion.button whileTap={{scale:.97}} className="is-youtube" onClick={() => openYoutube(currentSong)}><YouTubePremiumIcon/><span><b>YOUTUBE</b><small>Exact artist + title</small></span></motion.button></div>
-          <div className="m38-auditionDecisionLabel">DECIDE</div>
-          <div className="m37-auditionDecision"><motion.button whileTap={{scale:.97}} aria-pressed={currentFlashDecision==="keep"} className={`is-keep ${currentFlashDecision==="keep" ? "is-active" : ""}`} onClick={() => decide(currentSong,"keep")}><KeepPremiumIcon/><span><b>KEEP</b><small>Save for library</small></span></motion.button><motion.button whileTap={{scale:.97}} aria-pressed={currentFlashDecision==="maybe"} className={`is-maybe ${currentFlashDecision==="maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong,"maybe")}><MaybePremiumIcon/><span><b>MAYBE</b><small>Review later</small></span></motion.button><motion.button whileTap={{scale:.97}} aria-pressed={currentFlashDecision==="pass"} className={`is-pass ${currentFlashDecision==="pass" ? "is-active" : ""}`} onClick={() => decide(currentSong,"pass")}><PassPremiumIcon/><span><b>PASS</b><small>Show less like this</small></span></motion.button></div>
-          <div className="m37-auditionPager"><motion.button whileTap={{scale:.97}} disabled={currentIndex<=0} onClick={() => {stopPreview();setCurrentIndex((index)=>Math.max(0,index-1));}}><ChevronPremiumIcon direction="left"/><span>PREVIOUS</span></motion.button><b><small>POSITION</small>{currentIndex + 1} / {selectedSongs.length}</b><motion.button whileTap={{scale:.97}} onClick={nextUnreviewed}><span>NEXT UNREVIEWED</span><ChevronPremiumIcon direction="right"/></motion.button></div>
+      {currentSong ? <AnimatePresence mode="wait" initial={false}><motion.article key={currentSong.id} className={`m37-auditionSong ${currentArtworkReady ? "has-art" : "no-art"}`} initial={{opacity:0,x:18}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-14}} transition={{duration:.18,ease:[.22,1,.36,1]}}>
+        <div className="m37-auditionArtwork">{currentArtworkReady ? <img src={currentSong.artworkUrl || ""} alt="" onError={() => handleArtworkFailure(currentSong,currentSong.artworkUrl || "")} /> : <div><b>{currentSong.artist.split(/\s+/).slice(0,2).map((part)=>part[0]).join("").toUpperCase()}</b><small>{lookupSongId===currentSong.id ? "SEARCHING" : "NO ART"}</small></div>}</div>
+        <div className="m37-auditionSongInfo"><div className="m37-auditionSongStatus"><span className={`is-${currentFlashDecision || "new"}`}>{currentFlashDecision ? decisionLabel(currentFlashDecision) : "READY"}</span>{currentPreviewReady ? <span>{previewProviderLabel(currentSong.previewUrl)}</span> : null}</div><h2>{currentSong.title}</h2><h3>{currentSong.artist}</h3><p>{[currentSong.album,currentSong.releaseYear].filter(Boolean).join(" • ")}</p>
+          <div className="m37-auditionListen"><button className={`is-preview ${previewSongId===currentSong.id ? "is-active" : ""}`} onClick={() => void togglePreview(currentSong)}><PreviewRenderIcon playing={previewSongId===currentSong.id}/><span>{previewSongId===currentSong.id ? "STOP PREVIEW" : previewRequestSongId===currentSong.id ? "CANCEL" : currentPreviewReady ? "PREVIEW" : "FIND PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(currentSong)}><YouTubePremiumIcon/><span>YOUTUBE</span></button></div>
+          <div className="m37-auditionDecision"><button aria-pressed={currentFlashDecision==="keep"} className={`is-keep ${currentFlashDecision==="keep" ? "is-active" : ""}`} onClick={() => decide(currentSong,"keep")}><KeepPremiumIcon/><span>KEEP</span></button><button aria-pressed={currentFlashDecision==="maybe"} className={`is-maybe ${currentFlashDecision==="maybe" ? "is-active" : ""}`} onClick={() => decide(currentSong,"maybe")}><MaybePremiumIcon/><span>MAYBE</span></button><button aria-pressed={currentFlashDecision==="pass"} className={`is-pass ${currentFlashDecision==="pass" ? "is-active" : ""}`} onClick={() => decide(currentSong,"pass")}><PassPremiumIcon/><span>PASS</span></button></div>
+          <div className="m37-auditionPager"><button disabled={currentIndex<=0} onClick={() => {stopPreview();setCurrentIndex((index)=>Math.max(0,index-1));}}><ChevronPremiumIcon direction="left"/><span>PREVIOUS</span></button><b>{Math.min(currentStats.reviewed+1,currentStats.total)} OF {currentStats.total}</b><button onClick={nextUnreviewed}><span>NEXT UNREVIEWED</span><ChevronPremiumIcon direction="right"/></button></div>
         </div>
-        <aside className="m38-auditionContext">
-          <span>WHY IT'S HERE</span>
-          <strong>{currentSong.decision ? `Previously ${decisionLabel(currentSong.decision).toLowerCase()}` : "Unreviewed candidate"}</strong>
-          <p>{selectedList.name}</p>
-          <div><span>PREVIEW</span><b>{currentPreviewReady ? previewProviderLabel(currentSong.previewUrl).replace(" SAMPLE","") : "SEARCH"}</b></div>
-          <div><span>ARTWORK</span><b>{currentArtworkReady ? "READY" : "SEARCHING"}</b></div>
-          <div><span>LIBRARY</span><b>{currentSong.libraryTrackId ? "IN MVP" : "NOT ADDED"}</b></div>
-          <small>Keep, Maybe and Pass remain reversible from the decision tabs.</small>
-        </aside>
       </motion.article></AnimatePresence> : <div className="m37-auditionComplete"><b>AUDITION COMPLETE</b><button onClick={() => setView("history")}>VIEW HISTORY</button></div>}
-
     </div> : null}
 
-    {view === "kept" ? <section className="m37-auditionKept m38-auditionKept"><header><div><span>KEPT SONGS</span><h3>Ready to Add</h3><p>Preview again before importing. Songs already added to My Music are clearly marked.</p></div><b>{keptSongs.length}</b></header>{!keptSongs.length ? <div className="m37-auditionEmpty"><b>NO KEPT SONGS WAITING</b></div> : <div>{keptSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <motion.article layout key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div className="m38-resultCopy"><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><motion.button whileTap={{scale:.96}} className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></motion.button><motion.button whileTap={{scale:.96}} className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></motion.button>{song.libraryTrackId ? <span className="m38-inLibraryState">✓ IN LIBRARY</span> : onImportFile ? <motion.button whileTap={{scale:.96}} className="is-add" disabled={importingSongId===song.id} onClick={() => requestSongImport(song)}><UploadPremiumIcon/><span>{importingSongId===song.id ? "ADDING…" : "ADD TO LIBRARY"}</span></motion.button> : null}<motion.button whileTap={{scale:.96}} className="is-delete" onClick={() => void (async()=>{ if (!window.confirm(`Delete ${song.artist} - ${song.title} from Audition history? This will not delete the music-library file.`)) return; stopPreview(); await deleteMusicAuditionSong(song.id); refresh(); })()}><span className="m38-deleteX">×</span><span>DELETE</span></motion.button></div></motion.article>; })}</div>}</section> : null}
+    {view === "kept" ? <section className="m37-auditionKept"><header><div><span>KEPT SONGS</span><h3>Ready to Add</h3></div><b>{keptSongs.length}</b></header>{!keptSongs.length ? <div className="m37-auditionEmpty"><b>NO KEPT SONGS WAITING</b></div> : <div>{keptSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></button>{onImportFile ? <button className="is-add" disabled={importingSongId===song.id} onClick={() => requestSongImport(song)}><UploadPremiumIcon/><span>{importingSongId===song.id ? "ADDING…" : "ADD TO MVP"}</span></button> : null}</div></article>; })}</div>}</section> : null}
 
     {importOpen ? <div className="mvp-auditionModalBackdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setImportOpen(false); }}>
       <section className="mvp-auditionModal">
