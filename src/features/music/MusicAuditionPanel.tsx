@@ -973,19 +973,26 @@ function previewProviderLabel(url: string | null) {
   return "VERIFIED SAMPLE";
 }
 
-export async function resolveMusicAuditionMetadata(songId: string, options: { forceFresh?: boolean; blockedPreviewUrls?: Set<string> } = {}) {
+export async function resolveMusicAuditionMetadata(songId: string, options: { forceFresh?: boolean; blockedPreviewUrls?: Set<string>; blockedArtworkUrls?: Set<string> } = {}) {
   const state = readLocal();
   const song = state.songs.find((item) => item.id === songId);
   if (!song) throw new Error("Song not found.");
 
   const blockedPreviewUrls = options.blockedPreviewUrls || new Set<string>();
+  const blockedArtworkUrls = options.blockedArtworkUrls || new Set<string>();
   const existing = metadataRequests.get(songId);
   if (existing && !options.forceFresh) return existing;
 
   const request = (async () => {
     try {
       // Reuse a working cached preview immediately unless this call explicitly asks for a fresh source.
-      if (!options.forceFresh && song.previewUrl && !blockedPreviewUrls.has(song.previewUrl) && await probePreviewUrl(song.previewUrl)) return song;
+      if (
+        !options.forceFresh &&
+        song.previewUrl &&
+        !blockedPreviewUrls.has(song.previewUrl) &&
+        (!song.artworkUrl || !blockedArtworkUrls.has(song.artworkUrl)) &&
+        await probePreviewUrl(song.previewUrl)
+      ) return song;
 
       const queries = metadataQueries(song);
       const deezerTerms = deezerSearchTerms(song);
@@ -1009,7 +1016,8 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
       let combined = mergeCandidates(firstWave)
         .filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
       let ranked = rankedCandidates(song, combined);
-      let metadataBest = ranked[0] || null;
+      const metadataCandidates = combined.filter((item) => !item.artworkUrl || !blockedArtworkUrls.has(item.artworkUrl));
+      let metadataBest = rankedCandidates(song, metadataCandidates)[0] || ranked[0] || null;
       let playableBest = await firstPlayableCandidate(ranked);
 
       // Deep worldwide wave only when the fast wave cannot produce a verified playable sample.
@@ -1030,7 +1038,8 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
         combined = mergeCandidates([combined, ...secondWave])
           .filter((item) => !item.previewUrl || !blockedPreviewUrls.has(item.previewUrl));
         ranked = rankedCandidates(song, combined);
-        metadataBest = ranked[0] || metadataBest;
+        const freshMetadataCandidates = combined.filter((item) => !item.artworkUrl || !blockedArtworkUrls.has(item.artworkUrl));
+        metadataBest = rankedCandidates(song, freshMetadataCandidates)[0] || metadataBest;
         playableBest = await firstPlayableCandidate(ranked);
       }
 
@@ -1052,7 +1061,10 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
             album: clean(metadataItem.albumName),
             releaseYear: metadataItem.releaseYear,
             genre: clean(metadataItem.genre) || null,
-            artworkUrl: metadataItem.artworkUrl || previewItem?.artworkUrl || null,
+            artworkUrl:
+              (metadataItem.artworkUrl && !blockedArtworkUrls.has(metadataItem.artworkUrl) ? metadataItem.artworkUrl : null) ||
+              (previewItem?.artworkUrl && !blockedArtworkUrls.has(previewItem.artworkUrl) ? previewItem.artworkUrl : null) ||
+              null,
             previewUrl: previewItem?.previewUrl || null,
             storeUrl: previewItem?.storeUrl || metadataItem.storeUrl || null,
             metadataUpdatedAt: now(),
@@ -1203,6 +1215,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   const [previewRequestSongId, setPreviewRequestSongId] = useState<string | null>(null);
   const [importingSongId, setImportingSongId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [failedArtworkUrls, setFailedArtworkUrls] = useState<Set<string>>(() => new Set());
   const [verifiedMetadataIds, setVerifiedMetadataIds] = useState<Set<string>>(() => new Set());
   const verifiedMetadataIdsRef = useRef<Set<string>>(new Set());
   const [decisionFlash, setDecisionFlash] = useState<{ songId: string; decision: Exclude<AuditionDecision, null> } | null>(null);
@@ -1361,6 +1374,29 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     return () => window.clearTimeout(timer);
   }, [currentSong?.id, currentIndex, selectedSongs]);
 
+
+  function handleArtworkFailure(song: MusicAuditionSong, url: string) {
+    if (!url) return;
+    const blocked = new Set<string>(failedArtworkUrls);
+    blocked.add(url);
+    setFailedArtworkUrls(blocked);
+    verifiedMetadataIdsRef.current.delete(song.id);
+    setVerifiedMetadataIds((previous) => {
+      const next = new Set(previous);
+      next.delete(song.id);
+      return next;
+    });
+
+    setLookupSongId(song.id);
+    void resolveMusicAuditionMetadata(song.id, { forceFresh: true, blockedArtworkUrls: blocked })
+      .then((resolved) => {
+        if (resolved.artworkUrl && !blocked.has(resolved.artworkUrl)) {
+          verifiedMetadataIdsRef.current.add(song.id);
+          setVerifiedMetadataIds((previous) => new Set(previous).add(song.id));
+        }
+      })
+      .finally(() => setLookupSongId((id) => id === song.id ? null : id));
+  }
 
   function openList(list: MusicAuditionList) {
     stopPreview();
@@ -1721,7 +1757,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   }, [state.songs, isInLibraryFast]);
 
   const currentMetadataVerified = Boolean(currentSong && verifiedMetadataIds.has(currentSong.id));
-  const currentArtworkReady = Boolean(currentSong?.artworkUrl);
+  const currentArtworkReady = Boolean(currentSong?.artworkUrl && !failedArtworkUrls.has(currentSong.artworkUrl));
   const currentMetadataAvailable = Boolean(
     currentSong &&
     (currentMetadataVerified || currentSong.artworkUrl || currentSong.album || currentSong.releaseYear || currentSong.genre),
@@ -1799,7 +1835,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
       >
         <div className="mvp-auditionAmbient" aria-hidden="true" style={currentArtworkReady ? { backgroundImage: `url("${currentSong.artworkUrl}")` } : undefined} />
         <div className="mvp-auditionArtwork">
-          {currentArtworkReady ? <img src={currentSong.artworkUrl || ""} alt="" /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "FINDING PREVIEW" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
+          {currentArtworkReady ? <img src={currentSong.artworkUrl || ""} alt="" onError={() => handleArtworkFailure(currentSong, currentSong.artworkUrl || "")} /> : <div className="mvp-auditionArtworkFallback"><div className="mvp-auditionWave" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div><b>{currentSong.artist.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</b><small>{lookupSongId === currentSong.id ? "FINDING PREVIEW" : currentMetadataVerified ? "NO ART FOUND" : "ARTWORK SEARCH"}</small></div>}
           <span>{currentIndex + 1}<small>/ {selectedSongs.length}</small></span>
         </div>
         <div className="mvp-auditionSongInfo">
@@ -1860,7 +1896,7 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
           const sources = musicAuditionSongSources(song.id, state.lists);
           return <article key={song.id}>
             <div className="mvp-keptAmbient" aria-hidden="true" style={song.artworkUrl ? { backgroundImage: `url("${song.artworkUrl}")` } : undefined} />
-            <div className="mvp-auditionKeptArt">{song.artworkUrl ? <img src={song.artworkUrl} alt="" /> : <span>♫</span>}</div>
+            <div className="mvp-auditionKeptArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song, song.artworkUrl || "")} /> : <span>♫</span>}</div>
             <div className="mvp-auditionKeptInfo"><small>🔥 READY TO ADD</small><strong>{song.title}</strong><b>{song.artist}</b><p>{sources.length ? `FROM ${sources.map((list) => list.name).join(" • ")}` : "KEPT FROM AUDITION"}</p></div>
             <div className="mvp-auditionKeptActions">
               <button className={`mvp-keptAction is-preview ${previewRequestSongId === song.id ? "is-loading" : ""}`} onClick={() => void togglePreview(song)}>
