@@ -1,0 +1,24 @@
+R41 VALIDATION
+
+PASS - TypeScript strict/noUnusedLocals/noUnusedParameters validation for musicToday.ts + MusicTodayAi.tsx.
+PASS - Installer tested against exact R40 output.
+PASS - Installer second-run idempotency tested.
+PASS - Installer safety-stop tested against a non-R40 baseline.
+PASS - Post-install SHA256 checks verified for all 3 AI Today replacement files.
+PASS - MusicMiniPlayer is not rewritten by R41. Existing R40 integration is only verified.
+
+R41 FILE SCOPE
+- src/lib/musicToday.ts
+- src/features/music/premium/MusicTodayAi.tsx
+- src/features/music/premium/MusicTodayAi.css
+
+BEHAVIOR CHECKS BUILT INTO CODE
+- AI Today forces normal Repeat to OFF.
+- AI Today forces Shuffle to OFF.
+- Queue is unique-track filtered before ranking.
+- Calm/tired/low-drive states hard-exclude excessive energy, drive, aggression, upbeat character and incompatible heaviness.
+- Artist DNA/style layer influences song matching.
+- Future persisted Song DNA fields are preferred when present.
+
+NOT INCLUDED YET
+The full Internet/audio Intelligence Scan inside Enrich Library and automatic upload-time DNA analysis is the next controlled stage. It is intentionally not bundled into this AI-only patch.

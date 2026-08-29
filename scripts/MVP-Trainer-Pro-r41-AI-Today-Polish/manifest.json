@@ -1,0 +1,39 @@
+{
+  "version": "r41-ai-today-polish",
+  "requires": "r40-ai-today-only",
+  "scope": "AI Today only",
+  "files": [
+    {
+      "path": "payload/src/lib/musicToday.ts",
+      "sha256": "6b11193fafbb6c84f15c891644f4211677c104fafc59f01764f054e15566488e",
+      "bytes": 31712
+    },
+    {
+      "path": "payload/src/features/music/premium/MusicTodayAi.tsx",
+      "sha256": "a31ba31c05a1be460e38069e2785dbed1f755243c5d3c6ac9c4146c3bfbb9411",
+      "bytes": 15172
+    },
+    {
+      "path": "payload/src/features/music/premium/MusicTodayAi.css",
+      "sha256": "23bddb8873d233caa8302ea4b9d9ecb3f4f01d88dab6567de7c7ba6709827202",
+      "bytes": 13182
+    },
+    {
+      "path": "apply-mvp-trainer-r41-ai-today-polish.mjs",
+      "sha256": "081dc113921183e2dfbffc0cbf511aa7315a86f75e2d0c9a4ae75dd149927461",
+      "bytes": 5110
+    },
+    {
+      "path": "README.txt",
+      "sha256": "39b75f757029a16077ddef81a7f9403806d93940d8fca2a1127df9042fc8d499",
+      "bytes": 2068
+    }
+  ],
+  "notes": [
+    "Centers desktop and mobile AI control between artwork and DSP.",
+    "Adds deeper floating 3D cyan/glass AI styling and contained typography.",
+    "Forces Repeat and Shuffle off during AI Today.",
+    "Adds strict low-energy compatibility gates and Artist DNA/style weighting.",
+    "Does not add the full Enrich Library intelligence scan yet."
+  ]
+}
