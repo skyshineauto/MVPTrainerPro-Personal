@@ -1,0 +1,8 @@
+R42 VALIDATION
+- Patch scope: one file only, src/features/music/premium/MusicTodayAi.css
+- R41 source checksum: 23bddb8873d233caa8302ea4b9d9ecb3f4f01d88dab6567de7c7ba6709827202
+- R42 payload checksum: 78b062bd3f49a3b64714c670603ba575ac5995d403fbb45c6a48b2b53b227bdc
+- Installer refuses unknown CSS revisions.
+- Installer creates a backup before replacement.
+- Installer is idempotent.
+- No TypeScript or behavior file is changed.

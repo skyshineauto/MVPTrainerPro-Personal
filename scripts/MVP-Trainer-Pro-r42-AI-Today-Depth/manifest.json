@@ -1,0 +1,12 @@
+{
+  "version": "r42-ai-today-depth",
+  "requires": "r41-ai-today-polish",
+  "scope": "AI Today CSS visual depth only",
+  "files": [
+    {
+      "path": "src/features/music/premium/MusicTodayAi.css",
+      "fromSha256": "23bddb8873d233caa8302ea4b9d9ecb3f4f01d88dab6567de7c7ba6709827202",
+      "toSha256": "78b062bd3f49a3b64714c670603ba575ac5995d403fbb45c6a48b2b53b227bdc"
+    }
+  ]
+}
