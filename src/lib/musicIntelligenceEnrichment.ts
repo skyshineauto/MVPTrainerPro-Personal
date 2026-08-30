@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { analyzeMusicAudioLocally, type LocalAudioIntelligence } from "./musicAudioIntelligence";
 import {
   getMusicTrackSignedUrl,
   type MusicTrack,
@@ -16,7 +17,7 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 2;
+export const MUSIC_INTELLIGENCE_VERSION = 3;
 const TRACK_TABLE = "trainer_music_track_intelligence";
 
 type DbTrackIntelligence = {
@@ -117,6 +118,113 @@ function fromDb(row: DbTrackIntelligence): MusicTrackIntelligence {
     updatedAt: row.updated_at || new Date().toISOString(),
     error: row.error || null,
   };
+}
+
+
+function clampUnit(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : fallback;
+}
+
+function tempoLabelFromBpm(bpm: number | null) {
+  if (bpm == null || !Number.isFinite(bpm)) return null;
+  if (bpm < 78) return "very slow";
+  if (bpm < 96) return "slow";
+  if (bpm < 118) return "moderate";
+  if (bpm < 138) return "up-tempo";
+  if (bpm < 162) return "fast";
+  return "very fast";
+}
+
+function normalizeRange(value: number | null, low: number, high: number, fallback: number) {
+  if (value == null || !Number.isFinite(value) || high <= low) return fallback;
+  return clamp(((value - low) / (high - low)) * 100, fallback);
+}
+
+function mergeLocalAudioDna(base: MusicSongDNA, facts: LocalAudioIntelligence): MusicSongDNA {
+  const bpm = facts.bpm;
+  const pace = bpm == null ? base.drive : normalizeRange(bpm, 62, 176, base.drive);
+  const dance = facts.danceability == null
+    ? base.upbeat
+    : clamp((facts.danceability / 3) * 100, base.upbeat);
+  const intensityMeasured = facts.intensityClass == null
+    ? base.intensity
+    : facts.intensityClass <= -0.5 ? 24 : facts.intensityClass >= 0.5 ? 88 : 55;
+  const loudness = normalizeRange(facts.rmsDb, -28, -7, base.energy);
+  const brightnessMeasured = normalizeRange(facts.spectralCentroidHz, 650, 5200, base.brightness);
+  const noiseMotion = normalizeRange(facts.zeroCrossingRate, 0.018, 0.19, base.chaotic);
+
+  const audioEnergy = clamp(pace * .22 + dance * .17 + intensityMeasured * .28 + loudness * .33);
+  const audioDrive = clamp(pace * .46 + dance * .31 + intensityMeasured * .23);
+  const audioIntensity = clamp(intensityMeasured * .48 + audioEnergy * .30 + audioDrive * .22);
+  const audioUpbeat = clamp(pace * .30 + dance * .38 + brightnessMeasured * .22 + (100 - base.darkness) * .10);
+  const audioRelaxing = clamp(100 - (audioEnergy * .38 + audioDrive * .35 + audioIntensity * .17 + noiseMotion * .10));
+  const audioWorkout = clamp(audioEnergy * .30 + audioDrive * .40 + audioIntensity * .20 + (100 - audioRelaxing) * .10);
+
+  const mix = (current: number, measured: number, amount: number) => clamp(current * (1 - amount) + measured * amount);
+  return {
+    ...base,
+    energy: mix(base.energy, audioEnergy, .34),
+    drive: mix(base.drive, audioDrive, .40),
+    intensity: mix(base.intensity, audioIntensity, .34),
+    brightness: mix(base.brightness, brightnessMeasured, .22),
+    chaotic: mix(base.chaotic, noiseMotion, .18),
+    relaxing: mix(base.relaxing, audioRelaxing, .34),
+    upbeat: mix(base.upbeat, audioUpbeat, .38),
+    workoutFit: mix(base.workoutFit, audioWorkout, .34),
+    aggression: mix(base.aggression, clamp(intensityMeasured * .68 + noiseMotion * .32), .16),
+    focus: mix(base.focus, clamp(100 - noiseMotion * .48 - Math.abs(audioDrive - 56) * .35), .10),
+  };
+}
+
+function formatKeySignature(facts: LocalAudioIntelligence) {
+  if (!facts.key) return null;
+  const scale = facts.scale?.trim().toLowerCase();
+  return scale ? `${facts.key} ${scale}` : facts.key;
+}
+
+async function saveLocalAudioIntelligence(
+  base: MusicTrackIntelligence,
+  facts: LocalAudioIntelligence,
+): Promise<MusicTrackIntelligence> {
+  const bpm = facts.bpm != null && Number.isFinite(facts.bpm) && facts.bpm >= 40 && facts.bpm <= 240
+    ? Math.round(facts.bpm * 10) / 10
+    : null;
+  const keySignature = formatKeySignature(facts);
+  if (bpm == null || !keySignature) {
+    throw new Error("Local audio analysis did not return both BPM and key.");
+  }
+
+  const localConfidence = clampUnit(
+    facts.bpmConfidence * .58 + facts.keyStrength * .42,
+    .55,
+  );
+  const confidence = Math.max(base.confidence, Math.min(.99, base.confidence * .72 + localConfidence * .28 + .08));
+  const source = [...new Set([...(base.source || []), "essentia"])];
+  const songDna = mergeLocalAudioDna(base.songDna, facts);
+  const updatedAt = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from(TRACK_TABLE)
+    .update({
+      status: "complete",
+      analysis_version: MUSIC_INTELLIGENCE_VERSION,
+      confidence,
+      source,
+      song_dna: songDna,
+      bpm,
+      key_signature: keySignature,
+      tempo_label: tempoLabelFromBpm(bpm),
+      analyzed_at: updatedAt,
+      updated_at: updatedAt,
+      error: null,
+    })
+    .eq("track_id", base.trackId)
+    .select("track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,analyzed_at,updated_at,error")
+    .single();
+
+  if (error) throw error;
+  return fromDb(data as DbTrackIntelligence);
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -242,22 +350,31 @@ export async function analyzeMusicTrackIntelligence(
 
   options.onStage?.("song_dna", "Building Song DNA from mood, style, energy and movement…");
   const raw = response.intelligence;
-  const parsed = "track_id" in raw ? fromDb(raw as DbTrackIntelligence) : (raw as MusicTrackIntelligence);
+  let parsed = "track_id" in raw ? fromDb(raw as DbTrackIntelligence) : (raw as MusicTrackIntelligence);
   cacheMusicTrackIntelligence(parsed);
-  const audioStageDetail = parsed.cyaniteStatus === "processing"
-    ? "Deep audio analysis queued in the background…"
-    : parsed.cyaniteStatus === "complete"
-      ? "Deep audio intelligence complete ✓"
-      : parsed.cyaniteStatus === "not_configured"
-        ? "Song + Artist DNA ready • add CYANITE_API_KEY to enable deep audio analysis."
-        : parsed.cyaniteStatus === "not_eligible"
-          ? "Song + Artist DNA ready • this file is outside the deep-audio provider limits."
-          : parsed.cyaniteStatus === "failed"
-            ? "Song + Artist DNA ready • deep audio analysis can be retried."
-            : "Music Intelligence analyzed…";
-  options.onStage?.("audio_intelligence", audioStageDetail);
-  options.onStage?.("saving", "Saving Music Intelligence to your library…");
-  options.onStage?.("complete", parsed.status === "processing" ? "Provisional DNA ready · deep audio analysis continues" : "Music Intelligence complete");
+
+  if (audioUrl) {
+    options.onStage?.("audio_intelligence", "Analyzing the actual audio locally for BPM, key, rhythm and sonic character…");
+    try {
+      const facts = await analyzeMusicAudioLocally(audioUrl);
+      options.onStage?.("saving", "Saving local audio intelligence to your library…");
+      parsed = await saveLocalAudioIntelligence(parsed, facts);
+      cacheMusicTrackIntelligence(parsed);
+      options.onStage?.("audio_intelligence", `Audio intelligence complete ✓ ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "—"}`);
+    } catch (error) {
+      console.warn("MVP local audio intelligence failed", track.id, error);
+      options.onStage?.("audio_intelligence", "Song + Artist DNA ready • local audio analysis can be retried.");
+    }
+  } else {
+    options.onStage?.("audio_intelligence", "Song + Artist DNA ready • audio file was unavailable for local analysis.");
+  }
+
+  if (parsed.analysisVersion < MUSIC_INTELLIGENCE_VERSION) {
+    options.onStage?.("saving", "Metadata intelligence saved · audio intelligence still pending…");
+  }
+  options.onStage?.("complete", parsed.analysisVersion >= MUSIC_INTELLIGENCE_VERSION
+    ? "Music Intelligence complete"
+    : "Music Intelligence ready · local audio analysis pending");
   return parsed;
 }
 
@@ -273,6 +390,6 @@ export async function markMusicTrackIntelligenceStale(trackId: string) {
 export function describeMusicIntelligenceSources(item: MusicTrackIntelligence | null | undefined) {
   if (!item?.source.length) return "MVP analysis";
   return item.source
-    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "deezer" ? "Deezer" : value === "mvp" ? "MVP" : value)
+    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "essentia" ? "Essentia" : value === "deezer" ? "Deezer" : value === "mvp" ? "MVP" : value)
     .join(" + ");
 }
