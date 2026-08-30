@@ -95,7 +95,10 @@ function read(): CacheState {
   return memory;
 }
 
-function write() {
+let writeTimer: number | null = null;
+let pageHideBound = false;
+
+function persistNow() {
   if (typeof window === "undefined") return;
   const state = read();
   try {
@@ -106,6 +109,35 @@ function write() {
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(state));
   } catch {
     // The database remains authoritative. Cache failure must never block music.
+  }
+}
+
+function flushPendingWrite() {
+  if (typeof window === "undefined") return;
+  if (writeTimer !== null) {
+    window.clearTimeout(writeTimer);
+    writeTimer = null;
+  }
+  persistNow();
+}
+
+function write() {
+  if (typeof window === "undefined") return;
+
+  // Song-by-song enrichment used to stringify/sort the complete intelligence
+  // cache on every analyzed track. That synchronous localStorage work competes
+  // directly with Web Audio visualizers, Three.js and Framer Motion. Keep the
+  // in-memory cache immediate, but batch disk persistence until the scan pauses.
+  if (writeTimer === null) {
+    writeTimer = window.setTimeout(() => {
+      writeTimer = null;
+      persistNow();
+    }, 4500);
+  }
+
+  if (!pageHideBound) {
+    pageHideBound = true;
+    window.addEventListener("pagehide", flushPendingWrite);
   }
 }
 

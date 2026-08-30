@@ -1,5 +1,6 @@
 /* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -105,6 +106,8 @@ import {
 import "./premium/MusicLibraryPremium.css";
 import "./premium/MusicUiSystem.css";
 import "./premium/MusicIntelligenceEnrichment.css";
+
+const StableMusicLibraryVisualEngine = memo(MusicLibraryVisualEngine);
 
 type DraftMap = Record<string, { title: string; artist: string; album: string; releaseYear: string; genre: string }>;
 type PlaylistTrackMap = Record<string, string[]>;
@@ -667,10 +670,47 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     artist: string;
     percent: number;
   } | null>(null);
-  const [enrichment, setEnrichment] = useState<EnrichmentState>({
+  const [enrichment, setEnrichmentState] = useState<EnrichmentState>({
     running: false, open: false, minimized: false, current: 0, total: 0, completed: 0, matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: 0,
     label: "LIBRARY INTELLIGENCE", serviceMessage: "Ready to enrich your music library.", stage: "idle", currentTrackId: null, failedTrackIds: [], activity: [],
   });
+  const enrichmentRef = useRef(enrichment);
+  const enrichmentFlushTimerRef = useRef<number | null>(null);
+  const setEnrichment = (update: EnrichmentState | ((current: EnrichmentState) => EnrichmentState)) => {
+    const previous = enrichmentRef.current;
+    const next = typeof update === "function" ? update(previous) : update;
+    enrichmentRef.current = next;
+
+    const immediate =
+      previous.running !== next.running ||
+      previous.open !== next.open ||
+      previous.minimized !== next.minimized ||
+      next.stage === "complete";
+
+    if (immediate) {
+      if (enrichmentFlushTimerRef.current !== null) {
+        window.clearTimeout(enrichmentFlushTimerRef.current);
+        enrichmentFlushTimerRef.current = null;
+      }
+      setEnrichmentState(next);
+      return;
+    }
+
+    if (enrichmentFlushTimerRef.current !== null) return;
+    // Enrichment can emit several stage callbacks for one song. Rendering the
+    // entire My Music tree for every callback starves the player/DSP animation
+    // loop. The panel still feels live, while background scans update at a much
+    // lower cost.
+    const delay = next.minimized ? 650 : 120;
+    enrichmentFlushTimerRef.current = window.setTimeout(() => {
+      enrichmentFlushTimerRef.current = null;
+      setEnrichmentState(enrichmentRef.current);
+    }, delay);
+  };
+
+  useEffect(() => () => {
+    if (enrichmentFlushTimerRef.current !== null) window.clearTimeout(enrichmentFlushTimerRef.current);
+  }, []);
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
   const totalDuration = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.duration_seconds || 0), 0), [tracks]);
@@ -865,7 +905,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         const rows = await listMusicTracks();
         setTracks(rows); setDrafts(buildDraftMap(rows)); replaceMusicLibrary(rows);
         void hydrateArtworkPresence(rows);
-        void hydrateMusicIntelligenceCache(rows).catch(() => undefined);
         return rows;
       } catch (error) {
         lastError = error;
@@ -2033,7 +2072,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
   return (
-    <main data-mvp-music="flagship" className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><MusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
+    <main data-mvp-music="flagship" className={`tr10-page tr10-premiumLibrary tr10-premium-${tab}`}><StableMusicLibraryVisualEngine activeTab={tab} playing={Boolean(player.playing)} />
       <section className="tr10-hero">
         <div><h1>My Music</h1></div>
         <button type="button" onClick={goBack}>BACK TO TRAINER</button>
