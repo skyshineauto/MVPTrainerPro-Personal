@@ -813,3 +813,163 @@
   [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger{font-size:10px!important}
   [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectChevron{width:16px!important;height:16px!important;font-size:14px!important}
 }
+
+/* MVP Trainer Pro R55 - unmistakable active glass rail */
+/* Active state is the whole control surface. The old underline indicator is intentionally removed. */
+[data-mvp-music="flagship"] .tr52-tabRail{
+  padding:5px;
+  border-color:rgba(86,194,235,.15);
+  background:
+    linear-gradient(180deg,rgba(14,34,46,.72),rgba(5,16,23,.58)),
+    radial-gradient(120% 120% at 50% -35%,rgba(56,198,246,.09),transparent 60%);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.06),
+    inset 0 -1px rgba(0,0,0,.48),
+    0 12px 28px rgba(0,0,0,.16);
+}
+[data-mvp-music="flagship"] .tr52-tabs{gap:5px}
+[data-mvp-music="flagship"] .tr52-tabs button{
+  height:54px;
+  border:1px solid rgba(102,169,198,.055);
+  border-radius:11px;
+  background:linear-gradient(180deg,rgba(14,30,40,.38),rgba(5,15,22,.30));
+  color:#7f96a2;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.022),
+    inset 0 -1px rgba(0,0,0,.28);
+  transform:translateY(0) scale(1);
+  transition:
+    color .18s ease,
+    border-color .18s ease,
+    background .18s ease,
+    box-shadow .18s ease,
+    transform .18s ease;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::before{
+  inset:1px;
+  border-radius:10px;
+  opacity:.16;
+  background:
+    radial-gradient(90% 90% at 50% -12%,rgba(116,220,255,.10),transparent 66%),
+    linear-gradient(180deg,rgba(255,255,255,.025),transparent 44%);
+  box-shadow:none;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::after{
+  inset:1px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.012);
+  box-shadow:none;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active{
+  color:#fff;
+  border-color:rgba(82,218,255,.64);
+  background:
+    radial-gradient(115% 135% at 50% -32%,rgba(79,221,255,.28),transparent 56%),
+    linear-gradient(180deg,rgba(30,71,90,.98) 0%,rgba(12,38,52,.98) 54%,rgba(7,24,34,.99) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.20),
+    inset 0 0 0 1px rgba(106,226,255,.08),
+    inset 0 -3px 7px rgba(0,0,0,.44),
+    0 9px 18px rgba(0,0,0,.30),
+    0 0 0 1px rgba(48,195,243,.12),
+    0 0 22px rgba(44,202,255,.25),
+    0 0 10px rgba(245,158,49,.08);
+  transform:translateY(-1px) scale(1.012);
+  text-shadow:
+    0 1px 0 rgba(0,0,0,.55),
+    0 0 13px rgba(90,221,255,.34);
+  z-index:2;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::before{
+  opacity:1;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,0) 34%),
+    radial-gradient(74% 70% at 50% 0%,rgba(107,231,255,.18),transparent 72%);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.12),
+    inset 0 -1px rgba(0,0,0,.30);
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::after{
+  border-color:rgba(99,225,255,.26);
+  border-top-color:rgba(194,246,255,.42);
+  border-bottom-color:rgba(244,159,53,.20);
+  box-shadow:
+    inset 0 0 16px rgba(56,210,255,.07),
+    inset 0 -1px rgba(244,159,53,.09);
+}
+[data-mvp-music="flagship"] .tr52-tabIcon{
+  width:21px;height:21px;flex-basis:21px;
+  color:#7895a3;
+  transition:color .18s ease,filter .18s ease,transform .18s ease;
+}
+[data-mvp-music="flagship"] .tr52-tabIcon svg{
+  width:21px;height:21px;
+  stroke-width:2;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabIcon{
+  color:#78e5ff;
+  transform:translateY(-.5px) scale(1.06);
+  filter:
+    drop-shadow(0 0 5px rgba(103,226,255,.62))
+    drop-shadow(0 0 11px rgba(48,193,244,.32));
+}
+[data-mvp-music="flagship"] .tr52-tabLabel{
+  font-size:10.25px;
+  font-weight:900;
+  letter-spacing:.035em;
+  color:inherit;
+  transition:color .18s ease,text-shadow .18s ease,transform .18s ease;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabLabel{
+  color:#fff;
+  font-weight:1000;
+  transform:translateY(-.25px);
+  text-shadow:0 0 10px rgba(102,226,255,.28);
+}
+[data-mvp-music="flagship"] .tr52-tabs button>i{display:none!important}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover{
+    color:#aec2cb;
+    border-color:rgba(111,187,217,.10);
+    background:linear-gradient(180deg,rgba(20,42,54,.46),rgba(7,20,28,.34));
+    box-shadow:inset 0 1px rgba(255,255,255,.035),inset 0 -1px rgba(0,0,0,.30);
+    transform:none;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover::before{opacity:.28}
+  [data-mvp-music="flagship"] .tr52-tabs button.is-active:hover{
+    color:#fff;
+    border-color:rgba(82,218,255,.64);
+    transform:translateY(-1px) scale(1.012);
+  }
+}
+
+/* Mobile/tablet keeps the same full-surface active state, only resized. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .tr52-tabRail{padding:4px}
+  [data-mvp-music="flagship"] .tr52-tabs{gap:3px}
+  [data-mvp-music="flagship"] .tr52-tabs button{
+    flex:0 0 90px;
+    height:52px;
+    border-radius:10px;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button::before,
+  [data-mvp-music="flagship"] .tr52-tabs button::after{border-radius:9px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:17.5px;height:17.5px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:8.6px;letter-spacing:.025em}
+  [data-mvp-music="flagship"] .tr52-tabs button.is-active{
+    transform:translateY(-.5px) scale(1.008);
+    box-shadow:
+      inset 0 1px rgba(255,255,255,.18),
+      inset 0 -2px 5px rgba(0,0,0,.42),
+      0 5px 12px rgba(0,0,0,.24),
+      0 0 14px rgba(44,202,255,.20);
+  }
+}
+@media(max-width:560px){
+  [data-mvp-music="flagship"] .tr52-tabRail{padding:3px}
+  [data-mvp-music="flagship"] .tr52-tabs button{flex-basis:84px;height:49px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:16.5px;height:16.5px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:8.1px}
+}
