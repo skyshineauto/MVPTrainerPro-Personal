@@ -88,7 +88,7 @@ import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { MusicLibraryVisualEngine } from "./premium/MusicLibraryVisualEngine";
 import { MusicPremiumSelect } from "./premium/MusicPremiumSelect";
-import { MvpAction, MvpDensityPicker, MvpMusicTabs, MvpPrimaryAction } from "./premium/MusicUiPrimitives";
+import { MvpAction, MvpDensityPicker, MvpPrimaryAction } from "./premium/MusicUiPrimitives";
 import {
   ChevronDownPremiumIcon,
   ChevronUpPremiumIcon,
@@ -106,6 +106,7 @@ import {
 import "./premium/MusicLibraryPremium.css";
 import "./premium/MusicUiSystem.css";
 import "./premium/MusicIntelligenceEnrichment.css";
+import "./premium/MusicLibraryR52.css";
 
 const StableMusicLibraryVisualEngine = memo(MusicLibraryVisualEngine);
 
@@ -584,6 +585,60 @@ function readCollectionView(key: string, fallback: CollectionView = "grid8"): Co
   if (typeof window === "undefined") return fallback;
   const value = window.localStorage.getItem(key);
   return value === "list" || value === "grid4" || value === "grid8" || value === "grid16" ? value : fallback;
+}
+
+
+const R52_MUSIC_TABS: Array<{ key: MusicTab; label: string }> = [
+  { key: "songs", label: "SONGS" },
+  { key: "artists", label: "ARTISTS" },
+  { key: "albums", label: "ALBUMS" },
+  { key: "playlists", label: "PLAYLISTS" },
+  { key: "smart", label: "SMART MIX" },
+  { key: "intelligence", label: "INTELLIGENCE" },
+  { key: "discover", label: "DISCOVER" },
+  { key: "audition", label: "AUDITION" },
+];
+
+function R52TabGlyph({ tab }: { tab: MusicTab }) {
+  const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (tab === "songs") return <svg {...common}><path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>;
+  if (tab === "artists") return <svg {...common}><circle cx="12" cy="8" r="3"/><path d="M5.5 20c.9-4.2 3.1-6.2 6.5-6.2s5.6 2 6.5 6.2"/></svg>;
+  if (tab === "albums") return <svg {...common}><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>;
+  if (tab === "playlists") return <svg {...common}><path d="M4 7h10M4 12h10M4 17h7"/><path d="M17 10v8"/><path d="M17 10l3-1v7"/><circle cx="15.5" cy="18" r="1.5"/><circle cx="18.5" cy="16" r="1.5"/></svg>;
+  if (tab === "smart") return <svg {...common}><path d="M12 3l1.5 4.1L18 8.5l-4.5 1.4L12 14l-1.5-4.1L6 8.5l4.5-1.4L12 3Z"/><path d="M5 15l.8 2.2L8 18l-2.2.8L5 21l-.8-2.2L2 18l2.2-.8L5 15Z"/></svg>;
+  if (tab === "intelligence") return <svg {...common}><path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 2.8A3.2 3.2 0 0 0 7.2 14H9V4Z"/><path d="M15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 2 2.8A3.2 3.2 0 0 1 16.8 14H15V4Z"/><path d="M9 8h6M9 12h6M9 16c0 2 1.1 4 3 4s3-2 3-4"/></svg>;
+  if (tab === "discover") return <svg {...common}><circle cx="12" cy="12" r="8"/><path d="m15 9-2 4-4 2 2-4 4-2Z"/></svg>;
+  return <svg {...common}><path d="M5 7h14M7 4v6M17 4v6"/><path d="M6 13h12v7H6z"/><path d="m10 15 4 2-4 2v-4Z"/></svg>;
+}
+
+function R52MusicTabs({ value, onChange }: { value: MusicTab; onChange: (value: MusicTab) => void }) {
+  return <nav className="tr52-tabs" aria-label="Music library sections">
+    {R52_MUSIC_TABS.map((item) => {
+      const active = item.key === value;
+      return <motion.button
+        key={item.key}
+        type="button"
+        data-music-tab={item.key}
+        className={active ? "is-active" : ""}
+        aria-current={active ? "page" : undefined}
+        onClick={() => onChange(item.key)}
+        whileTap={{ scale: .97 }}
+        transition={{ type: "spring", stiffness: 620, damping: 42, mass: .28 }}
+      >
+        <span className="tr52-tabIcon"><R52TabGlyph tab={item.key} /></span>
+        <span className="tr52-tabLabel">{item.label}</span>
+        {active ? <motion.i layoutId="tr52-tab-active" transition={{ type: "spring", stiffness: 520, damping: 38 }} /> : null}
+      </motion.button>;
+    })}
+  </nav>;
+}
+
+function R52MoreIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>;
+}
+
+function R52PlayingGlyph() {
+  return <svg className="tr52-playingGlyph" viewBox="0 0 24 24" aria-hidden><rect x="5" y="9" width="3" height="10" rx="1.5"/><rect x="10.5" y="5" width="3" height="14" rx="1.5"/><rect x="16" y="7" width="3" height="12" rx="1.5"/></svg>;
 }
 
 
@@ -2193,7 +2248,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <div ref={tabNavRef}><MvpMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }} /></div>
+        <div ref={tabNavRef} className="tr52-tabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }} /></div>
 
         {message ? <div className="tr10-message">{message}</div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
@@ -2201,7 +2256,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "songs" ? <>
           <div className="m37-toolbar tr10-toolbar">
             <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
-            <MusicPremiumSelect label="ENERGY" value={energyFilter} onChange={(next) => setEnergyFilter(next as EnergyFilter)} options={[{value:"all",label:"All energy"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]} />
+            <div className="tr52-energyFilter" role="group" aria-label="Energy filter"><span>ENERGY</span><div>{(["all","low","medium","high"] as EnergyFilter[]).map((level) => <button key={level} type="button" className={`is-${level}${energyFilter === level ? " is-active" : ""}`} aria-pressed={energyFilter === level} onClick={() => setEnergyFilter(level)}>{level === "all" ? "ALL" : level.toUpperCase()}</button>)}</div></div>
             <MusicPremiumSelect label="SORT" value={songSort} onChange={(next) => setSongSort(next as SongSort)} options={(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => ({ value: sort, label: songSortLabel(sort) }))} />
             <MusicPremiumSelect label="SHOW" value={pageSize} onChange={(next) => setPageSize(Number(next) as PageSize)} options={[{value:12,label:"12"},{value:24,label:"24"},{value:48,label:"48"}]} />
           </div>
@@ -2228,20 +2283,25 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 </div>
                 <label className="tr10-check"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label>
                 <div className="tr10-trackCell">
-                  <button className={`tr10-play ${current && player.playing ? "is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)} aria-label={`${current && player.playing ? "Pause" : "Play"} ${track.title}`}>{current && player.playing ? <PausePremiumIcon /> : <PlayPremiumIcon />}</button>
+                  <button className={`tr10-play ${current && player.playing ? "is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)} aria-label={`${current && player.playing ? "Pause" : "Play"} ${track.title}`}>{current && player.playing ? <R52PlayingGlyph /> : <PlayPremiumIcon />}</button>
                   <TrackArtwork track={track} />
                   <div className="tr10-trackText"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span><small>{track.original_name}</small>{playbackErrors[track.id] ? <em className="tr10-playbackError">{playbackErrors[track.id]}</em> : null}</div>
                   {needsInfo ? <em className="tr10-healthBadge is-needs">NEEDS INFO</em> : missingArt ? <em className="tr10-healthBadge is-art">MISSING ART</em> : null}
                 </div>
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span></button>
-                <div className="m37-trackActions">
+                <div className="m37-trackActions tr52-trackActions">
                   <MvpAction icon={<HeartPremiumIcon filled={track.favorite} />} label={track.favorite ? "LIKED" : "LIKE"} tone="green" active={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} />
                   <MvpAction icon={<PlayLessPremiumIcon />} label="PLAY LESS" tone="red" active={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} />
-                  <MvpAction icon={<NextPremiumIcon />} label="PLAY NEXT" tone="blue" onClick={() => playMusicNext(track.id)} />
-                  <MvpAction icon={<QueuePremiumIcon />} label="QUEUE" onClick={() => addMusicToQueue(track.id)} />
-                  <MvpAction icon={<PlaylistPremiumIcon />} label="PLAYLIST" tone="amber" onClick={() => openPlaylistModal([track.id])} />
-                  <MvpAction icon={<EditPremiumIcon />} label="EDIT" onClick={() => openDetail(track)} />
+                  <details className="tr52-more">
+                    <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /><span>MORE</span></summary>
+                    <div className="tr52-moreMenu">
+                      <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
+                      <button type="button" onClick={(event) => { addMusicToQueue(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
+                      <button type="button" onClick={(event) => { openPlaylistModal([track.id]); event.currentTarget.closest("details")?.removeAttribute("open"); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
+                      <button type="button" onClick={(event) => { openDetail(track); event.currentTarget.closest("details")?.removeAttribute("open"); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
+                    </div>
+                  </details>
                 </div>
               </article>;
             })}
@@ -2418,14 +2478,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       </section>
 
       {enrichment.open && !enrichment.minimized && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-analysisBack tr44-enrichmentBack"><motion.section className="tr10-analysisModal tr44-enrichmentModal" role="dialog" aria-modal="true" aria-live="polite" initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-        <header className="tr44-enrichmentHeader"><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr44-enrichmentHeaderTools"><div className="tr10-analysisCounter"><strong>{enrichment.running ? enrichment.completed : enrichment.libraryTotal}</strong><span>{enrichment.running ? `OF ${enrichment.total}` : "CHECKED"}</span></div><button type="button" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "MINIMIZE" : "CLOSE"}</button></div></header>
+        <header className="tr44-enrichmentHeader"><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr44-enrichmentHeaderTools"><div className="tr10-analysisCounter"><strong>{enrichment.running ? enrichment.completed : enrichment.libraryTotal}</strong><span>{enrichment.running ? `OF ${enrichment.total}` : "CHECKED"}</span></div><button type="button" onClick={() => { if (!enrichment.running) setMessage(""); setEnrichment((current) => ({ ...current, open: false, minimized: current.running })); }}>{enrichment.running ? "MINIMIZE" : "CLOSE"}</button></div></header>
         <div className="tr44-progressLine"><motion.i initial={false} animate={{ scaleX: enrichment.running ? (enrichment.total ? enrichment.completed / enrichment.total : 0) : 1 }} transition={{ type: "spring", stiffness: 220, damping: 28 }} /></div>
         <div className="tr44-stageRail">{ENRICHMENT_STAGE_ORDER.map((item, index) => { const activeIndex = ENRICHMENT_STAGE_ORDER.findIndex((stage) => stage.key === enrichment.stage); const complete = enrichment.stage === "complete" || (activeIndex >= 0 && index < activeIndex); const active = item.key === enrichment.stage; return <div key={item.key} className={`${complete ? "is-complete " : ""}${active ? "is-active" : ""}`}><i>{complete ? "✓" : index + 1}</i><span>{item.label}</span></div>; })}</div>
         <div className="tr44-enrichmentMetrics"><span><b>{enrichment.completed}</b> COMPLETED</span><span><b>{Math.max(0,enrichment.total-enrichment.completed)}</b> REMAINING</span><span><b>{enrichment.skipped}</b> SKIPPED</span><span><b>{enrichment.intelligenceComplete}</b> DNA READY</span><span><b>{enrichment.review}</b> REVIEW</span><span className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b> FAILED</span></div>
         <div className="tr44-enrichmentNow"><span>{enrichment.running ? "NOW PROCESSING" : "SCAN SUMMARY"}</span><strong>{enrichment.running && enrichment.currentTrackId ? tracks.find((track) => track.id === enrichment.currentTrackId)?.title || enrichment.label : enrichment.label}</strong><small>{enrichment.serviceMessage}</small></div>
         {!enrichment.running && enrichment.stage === "complete" ? <div className="tr51-completionSummary" aria-label="Enrichment completion summary"><div><b>{enrichment.libraryTotal}</b><span>SONGS CHECKED</span></div><div><b>{enrichment.skipped}</b><span>ALREADY COMPLETE</span></div><div><b>{enrichment.metadataUpdated}</b><span>SONG INFO UPDATED</span></div><div><b>{enrichment.artworkUpdated}</b><span>ARTWORK UPDATED</span></div><div><b>{enrichment.intelligenceUpdated}</b><span>V3 / AUDIO UPDATED</span></div><div><b>{enrichment.review}</b><span>NEED REVIEW</span></div><div className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b><span>FAILED</span></div></div> : null}
         <div className="tr44-activityFeed"><div className="tr44-feedTitle"><span>LIVE ACTIVITY</span><small>{enrichment.running ? "Only songs needing work enter the pipeline" : "Most recent results"}</small></div>{enrichment.activity.length ? enrichment.activity.map((item) => <motion.div key={item.id} className={`is-${item.tone}`} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}><i>{item.tone === "ok" ? "✓" : item.tone === "error" ? "!" : item.tone === "review" ? "?" : "•"}</i><span><strong>{item.text}</strong><small>{item.detail}</small></span></motion.div>) : <div className="tr44-feedEmpty">Checking which library records actually need work…</div>}</div>
-        <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Complete records are skipped. MVP searches only missing or outdated song info, artwork and intelligence.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "RUN IN BACKGROUND" : "CLOSE"}</button></div></footer>
+        <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Complete records are skipped. MVP searches only missing or outdated song info, artwork and intelligence.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => { if (!enrichment.running) setMessage(""); setEnrichment((current) => ({ ...current, open: false, minimized: current.running })); }}>{enrichment.running ? "RUN IN BACKGROUND" : "CLOSE"}</button></div></footer>
       </motion.section></div>, document.body) : null}
 
       {reviewItems.length && reviewRemainingCount > 0 ? <button className="tr10-reviewDock" onClick={openReviewQueue}>REVIEW {reviewRemainingCount} POSSIBLE MATCH{reviewRemainingCount === 1 ? "" : "ES"} ›</button> : null}
