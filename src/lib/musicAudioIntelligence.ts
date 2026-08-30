@@ -5,13 +5,15 @@ export type LocalAudioIntelligence = {
   scale: string | null;
   keyStrength: number;
   danceability: number | null;
-  intensityClass: number | null;
+  intensityScore: number | null;
   loudnessDb: number | null;
   dynamicComplexity: number | null;
   spectralCentroidHz: number | null;
   zeroCrossingRate: number | null;
   rmsDb: number | null;
   durationSeconds: number;
+  successfulFeatures: string[];
+  failedFeatures: Array<{ feature: string; error: string }>;
 };
 
 type AnalyzeRequest = {

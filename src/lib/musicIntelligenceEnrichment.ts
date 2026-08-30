@@ -147,9 +147,9 @@ function mergeLocalAudioDna(base: MusicSongDNA, facts: LocalAudioIntelligence): 
   const dance = facts.danceability == null
     ? base.upbeat
     : clamp((facts.danceability / 3) * 100, base.upbeat);
-  const intensityMeasured = facts.intensityClass == null
-    ? base.intensity
-    : facts.intensityClass <= -0.5 ? 24 : facts.intensityClass >= 0.5 ? 88 : 55;
+  const intensityMeasured = facts.intensityScore == null
+    ? clamp(base.intensity * .58 + base.energy * .24 + base.drive * .18, base.intensity)
+    : clamp(facts.intensityScore, base.intensity);
   const loudness = normalizeRange(facts.rmsDb, -28, -7, base.energy);
   const brightnessMeasured = normalizeRange(facts.spectralCentroidHz, 650, 5200, base.brightness);
   const noiseMotion = normalizeRange(facts.zeroCrossingRate, 0.018, 0.19, base.chaotic);
@@ -183,32 +183,51 @@ function formatKeySignature(facts: LocalAudioIntelligence) {
   return scale ? `${facts.key} ${scale}` : facts.key;
 }
 
+function describeLocalFailures(facts: LocalAudioIntelligence) {
+  if (!facts.failedFeatures?.length) return null;
+  return facts.failedFeatures
+    .map((item) => `${item.feature}: ${item.error}`)
+    .join(" | ")
+    .slice(0, 900);
+}
+
 async function saveLocalAudioIntelligence(
   base: MusicTrackIntelligence,
   facts: LocalAudioIntelligence,
 ): Promise<MusicTrackIntelligence> {
-  const bpm = facts.bpm != null && Number.isFinite(facts.bpm) && facts.bpm >= 40 && facts.bpm <= 240
+  const localBpm = facts.bpm != null && Number.isFinite(facts.bpm) && facts.bpm >= 40 && facts.bpm <= 240
     ? Math.round(facts.bpm * 10) / 10
     : null;
-  const keySignature = formatKeySignature(facts);
-  if (bpm == null || !keySignature) {
-    throw new Error("Local audio analysis did not return both BPM and key.");
+  const bpm = localBpm ?? (base.bpm != null && Number.isFinite(base.bpm) ? base.bpm : null);
+  const localKeySignature = formatKeySignature(facts);
+  const keySignature = localKeySignature ?? base.keySignature ?? null;
+  const localFeatures = Array.isArray(facts.successfulFeatures) ? facts.successfulFeatures.filter(Boolean) : [];
+  const hasLocalMeasurements = localFeatures.length > 0;
+  const coreComplete = bpm != null && Boolean(keySignature) && hasLocalMeasurements;
+
+  if (!hasLocalMeasurements) {
+    const failureDetail = describeLocalFailures(facts);
+    throw new Error(failureDetail || "Local audio analysis returned no usable measurements.");
   }
 
-  const localConfidence = clampUnit(
-    facts.bpmConfidence * .58 + facts.keyStrength * .42,
-    .55,
-  );
-  const confidence = Math.max(base.confidence, Math.min(.99, base.confidence * .72 + localConfidence * .28 + .08));
+  const confidenceSignals = [
+    facts.bpmConfidence > 0 ? facts.bpmConfidence : null,
+    facts.keyStrength > 0 ? facts.keyStrength : null,
+  ].filter((value): value is number => value != null);
+  const localConfidence = confidenceSignals.length
+    ? confidenceSignals.reduce((sum, value) => sum + value, 0) / confidenceSignals.length
+    : .55;
+  const confidence = Math.max(base.confidence, Math.min(.99, base.confidence * .74 + clampUnit(localConfidence, .55) * .18 + .08));
   const source = [...new Set([...(base.source || []), "essentia"])];
-  const songDna = mergeLocalAudioDna(base.songDna, facts);
+  const songDna = mergeLocalAudioDna(base.songDna, { ...facts, bpm: localBpm ?? bpm });
   const updatedAt = new Date().toISOString();
+  const failureDetail = describeLocalFailures(facts);
 
   const { data, error } = await supabase
     .from(TRACK_TABLE)
     .update({
-      status: "complete",
-      analysis_version: MUSIC_INTELLIGENCE_VERSION,
+      status: coreComplete ? "complete" : "partial",
+      analysis_version: coreComplete ? MUSIC_INTELLIGENCE_VERSION : Math.min(base.analysisVersion, MUSIC_INTELLIGENCE_VERSION - 1),
       confidence,
       source,
       song_dna: songDna,
@@ -217,7 +236,7 @@ async function saveLocalAudioIntelligence(
       tempo_label: tempoLabelFromBpm(bpm),
       analyzed_at: updatedAt,
       updated_at: updatedAt,
-      error: null,
+      error: coreComplete ? null : (failureDetail || "Local audio analysis is partial. BPM or key is still missing."),
     })
     .eq("track_id", base.trackId)
     .select("track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,analyzed_at,updated_at,error")
@@ -357,10 +376,18 @@ export async function analyzeMusicTrackIntelligence(
     options.onStage?.("audio_intelligence", "Analyzing the actual audio locally for BPM, key, rhythm and sonic character…");
     try {
       const facts = await analyzeMusicAudioLocally(audioUrl);
+      if (facts.failedFeatures?.length) {
+        console.warn("MVP local audio feature fallbacks", track.id, facts.failedFeatures);
+      }
       options.onStage?.("saving", "Saving local audio intelligence to your library…");
       parsed = await saveLocalAudioIntelligence(parsed, facts);
       cacheMusicTrackIntelligence(parsed);
-      options.onStage?.("audio_intelligence", `Audio intelligence complete ✓ ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "—"}`);
+      options.onStage?.(
+        "audio_intelligence",
+        parsed.analysisVersion >= MUSIC_INTELLIGENCE_VERSION
+          ? `Audio intelligence complete ✓ ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "—"}`
+          : `Audio intelligence partial • ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "key pending"} • retry available`,
+      );
     } catch (error) {
       console.warn("MVP local audio intelligence failed", track.id, error);
       options.onStage?.("audio_intelligence", "Song + Artist DNA ready • local audio analysis can be retried.");
