@@ -881,3 +881,409 @@
   [data-mvp-music="flagship"] .m37-auditionDecision{gap:5px!important}
   [data-mvp-music="flagship"] .m37-auditionDecision button{height:52px!important;padding-inline:4px!important;font-size:7.6px!important;letter-spacing:.035em!important}
 }
+
+/* ========================================================================== */
+/* R61 · Audition hardware-control rendering                                  */
+/* Final control-depth pass. No broad color wash; no audition-only scene.      */
+/* ========================================================================== */
+
+/* Give the active audition surface another physical plane above the section. */
+[data-mvp-music="flagship"] .m37-auditionSong{
+  perspective:1000px;
+  background:linear-gradient(180deg,rgba(12,21,27,.985) 0%,rgba(5,11,15,.99) 52%,rgba(2,7,10,.995) 100%)!important;
+  border-color:rgba(137,215,247,.34)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.19),
+    inset 0 2px 10px rgba(125,215,250,.025),
+    inset 0 -2px 0 rgba(0,0,0,.88),
+    inset 0 -32px 58px rgba(0,0,0,.25),
+    0 4px 0 rgba(1,5,8,.84),
+    0 16px 28px rgba(0,0,0,.34),
+    0 38px 82px rgba(0,0,0,.58),
+    0 0 0 1px rgba(0,0,0,.76),
+    0 0 34px rgba(58,197,244,.09)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionSong::after{
+  content:"";position:absolute;pointer-events:none;z-index:0;left:3.5%;right:3.5%;bottom:-12px;height:24px;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,.58) 0%,rgba(0,0,0,.28) 48%,transparent 74%);
+  filter:blur(8px);opacity:.9;
+}
+[data-mvp-music="flagship"] .m37-auditionArtwork,
+[data-mvp-music="flagship"] .m37-auditionSongInfo{position:relative;z-index:1}
+[data-mvp-music="flagship"] .m37-auditionArtwork{
+  transform:translateY(-1px);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.20),
+    inset 0 -1px rgba(0,0,0,.64),
+    0 4px 0 rgba(0,0,0,.74),
+    0 18px 38px rgba(0,0,0,.48),
+    0 0 0 1px rgba(179,227,246,.08)!important;
+}
+
+/* Playback controls: machined glass face with a distinct top lens and base. */
+[data-mvp-music="flagship"] .m37-auditionListen button{
+  --mvp-accent:139,219,250;
+  min-height:48px!important;
+  border:1px solid rgba(var(--mvp-accent),.30)!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.105) 0%,rgba(255,255,255,.018) 22%,transparent 23%),
+    linear-gradient(180deg,rgba(26,39,47,.98) 0%,rgba(12,21,27,.99) 48%,rgba(4,10,14,.995) 100%)!important;
+  color:#e9f7fc!important;
+  font-size:9.7px!important;font-weight:900!important;letter-spacing:.055em!important;
+  border-radius:13px!important;
+  transform-style:preserve-3d;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.22),
+    inset 0 0 0 1px rgba(var(--mvp-accent),.035),
+    inset 0 -2px 0 rgba(0,0,0,.86),
+    inset 0 -14px 22px rgba(0,0,0,.31),
+    0 3px 0 rgba(0,0,0,.82),
+    0 10px 16px rgba(0,0,0,.30),
+    0 18px 30px rgba(0,0,0,.18),
+    0 0 18px rgba(var(--mvp-accent),.08)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListen button::before{
+  left:9px;right:9px;top:2px;height:42%;border-radius:10px 10px 50% 50%;
+  background:linear-gradient(180deg,rgba(255,255,255,.20),rgba(255,255,255,.045) 68%,transparent)!important;
+  opacity:.9;
+}
+[data-mvp-music="flagship"] .m37-auditionListen button::after{
+  content:"";position:absolute;z-index:-1;left:12%;right:12%;bottom:-8px;height:10px;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,.56),transparent 72%);filter:blur(4px);pointer-events:none;
+}
+[data-mvp-music="flagship"] .m37-auditionListen .is-preview{--mvp-accent:72,205,250;min-width:164px!important}
+[data-mvp-music="flagship"] .m37-auditionListen .is-youtube{--mvp-accent:244,87,99;color:#ffb5bb!important}
+[data-mvp-music="flagship"] .m37-auditionListen .is-preview.is-active{
+  color:#fff!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.018) 25%,transparent 26%),
+    linear-gradient(180deg,rgba(24,121,159,.98),rgba(8,55,76,.99) 54%,rgba(3,28,39,.995))!important;
+  border-color:rgba(104,224,255,.88)!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.31),
+    inset 0 0 18px rgba(104,224,255,.10),
+    inset 0 -3px rgba(0,0,0,.72),
+    inset 0 -14px 22px rgba(0,0,0,.25),
+    0 3px 0 rgba(0,0,0,.80),
+    0 13px 24px rgba(0,0,0,.35),
+    0 0 18px rgba(58,205,255,.28),
+    0 0 36px rgba(58,205,255,.11)!important;
+  animation:mvpAuditionPreviewLive 1.8s ease-in-out infinite;
+}
+@keyframes mvpAuditionPreviewLive{
+  0%,100%{filter:brightness(1);}
+  50%{filter:brightness(1.075);}
+}
+
+/* Decision controls: physical three-layer face + colored light trapped in glass. */
+[data-mvp-music="flagship"] .m37-auditionDecision{gap:12px!important;margin:12px 0 14px!important}
+[data-mvp-music="flagship"] .m37-auditionDecision button{
+  --mvp-decision-rgb:148,180,194;
+  height:66px!important;
+  border:1px solid rgba(var(--mvp-decision-rgb),.38)!important;
+  border-radius:15px!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.13) 0%,rgba(255,255,255,.025) 20%,transparent 21%),
+    linear-gradient(180deg,rgba(30,42,49,.99) 0%,rgba(14,23,28,.995) 48%,rgba(4,10,13,.998) 100%)!important;
+  color:#eef7fa!important;
+  font-size:10.8px!important;font-weight:950!important;letter-spacing:.07em!important;
+  transform:translateY(0) translateZ(0);
+  transform-style:preserve-3d;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.24),
+    inset 0 0 0 1px rgba(var(--mvp-decision-rgb),.035),
+    inset 0 -3px rgba(0,0,0,.90),
+    inset 0 -18px 28px rgba(0,0,0,.34),
+    0 4px 0 rgba(0,0,0,.88),
+    0 12px 18px rgba(0,0,0,.34),
+    0 22px 34px rgba(0,0,0,.18),
+    0 0 20px rgba(var(--mvp-decision-rgb),.075)!important;
+  transition:transform .14s cubic-bezier(.2,.8,.2,1),filter .14s ease,border-color .14s ease,box-shadow .14s ease!important;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision button::before{
+  left:10px;right:10px;top:2px;height:40%;border-radius:11px 11px 55% 55%;
+  background:linear-gradient(180deg,rgba(255,255,255,.23),rgba(255,255,255,.045) 70%,transparent)!important;
+  opacity:.88;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision button::after{
+  content:"";position:absolute;pointer-events:none;left:11%;right:11%;bottom:-10px;height:13px;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,.66),rgba(0,0,0,.20) 54%,transparent 75%);filter:blur(5px);z-index:-2;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision .is-keep{--mvp-decision-rgb:77,232,160;color:#9af5c9!important}
+[data-mvp-music="flagship"] .m37-auditionDecision .is-maybe{--mvp-decision-rgb:255,190,67;color:#ffd67c!important}
+[data-mvp-music="flagship"] .m37-auditionDecision .is-pass{--mvp-decision-rgb:255,91,107;color:#ffabb2!important}
+[data-mvp-music="flagship"] .m37-auditionDecision svg{
+  width:23px!important;height:23px!important;stroke-width:2.15!important;
+  filter:drop-shadow(0 2px 2px rgba(0,0,0,.58)) drop-shadow(0 0 7px rgba(var(--mvp-decision-rgb),.17));
+}
+[data-mvp-music="flagship"] .m37-auditionDecision .is-active{
+  color:#fff!important;
+  border-color:rgba(var(--mvp-decision-rgb),.92)!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.20),rgba(255,255,255,.035) 22%,transparent 23%),
+    linear-gradient(180deg,rgba(var(--mvp-decision-rgb),.48) 0%,rgba(var(--mvp-decision-rgb),.20) 48%,rgba(4,11,13,.995) 100%)!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.34),
+    inset 0 0 24px rgba(var(--mvp-decision-rgb),.12),
+    inset 0 -3px rgba(0,0,0,.76),
+    inset 0 -18px 28px rgba(0,0,0,.27),
+    0 4px 0 rgba(0,0,0,.88),
+    0 14px 22px rgba(0,0,0,.38),
+    0 0 20px rgba(var(--mvp-decision-rgb),.28),
+    0 0 42px rgba(var(--mvp-decision-rgb),.11)!important;
+}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .m37-auditionDecision button:hover:not(:disabled){
+    transform:translateY(-4px) translateZ(0)!important;
+    filter:brightness(1.085) saturate(1.06);
+    border-color:rgba(var(--mvp-decision-rgb),.60)!important;
+  }
+  [data-mvp-music="flagship"] .m37-auditionListen button:hover:not(:disabled){transform:translateY(-3px)!important;filter:brightness(1.075)}
+}
+[data-mvp-music="flagship"] .m37-auditionDecision button:active:not(:disabled){
+  transform:translateY(2px)!important;
+  box-shadow:
+    inset 0 4px 12px rgba(0,0,0,.46),
+    inset 0 1px rgba(255,255,255,.11),
+    inset 0 0 16px rgba(var(--mvp-decision-rgb),.08),
+    0 1px 0 rgba(0,0,0,.82),
+    0 5px 9px rgba(0,0,0,.27)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision button:disabled,
+[data-mvp-music="flagship"] .m37-auditionListen button:disabled{opacity:.46!important;filter:saturate(.55)!important}
+
+/* Tiny list footer text becomes compact rendered controls without enlarging the row. */
+[data-mvp-music="flagship"] .m37-auditionListCard>footer{gap:6px!important;align-items:center!important}
+[data-mvp-music="flagship"] .m37-auditionListCard>footer button{
+  min-height:31px!important;padding:0 9px!important;border-radius:9px!important;
+  border:1px solid rgba(126,193,222,.11)!important;
+  background:linear-gradient(180deg,rgba(19,30,36,.82),rgba(5,11,15,.94))!important;
+  color:#adbec6!important;font-size:7.8px!important;font-weight:850!important;letter-spacing:.035em!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.08),inset 0 -8px 13px rgba(0,0,0,.22),0 5px 10px rgba(0,0,0,.14)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListCard>footer button.is-open,
+[data-mvp-music="flagship"] .m37-auditionListCard>footer button:first-child{
+  color:#9ee7ff!important;border-color:rgba(71,205,252,.26)!important;
+  background:linear-gradient(180deg,rgba(18,70,89,.76),rgba(5,25,34,.95))!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListCard>footer button:last-child{color:#ff949e!important;border-color:rgba(255,91,107,.16)!important}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer button:hover{transform:translateY(-1px);color:#fff!important;border-color:rgba(159,216,239,.25)!important}
+}
+
+/* Mobile: preserve depth but keep controls perfectly contained. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:60px!important;font-size:9.3px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen button{min-height:46px!important}
+}
+@media(max-width:600px){
+  [data-mvp-music="flagship"] .m37-auditionDecision{gap:6px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:56px!important;padding-inline:6px!important;font-size:8.3px!important;letter-spacing:.045em!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:19px!important;height:19px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen .is-preview{min-width:0!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer{display:flex!important;flex-wrap:wrap!important;gap:5px!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer button{min-height:32px!important;padding-inline:8px!important;flex:0 0 auto!important}
+}
+@media(max-width:390px){
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:54px!important;font-size:7.8px!important;padding-inline:4px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:17px!important;height:17px!important}
+}
+
+/* ========================================================================== */
+/* R62 · Audition final polish + mobile containment                           */
+/* Final visual-only pass. No audition logic, preview logic, or data changes. */
+/* ========================================================================== */
+
+/* Stronger foreground separation without reintroducing a broad color wash. */
+[data-mvp-music="flagship"] .m37-auditionSong{
+  border-color:rgba(155,224,250,.42)!important;
+  background:
+    linear-gradient(180deg,rgba(17,28,35,.995) 0%,rgba(8,16,21,.995) 46%,rgba(3,9,12,.998) 100%)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.24),
+    inset 0 0 0 1px rgba(111,210,249,.025),
+    inset 0 -3px 0 rgba(0,0,0,.92),
+    inset 0 -38px 68px rgba(0,0,0,.29),
+    0 5px 0 rgba(0,0,0,.90),
+    0 18px 34px rgba(0,0,0,.40),
+    0 48px 96px rgba(0,0,0,.62),
+    0 0 0 1px rgba(0,0,0,.82),
+    0 0 42px rgba(66,204,248,.105)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionSongInfo{
+  min-width:0!important;
+}
+[data-mvp-music="flagship"] .m37-auditionSongInfo h2,
+[data-mvp-music="flagship"] .m37-auditionSongInfo h3,
+[data-mvp-music="flagship"] .m37-auditionSongInfo>p{
+  max-width:100%!important;
+  overflow-wrap:anywhere;
+}
+
+/* Decision controls: brighter lens, heavier base and larger high-resolution icon. */
+[data-mvp-music="flagship"] .m37-auditionDecision button{
+  height:68px!important;
+  border-color:rgba(var(--mvp-decision-rgb),.46)!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.175) 0%,rgba(255,255,255,.052) 18%,rgba(255,255,255,.010) 31%,transparent 32%),
+    linear-gradient(180deg,rgba(34,47,54,.995) 0%,rgba(15,25,30,.998) 47%,rgba(3,9,12,1) 100%)!important;
+  color:#f5fbfd!important;
+  font-size:11.1px!important;
+  letter-spacing:.075em!important;
+  text-shadow:0 1px 1px rgba(0,0,0,.9),0 0 10px rgba(var(--mvp-decision-rgb),.10)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    inset 0 0 0 1px rgba(var(--mvp-decision-rgb),.055),
+    inset 0 -4px 0 rgba(0,0,0,.94),
+    inset 0 -21px 32px rgba(0,0,0,.38),
+    0 5px 0 rgba(0,0,0,.92),
+    0 14px 22px rgba(0,0,0,.38),
+    0 28px 40px rgba(0,0,0,.20),
+    0 0 24px rgba(var(--mvp-decision-rgb),.095)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision button::before{
+  left:9px!important;right:9px!important;top:2px!important;height:43%!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.31),rgba(255,255,255,.075) 63%,transparent 100%)!important;
+  opacity:.92!important;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision svg{
+  width:25px!important;height:25px!important;stroke-width:2.25!important;
+  filter:drop-shadow(0 2px 2px rgba(0,0,0,.64)) drop-shadow(0 0 9px rgba(var(--mvp-decision-rgb),.23))!important;
+}
+[data-mvp-music="flagship"] .m37-auditionDecision .is-active{
+  transform:translateY(-2px)!important;
+  border-color:rgba(var(--mvp-decision-rgb),1)!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.245) 0%,rgba(255,255,255,.065) 21%,transparent 22%),
+    linear-gradient(180deg,rgba(var(--mvp-decision-rgb),.58) 0%,rgba(var(--mvp-decision-rgb),.25) 47%,rgba(3,10,12,.998) 100%)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.40),
+    inset 0 0 28px rgba(var(--mvp-decision-rgb),.16),
+    inset 0 -4px 0 rgba(0,0,0,.80),
+    inset 0 -20px 30px rgba(0,0,0,.29),
+    0 5px 0 rgba(0,0,0,.92),
+    0 17px 27px rgba(0,0,0,.43),
+    0 0 26px rgba(var(--mvp-decision-rgb),.34),
+    0 0 52px rgba(var(--mvp-decision-rgb),.14)!important;
+}
+
+/* Playback controls gain the same physical lens language without competing with decisions. */
+[data-mvp-music="flagship"] .m37-auditionListen button{
+  min-height:50px!important;
+  font-size:10px!important;
+  border-radius:14px!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.27),
+    inset 0 -3px 0 rgba(0,0,0,.88),
+    inset 0 -16px 24px rgba(0,0,0,.34),
+    0 4px 0 rgba(0,0,0,.86),
+    0 12px 20px rgba(0,0,0,.33),
+    0 0 20px rgba(var(--mvp-accent),.095)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListen svg{width:20px!important;height:20px!important;stroke-width:2.2!important}
+[data-mvp-music="flagship"] .m37-auditionListen .is-preview.is-active{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.36),
+    inset 0 0 22px rgba(104,224,255,.14),
+    inset 0 -3px 0 rgba(0,0,0,.73),
+    inset 0 -16px 25px rgba(0,0,0,.28),
+    0 4px 0 rgba(0,0,0,.84),
+    0 15px 26px rgba(0,0,0,.38),
+    0 0 24px rgba(58,205,255,.34),
+    0 0 48px rgba(58,205,255,.14)!important;
+}
+
+/* Audition list hierarchy and utility controls remain compact, but no longer microscopic. */
+[data-mvp-music="flagship"] .m37-auditionListCard>header h3,
+[data-mvp-music="flagship"] .m37-auditionListCard>header b{
+  color:#f6fbfd!important;
+  font-weight:950!important;
+  letter-spacing:.01em!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListCard>footer button{
+  min-height:33px!important;
+  padding-inline:10px!important;
+  font-size:8.15px!important;
+  color:#c1d0d6!important;
+  border-color:rgba(141,206,234,.14)!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListStats{
+  min-width:0!important;
+}
+[data-mvp-music="flagship"] .m37-auditionListStats>*{
+  min-width:0!important;
+}
+
+/* Mobile/tablet hardening: fit every surface without clipping or overlap. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .m37-audition,
+  [data-mvp-music="flagship"] .m37-audition *{box-sizing:border-box}
+  [data-mvp-music="flagship"] .m37-auditionSong{width:100%!important;max-width:100%!important;overflow:visible!important}
+  [data-mvp-music="flagship"] .m37-auditionArtwork{width:min(64vw,280px)!important;max-width:280px!important;height:auto!important;aspect-ratio:1/1!important;object-fit:cover!important}
+  [data-mvp-music="flagship"] .m37-auditionSongInfo{min-width:0!important;overflow:visible!important}
+  [data-mvp-music="flagship"] .m37-auditionSongInfo h2{font-size:clamp(23px,6vw,28px)!important;line-height:1.04!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+  [data-mvp-music="flagship"] .m37-auditionSongInfo h3{font-size:clamp(13px,3.6vw,16px)!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+  [data-mvp-music="flagship"] .m37-auditionSongInfo>p{font-size:9px!important;white-space:normal!important;overflow:visible!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:60px!important;font-size:9.2px!important;padding-inline:7px!important;letter-spacing:.05em!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:21px!important;height:21px!important}
+  [data-mvp-music="flagship"] .m37-auditionPager button,
+  [data-mvp-music="flagship"] .m37-auditionPager>b{min-width:0!important;max-width:100%!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard{width:100%!important;max-width:100%!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionListStats{width:100%!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer{max-width:100%!important}
+}
+@media(max-width:600px){
+  [data-mvp-music="flagship"] .m37-audition{width:100%!important;max-width:100%!important;overflow-x:hidden!important;padding-left:6px!important;padding-right:6px!important}
+  [data-mvp-music="flagship"] .m37-auditionHero{min-width:0!important}
+  [data-mvp-music="flagship"] .m37-auditionGlobal{width:100%!important;max-width:100%!important;grid-template-columns:repeat(4,minmax(0,1fr))!important}
+  [data-mvp-music="flagship"] .m37-auditionGlobal button{min-width:0!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionGlobal b{font-size:14px!important;line-height:1!important}
+  [data-mvp-music="flagship"] .m37-auditionGlobal span{font-size:6.2px!important;white-space:nowrap!important}
+  [data-mvp-music="flagship"] .m37-auditionNav{max-width:100%!important;overscroll-behavior-x:contain!important;scrollbar-width:none}
+  [data-mvp-music="flagship"] .m37-auditionNav::-webkit-scrollbar{display:none}
+  [data-mvp-music="flagship"] .m37-auditionNav button{min-width:124px!important;max-width:160px!important;height:38px!important;padding-inline:8px!important;white-space:nowrap!important}
+  [data-mvp-music="flagship"] .m37-auditionStageHead{width:100%!important;min-width:0!important;grid-template-columns:auto minmax(0,1fr) auto!important}
+  [data-mvp-music="flagship"] .m37-auditionStageHead h3{min-width:0!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  [data-mvp-music="flagship"] .m37-auditionArtwork{width:min(72vw,245px)!important;max-width:245px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen{grid-template-columns:minmax(0,1fr) 46px!important;width:100%!important;max-width:100%!important;gap:7px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen button{min-width:0!important;max-width:100%!important;height:48px!important;padding-inline:9px!important;font-size:8.9px!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionListen .is-youtube{width:46px!important;min-width:46px!important;padding:0!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision{width:100%!important;max-width:100%!important;gap:6px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:56px!important;min-width:0!important;padding-inline:4px!important;font-size:8.1px!important;letter-spacing:.035em!important;gap:5px!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:19px!important;height:19px!important;flex:0 0 auto!important}
+  [data-mvp-music="flagship"] .m37-auditionPager{width:100%!important;max-width:100%!important;grid-template-columns:minmax(0,1fr) 58px minmax(0,1fr)!important;gap:5px!important}
+  [data-mvp-music="flagship"] .m37-auditionPager button{height:38px!important;padding-inline:5px!important;font-size:7.2px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  [data-mvp-music="flagship"] .m37-auditionPager>b{width:58px!important;min-width:58px!important;height:38px!important;padding:0 3px!important;font-size:8.2px!important;white-space:nowrap!important}
+  [data-mvp-music="flagship"] .m37-auditionListStats{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:4px!important}
+  [data-mvp-music="flagship"] .m37-auditionListStats>*{min-width:0!important;padding-inline:2px!important;overflow:hidden!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer{display:flex!important;flex-wrap:wrap!important;gap:5px!important;width:100%!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer button{flex:0 0 auto!important;min-height:32px!important;padding-inline:8px!important;font-size:7.6px!important}
+  [data-mvp-music="flagship"] .m37-auditionComplete,
+  [data-mvp-music="flagship"] .m37-auditionEmpty{width:100%!important;max-width:100%!important;min-height:120px!important;padding:16px 10px!important}
+}
+@media(max-width:430px){
+  [data-mvp-music="flagship"] .m37-auditionArtwork{width:min(70vw,225px)!important;max-width:225px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:54px!important;font-size:7.7px!important;padding-inline:3px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:18px!important;height:18px!important}
+  [data-mvp-music="flagship"] .m37-auditionPager{grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr)!important}
+  [data-mvp-music="flagship"] .m37-auditionPager>b{width:54px!important;min-width:54px!important;font-size:7.7px!important}
+}
+@media(max-width:360px){
+  [data-mvp-music="flagship"] .m37-audition{padding-left:4px!important;padding-right:4px!important}
+  [data-mvp-music="flagship"] .m37-auditionArtwork{width:min(68vw,205px)!important;max-width:205px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision{gap:4px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button{height:52px!important;font-size:7.2px!important;letter-spacing:.025em!important;gap:3px!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision svg{width:16px!important;height:16px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen{grid-template-columns:minmax(0,1fr) 42px!important;gap:5px!important}
+  [data-mvp-music="flagship"] .m37-auditionListen .is-youtube{width:42px!important;min-width:42px!important}
+  [data-mvp-music="flagship"] .m37-auditionPager{grid-template-columns:minmax(0,1fr) 50px minmax(0,1fr)!important;gap:4px!important}
+  [data-mvp-music="flagship"] .m37-auditionPager>b{width:50px!important;min-width:50px!important;font-size:7.2px!important}
+  [data-mvp-music="flagship"] .m37-auditionListStats{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:2px!important}
+  [data-mvp-music="flagship"] .m37-auditionListCard>footer button{padding-inline:6px!important;font-size:7px!important}
+}
+
+@media(prefers-reduced-motion:reduce){
+  [data-mvp-music="flagship"] .m37-auditionListen .is-preview.is-active{animation:none!important}
+  [data-mvp-music="flagship"] .m37-auditionDecision button,
+  [data-mvp-music="flagship"] .m37-auditionListen button{transition:none!important}
+}
