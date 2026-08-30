@@ -144,7 +144,8 @@ type EnrichmentActivity = { id: string; tone: "ok" | "work" | "review" | "error"
 type EnrichmentVisualStage = "idle" | "identifying" | "metadata" | "artwork" | "artist_dna" | "song_dna" | "audio_intelligence" | "saving" | "complete";
 type EnrichmentState = {
   running: boolean; open: boolean; minimized: boolean; current: number; total: number; completed: number;
-  matched: number; review: number; notFound: number; failed: number; intelligenceComplete: number;
+  libraryTotal: number; skipped: number; matched: number; review: number; notFound: number; failed: number; intelligenceComplete: number;
+  metadataUpdated: number; artworkUpdated: number; intelligenceUpdated: number;
   label: string; serviceMessage: string; stage: EnrichmentVisualStage; currentTrackId: string | null;
   failedTrackIds: string[]; activity: EnrichmentActivity[];
 };
@@ -671,7 +672,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     percent: number;
   } | null>(null);
   const [enrichment, setEnrichmentState] = useState<EnrichmentState>({
-    running: false, open: false, minimized: false, current: 0, total: 0, completed: 0, matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: 0,
+    running: false, open: false, minimized: false, current: 0, total: 0, completed: 0, libraryTotal: 0, skipped: 0, matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: 0,
+    metadataUpdated: 0, artworkUpdated: 0, intelligenceUpdated: 0,
     label: "LIBRARY INTELLIGENCE", serviceMessage: "Ready to enrich your music library.", stage: "idle", currentTrackId: null, failedTrackIds: [], activity: [],
   });
   const enrichmentRef = useRef(enrichment);
@@ -1265,12 +1267,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }
 
   async function enrichTracks(targets: MusicTrack[], artworkOnly = false) {
-    const work = artworkOnly ? targets.filter(trackNeedsArtwork) : [...targets];
-    if (!work.length) {
-      setMessage(artworkOnly ? "Selected songs already have artwork. Existing artwork is protected." : "Your library is already ready to scan.");
-      return;
-    }
-
     setError("");
     setMessage("");
     setReviewItems([]);
@@ -1279,14 +1275,59 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setReviewSavedIds(new Set());
     setReviewSkippedIds(new Set());
 
+    let intelligenceMap = new Map<string, MusicTrackIntelligence>();
+    if (!artworkOnly && targets.length) {
+      intelligenceMap = await hydrateMusicIntelligenceCache(targets).catch(() => new Map<string, MusicTrackIntelligence>());
+    }
+
+    const metadataNeedsWork = (track: MusicTrack) =>
+      needsMusicMetadata(track) ||
+      trackNeedsArtwork(track) ||
+      track.metadata_status === "unknown" ||
+      track.metadata_status === "review" ||
+      !track.metadata_updated_at;
+
+    const intelligenceNeedsWork = (track: MusicTrack) => {
+      const existing = intelligenceMap.get(track.id) || null;
+      return !isMusicIntelligenceCurrent(existing) ||
+        existing?.status === "processing" ||
+        existing?.status === "stale" ||
+        existing?.status === "failed" ||
+        !existing?.bpm ||
+        !existing?.keySignature;
+    };
+
+    const work = artworkOnly
+      ? targets.filter(trackNeedsArtwork)
+      : targets.filter((track) => metadataNeedsWork(track) || intelligenceNeedsWork(track));
+    const skipped = Math.max(0, targets.length - work.length);
+    const initialActivity: EnrichmentActivity[] = skipped
+      ? [{ id: `skip-${Date.now()}`, tone: "ok", text: `${skipped} song${skipped === 1 ? "" : "s"} already complete`, detail: "Verified metadata, artwork and current V3 intelligence protected • skipped" }]
+      : [];
+
+    if (!work.length) {
+      setEnrichment({
+        running: false, open: true, minimized: false, current: 0, total: 0, completed: 0, libraryTotal: targets.length, skipped,
+        matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: artworkOnly ? 0 : skipped,
+        metadataUpdated: 0, artworkUpdated: 0, intelligenceUpdated: 0,
+        label: artworkOnly ? "ARTWORK ALREADY COMPLETE" : "LIBRARY ALREADY COMPLETE",
+        serviceMessage: artworkOnly ? "Every selected song already has protected artwork." : "No missing or outdated song information was found. Nothing was rescanned.",
+        stage: "complete", currentTrackId: null, failedTrackIds: [], activity: initialActivity,
+      });
+      return;
+    }
+
     let matched = 0;
     let review = 0;
     let notFound = 0;
     let failed = 0;
     let intelligenceComplete = 0;
+    let metadataUpdated = 0;
+    let artworkUpdated = 0;
+    let intelligenceUpdated = 0;
     const failedTrackIds: string[] = [];
     const reviewQueue: ReviewItem[] = [];
-    let activity: EnrichmentActivity[] = [];
+    let activity: EnrichmentActivity[] = [...initialActivity];
 
     const addActivity = (tone: EnrichmentActivity["tone"], text: string, detail: string) => {
       const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, tone, text, detail };
@@ -1294,16 +1335,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       setEnrichment((current) => ({ ...current, activity }));
     };
 
-    let intelligenceMap = new Map<string, MusicTrackIntelligence>();
-    if (!artworkOnly) {
-      intelligenceMap = await hydrateMusicIntelligenceCache(work).catch(() => new Map<string, MusicTrackIntelligence>());
-    }
-
     setEnrichment({
-      running: true, open: true, minimized: false, current: 0, total: work.length, completed: 0, matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: 0,
-      label: artworkOnly ? "FINDING ALBUM ARTWORK" : "ENRICHING MUSIC LIBRARY",
-      serviceMessage: artworkOnly ? "Searching for missing artwork while protecting existing covers." : "Checking song info, artwork, Artist DNA, Song DNA and audio intelligence.",
-      stage: "identifying", currentTrackId: null, failedTrackIds: [], activity: [],
+      running: true, open: true, minimized: false, current: 0, total: work.length, completed: 0, libraryTotal: targets.length, skipped,
+      matched: 0, review: 0, notFound: 0, failed: 0, intelligenceComplete: 0,
+      metadataUpdated: 0, artworkUpdated: 0, intelligenceUpdated: 0,
+      label: artworkOnly ? "FINDING MISSING ARTWORK" : "ENRICHING MUSIC LIBRARY",
+      serviceMessage: artworkOnly
+        ? `${skipped} already complete • ${work.length} artwork check${work.length === 1 ? "" : "s"} needed.`
+        : `${skipped} already complete • ${work.length} song${work.length === 1 ? "" : "s"} need missing or outdated information.`,
+      stage: "identifying", currentTrackId: null, failedTrackIds: [], activity,
     });
 
     try {
@@ -1312,15 +1352,22 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         let track = originalTrack;
         const currentNumber = index + 1;
         const identity = [artistLabel(track), track.title].filter(Boolean).join(" • ");
+        let metadataChangedThisTrack = false;
+        let artworkChangedThisTrack = false;
+        let intelligenceUpdatedThisTrack = false;
+
         setEnrichment((current) => ({
           ...current, current: currentNumber, label: artworkOnly ? `FINDING ARTWORK • ${track.title}` : `ENRICHING • ${track.title}`,
-          serviceMessage: identity, stage: "identifying", currentTrackId: track.id, matched, review, notFound, failed, intelligenceComplete, failedTrackIds: [...failedTrackIds],
+          serviceMessage: identity, stage: "identifying", currentTrackId: track.id, matched, review, notFound, failed, intelligenceComplete,
+          metadataUpdated, artworkUpdated, intelligenceUpdated, failedTrackIds: [...failedTrackIds],
         }));
 
         try {
-          const metadataNeeded = artworkOnly || needsMusicMetadata(track) || trackNeedsArtwork(track) || track.metadata_status === "unknown" || track.metadata_status === "review" || !track.metadata_updated_at;
+          const metadataNeeded = artworkOnly || metadataNeedsWork(track);
           if (metadataNeeded) {
-            setEnrichment((current) => ({ ...current, stage: "metadata", serviceMessage: `Checking metadata • ${identity}` }));
+            const beforeMetadata = [track.title, track.artist || "", track.album || "", track.release_year || "", track.genre || "", track.metadata_status || ""].join("\u0001");
+            const beforeArtwork = [track.artwork_path || "", track.external_artwork_url || ""].join("\u0001");
+            setEnrichment((current) => ({ ...current, stage: artworkOnly ? "artwork" : "metadata", serviceMessage: artworkOnly ? `Searching missing artwork • ${identity}` : `Checking only missing song info • ${identity}` }));
             const result = await enrichMusicTrack(track, {
               artworkOnly,
               autoApplyThreshold: 0.98,
@@ -1333,37 +1380,56 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             });
             track = result.track;
             replaceTrackLocally(track);
+            const afterMetadata = [track.title, track.artist || "", track.album || "", track.release_year || "", track.genre || "", track.metadata_status || ""].join("\u0001");
+            const afterArtwork = [track.artwork_path || "", track.external_artwork_url || ""].join("\u0001");
+            metadataChangedThisTrack = beforeMetadata !== afterMetadata;
+            artworkChangedThisTrack = beforeArtwork !== afterArtwork;
+            if (metadataChangedThisTrack) metadataUpdated += 1;
+            if (artworkChangedThisTrack) artworkUpdated += 1;
             if (result.status === "matched") matched += 1;
             else if (result.status === "review") {
               review += 1;
               if (result.candidates.length) reviewQueue.push({ trackId: track.id, candidates: result.candidates });
             } else if (result.status === "not_found") notFound += 1;
-            setEnrichment((current) => ({ ...current, stage: "artwork", serviceMessage: trackNeedsArtwork(track) ? "Artwork not confirmed yet • continuing intelligence scan." : "Artwork ready ✓" }));
+            setEnrichment((current) => ({ ...current, stage: "artwork", serviceMessage: trackNeedsArtwork(track) ? "Artwork is still missing • existing good data remains protected." : "Artwork ready ✓" }));
           } else {
             matched += 1;
-            setEnrichment((current) => ({ ...current, stage: "artwork", serviceMessage: "Verified metadata and artwork already protected ✓" }));
+            setEnrichment((current) => ({ ...current, stage: "artwork", serviceMessage: "Verified song info and artwork skipped ✓" }));
           }
 
           if (!artworkOnly) {
             const existing = intelligenceMap.get(track.id) || null;
             let intelligence = existing;
-            if (!isMusicIntelligenceCurrent(existing) || existing?.status === "processing") {
+            const intelligenceNeeded = metadataChangedThisTrack || intelligenceNeedsWork(track);
+            if (intelligenceNeeded) {
               intelligence = await analyzeMusicTrackIntelligence(track, {
+                force: true,
                 onStage: (stage, detail) => {
                   setEnrichment((current) => ({ ...current, stage: visualStageFromIntelligence(stage), serviceMessage: detail }));
                 },
               });
+              intelligenceUpdatedThisTrack = true;
+              intelligenceUpdated += 1;
             } else {
-              setEnrichment((current) => ({ ...current, stage: "song_dna", serviceMessage: "Song DNA and Artist DNA already current ✓" }));
+              setEnrichment((current) => ({ ...current, stage: "song_dna", serviceMessage: "Current V3 Song DNA, BPM and Key protected ✓" }));
             }
             if (intelligence) {
               intelligenceMap.set(track.id, intelligence);
-              intelligenceComplete += 1;
+              if (isMusicIntelligenceCurrent(intelligence) && intelligence.bpm && intelligence.keySignature) intelligenceComplete += 1;
             }
           }
 
-          setEnrichment((current) => ({ ...current, stage: "saving", serviceMessage: "Saving enrichment state…" }));
-          addActivity(reviewQueue.some((item) => item.trackId === track.id) ? "review" : "ok", `${track.title} • ${artistLabel(track)}`, artworkOnly ? "Artwork check complete" : "Metadata + Music Intelligence complete");
+          setEnrichment((current) => ({ ...current, stage: "saving", serviceMessage: "Saving only the fields that changed…" }));
+          const changes = [
+            metadataChangedThisTrack ? "song info updated" : "",
+            artworkChangedThisTrack ? "artwork updated" : "",
+            intelligenceUpdatedThisTrack ? "V3 intelligence updated" : "",
+          ].filter(Boolean);
+          addActivity(
+            reviewQueue.some((item) => item.trackId === track.id) ? "review" : "ok",
+            `${track.title} • ${artistLabel(track)}`,
+            changes.length ? changes.join(" • ") : (artworkOnly ? "Artwork checked • protected existing data" : "Missing fields checked • current data protected"),
+          );
         } catch (caught) {
           failed += 1;
           failedTrackIds.push(track.id);
@@ -1372,7 +1438,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         }
 
         setEnrichment((current) => ({
-          ...current, completed: currentNumber, current: currentNumber, matched, review, notFound, failed, intelligenceComplete, failedTrackIds: [...failedTrackIds],
+          ...current, completed: currentNumber, current: currentNumber, matched, review, notFound, failed, intelligenceComplete,
+          metadataUpdated, artworkUpdated, intelligenceUpdated, failedTrackIds: [...failedTrackIds],
         }));
         if (index < work.length - 1) await delayMusicLookup(artworkOnly ? 180 : 1250);
       }
@@ -1380,18 +1447,41 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       await refreshTracks();
       setReviewItems(reviewQueue);
       setEnrichment((current) => ({
-        ...current, running: false, open: true, minimized: false, current: work.length, completed: work.length, total: work.length, matched, review, notFound, failed, intelligenceComplete,
+        ...current,
+        running: false,
+        open: current.minimized ? false : true,
+        minimized: current.minimized,
+        current: work.length,
+        completed: work.length,
+        total: work.length,
+        libraryTotal: targets.length,
+        skipped,
+        matched,
+        review,
+        notFound,
+        failed,
+        intelligenceComplete,
+        metadataUpdated,
+        artworkUpdated,
+        intelligenceUpdated,
         label: artworkOnly ? "ARTWORK SCAN COMPLETE" : "LIBRARY ENRICHMENT COMPLETE",
-        serviceMessage: failed ? `${failed} song${failed === 1 ? "" : "s"} can be retried without rescanning completed work.` : reviewQueue.length ? `${reviewQueue.length} possible metadata match${reviewQueue.length === 1 ? "" : "es"} need review.` : "Everything that could be enriched is saved.",
-        stage: "complete", currentTrackId: null, failedTrackIds: [...failedTrackIds], activity,
+        serviceMessage: failed
+          ? `${failed} song${failed === 1 ? "" : "s"} can be retried. ${skipped} complete song${skipped === 1 ? " was" : "s were"} never rescanned.`
+          : reviewQueue.length
+            ? `${reviewQueue.length} possible metadata match${reviewQueue.length === 1 ? "" : "es"} need review. ${skipped} complete song${skipped === 1 ? " was" : "s were"} skipped.`
+            : `${skipped} already complete • ${work.length} song${work.length === 1 ? "" : "s"} checked only where information was missing or outdated.`,
+        stage: "complete",
+        currentTrackId: null,
+        failedTrackIds: [...failedTrackIds],
+        activity,
       }));
 
       if (!reviewQueue.length) {
-        setMessage(`${work.length - failed} enriched${intelligenceComplete ? ` • ${intelligenceComplete} intelligence profiles ready` : ""}${failed ? ` • ${failed} retry` : ""}.`);
+        setMessage(`${work.length - failed} updated or checked • ${skipped} already complete${failed ? ` • ${failed} retry` : ""}.`);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not finish library enrichment.");
-      setEnrichment((current) => ({ ...current, running: false, open: true, minimized: false, stage: "complete" }));
+      setEnrichment((current) => ({ ...current, running: false, open: current.minimized ? false : true, stage: "complete" }));
     }
   }
 
@@ -2087,7 +2177,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div><span className="tr10-directoryEyebrow">DIRECTORY</span><h2>Song Library</h2></div>
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
-            <button type="button" className={enrichment.running ? "tr44-enrichLauncher is-running" : "tr44-enrichLauncher"} onClick={() => { if (enrichment.running) setEnrichment((current) => ({ ...current, open: true, minimized: false })); else void enrichTracks(tracks); }}>{enrichment.running ? `ENRICHING ${enrichment.completed}/${enrichment.total}` : "ENRICH LIBRARY"}</button>
+            <button type="button" className={`tr44-enrichLauncher${enrichment.running ? " is-running" : ""}${enrichment.minimized && enrichment.stage === "complete" ? " is-complete" : ""}`} onClick={() => { if (enrichment.running || enrichment.minimized) setEnrichment((current) => ({ ...current, open: true, minimized: false })); else void enrichTracks(tracks); }}>{enrichment.running ? `ENRICHING ${enrichment.completed}/${enrichment.total}` : enrichment.minimized && enrichment.stage === "complete" ? "ENRICHMENT COMPLETE" : "ENRICH LIBRARY"}</button>
             <button type="button" className="is-orange" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
           </div>
         </header>
@@ -2327,15 +2417,16 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         </section> : null}
       </section>
 
-      {enrichment.open && !enrichment.minimized ? <div className="tr10-modalBack tr10-analysisBack tr44-enrichmentBack"><motion.section className="tr10-analysisModal tr44-enrichmentModal" role="dialog" aria-modal="true" aria-live="polite" initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-        <header className="tr44-enrichmentHeader"><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr44-enrichmentHeaderTools"><div className="tr10-analysisCounter"><strong>{enrichment.completed}</strong><span>OF {enrichment.total}</span></div><button type="button" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "MINIMIZE" : "CLOSE"}</button></div></header>
-        <div className="tr44-progressLine"><motion.i initial={false} animate={{ scaleX: enrichment.total ? enrichment.completed / enrichment.total : 0 }} transition={{ type: "spring", stiffness: 220, damping: 28 }} /></div>
+      {enrichment.open && !enrichment.minimized && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-analysisBack tr44-enrichmentBack"><motion.section className="tr10-analysisModal tr44-enrichmentModal" role="dialog" aria-modal="true" aria-live="polite" initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+        <header className="tr44-enrichmentHeader"><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr44-enrichmentHeaderTools"><div className="tr10-analysisCounter"><strong>{enrichment.running ? enrichment.completed : enrichment.libraryTotal}</strong><span>{enrichment.running ? `OF ${enrichment.total}` : "CHECKED"}</span></div><button type="button" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "MINIMIZE" : "CLOSE"}</button></div></header>
+        <div className="tr44-progressLine"><motion.i initial={false} animate={{ scaleX: enrichment.running ? (enrichment.total ? enrichment.completed / enrichment.total : 0) : 1 }} transition={{ type: "spring", stiffness: 220, damping: 28 }} /></div>
         <div className="tr44-stageRail">{ENRICHMENT_STAGE_ORDER.map((item, index) => { const activeIndex = ENRICHMENT_STAGE_ORDER.findIndex((stage) => stage.key === enrichment.stage); const complete = enrichment.stage === "complete" || (activeIndex >= 0 && index < activeIndex); const active = item.key === enrichment.stage; return <div key={item.key} className={`${complete ? "is-complete " : ""}${active ? "is-active" : ""}`}><i>{complete ? "✓" : index + 1}</i><span>{item.label}</span></div>; })}</div>
-        <div className="tr44-enrichmentMetrics"><span><b>{enrichment.completed}</b> COMPLETED</span><span><b>{Math.max(0,enrichment.total-enrichment.completed)}</b> REMAINING</span><span><b>{enrichment.intelligenceComplete}</b> DNA READY</span><span><b>{enrichment.review}</b> REVIEW</span><span className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b> FAILED</span></div>
+        <div className="tr44-enrichmentMetrics"><span><b>{enrichment.completed}</b> COMPLETED</span><span><b>{Math.max(0,enrichment.total-enrichment.completed)}</b> REMAINING</span><span><b>{enrichment.skipped}</b> SKIPPED</span><span><b>{enrichment.intelligenceComplete}</b> DNA READY</span><span><b>{enrichment.review}</b> REVIEW</span><span className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b> FAILED</span></div>
         <div className="tr44-enrichmentNow"><span>{enrichment.running ? "NOW PROCESSING" : "SCAN SUMMARY"}</span><strong>{enrichment.running && enrichment.currentTrackId ? tracks.find((track) => track.id === enrichment.currentTrackId)?.title || enrichment.label : enrichment.label}</strong><small>{enrichment.serviceMessage}</small></div>
-        <div className="tr44-activityFeed"><div className="tr44-feedTitle"><span>LIVE ACTIVITY</span><small>{enrichment.running ? "Updates as each song moves through the pipeline" : "Most recent results"}</small></div>{enrichment.activity.length ? enrichment.activity.map((item) => <motion.div key={item.id} className={`is-${item.tone}`} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}><i>{item.tone === "ok" ? "✓" : item.tone === "error" ? "!" : item.tone === "review" ? "?" : "•"}</i><span><strong>{item.text}</strong><small>{item.detail}</small></span></motion.div>) : <div className="tr44-feedEmpty">Preparing the first library record…</div>}</div>
-        <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Verified metadata and artwork are reused. MVP fills missing or outdated information instead of blindly replacing it.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "RUN IN BACKGROUND" : "DONE"}</button></div></footer>
-      </motion.section></div> : null}
+        {!enrichment.running && enrichment.stage === "complete" ? <div className="tr51-completionSummary" aria-label="Enrichment completion summary"><div><b>{enrichment.libraryTotal}</b><span>SONGS CHECKED</span></div><div><b>{enrichment.skipped}</b><span>ALREADY COMPLETE</span></div><div><b>{enrichment.metadataUpdated}</b><span>SONG INFO UPDATED</span></div><div><b>{enrichment.artworkUpdated}</b><span>ARTWORK UPDATED</span></div><div><b>{enrichment.intelligenceUpdated}</b><span>V3 / AUDIO UPDATED</span></div><div><b>{enrichment.review}</b><span>NEED REVIEW</span></div><div className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b><span>FAILED</span></div></div> : null}
+        <div className="tr44-activityFeed"><div className="tr44-feedTitle"><span>LIVE ACTIVITY</span><small>{enrichment.running ? "Only songs needing work enter the pipeline" : "Most recent results"}</small></div>{enrichment.activity.length ? enrichment.activity.map((item) => <motion.div key={item.id} className={`is-${item.tone}`} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}><i>{item.tone === "ok" ? "✓" : item.tone === "error" ? "!" : item.tone === "review" ? "?" : "•"}</i><span><strong>{item.text}</strong><small>{item.detail}</small></span></motion.div>) : <div className="tr44-feedEmpty">Checking which library records actually need work…</div>}</div>
+        <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Complete records are skipped. MVP searches only missing or outdated song info, artwork and intelligence.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => setEnrichment((current) => ({ ...current, open: false, minimized: current.running }))}>{enrichment.running ? "RUN IN BACKGROUND" : "CLOSE"}</button></div></footer>
+      </motion.section></div>, document.body) : null}
 
       {reviewItems.length && reviewRemainingCount > 0 ? <button className="tr10-reviewDock" onClick={openReviewQueue}>REVIEW {reviewRemainingCount} POSSIBLE MATCH{reviewRemainingCount === 1 ? "" : "ES"} ›</button> : null}
 
