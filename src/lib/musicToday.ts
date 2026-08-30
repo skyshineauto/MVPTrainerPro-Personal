@@ -5,6 +5,11 @@ import {
   playMusicAdHocQueue,
   toggleMusicShuffle,
 } from "./musicPlayer";
+import {
+  getCachedMusicArtistDNA,
+  getCachedMusicSongDNA,
+} from "./musicIntelligenceCache";
+import { hydrateMusicIntelligenceCache } from "./musicIntelligenceEnrichment";
 
 export type MusicTodaySteering =
   | "harder"
@@ -405,6 +410,11 @@ function readDeepNumber(track: MusicTrack, names: string[]) {
 }
 
 function externalSongDNA(track: MusicTrack): Partial<TrackDNA> {
+  const cached = getCachedMusicSongDNA(track.id);
+  const cachedResult: Partial<TrackDNA> = cached ? {
+    energy: cached.energy, heavy: cached.heaviness, melodic: cached.melodic, dark: cached.darkness, drive: cached.drive, bright: cached.brightness, focus: cached.focus,
+    aggression: cached.aggression, atmospheric: cached.atmospheric, reflective: cached.reflective, relaxing: cached.relaxing, upbeat: cached.upbeat,
+  } : {};
   const map: Array<[keyof TrackDNA, string[]]> = [
     ["energy", ["energy", "energy_score"]],
     ["heavy", ["heavy", "heaviness", "heaviness_score"]],
@@ -419,10 +429,10 @@ function externalSongDNA(track: MusicTrack): Partial<TrackDNA> {
     ["relaxing", ["relaxing", "relaxed", "calm", "calm_score"]],
     ["upbeat", ["upbeat", "uplifting", "upbeat_score"]],
   ];
-  const result: Partial<TrackDNA> = {};
+  const result: Partial<TrackDNA> = { ...cachedResult };
   for (const [key, names] of map) {
     const value = readDeepNumber(track, names);
-    if (value != null) result[key] = value;
+    if (value != null && result[key] == null) result[key] = value;
   }
   return result;
 }
@@ -440,8 +450,15 @@ function genericArtistDNA(track: MusicTrack): ArtistDNA {
 }
 
 function artistDNA(track: MusicTrack): ArtistDNA {
+  const generic = genericArtistDNA(track);
   const known = ARTIST_DNA[artistText(track)];
-  return known ? { ...genericArtistDNA(track), ...known } : genericArtistDNA(track);
+  const cached = getCachedMusicArtistDNA(track.artist);
+  const persisted: ArtistDNA = cached ? {
+    energy: cached.energy, heavy: cached.heaviness, melodic: cached.melodic, dark: cached.darkness, drive: cached.drive, bright: cached.brightness, focus: cached.focus,
+    aggression: cached.aggression, atmospheric: cached.atmospheric, reflective: cached.reflective, relaxing: cached.relaxing, upbeat: cached.upbeat,
+  } : {};
+  if (Object.keys(persisted).length) return { ...generic, ...known, ...persisted };
+  return known ? { ...generic, ...known } : generic;
 }
 
 function blendDNA(base: TrackDNA, source: Partial<TrackDNA>, amount: number) {
@@ -511,7 +528,7 @@ function staticTrackDNA(track: MusicTrack): TrackDNA {
   dna = blendDNA(dna, artist, knownArtist ? 0.46 : 0.28);
 
   const persisted = externalSongDNA(track);
-  if (Object.keys(persisted).length) dna = blendDNA(dna, persisted, 0.82);
+  if (Object.keys(persisted).length) dna = blendDNA(dna, persisted, 0.94);
   return dna;
 }
 
@@ -560,18 +577,27 @@ function diversifyArtists(ranked: MusicTrack[]) {
 }
 
 function strictCompatibility(target: TodayVector, dna: TrackDNA, relaxation = 0) {
-  const slack = relaxation * 9;
-  const calmTarget = target.energy <= 48 || target.drive <= 46;
-  const veryCalmTarget = target.energy <= 40 && target.drive <= 42;
+  const slack = relaxation * 7;
+  const calmTarget = target.energy <= 50 || target.drive <= 48;
+  const veryCalmTarget = target.energy <= 42 && target.drive <= 44;
   const lightTarget = target.heavy <= 45;
-  const aggressionLimit = clamp(13 + target.heavy * 0.33 + target.energy * 0.14 + target.drive * 0.10 + slack);
+  const aggressionLimit = clamp(12 + target.heavy * 0.30 + target.energy * 0.12 + target.drive * 0.08 + slack);
 
-  if (calmTarget && dna.energy > 61 + slack) return false;
-  if (calmTarget && dna.drive > 61 + slack) return false;
-  if (calmTarget && dna.aggression > aggressionLimit) return false;
-  if (veryCalmTarget && dna.upbeat > 64 + slack) return false;
-  if (veryCalmTarget && dna.relaxing < 35 - slack) return false;
-  if (lightTarget && dna.heavy > 70 + slack) return false;
+  // Hard mood gates stay strict even when the candidate pool is small.
+  // A calm/tired request must never "relax" far enough to admit an obviously
+  // aggressive, upbeat or high-drive song.
+  if (veryCalmTarget && dna.energy > 58 + Math.min(5, slack)) return false;
+  if (veryCalmTarget && dna.drive > 58 + Math.min(5, slack)) return false;
+  if (veryCalmTarget && dna.aggression > 46 + Math.min(4, slack)) return false;
+  if (veryCalmTarget && dna.upbeat > 65 + Math.min(4, slack)) return false;
+  if (veryCalmTarget && dna.relaxing < 32 - Math.min(4, slack)) return false;
+
+  if (calmTarget && dna.energy > 68 + Math.min(7, slack)) return false;
+  if (calmTarget && dna.drive > 70 + Math.min(7, slack)) return false;
+  if (calmTarget && dna.aggression > Math.max(56, aggressionLimit)) return false;
+  if (calmTarget && dna.upbeat > 78 + Math.min(4, slack)) return false;
+
+  if (lightTarget && dna.heavy > 68 + slack) return false;
   if (target.dark <= 40 && dna.dark > 82 + slack) return false;
   if (target.bright >= 70 && dna.bright < 24 - slack) return false;
   return true;
@@ -599,7 +625,12 @@ function rankForToday(
   let eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 0));
   if (eligible.length < Math.min(12, prepared.length)) eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 1));
   if (eligible.length < Math.min(8, prepared.length)) eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 2));
-  if (!eligible.length) eligible = prepared;
+  if (!eligible.length) {
+    const calmTarget = target.energy <= 50 || target.drive <= 48;
+    eligible = calmTarget
+      ? prepared.filter(({ dna }) => dna.energy <= 72 && dna.drive <= 74 && dna.aggression <= 60 && dna.upbeat <= 80)
+      : prepared;
+  }
 
   const ranked = eligible
     .map(({ track, dna }) => {
@@ -634,6 +665,10 @@ async function startQueue(next: MusicTodayContext, surpriseStrength = 0, exclude
   const player = getMusicPlayerSnapshot();
   const library = player.libraryTracks;
   if (!library.length) throw new Error("Your music library is empty.");
+
+  // R44: hydrate persisted Song DNA / Artist DNA before ranking. The cache keeps
+  // this fast after the first read and the database remains authoritative.
+  await hydrateMusicIntelligenceCache(library).catch(() => undefined);
 
   const currentTrackId = excludeCurrent ? player.currentTrack?.id || null : null;
   const queue = rankForToday(library, next.target, next.prompt, next.revision, currentTrackId, surpriseStrength);
