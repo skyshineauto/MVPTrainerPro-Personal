@@ -548,3 +548,268 @@
   [data-mvp-music="flagship"] .tr52-trackActions{grid-template-columns:minmax(52px,.85fr) minmax(68px,1.15fr) 40px!important}
   [data-mvp-music="flagship"] .tr52-trackActions .m37-actionLabel{font-size:6.7px!important}
 }
+
+/* MVP Trainer Pro R54 - premium library nav + aligned command controls */
+/* One sculpted navigation rail. Active state is unmistakable; inactive states stay recessed. */
+[data-mvp-music="flagship"] .tr52-tabRail{
+  margin:10px 12px 13px;
+  padding:4px;
+  border:1px solid rgba(85,178,218,.105);
+  border-radius:14px;
+  background:
+    linear-gradient(180deg,rgba(16,36,48,.56),rgba(7,18,25,.38)),
+    radial-gradient(120% 90% at 50% -20%,rgba(46,176,226,.055),transparent 62%);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.045),
+    inset 0 -1px rgba(0,0,0,.36),
+    0 10px 28px rgba(0,0,0,.10);
+  overflow:visible;
+}
+[data-mvp-music="flagship"] .tr52-tabs{gap:4px}
+[data-mvp-music="flagship"] .tr52-tabs button{
+  height:52px;
+  border-radius:10px;
+  color:#788d98;
+  text-rendering:geometricPrecision;
+  -webkit-font-smoothing:antialiased;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::before{
+  inset:2px;
+  border-radius:9px;
+  opacity:.34;
+  background:linear-gradient(180deg,rgba(255,255,255,.018),rgba(0,0,0,.08));
+  box-shadow:inset 0 1px rgba(255,255,255,.018),inset 0 -1px rgba(0,0,0,.18);
+}
+[data-mvp-music="flagship"] .tr52-tabs button::after{
+  content:"";
+  position:absolute;
+  inset:2px;
+  border-radius:9px;
+  border:1px solid transparent;
+  pointer-events:none;
+  z-index:-1;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active{
+  color:#fff;
+  text-shadow:0 0 15px rgba(84,215,255,.24);
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::before{
+  opacity:1;
+  background:
+    linear-gradient(180deg,rgba(26,57,72,.96),rgba(9,29,40,.98)),
+    radial-gradient(90% 140% at 50% -34%,rgba(66,211,255,.18),transparent 57%);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.10),
+    inset 0 -2px rgba(0,0,0,.42),
+    0 7px 15px rgba(0,0,0,.22),
+    0 0 18px rgba(44,195,246,.10);
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::after{
+  border-color:rgba(78,210,255,.25);
+  border-bottom-color:rgba(242,155,45,.22);
+  box-shadow:inset 0 0 12px rgba(70,205,255,.045);
+}
+[data-mvp-music="flagship"] .tr52-tabIcon{
+  width:21px;height:21px;flex-basis:21px;
+  color:#7d98a5;
+}
+[data-mvp-music="flagship"] .tr52-tabIcon svg{
+  width:21px;height:21px;
+  stroke-width:1.9;
+  shape-rendering:geometricPrecision;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabIcon{
+  color:#65ddff;
+  filter:drop-shadow(0 0 7px rgba(62,203,255,.38));
+}
+[data-mvp-music="flagship"] .tr52-tabLabel{
+  font-size:10.4px;
+  font-weight:950;
+  letter-spacing:.035em;
+  color:inherit;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabLabel{color:#fff}
+[data-mvp-music="flagship"] .tr52-tabs button>i{
+  left:24%;right:24%;bottom:1px;height:3px;
+  background:linear-gradient(90deg,transparent,#56dcff 20%,#f5a33b 80%,transparent);
+  box-shadow:0 0 13px rgba(70,210,255,.55),0 0 8px rgba(245,163,59,.28);
+}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover{
+    color:#b9cad2;
+    background:transparent;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover::before{
+    opacity:.62;
+    background:linear-gradient(180deg,rgba(64,155,194,.055),rgba(0,0,0,.08));
+  }
+}
+
+/* SEARCH / ENERGY / SORT / SHOW share one exact baseline and material system. */
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar{
+  align-items:end!important;
+  grid-template-columns:minmax(260px,1.4fr) minmax(280px,.95fr) minmax(190px,.7fr) 92px!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.m37-select,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.tr52-energyFilter{
+  display:grid!important;
+  grid-template-rows:12px 44px!important;
+  gap:6px!important;
+  align-self:end!important;
+  min-width:0!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label>span,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectLabel,
+[data-mvp-music="flagship"] .tr52-energyFilter>span{
+  display:flex!important;
+  align-items:center!important;
+  height:12px!important;
+  margin:0!important;
+  padding:0 1px!important;
+  font-size:8.3px!important;
+  line-height:12px!important;
+  font-weight:950!important;
+  letter-spacing:.105em!important;
+  color:#728995!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger,
+[data-mvp-music="flagship"] .tr52-energyFilter>div{
+  height:44px!important;
+  min-height:44px!important;
+  margin:0!important;
+  border-radius:10px!important;
+  border:1px solid rgba(92,174,207,.105)!important;
+  background:linear-gradient(180deg,rgba(18,40,52,.80),rgba(8,24,33,.88))!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.055),
+    inset 0 -1px rgba(0,0,0,.38),
+    0 7px 15px rgba(0,0,0,.10)!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input{
+  font-size:11.5px!important;
+  font-weight:750!important;
+  color:#f2f8fb!important;
+  letter-spacing:.005em!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input::placeholder{
+  color:#6f8692!important;
+  opacity:1!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger{
+  padding:0 12px!important;
+  gap:9px!important;
+  font-size:11.5px!important;
+  font-weight:850!important;
+  letter-spacing:.005em!important;
+  color:#f5fbfe!important;
+  text-rendering:geometricPrecision;
+  -webkit-font-smoothing:antialiased;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectValue{
+  min-width:0!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  white-space:nowrap!important;
+  color:#f5fbfe!important;
+  font:inherit!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectChevron{
+  flex:0 0 auto!important;
+  width:18px!important;
+  height:18px!important;
+  display:grid!important;
+  place-items:center!important;
+  font-size:15px!important;
+  line-height:1!important;
+  font-weight:900!important;
+  color:#84a8b8!important;
+  transform:translateY(-1px)!important;
+  text-shadow:0 0 8px rgba(62,194,240,.12);
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-select.is-open .m37-selectTrigger{
+  border-color:rgba(73,207,255,.26)!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.07),0 0 0 2px rgba(60,198,247,.045),0 8px 19px rgba(0,0,0,.14)!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-select.is-open .m37-selectChevron{color:#63d9ff!important}
+
+/* Tablet/mobile keeps the same hierarchy, resized instead of squeezed. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .tr52-tabRail{
+    margin:7px 7px 10px;
+    padding:3px;
+    border-radius:12px;
+    overflow:hidden;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs{gap:2px;padding-bottom:0}
+  [data-mvp-music="flagship"] .tr52-tabs button{
+    flex:0 0 88px;
+    height:50px;
+    border-radius:9px;
+    gap:3px;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button::before,
+  [data-mvp-music="flagship"] .tr52-tabs button::after{inset:1px;border-radius:8px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:17px;height:17px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:8.45px;letter-spacing:.025em}
+  [data-mvp-music="flagship"] .tr52-tabs button>i{left:26%;right:26%;bottom:1px;height:2.5px}
+
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+    gap:7px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.m37-select,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.tr52-energyFilter{
+    grid-template-rows:11px 40px!important;
+    gap:5px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label>span,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectLabel,
+  [data-mvp-music="flagship"] .tr52-energyFilter>span{
+    height:11px!important;
+    line-height:11px!important;
+    font-size:7.5px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger,
+  [data-mvp-music="flagship"] .tr52-energyFilter>div{
+    height:40px!important;
+    min-height:40px!important;
+    border-radius:9px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger{font-size:10.5px!important}
+}
+
+@media(max-width:560px){
+  [data-mvp-music="flagship"] .tr52-tabRail{margin-inline:6px;padding:3px}
+  [data-mvp-music="flagship"] .tr52-tabs button{flex-basis:82px;height:48px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:16px;height:16px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:8px}
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.m37-select,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>.tr52-energyFilter{
+    grid-template-rows:10px 39px!important;
+    gap:4px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label>span,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectLabel,
+  [data-mvp-music="flagship"] .tr52-energyFilter>span{
+    height:10px!important;
+    line-height:10px!important;
+    font-size:7.15px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger,
+  [data-mvp-music="flagship"] .tr52-energyFilter>div{
+    height:39px!important;
+    min-height:39px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger{font-size:10px!important}
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectChevron{width:16px!important;height:16px!important;font-size:14px!important}
+}
