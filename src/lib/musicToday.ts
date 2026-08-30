@@ -8,6 +8,7 @@ import {
 import {
   getCachedMusicArtistDNA,
   getCachedMusicSongDNA,
+  getCachedMusicTrackIntelligence,
 } from "./musicIntelligenceCache";
 import { hydrateMusicIntelligenceCache } from "./musicIntelligenceEnrichment";
 
@@ -576,27 +577,31 @@ function diversifyArtists(ranked: MusicTrack[]) {
   return output;
 }
 
-function strictCompatibility(target: TodayVector, dna: TrackDNA, relaxation = 0) {
+function strictCompatibility(target: TodayVector, dna: TrackDNA, bpm: number | null, relaxation = 0) {
   const slack = relaxation * 7;
   const calmTarget = target.energy <= 50 || target.drive <= 48;
   const veryCalmTarget = target.energy <= 42 && target.drive <= 44;
   const lightTarget = target.heavy <= 45;
   const aggressionLimit = clamp(12 + target.heavy * 0.30 + target.energy * 0.12 + target.drive * 0.08 + slack);
+  const tempoSlack = relaxation * 3;
 
   // Hard mood gates stay strict even when the candidate pool is small.
   // A calm/tired request must never "relax" far enough to admit an obviously
-  // aggressive, upbeat or high-drive song.
+  // aggressive, upbeat, high-drive or fast song.
   if (veryCalmTarget && dna.energy > 58 + Math.min(5, slack)) return false;
   if (veryCalmTarget && dna.drive > 58 + Math.min(5, slack)) return false;
   if (veryCalmTarget && dna.aggression > 46 + Math.min(4, slack)) return false;
   if (veryCalmTarget && dna.upbeat > 65 + Math.min(4, slack)) return false;
   if (veryCalmTarget && dna.relaxing < 32 - Math.min(4, slack)) return false;
+  if (veryCalmTarget && bpm != null && bpm > 122 + tempoSlack) return false;
 
   if (calmTarget && dna.energy > 68 + Math.min(7, slack)) return false;
   if (calmTarget && dna.drive > 70 + Math.min(7, slack)) return false;
   if (calmTarget && dna.aggression > Math.max(56, aggressionLimit)) return false;
   if (calmTarget && dna.upbeat > 78 + Math.min(4, slack)) return false;
+  if (calmTarget && bpm != null && bpm > 138 + tempoSlack) return false;
 
+  if (target.drive <= 40 && bpm != null && bpm > 128 + tempoSlack) return false;
   if (lightTarget && dna.heavy > 68 + slack) return false;
   if (target.dark <= 40 && dna.dark > 82 + slack) return false;
   if (target.bright >= 70 && dna.bright < 24 - slack) return false;
@@ -612,6 +617,16 @@ function moodAffinity(target: TodayVector, dna: TrackDNA) {
   return bonus;
 }
 
+function tempoAffinity(target: TodayVector, bpm: number | null) {
+  if (bpm == null || !Number.isFinite(bpm)) return 0;
+  const desiredBpm = 74 + target.drive * 0.78;
+  let score = -Math.abs(bpm - desiredBpm) * 0.07;
+  if (target.energy <= 48 && bpm > 118) score -= (bpm - 118) * 0.11;
+  if (target.drive <= 42 && bpm > 122) score -= (bpm - 122) * 0.13;
+  if (target.drive >= 72 && bpm < 92) score -= (92 - bpm) * 0.05;
+  return score;
+}
+
 function rankForToday(
   library: MusicTrack[],
   target: TodayVector,
@@ -621,24 +636,29 @@ function rankForToday(
   surpriseStrength = 0,
 ) {
   const unique = uniqueTracks(library);
-  const prepared = unique.map((track) => ({ track, dna: staticTrackDNA(track) }));
-  let eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 0));
-  if (eligible.length < Math.min(12, prepared.length)) eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 1));
-  if (eligible.length < Math.min(8, prepared.length)) eligible = prepared.filter(({ dna }) => strictCompatibility(target, dna, 2));
+  const prepared = unique.map((track) => {
+    const intelligence = getCachedMusicTrackIntelligence(track.id);
+    const rawBpm = intelligence?.bpm == null ? null : Number(intelligence.bpm);
+    const bpm = rawBpm != null && Number.isFinite(rawBpm) && rawBpm >= 40 && rawBpm <= 240 ? rawBpm : null;
+    return { track, dna: staticTrackDNA(track), bpm };
+  });
+  let eligible = prepared.filter(({ dna, bpm }) => strictCompatibility(target, dna, bpm, 0));
+  if (eligible.length < Math.min(12, prepared.length)) eligible = prepared.filter(({ dna, bpm }) => strictCompatibility(target, dna, bpm, 1));
+  if (eligible.length < Math.min(8, prepared.length)) eligible = prepared.filter(({ dna, bpm }) => strictCompatibility(target, dna, bpm, 2));
   if (!eligible.length) {
     const calmTarget = target.energy <= 50 || target.drive <= 48;
     eligible = calmTarget
-      ? prepared.filter(({ dna }) => dna.energy <= 72 && dna.drive <= 74 && dna.aggression <= 60 && dna.upbeat <= 80)
+      ? prepared.filter(({ dna, bpm }) => dna.energy <= 72 && dna.drive <= 74 && dna.aggression <= 60 && dna.upbeat <= 80 && (bpm == null || bpm <= 142))
       : prepared;
   }
 
   const ranked = eligible
-    .map(({ track, dna }) => {
+    .map(({ track, dna, bpm }) => {
       const distance = vectorDistance(target, dna);
       const stable = hashUnit(`${prompt}|${revision}|${track.id}`);
       const jitter = surpriseStrength > 0 ? stable * 26 * surpriseStrength : stable * 0.9;
       const currentPenalty = currentTrackId && track.id === currentTrackId ? 160 : 0;
-      const score = 100 - distance + moodAffinity(target, dna) + jitter - currentPenalty;
+      const score = 100 - distance + moodAffinity(target, dna) + tempoAffinity(target, bpm) + jitter - currentPenalty;
       return { track, score };
     })
     .sort((left, right) => right.score - left.score)

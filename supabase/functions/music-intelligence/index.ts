@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const ARTIST_TABLE = "trainer_music_artist_intelligence";
-const ANALYSIS_VERSION = 1;
+const ANALYSIS_VERSION = 2;
 const CYANITE_LIMIT_BYTES = 20 * 1024 * 1024;
 const CYANITE_LIMIT_SECONDS = 15 * 60;
 const CYANITE_MODELS = [
@@ -71,6 +71,13 @@ type ProviderContext = {
   mbRecordingId: string | null;
   mbArtistId: string | null;
   mbGenres: string[];
+};
+
+type DeezerAudioFacts = {
+  trackId: number | null;
+  bpm: number | null;
+  gain: number | null;
+  confidence: number;
 };
 
 function json(body: unknown, status = 200) {
@@ -190,6 +197,90 @@ async function musicBrainzIdentity(track: InputTrack) {
   };
 }
 
+
+function deezerArtistName(row: Record<string, unknown>) {
+  const artist = row.artist && typeof row.artist === "object" ? row.artist as Record<string, unknown> : {};
+  return typeof artist.name === "string" ? artist.name : "";
+}
+
+function rankDeezerCandidate(track: InputTrack, row: Record<string, unknown>) {
+  const wantedTitle = normalizeCatalogText(track.title);
+  const wantedArtist = normalizeCatalogText(track.artist);
+  const candidateTitle = normalizeCatalogText(row.title_short || row.title);
+  const candidateArtist = normalizeCatalogText(deezerArtistName(row));
+  let score = 0;
+
+  if (wantedTitle && candidateTitle === wantedTitle) score += 72;
+  else if (wantedTitle && candidateTitle && (candidateTitle.includes(wantedTitle) || wantedTitle.includes(candidateTitle))) score += 34;
+
+  if (wantedArtist && candidateArtist === wantedArtist) score += 58;
+  else if (wantedArtist && candidateArtist && (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist))) score += 24;
+
+  const wantedDuration = Number(track.durationSeconds || 0);
+  const candidateDuration = Number(row.duration || 0);
+  if (wantedDuration > 0 && candidateDuration > 0) {
+    const diff = Math.abs(wantedDuration - candidateDuration);
+    if (diff <= 3) score += 18;
+    else if (diff <= 8) score += 11;
+    else if (diff <= 15) score += 5;
+    else if (diff > 40) score -= 14;
+  }
+
+  return score;
+}
+
+async function deezerAudioFacts(track: InputTrack): Promise<DeezerAudioFacts | null> {
+  if (!track.artist || !track.title) return null;
+  const query = `artist:"${track.artist.replace(/"/g, " ")}" track:"${track.title.replace(/"/g, " ")}"`;
+  const response = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=8`);
+  if (!response.ok) return null;
+  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const rows = Array.isArray(payload?.data) ? payload?.data as Array<Record<string, unknown>> : [];
+  const ranked = rows
+    .map((row) => ({ row, score: rankDeezerCandidate(track, row) }))
+    .sort((a, b) => b.score - a.score);
+  const best = ranked[0];
+  if (!best || best.score < 92) return null;
+
+  const id = Number(best.row.id || 0);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const detailResponse = await fetch(`https://api.deezer.com/track/${id}`);
+  if (!detailResponse.ok) return null;
+  const detail = await detailResponse.json().catch(() => null) as Record<string, unknown> | null;
+  if (!detail || detail.error) return null;
+
+  const bpmRaw = Number(detail.bpm || 0);
+  const gainRaw = Number(detail.gain);
+  const bpm = Number.isFinite(bpmRaw) && bpmRaw >= 40 && bpmRaw <= 240 ? bpmRaw : null;
+  const gain = Number.isFinite(gainRaw) ? gainRaw : null;
+  if (bpm == null) return null;
+
+  const confidence = Math.max(.55, Math.min(.92, best.score / 160));
+  return { trackId: id, bpm, gain, confidence };
+}
+
+function tempoLabelFromBpm(bpm: number | null) {
+  if (bpm == null) return null;
+  if (bpm < 78) return "very slow";
+  if (bpm < 96) return "slow";
+  if (bpm < 118) return "moderate";
+  if (bpm < 138) return "up-tempo";
+  if (bpm < 162) return "fast";
+  return "very fast";
+}
+
+function applyTempoFacts(base: SongDNA, bpm: number | null) {
+  if (bpm == null || !Number.isFinite(bpm)) return base;
+  const pace = clamp(((bpm - 60) / 100) * 100);
+  const dna = { ...base };
+  dna.energy = clamp(dna.energy * .84 + pace * .16);
+  dna.drive = clamp(dna.drive * .72 + pace * .28);
+  dna.upbeat = clamp(dna.upbeat * .82 + pace * .18);
+  dna.intensity = clamp(dna.energy * .38 + dna.drive * .25 + dna.aggression * .22 + dna.heaviness * .15);
+  dna.workoutFit = clamp(dna.energy * .27 + dna.drive * .33 + dna.motivational * .23 + (100 - dna.relaxing) * .17);
+  return dna;
+}
+
 function baseSongDna(track: InputTrack): SongDNA {
   const energy = track.energyLevel === "high" ? 86 : track.energyLevel === "low" ? 34 : 60;
   return {
@@ -300,20 +391,22 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
   };
 }
 
-function sourceList(context: ProviderContext, cyanite = false) {
+function sourceList(context: ProviderContext, cyanite = false, deezer = false) {
   const sources = ["mvp"];
   if (context.trackTags.length || context.artistTags.length) sources.push("lastfm");
   if (context.mbRecordingId || context.mbArtistId || context.mbGenres.length) sources.push("musicbrainz");
+  if (deezer) sources.push("deezer");
   if (cyanite) sources.push("cyanite");
   return sources;
 }
 
-function confidenceFor(context: ProviderContext, cyanite = false) {
+function confidenceFor(context: ProviderContext, cyanite = false, deezer = false) {
   let confidence = .50;
   if (context.trackTags.length) confidence += .10;
   if (context.artistTags.length) confidence += .08;
   if (context.mbRecordingId) confidence += .10;
   if (context.mbArtistId) confidence += .05;
+  if (deezer) confidence += .07;
   if (cyanite) confidence += .15;
   return Math.min(.98, confidence);
 }
@@ -424,11 +517,15 @@ function applyCyanite(base: SongDNA, payload: unknown) {
   dna.intensity = clamp(dna.energy * .38 + dna.drive * .24 + dna.aggression * .23 + dna.heaviness * .15);
   dna.workoutFit = clamp(dna.energy * .28 + dna.drive * .32 + dna.motivational * .23 + (100 - dna.relaxing) * .17);
 
+  const keySignature = typeof keyModel?.tag === "string" && keyModel.tag.trim() ? keyModel.tag.trim() : null;
+  const tempoLabel = typeof tempoModel?.tag === "string" && tempoModel.tag.trim() ? tempoModel.tag.trim() : null;
+
   return {
     dna,
     bpm,
-    tempoLabel: typeof tempoModel?.tag === "string" ? tempoModel.tag : null,
-    keySignature: typeof keyModel?.tag === "string" ? keyModel.tag : null,
+    audioReady: bpm != null && keySignature != null,
+    tempoLabel,
+    keySignature,
     mainGenres: tagsFromModel(genreModel),
     subgenres: tagsFromModel(subgenreModel),
     moods: [...new Set([...tagsFromModel(advanced), ...tagsFromModel(simple)])].slice(0, 16),
@@ -510,13 +607,15 @@ async function finalizeCyanite(
   baseDna: SongDNA,
   cyaniteTrackId: string,
   key: string,
+  fallbackBpm: number | null,
+  deezerUsed: boolean,
 ) {
   for (let attempt = 0; attempt < 14; attempt += 1) {
     if (attempt) await new Promise((resolve) => setTimeout(resolve, 4500));
     const payload = await fetchCyaniteModels(cyaniteTrackId, key).catch(() => null);
     const cyanite = applyCyanite(baseDna, payload);
-    if (!cyanite) continue;
-    const source = sourceList(context, true);
+    if (!cyanite || !cyanite.audioReady) continue;
+    const source = sourceList(context, true, deezerUsed);
     const row = {
       user_id: userId,
       track_id: track.id,
@@ -524,11 +623,11 @@ async function finalizeCyanite(
       artist_name: track.artist || "",
       status: "complete",
       analysis_version: ANALYSIS_VERSION,
-      confidence: confidenceFor(context, true),
+      confidence: confidenceFor(context, true, deezerUsed),
       source,
       song_dna: cyanite.dna,
       artist_dna: artistDna,
-      bpm: cyanite.bpm,
+      bpm: cyanite.bpm ?? fallbackBpm,
       key_signature: cyanite.keySignature,
       tempo_label: cyanite.tempoLabel,
       main_genres: cyanite.mainGenres.length ? cyanite.mainGenres : context.mbGenres,
@@ -590,7 +689,7 @@ Deno.serve(async (req) => {
     if (existing?.cyanite_track_id && cyaniteKey) {
       const payload = await fetchCyaniteModels(String(existing.cyanite_track_id), cyaniteKey).catch(() => null);
       const cyanite = applyCyanite((existing.song_dna || baseSongDna(track)) as SongDNA, payload);
-      if (cyanite) {
+      if (cyanite?.audioReady) {
         const context: ProviderContext = {
           trackTags: Array.isArray(existing.lastfm_track_tags) ? existing.lastfm_track_tags : [],
           artistTags: [],
@@ -604,9 +703,9 @@ Deno.serve(async (req) => {
           confidence: Math.max(Number(existing.confidence || 0), confidenceFor(context, true)),
           source: [...new Set([...(Array.isArray(existing.source) ? existing.source : []), "cyanite"])],
           song_dna: cyanite.dna,
-          bpm: cyanite.bpm,
-          key_signature: cyanite.keySignature,
-          tempo_label: cyanite.tempoLabel,
+          bpm: cyanite.bpm ?? existing.bpm ?? null,
+          key_signature: cyanite.keySignature ?? existing.key_signature ?? null,
+          tempo_label: cyanite.tempoLabel ?? existing.tempo_label ?? null,
           main_genres: cyanite.mainGenres.length ? cyanite.mainGenres : existing.main_genres,
           subgenres: cyanite.subgenres,
           moods: cyanite.moods,
@@ -630,12 +729,15 @@ Deno.serve(async (req) => {
     const { data: cachedArtist } = normalizedArtistKey
       ? await service.from(ARTIST_TABLE).select("analysis_version,artist_dna,top_tags,genres,musicbrainz_artist_id").eq("user_id", userId).eq("artist_key", normalizedArtistKey).maybeSingle()
       : { data: null };
-    const context = await providerContext(track, cachedArtist as CachedArtistRow | null);
+    const [context, deezer] = await Promise.all([
+      providerContext(track, cachedArtist as CachedArtistRow | null),
+      deezerAudioFacts(track).catch(() => null),
+    ]);
     const cachedArtistDna = cachedArtist && Number(cachedArtist.analysis_version || 0) >= ANALYSIS_VERSION && cachedArtist.artist_dna
       ? cachedArtist.artist_dna as ArtistDNA
       : null;
     const aDna = cachedArtistDna || deriveArtistDna(track, context);
-    const sDna = deriveSongDna(track, context, aDna);
+    const sDna = applyTempoFacts(deriveSongDna(track, context, aDna), deezer?.bpm ?? null);
     if (!cachedArtistDna) await upsertArtist(service, userId, track, context, aDna);
 
     let cyaniteTrackId = existing?.cyanite_track_id ? String(existing.cyanite_track_id) : null;
@@ -655,7 +757,8 @@ Deno.serve(async (req) => {
       cyaniteStatus = "processing";
     }
 
-    const sources = sourceList(context, false);
+    const deezerUsed = Boolean(deezer?.bpm);
+    const sources = sourceList(context, false, deezerUsed);
     const status = cyaniteStatus === "processing" ? "processing" : "complete";
     const provisional = {
       user_id: userId,
@@ -664,13 +767,13 @@ Deno.serve(async (req) => {
       artist_name: track.artist || "",
       status,
       analysis_version: ANALYSIS_VERSION,
-      confidence: confidenceFor(context, false),
+      confidence: confidenceFor(context, false, deezerUsed),
       source: sources,
       song_dna: sDna,
       artist_dna: aDna,
-      bpm: existing?.bpm || null,
-      key_signature: existing?.key_signature || null,
-      tempo_label: existing?.tempo_label || null,
+      bpm: deezer?.bpm ?? existing?.bpm ?? null,
+      key_signature: existing?.key_signature ?? null,
+      tempo_label: tempoLabelFromBpm(deezer?.bpm ?? existing?.bpm ?? null) ?? existing?.tempo_label ?? null,
       main_genres: context.mbGenres,
       subgenres: existing?.subgenres || [],
       moods: context.trackTags.slice(0, 10).map((tag) => tag.name),
@@ -683,7 +786,11 @@ Deno.serve(async (req) => {
       lastfm_track_tags: context.trackTags,
       cyanite_track_id: cyaniteTrackId,
       cyanite_status: cyaniteStatus,
-      provider_payload: { lastfmArtistTags: context.artistTags, musicbrainzGenres: context.mbGenres },
+      provider_payload: {
+        lastfmArtistTags: context.artistTags,
+        musicbrainzGenres: context.mbGenres,
+        deezer: deezer ? { trackId: deezer.trackId, bpm: deezer.bpm, gain: deezer.gain, confidence: deezer.confidence } : null,
+      },
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       error: cyaniteError,
@@ -692,7 +799,18 @@ Deno.serve(async (req) => {
     if (saveError) throw saveError;
 
     if (cyaniteStatus === "processing" && cyaniteTrackId && cyaniteKey) {
-      const task = finalizeCyanite(service, userId, track, context, aDna, sDna, cyaniteTrackId, cyaniteKey).catch(() => undefined);
+      const task = finalizeCyanite(
+        service,
+        userId,
+        track,
+        context,
+        aDna,
+        sDna,
+        cyaniteTrackId,
+        cyaniteKey,
+        deezer?.bpm ?? existing?.bpm ?? null,
+        deezerUsed,
+      ).catch(() => undefined);
       const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
       if (runtime?.waitUntil) runtime.waitUntil(task);
     }

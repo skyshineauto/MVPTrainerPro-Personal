@@ -16,7 +16,7 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 1;
+export const MUSIC_INTELLIGENCE_VERSION = 2;
 const TRACK_TABLE = "trainer_music_track_intelligence";
 
 type DbTrackIntelligence = {
@@ -273,6 +273,6 @@ export async function markMusicTrackIntelligenceStale(trackId: string) {
 export function describeMusicIntelligenceSources(item: MusicTrackIntelligence | null | undefined) {
   if (!item?.source.length) return "MVP analysis";
   return item.source
-    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "mvp" ? "MVP" : value)
+    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "deezer" ? "Deezer" : value === "mvp" ? "MVP" : value)
     .join(" + ");
 }
