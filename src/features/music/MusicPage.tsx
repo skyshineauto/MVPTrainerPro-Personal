@@ -2333,10 +2333,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
           <header className="tr34-collectionTools"><div><span>ARTIST DIRECTORY</span><h3>{artistGroups.length} artists</h3></div><MvpDensityPicker value={artistView} onChange={(mode) => setArtistView(mode as CollectionView)} label="Artist view density" /></header>
-          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => <article className="tr10-collectionCard" key={artist}>
-            <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`} title={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div></button>
-            <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(artist,songs)}><PlayPremiumIcon /><span>PLAY</span></button>
-          </article>)}</div>
+          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${artistView}`}>{artistGroups.map(([artist,songs]) => {
+            const artistListPlaying = artistView === "list" && player.playing && !player.activePlaylistId && player.activePlaylistName === artist && Boolean(player.currentTrack?.id) && songs.some((track) => track.id === player.currentTrack?.id);
+            return <article className="tr10-collectionCard" key={artist}>
+              <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "artist", artist })} aria-label={`Open ${artist}`} title={artist}><TrackArtwork track={songs[0]} size="card" /><div><small>ARTIST</small><h3>{artist}</h3><p>{songs.length} SONG{songs.length === 1 ? "" : "S"} • {formatLongDuration(songs.reduce((sum,track) => sum + Number(track.duration_seconds || 0),0))}</p></div></button>
+              <button type="button" className={`tr10-collectionPlay ${artistListPlaying ? "is-playing" : ""}`} onClick={() => { if (artistListPlaying) pauseMusic(); else void playMusicAdHocQueue(artist,songs); }} aria-label={artistListPlaying ? `Pause ${artist}` : `Play ${artist}`}>{artistListPlaying ? <R52PlayingGlyph /> : <PlayPremiumIcon />}<span>{artistListPlaying ? "PLAYING" : "PLAY"}</span></button>
+            </article>;
+          })}</div>
         </section> : null}
 
         {tab === "albums" ? activeAlbumDetail ? <CollectionDetailView
@@ -2358,10 +2361,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           onEdit={openDetail}
         /> : <section className="tr34-collectionBrowse">
           <header className="tr34-collectionTools"><div><span>ALBUM DIRECTORY</span><h3>{albumGroups.length} albums</h3></div><MvpDensityPicker value={albumView} onChange={(mode) => setAlbumView(mode as CollectionView)} label="Album view density" /></header>
-          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
-            <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`} title={`${group.album} • ${group.artist}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div></button>
-            <button type="button" className="tr10-collectionPlay" onClick={() => void playMusicAdHocQueue(`Album • ${group.album}`,group.tracks)}><PlayPremiumIcon /><span>PLAY</span></button>
-          </article>)}</div>
+          <div className={`m37-collectionGrid tr10-cardGrid tr34-collectionGrid is-${albumView}`}>{albumGroups.map((group) => {
+            const albumQueueName = `Album • ${group.album}`;
+            const albumListPlaying = albumView === "list" && player.playing && !player.activePlaylistId && player.activePlaylistName === albumQueueName && Boolean(player.currentTrack?.id) && group.tracks.some((track) => track.id === player.currentTrack?.id);
+            return <article className="tr10-collectionCard" key={`${group.artist}-${group.album}`}>
+              <button type="button" className="tr10-collectionOpen" onClick={() => setCollectionDetail({ kind: "album", artist: group.artist, album: group.album })} aria-label={`Open ${group.album}`} title={`${group.album} • ${group.artist}`}><TrackArtwork track={group.tracks[0]} size="card" /><div><small>ALBUM</small><h3>{group.album}</h3><p>{group.artist} • {group.tracks.length} SONG{group.tracks.length === 1 ? "" : "S"}</p></div></button>
+              <button type="button" className={`tr10-collectionPlay ${albumListPlaying ? "is-playing" : ""}`} onClick={() => { if (albumListPlaying) pauseMusic(); else void playMusicAdHocQueue(albumQueueName,group.tracks); }} aria-label={albumListPlaying ? `Pause ${group.album}` : `Play ${group.album}`}>{albumListPlaying ? <R52PlayingGlyph /> : <PlayPremiumIcon />}<span>{albumListPlaying ? "PLAYING" : "PLAY"}</span></button>
+            </article>;
+          })}</div>
         </section> : null}
 
         {tab === "playlists" ? <section className="m37-playlists tr21-playlists tr56-playlists">
