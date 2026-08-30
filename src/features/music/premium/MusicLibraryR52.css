@@ -298,3 +298,253 @@
 @media(prefers-reduced-motion:reduce){
   [data-mvp-music="flagship"] .tr52-playingGlyph rect{animation:none}
 }
+
+/* MVP Trainer Pro R53 - Song Library polish + mobile fit */
+/* Desktop navigation gets stronger hierarchy without turning into pills. */
+[data-mvp-music="flagship"] .tr52-tabRail{
+  margin-top:10px;
+  margin-bottom:12px;
+  border-bottom-color:rgba(105,190,230,.12);
+}
+[data-mvp-music="flagship"] .tr52-tabs button{
+  height:56px;
+  gap:8px;
+  color:#778c97;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::before{
+  inset:7px 3px 8px;
+  border-radius:11px;
+  background:linear-gradient(180deg,rgba(75,188,235,.075),rgba(10,54,76,.018));
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::before{
+  opacity:1;
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 8px 24px rgba(0,0,0,.08);
+}
+[data-mvp-music="flagship"] .tr52-tabIcon{
+  width:19px;height:19px;flex-basis:19px;
+}
+[data-mvp-music="flagship"] .tr52-tabIcon svg{width:19px;height:19px}
+[data-mvp-music="flagship"] .tr52-tabLabel{
+  font-size:10.25px;
+  letter-spacing:.04em;
+}
+[data-mvp-music="flagship"] .tr52-tabs button>i{
+  left:13%;right:13%;height:2.5px;
+  box-shadow:0 0 14px rgba(52,205,255,.42),0 0 10px rgba(242,155,45,.20);
+}
+
+/* The filter area reads as one command surface rather than four boxes. */
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar{
+  padding:9px 14px 13px!important;
+  background:linear-gradient(90deg,rgba(10,26,35,.24),rgba(10,22,30,.12))!important;
+  border-top:1px solid rgba(86,163,197,.055)!important;
+  border-bottom:1px solid rgba(86,163,197,.055)!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger,
+[data-mvp-music="flagship"] .tr52-energyFilter>div{
+  background:rgba(11,27,36,.52)!important;
+  border:1px solid rgba(91,157,185,.075)!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.025)!important;
+}
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input:focus,
+[data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger:focus-visible{
+  border-color:rgba(72,205,255,.20)!important;
+  box-shadow:0 0 0 2px rgba(54,195,246,.05)!important;
+}
+
+/* Action states are persistent. Inactive Like / Play Less stay neutral. */
+[data-mvp-music="flagship"] .tr52-trackActions .m37-action{
+  border:1px solid transparent!important;
+  color:#93a5ae!important;
+}
+[data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-green:not(.is-active),
+[data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-red:not(.is-active){
+  background:transparent!important;
+  color:#93a5ae!important;
+  border-color:transparent!important;
+  box-shadow:none!important;
+}
+[data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-green.is-active{
+  color:#dffff0!important;
+  background:rgba(44,210,132,.09)!important;
+  border-color:rgba(58,221,149,.10)!important;
+  box-shadow:inset 0 0 0 1px rgba(58,221,149,.035)!important;
+}
+[data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-red.is-active{
+  color:#ffe9ec!important;
+  background:rgba(255,82,101,.085)!important;
+  border-color:rgba(255,94,111,.10)!important;
+  box-shadow:inset 0 0 0 1px rgba(255,94,111,.03)!important;
+}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-green:not(.is-active):hover,
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-action.is-red:not(.is-active):hover{
+    background:rgba(255,255,255,.022)!important;
+    color:#c7d3d9!important;
+  }
+}
+
+/* More stays compact but has a deliberate target. */
+[data-mvp-music="flagship"] .tr52-more>summary{
+  min-width:54px;
+  padding:0 6px;
+  color:#9aadb7;
+}
+[data-mvp-music="flagship"] .tr52-more>summary svg{width:16px;height:16px}
+[data-mvp-music="flagship"] .tr52-more>summary span{font-size:8.25px}
+
+/* Optical alignment across the precision grid. */
+[data-mvp-music="flagship"] .m37-songTable .tr10-trackText{min-width:0!important}
+[data-mvp-music="flagship"] .m37-songTable .tr10-trackText strong,
+[data-mvp-music="flagship"] .m37-songTable .tr10-trackText span{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+[data-mvp-music="flagship"] .m37-songTable .tr10-duration{font-variant-numeric:tabular-nums}
+[data-mvp-music="flagship"] .tr52-trackActions{align-self:center!important}
+
+/* Tablet / mobile: purpose-built density, no desktop squeeze. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .tr52-tabRail{
+    margin:7px 7px 10px;
+    overflow:hidden;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs{
+    gap:1px;
+    padding:0 1px 2px;
+    -webkit-overflow-scrolling:touch;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button{
+    flex:0 0 84px;
+    height:48px;
+    gap:3px;
+    padding:0 3px;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button::before{inset:5px 2px 6px;border-radius:9px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:16.5px;height:16.5px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:8.35px;letter-spacing:.025em}
+  [data-mvp-music="flagship"] .tr52-tabs button>i{left:18%;right:18%}
+
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+    gap:7px!important;
+    padding:8px 8px 10px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label:first-child{grid-column:1/-1}
+  [data-mvp-music="flagship"] .tr52-energyFilter{grid-column:1/-1}
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar input,
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar .m37-selectTrigger,
+  [data-mvp-music="flagship"] .tr52-energyFilter>div{height:39px!important;border-radius:9px!important}
+
+  [data-mvp-music="flagship"] .m37-songTable.tr10-table{
+    padding:0 6px 10px!important;
+    overflow:visible!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row{
+    grid-template-columns:20px 18px minmax(0,1fr) auto!important;
+    grid-template-areas:"order check track track" ". . time energy" ". . actions actions"!important;
+    gap:5px 7px!important;
+    padding:8px 7px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-orderCell button{
+    width:18px!important;height:15px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-orderCell svg{width:10px!important;height:10px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackCell{gap:7px!important;min-width:0!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-art{
+    width:38px!important;height:38px!important;min-width:38px!important;border-radius:8px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-play{
+    width:32px!important;height:32px!important;min-width:32px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-play svg{width:14px!important;height:14px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText strong{font-size:11.5px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText span{font-size:8.7px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-duration{font-size:9px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-energy{
+    min-width:61px!important;height:27px!important;padding:0 7px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-energy>span{font-size:7.7px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-energyLed{width:6px!important;height:6px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions{
+    grid-template-columns:minmax(62px,.9fr) minmax(78px,1.08fr) 46px!important;
+    gap:4px!important;
+    width:100%!important;
+  }
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-action,
+  [data-mvp-music="flagship"] .tr52-more>summary{height:31px!important;border-radius:7px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-actionLabel{font-size:7.4px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-actionIcon,
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-actionIcon svg{width:13px!important;height:13px!important}
+  [data-mvp-music="flagship"] .tr52-more>summary{min-width:46px;padding:0 4px}
+  [data-mvp-music="flagship"] .tr52-more>summary svg{width:15px;height:15px}
+  [data-mvp-music="flagship"] .tr52-moreMenu{
+    width:min(172px,calc(100vw - 28px));
+    max-width:calc(100vw - 28px);
+  }
+}
+
+@media(max-width:560px){
+  [data-mvp-music="flagship"] .tr10-stats strong{font-size:clamp(18px,6vw,24px)!important}
+  [data-mvp-music="flagship"] .tr10-stats span{font-size:7px!important;letter-spacing:.09em!important}
+
+  [data-mvp-music="flagship"] .tr52-tabs button{flex-basis:78px;height:46px}
+  [data-mvp-music="flagship"] .tr52-tabLabel{font-size:7.9px}
+  [data-mvp-music="flagship"] .tr52-tabIcon,
+  [data-mvp-music="flagship"] .tr52-tabIcon svg{width:15.5px;height:15.5px}
+
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar{
+    grid-template-columns:minmax(0,1fr) 78px!important;
+    gap:6px!important;
+    padding-inline:7px!important;
+  }
+  [data-mvp-music="flagship"] .m37-toolbar.tr10-toolbar>label>span,
+  [data-mvp-music="flagship"] .tr52-energyFilter>span{font-size:7.25px!important}
+  [data-mvp-music="flagship"] .tr52-energyFilter button{font-size:7.6px}
+
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row{
+    grid-template-columns:18px 17px minmax(0,1fr) auto!important;
+    gap:4px 6px!important;
+    padding:7px 6px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackCell{gap:6px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-art{
+    width:35px!important;height:35px!important;min-width:35px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-play{
+    width:30px!important;height:30px!important;min-width:30px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText strong{font-size:11px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText span{font-size:8.15px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-healthBadge{font-size:6px!important;padding:2px 4px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-duration{font-size:8.4px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-energy{
+    min-width:56px!important;height:26px!important;padding:0 6px!important;
+  }
+  [data-mvp-music="flagship"] .m37-songTable .tr10-energy>span{font-size:7.2px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions{
+    grid-template-columns:minmax(56px,.88fr) minmax(73px,1.12fr) 42px!important;
+    gap:3px!important;
+  }
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-action,
+  [data-mvp-music="flagship"] .tr52-more>summary{height:30px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-actionLabel{font-size:7px!important}
+  [data-mvp-music="flagship"] .tr52-more>summary{min-width:42px}
+  [data-mvp-music="flagship"] .tr52-more>summary span{display:none!important}
+}
+
+@media(max-width:390px){
+  [data-mvp-music="flagship"] .tr52-tabs button{flex-basis:74px}
+  [data-mvp-music="flagship"] .m37-songTable.tr10-table{padding-inline:4px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row{padding-inline:5px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-art{width:33px!important;height:33px!important;min-width:33px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-play{width:28px!important;height:28px!important;min-width:28px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText strong{font-size:10.6px!important}
+  [data-mvp-music="flagship"] .m37-songTable .tr10-trackText span{font-size:7.8px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions{grid-template-columns:minmax(52px,.85fr) minmax(68px,1.15fr) 40px!important}
+  [data-mvp-music="flagship"] .tr52-trackActions .m37-actionLabel{font-size:6.7px!important}
+}
