@@ -859,3 +859,144 @@
   }
 }
 
+/* MVP_R12_5E_24_SEAMLESS_LIBRARY_BACKGROUND
+   Seamless premium ambient layer for the Song Library.
+   No hard rectangle, no box-sized GPU surface, mobile-safe. */
+
+.tr10-premiumLibrary{
+  background:transparent!important;
+  background-color:transparent!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+  isolation:isolate!important;
+}
+
+/* Large soft ambient field that fades naturally into the Music page. */
+.tr10-premiumLibrary::before{
+  content:""!important;
+  position:absolute!important;
+  z-index:-2!important;
+  pointer-events:none!important;
+  inset:-150px -22vw -220px!important;
+  border:0!important;
+  border-radius:0!important;
+  background:
+    radial-gradient(ellipse 42% 34% at 30% 22%,rgba(22,154,188,.085),transparent 72%),
+    radial-gradient(ellipse 34% 30% at 76% 30%,rgba(255,143,38,.035),transparent 76%),
+    radial-gradient(ellipse 68% 52% at 50% 52%,rgba(7,30,39,.12),transparent 80%)!important;
+  filter:blur(26px)!important;
+  opacity:.9!important;
+  transform:translateZ(0)!important;
+}
+
+/* Keep the existing visual engine, but remove the panel geometry around it. */
+.tr10-premiumLibrary>.mlv-engine{
+  position:absolute!important;
+  z-index:0!important;
+  pointer-events:none!important;
+  inset:-120px -18vw -220px!important;
+  width:auto!important;
+  height:auto!important;
+  overflow:visible!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  opacity:.46!important;
+  -webkit-mask-image:radial-gradient(
+    ellipse 72% 66% at 50% 43%,
+    #000 0 36%,
+    rgba(0,0,0,.82) 53%,
+    rgba(0,0,0,.34) 69%,
+    transparent 86%
+  )!important;
+  mask-image:radial-gradient(
+    ellipse 72% 66% at 50% 43%,
+    #000 0 36%,
+    rgba(0,0,0,.82) 53%,
+    rgba(0,0,0,.34) 69%,
+    transparent 86%
+  )!important;
+}
+
+/* Undo prior clipping that makes the visual look like a square. */
+.tr10-premiumLibrary:has(.mlv-engine){
+  overflow:visible!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine canvas{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  opacity:.72!important;
+  filter:saturate(.94) contrast(.96)!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine .mlv-engineSheen{
+  opacity:.34!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine .mlv-engineGrain{
+  opacity:.025!important;
+}
+
+.tr10-premiumLibrary>:not(.mlv-engine){
+  position:relative!important;
+  z-index:2!important;
+}
+
+/* Blend the top library surfaces into the rest of the app. */
+.tr10-premiumLibrary .tr10-hero,
+.tr10-premiumLibrary .tr10-stats{
+  background:rgba(2,9,13,.34)!important;
+  box-shadow:none!important;
+  border-color:rgba(73,174,204,.055)!important;
+  backdrop-filter:blur(12px) saturate(112%)!important;
+  -webkit-backdrop-filter:blur(12px) saturate(112%)!important;
+}
+
+/* Content areas stay dimensional without creating a page-sized box. */
+.tr10-premiumLibrary .tr10-console,
+.tr10-premiumLibrary .mvp-audition{
+  background:transparent!important;
+  box-shadow:none!important;
+}
+
+@media(max-width:760px){
+  .tr10-premiumLibrary::before{
+    inset:-90px -55vw -160px!important;
+    filter:blur(22px)!important;
+    opacity:.64!important;
+  }
+
+  .tr10-premiumLibrary>.mlv-engine{
+    inset:-70px -30vw -150px!important;
+    opacity:.26!important;
+    -webkit-mask-image:radial-gradient(
+      ellipse 70% 62% at 50% 42%,
+      #000 0 31%,
+      rgba(0,0,0,.72) 49%,
+      rgba(0,0,0,.24) 66%,
+      transparent 84%
+    )!important;
+    mask-image:radial-gradient(
+      ellipse 70% 62% at 50% 42%,
+      #000 0 31%,
+      rgba(0,0,0,.72) 49%,
+      rgba(0,0,0,.24) 66%,
+      transparent 84%
+    )!important;
+  }
+
+  .tr10-premiumLibrary>.mlv-engine canvas{
+    opacity:.46!important;
+  }
+
+  .tr10-premiumLibrary .tr10-hero,
+  .tr10-premiumLibrary .tr10-stats{
+    background:rgba(2,9,13,.26)!important;
+    backdrop-filter:blur(9px) saturate(108%)!important;
+    -webkit-backdrop-filter:blur(9px) saturate(108%)!important;
+  }
+}
+
