@@ -1018,3 +1018,117 @@
 .mvp-auditionSongYoutube,.mvp-auditionSongDelete{appearance:none!important;-webkit-appearance:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px!important;min-height:28px!important;height:28px!important;margin:0!important;border-radius:7px!important;box-shadow:none!important;font-size:7px!important;line-height:1!important;font-weight:950!important}.mvp-auditionSongYoutube{padding:0 7px!important;color:#abc8d0!important;border:1px solid rgba(117,180,200,.14)!important;background:rgba(5,16,21,.42)!important}.mvp-auditionSongYoutube svg{width:16px!important;height:12px!important;overflow:visible!important}.mvp-auditionSongYoutube svg rect{fill:none!important;stroke:currentColor!important;stroke-width:1.5!important}.mvp-auditionSongYoutube svg path{fill:currentColor!important;stroke:none!important}.mvp-auditionSongDelete{width:28px!important;min-width:28px!important;padding:0!important;color:#b66a73!important;border:1px solid rgba(255,93,107,.16)!important;background:rgba(43,10,15,.22)!important}.mvp-auditionSongDelete:hover{color:#ff929c!important;border-color:rgba(255,93,107,.36)!important;background:rgba(73,16,24,.35)!important}.mvp-auditionSongDelete svg{width:15px!important;height:15px!important;fill:none!important;stroke:currentColor!important;stroke-width:1.65!important;stroke-linecap:round!important;stroke-linejoin:round!important}
 @media(max-width:650px){.tr10-row{grid-template-columns:34px 20px minmax(0,1fr)!important;column-gap:9px!important}.tr10-orderCell{width:34px!important;min-width:34px!important;padding-right:5px!important;box-sizing:border-box!important}.tr10-trackCell{column-gap:9px!important}.tr10-trackCell>.tr10-play{margin-left:3px!important}.tr10-smartPremiumV25,[data-smart-premium="v25"]{gap:14px!important;padding:14px 2px 22px!important}.tr10-smartPremiumV25::before,[data-smart-premium="v25"]::before{inset:-30px -38vw -45px!important;filter:blur(22px)!important;opacity:.62!important}.tr10-smartPremiumV25 button,[data-smart-premium="v25"] button{min-height:44px!important;border-radius:10px!important}.mvp-auditionSongYoutube{height:30px!important;min-height:30px!important}.mvp-auditionSongDelete{width:30px!important;min-width:30px!important;height:30px!important;min-height:30px!important}}
 
+/* MVP_R12_5E_27_STATIC_PREMIUM_BACKGROUND
+   Premium STATIC My Music atmosphere.
+   No animation, no WebGL, no hard square boundary. */
+
+.tr10-premiumLibrary{
+  --ml-static-cyan:68,220,255;
+  --ml-static-orange:255,155,47;
+  position:relative!important;
+  isolation:isolate!important;
+  overflow:visible!important;
+  background:
+    radial-gradient(ellipse 64% 38% at 22% 8%,rgba(var(--ml-static-cyan),.052),transparent 72%),
+    radial-gradient(ellipse 52% 34% at 82% 22%,rgba(var(--ml-static-orange),.026),transparent 76%),
+    radial-gradient(ellipse 70% 46% at 50% 60%,rgba(7,31,40,.080),transparent 82%),
+    linear-gradient(180deg,rgba(2,9,13,.24),rgba(1,5,8,.08) 52%,rgba(1,5,8,.20))!important;
+  background-color:transparent!important;
+  box-shadow:none!important;
+}
+
+.tr10-premiumLibrary::before{
+  animation:none!important;
+  transition:none!important;
+  filter:none!important;
+  transform:none!important;
+  opacity:.34!important;
+  background:
+    radial-gradient(ellipse 46% 32% at 20% 22%,rgba(var(--ml-static-cyan),.045),transparent 74%),
+    radial-gradient(ellipse 38% 28% at 78% 30%,rgba(var(--ml-static-orange),.020),transparent 76%)!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine--static{
+  position:absolute!important;
+  z-index:0!important;
+  pointer-events:none!important;
+  inset:-72px -9vw -110px!important;
+  width:auto!important;
+  height:auto!important;
+  border:0!important;
+  border-radius:0!important;
+  overflow:visible!important;
+  background:
+    radial-gradient(ellipse 43% 32% at 28% 24%,rgba(var(--ml-static-cyan),.072),transparent 73%),
+    radial-gradient(ellipse 34% 27% at 74% 31%,rgba(var(--ml-static-orange),.034),transparent 76%),
+    radial-gradient(ellipse 64% 44% at 50% 58%,rgba(10,36,45,.066),transparent 82%)!important;
+  box-shadow:none!important;
+  opacity:1!important;
+  animation:none!important;
+  transition:none!important;
+  transform:none!important;
+  filter:none!important;
+  -webkit-mask-image:radial-gradient(
+    ellipse 82% 74% at 50% 44%,
+    #000 0 31%,
+    rgba(0,0,0,.78) 52%,
+    rgba(0,0,0,.26) 70%,
+    transparent 88%
+  )!important;
+  mask-image:radial-gradient(
+    ellipse 82% 74% at 50% 44%,
+    #000 0 31%,
+    rgba(0,0,0,.78) 52%,
+    rgba(0,0,0,.26) 70%,
+    transparent 88%
+  )!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine--static::before{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  pointer-events:none!important;
+  background:
+    radial-gradient(circle at 16% 20%,rgba(255,255,255,.040) 0 1px,transparent 1.4px),
+    radial-gradient(circle at 34% 44%,rgba(var(--ml-static-cyan),.050) 0 1px,transparent 1.4px),
+    radial-gradient(circle at 64% 22%,rgba(255,255,255,.030) 0 1px,transparent 1.4px),
+    radial-gradient(circle at 83% 52%,rgba(var(--ml-static-orange),.040) 0 1px,transparent 1.4px)!important;
+  opacity:.42!important;
+  animation:none!important;
+}
+
+.tr10-premiumLibrary>.mlv-engine--static canvas,
+.tr10-premiumLibrary>.mlv-engine--static .mlv-engineSheen,
+.tr10-premiumLibrary>.mlv-engine--static .mlv-engineGrain,
+.tr10-premiumLibrary>.mlv-engine--static .mlv-engineArtwork{
+  display:none!important;
+}
+
+.tr10-premiumLibrary>:not(.mlv-engine){
+  position:relative!important;
+  z-index:2!important;
+}
+
+@media(max-width:760px){
+  .tr10-premiumLibrary{
+    background:
+      radial-gradient(ellipse 88% 38% at 20% 9%,rgba(var(--ml-static-cyan),.032),transparent 74%),
+      radial-gradient(ellipse 68% 30% at 82% 22%,rgba(var(--ml-static-orange),.016),transparent 77%),
+      linear-gradient(180deg,rgba(2,9,13,.20),rgba(1,5,8,.06) 52%,rgba(1,5,8,.17))!important;
+  }
+
+  .tr10-premiumLibrary>.mlv-engine--static{
+    inset:-42px -14vw -72px!important;
+    opacity:.72!important;
+    background:
+      radial-gradient(ellipse 54% 30% at 28% 22%,rgba(var(--ml-static-cyan),.044),transparent 74%),
+      radial-gradient(ellipse 42% 26% at 75% 31%,rgba(var(--ml-static-orange),.020),transparent 77%),
+      radial-gradient(ellipse 72% 40% at 50% 58%,rgba(10,34,42,.048),transparent 83%)!important;
+  }
+
+  .tr10-premiumLibrary>.mlv-engine--static::before{
+    opacity:.22!important;
+  }
+}
+

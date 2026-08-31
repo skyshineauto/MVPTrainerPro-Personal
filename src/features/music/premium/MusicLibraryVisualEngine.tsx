@@ -232,6 +232,11 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   activeTab: MusicLibraryVisualTab;
   playing: boolean;
 }) {
+  /* MVP_R12_5E_27_STATIC_VISUAL_ENGINE
+     Static background only. Do not mount R3F/Three/Postprocessing here.
+     This preserves audio headroom on mobile and desktop. */
+  return <div className="mlv-engine mlv-engine--static" aria-hidden="true" />;
+
   const [mobile, setMobile] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
 
