@@ -30,113 +30,60 @@ const TAB_PALETTES: Record<MusicLibraryVisualTab, Palette> = {
   audition: { primary: "#4cddff", secondary: "#ff9834", tertiary: "#8deaff" },
 };
 
-type BokehOrb = {
-  position: [number, number, number];
-  scale: number;
-  opacity: number;
-  phase: number;
-  drift: number;
-  warm: boolean;
-};
-
 function seeded(seed: number) {
   const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return value - Math.floor(value);
 }
 
-function makeBokeh(count: number, mobile: boolean, discover: boolean): BokehOrb[] {
-  return Array.from({ length: count }, (_, index) => {
-    const a = seeded(index + 2.17);
-    const b = seeded(index + 7.91);
-    const c = seeded(index + 19.43);
-    const d = seeded(index + 31.77);
-    const depth = -5.8 + c * 9.6;
-    const warm = d > (discover ? 0.73 : 0.82);
-    return {
-      position: [
-        (a - 0.5) * (mobile ? 9 : 13.5),
-        (b - 0.5) * (mobile ? 12 : 16.5),
-        depth,
-      ],
-      scale: (mobile ? 0.055 : 0.07) + seeded(index + 51.2) * (discover ? 0.34 : 0.24),
-      opacity: 0.14 + seeded(index + 81.3) * (discover ? 0.46 : 0.30),
-      phase: seeded(index + 112.4) * Math.PI * 2,
-      drift: 0.08 + seeded(index + 142.8) * 0.22,
-      warm,
-    };
-  });
-}
-
-function BokehOrbMesh({ orb, palette, reducedMotion, index }: {
-  orb: BokehOrb;
-  palette: Palette;
-  reducedMotion: boolean;
-  index: number;
-}) {
-  const ref = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    if (!ref.current || reducedMotion) return;
-    const time = state.clock.elapsedTime;
-    const x = orb.position[0] + Math.sin(time * orb.drift + orb.phase) * 0.14;
-    const y = orb.position[1] + Math.cos(time * orb.drift * 0.82 + orb.phase) * 0.11;
-    ref.current.position.x = x + state.pointer.x * (0.04 + Math.abs(orb.position[2]) * 0.006);
-    ref.current.position.y = y + state.pointer.y * (0.03 + Math.abs(orb.position[2]) * 0.004);
-    const pulse = 1 + Math.sin(time * 0.34 + orb.phase) * 0.06;
-    ref.current.scale.setScalar(orb.scale * pulse);
-  });
-
-  const tone = orb.warm ? palette.secondary : index % 5 === 0 ? palette.tertiary : palette.primary;
-  return (
-    <mesh ref={ref} position={orb.position} scale={orb.scale} renderOrder={1}>
-      <circleGeometry args={[1, 48]} />
-      <meshBasicMaterial
-        color={tone}
-        transparent
-        opacity={orb.opacity}
-        depthWrite={false}
-        toneMapped={false}
-        blending={THREE.AdditiveBlending}
-      />
-    </mesh>
-  );
-}
-
-function DustField({ palette, mobile, reducedMotion }: {
+function MicroLightField({ palette, mobile, reducedMotion }: {
   palette: Palette;
   mobile: boolean;
   reducedMotion: boolean;
 }) {
   const ref = useRef<THREE.Points>(null);
   const geometry = useMemo(() => {
-    const count = mobile ? 70 : 150;
+    const count = mobile ? 72 : 170;
     const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const cool = new THREE.Color(palette.primary);
+    const pale = new THREE.Color(palette.tertiary);
+    const warm = new THREE.Color(palette.secondary);
+
     for (let index = 0; index < count; index += 1) {
-      positions[index * 3] = (seeded(index + 210.1) - 0.5) * (mobile ? 9 : 14);
-      positions[index * 3 + 1] = (seeded(index + 260.7) - 0.5) * (mobile ? 13 : 18);
-      positions[index * 3 + 2] = -5 + seeded(index + 330.2) * 8;
+      positions[index * 3] = (seeded(index + 10.2) - 0.5) * (mobile ? 8.5 : 14.5);
+      positions[index * 3 + 1] = (seeded(index + 40.7) - 0.5) * (mobile ? 12 : 18);
+      positions[index * 3 + 2] = -7.5 + seeded(index + 80.4) * 8.5;
+
+      const tone = seeded(index + 120.9);
+      const source = tone > 0.94 ? warm : tone > 0.72 ? pale : cool;
+      colors[index * 3] = source.r;
+      colors[index * 3 + 1] = source.g;
+      colors[index * 3 + 2] = source.b;
     }
+
     const next = new THREE.BufferGeometry();
     next.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    next.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     return next;
-  }, [mobile]);
+  }, [mobile, palette.primary, palette.secondary, palette.tertiary]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   useFrame((state) => {
     if (!ref.current || reducedMotion) return;
     const time = state.clock.elapsedTime;
-    ref.current.rotation.z = Math.sin(time * 0.025) * 0.018;
-    ref.current.position.x = state.pointer.x * 0.08;
-    ref.current.position.y = state.pointer.y * 0.05;
+    ref.current.rotation.z = Math.sin(time * 0.018) * 0.009;
+    ref.current.position.x = state.pointer.x * 0.035;
+    ref.current.position.y = state.pointer.y * 0.025;
   });
 
   return (
     <points ref={ref} geometry={geometry} renderOrder={0}>
       <pointsMaterial
-        color={palette.primary}
-        size={mobile ? 0.012 : 0.016}
+        vertexColors
+        size={mobile ? 0.008 : 0.011}
         transparent
-        opacity={0.28}
+        opacity={0.22}
         depthWrite={false}
         sizeAttenuation
         toneMapped={false}
@@ -146,18 +93,101 @@ function DustField({ palette, mobile, reducedMotion }: {
   );
 }
 
-function SoftVolume({ palette, discover }: { palette: Palette; discover: boolean }) {
+function AmbientField({ palette, activeTab, reducedMotion }: {
+  palette: Palette;
+  activeTab: MusicLibraryVisualTab;
+  reducedMotion: boolean;
+}) {
+  const materialRef = useRef<THREE.ShaderMaterial>(null);
+  const primary = useMemo(() => new THREE.Color(palette.primary), [palette.primary]);
+  const secondary = useMemo(() => new THREE.Color(palette.secondary), [palette.secondary]);
+  const tertiary = useMemo(() => new THREE.Color(palette.tertiary), [palette.tertiary]);
+
+  const uniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uPrimary: { value: primary },
+    uSecondary: { value: secondary },
+    uTertiary: { value: tertiary },
+    uDiscover: { value: activeTab === "discover" ? 1 : 0 },
+  }), [activeTab, primary, secondary, tertiary]);
+
+  useFrame((state) => {
+    if (!materialRef.current || reducedMotion) return;
+    materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+  });
+
   return (
-    <group>
-      <mesh position={[-4.2, 2.0, -4.8]} scale={[discover ? 4.8 : 3.8, discover ? 3.5 : 2.8, 1]}>
-        <circleGeometry args={[1, 64]} />
-        <meshBasicMaterial color={palette.primary} transparent opacity={discover ? 0.035 : 0.024} depthWrite={false} toneMapped={false} blending={THREE.AdditiveBlending} />
-      </mesh>
-      <mesh position={[4.8, -1.6, -3.9]} scale={[discover ? 3.9 : 3.0, discover ? 3.1 : 2.4, 1]}>
-        <circleGeometry args={[1, 64]} />
-        <meshBasicMaterial color={palette.secondary} transparent opacity={discover ? 0.022 : 0.014} depthWrite={false} toneMapped={false} blending={THREE.AdditiveBlending} />
-      </mesh>
-    </group>
+    <mesh position={[0, 0, -8.8]} scale={[15.5, 19.5, 1]} renderOrder={-2}>
+      <planeGeometry args={[1, 1, 1, 1]} />
+      <shaderMaterial
+        ref={materialRef}
+        uniforms={uniforms}
+        transparent
+        depthWrite={false}
+        depthTest={false}
+        toneMapped={false}
+        vertexShader={`
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `}
+        fragmentShader={`
+          varying vec2 vUv;
+          uniform float uTime;
+          uniform vec3 uPrimary;
+          uniform vec3 uSecondary;
+          uniform vec3 uTertiary;
+          uniform float uDiscover;
+
+          float hash(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+          }
+
+          float noise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = hash(i);
+            float b = hash(i + vec2(1.0, 0.0));
+            float c = hash(i + vec2(0.0, 1.0));
+            float d = hash(i + vec2(1.0, 1.0));
+            return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+          }
+
+          void main() {
+            vec2 uv = vUv;
+            vec2 p = uv - 0.5;
+            float t = uTime * 0.035;
+
+            float n1 = noise(uv * 3.2 + vec2(t, -t * 0.6));
+            float n2 = noise(uv * 7.5 + vec2(-t * 0.45, t * 0.35));
+
+            float leftSweep = smoothstep(0.34, 0.0, abs(p.x + 0.34 + (n1 - 0.5) * 0.08));
+            leftSweep *= smoothstep(0.60, 0.02, abs(p.y - 0.10));
+
+            float rightSweep = smoothstep(0.26, 0.0, abs(p.x - 0.39 + (n2 - 0.5) * 0.05));
+            rightSweep *= smoothstep(0.48, 0.02, abs(p.y + 0.22));
+
+            float horizon = exp(-pow((p.y + 0.33 + (n1 - 0.5) * 0.025) * 7.5, 2.0));
+            float centerFalloff = 1.0 - smoothstep(0.12, 0.78, length(p * vec2(0.78, 1.0)));
+            float grain = (n2 - 0.5) * 0.015;
+
+            vec3 base = vec3(0.003, 0.010, 0.016);
+            vec3 color = base;
+            color += uPrimary * leftSweep * (0.045 + uDiscover * 0.014);
+            color += uSecondary * rightSweep * 0.018;
+            color += uTertiary * horizon * 0.020;
+            color += uPrimary * centerFalloff * 0.008;
+            color += grain;
+
+            float alpha = 0.93;
+            gl_FragColor = vec4(max(color, vec3(0.0)), alpha);
+          }
+        `}
+      />
+    </mesh>
   );
 }
 
@@ -169,34 +199,29 @@ function Scene({ activeTab, playing, mobile, reducedMotion }: {
 }) {
   const palette = TAB_PALETTES[activeTab];
   const discover = activeTab === "discover";
-  const orbCount = mobile ? (discover ? 18 : 12) : discover ? 38 : 26;
-  const orbs = useMemo(() => makeBokeh(orbCount, mobile, discover), [orbCount, mobile, discover]);
 
   return (
     <>
       <color attach="background" args={["#010407"]} />
-      <fog attach="fog" args={["#01060a", 6.5, 17.5]} />
-      <SoftVolume palette={palette} discover={discover} />
-      <DustField palette={palette} mobile={mobile} reducedMotion={reducedMotion} />
-      {orbs.map((orb, index) => (
-        <BokehOrbMesh key={`${activeTab}-${index}`} orb={orb} palette={palette} reducedMotion={reducedMotion} index={index} />
-      ))}
+      <fog attach="fog" args={["#01060a", 7.5, 19]} />
+      <AmbientField palette={palette} activeTab={activeTab} reducedMotion={reducedMotion} />
+      <MicroLightField palette={palette} mobile={mobile} reducedMotion={reducedMotion} />
       {!reducedMotion ? (
         <EffectComposer multisampling={mobile ? 0 : 2} enableNormalPass={false}>
           <DepthOfField
-            focusDistance={discover ? 0.025 : 0.03}
-            focalLength={discover ? 0.052 : 0.045}
-            bokehScale={mobile ? (discover ? 2.3 : 1.8) : discover ? 4.2 : 3.0}
-            height={mobile ? 360 : 720}
+            focusDistance={0.045}
+            focalLength={discover ? 0.038 : 0.032}
+            bokehScale={mobile ? 0.65 : 1.15}
+            height={mobile ? 320 : 640}
           />
           <Bloom
-            intensity={playing ? (discover ? 0.78 : 0.62) : discover ? 0.62 : 0.46}
-            luminanceThreshold={0.28}
-            luminanceSmoothing={0.68}
+            intensity={playing ? 0.40 : 0.28}
+            luminanceThreshold={0.62}
+            luminanceSmoothing={0.82}
             mipmapBlur
           />
-          <Noise opacity={mobile ? 0 : 0.008} />
-          <Vignette offset={0.16} darkness={discover ? 0.78 : 0.72} />
+          <Noise opacity={mobile ? 0 : 0.004} />
+          <Vignette offset={0.20} darkness={0.70} />
         </EffectComposer>
       ) : null}
     </>
@@ -227,13 +252,13 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   }, []);
 
   return (
-    <div className={`mlv-engine mlv-engine--r64 ${activeTab === "discover" ? "is-discover" : ""} ${playing ? "is-playing" : ""}`} aria-hidden="true">
+    <div className={`mlv-engine mlv-engine--r65 ${activeTab === "discover" ? "is-discover" : ""} ${playing ? "is-playing" : ""}`} aria-hidden="true">
       <Canvas
-        dpr={mobile ? [1, 1.25] : [1, 1.65]}
-        camera={{ position: [0, 0, 8], fov: 48, near: 0.1, far: 28 }}
+        dpr={mobile ? [1, 1.2] : [1, 1.5]}
+        camera={{ position: [0, 0, 8], fov: 48, near: 0.1, far: 30 }}
         gl={{ alpha: true, antialias: !mobile, powerPreference: "high-performance", premultipliedAlpha: false }}
         frameloop={reducedMotion ? "demand" : "always"}
-        performance={{ min: 0.55 }}
+        performance={{ min: 0.6 }}
       >
         <Scene activeTab={activeTab} playing={playing} mobile={mobile} reducedMotion={reducedMotion} />
       </Canvas>
