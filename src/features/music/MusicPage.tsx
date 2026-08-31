@@ -2669,3 +2669,101 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     </main>
   );
 }
+
+/* MVP_R12_5E_32_MOBILE_SINGLE_MORE_MENU
+   Mobile-only controller for Song Library More menus.
+   Desktop behavior is untouched. */
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  const mvpMoreWindow = window as Window & {
+    __mvpMobileSingleMoreMenuV32?: boolean;
+  };
+
+  if (!mvpMoreWindow.__mvpMobileSingleMoreMenuV32) {
+    mvpMoreWindow.__mvpMobileSingleMoreMenuV32 = true;
+
+    const isMvpMobileMore = () =>
+      window.matchMedia("(max-width: 650px)").matches;
+
+    let mvpOpenMore: HTMLDetailsElement | null = null;
+
+    const closeMvpMore = () => {
+      if (!mvpOpenMore) return;
+      mvpOpenMore.open = false;
+      mvpOpenMore = null;
+    };
+
+    document.addEventListener(
+      "toggle",
+      (event) => {
+        if (!isMvpMobileMore()) return;
+
+        const details = event.target;
+        if (!(details instanceof HTMLDetailsElement)) return;
+        if (!details.matches(".tr52-more")) return;
+
+        if (!details.open) {
+          if (mvpOpenMore === details) mvpOpenMore = null;
+          return;
+        }
+
+        if (mvpOpenMore && mvpOpenMore !== details) {
+          mvpOpenMore.open = false;
+        }
+
+        mvpOpenMore = details;
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!isMvpMobileMore() || !mvpOpenMore) return;
+
+        const target = event.target;
+        if (!(target instanceof Node)) return;
+        if (mvpOpenMore.contains(target)) return;
+
+        closeMvpMore();
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (!isMvpMobileMore() || !mvpOpenMore) return;
+
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+
+        if (
+          target.closest(
+            ".tr52-moreMenu button, .tr52-more > div button, .tr52-more [role='menuitem']",
+          )
+        ) {
+          window.setTimeout(closeMvpMore, 0);
+        }
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "scroll",
+      () => {
+        if (!isMvpMobileMore()) return;
+        closeMvpMore();
+      },
+      { capture: true, passive: true },
+    );
+
+    window.addEventListener(
+      "resize",
+      () => {
+        if (!isMvpMobileMore()) closeMvpMore();
+      },
+      { passive: true },
+    );
+  }
+}
+
