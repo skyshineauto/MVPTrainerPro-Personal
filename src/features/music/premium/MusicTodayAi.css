@@ -655,3 +655,81 @@
     letter-spacing:.012em;
   }
 }
+
+
+/* MVP Trainer Pro R58 - AI Today iPhone viewport lock
+   Prevent Safari focus zoom and keep the sheet inside the live visual viewport. */
+@media(max-width:650px){
+  .mvp-today-sheetBack{
+    inset:0!important;
+    width:100vw!important;
+    width:100dvw!important;
+    max-width:100dvw!important;
+    min-width:0!important;
+    height:100vh!important;
+    height:100dvh!important;
+    max-height:100dvh!important;
+    padding:10px!important;
+    padding-top:max(10px,env(safe-area-inset-top))!important;
+    padding-bottom:max(10px,env(safe-area-inset-bottom))!important;
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+  }
+  .mvp-today-sheet{
+    width:100%!important;
+    max-width:min(520px,calc(100dvw - 20px))!important;
+    min-width:0!important;
+    max-height:min(76dvh,620px)!important;
+    margin:0 auto!important;
+    padding:14px!important;
+    overflow-x:hidden!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch!important;
+    box-sizing:border-box!important;
+    border-radius:18px!important;
+  }
+  .mvp-today-sheet,
+  .mvp-today-sheet *{
+    box-sizing:border-box!important;
+  }
+  .mvp-today-sheet header{
+    grid-template-columns:36px minmax(0,1fr) 34px!important;
+    gap:8px!important;
+    min-width:0!important;
+  }
+  .mvp-today-sheet header>div,
+  .mvp-today-sheet form,
+  .mvp-today-sheetCurrent{
+    min-width:0!important;
+    max-width:100%!important;
+  }
+  .mvp-today-sheet header h3{
+    min-width:0!important;
+    max-width:100%!important;
+    font-size:clamp(16px,4.8vw,19px)!important;
+    line-height:1.08!important;
+    white-space:normal!important;
+    overflow-wrap:anywhere!important;
+  }
+  .mvp-today-sheet textarea{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+    min-height:94px!important;
+    /* 16px is intentional: iOS Safari otherwise zooms the page when focused. */
+    font-size:16px!important;
+    line-height:1.38!important;
+    touch-action:manipulation!important;
+  }
+  .mvp-today-sheet form>button{
+    width:100%!important;
+    max-width:100%!important;
+    min-width:0!important;
+  }
+}
+@media(max-width:390px){
+  .mvp-today-sheetBack{padding-left:8px!important;padding-right:8px!important}
+  .mvp-today-sheet{max-width:calc(100dvw - 16px)!important;padding:12px!important}
+}

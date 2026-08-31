@@ -2332,7 +2332,8 @@ async function recoverStalledPlayback(audio: HTMLAudioElement) {
 function ensureAudioElement() {
   if (audioElement) return audioElement;
   const audio = new Audio();
-  audio.preload = "metadata";
+  // R58: keep the active media element ready to begin a newly assigned source immediately.
+  audio.preload = "auto";
   audio.crossOrigin = "anonymous";
   audio.volume = 1;
   audio.addEventListener("play", () => {
@@ -2590,7 +2591,8 @@ function clearTransitionPreload() {
 }
 
 async function preloadNextTransitionTrack() {
-  if (state.transitionMode === "off") return;
+  // R58: pre-resolve and warm the next source even when transition FX are off.
+  // This removes signed-URL/network setup from the user's manual Next tap.
   const next = nextTransitionCandidate();
   if (!next || next.id === transitionPreloadTrackId) return;
   const currentIdAtStart = state.currentTrack?.id ?? null;
@@ -2914,9 +2916,10 @@ export async function nextMusicTrack(fromEnded = false) {
     );
 
     if (adaptive) {
-      // Adaptive Radio and normal queues share the same transition engine.
-      // Legacy AutoMix still enables the feature, but no artificial sound is inserted.
-      if (isAutoMixEnabled() || state.transitionMode !== "off") await playTrackWithIntelligentTransition(adaptive.id, fromEnded);
+      // R58: a button-driven track change is transport, not a transition effect.
+      // Start it immediately; natural end-of-song playback keeps the existing transition path.
+      if (!fromEnded) await playMusicTrack(adaptive.id, 0);
+      else if (isAutoMixEnabled() || state.transitionMode !== "off") await playTrackWithIntelligentTransition(adaptive.id, true);
       else await playMusicTrack(adaptive.id, 0);
       return;
     }
@@ -2932,7 +2935,12 @@ export async function nextMusicTrack(fromEnded = false) {
   }
 
   const track = state.tracks[index];
-  if (track) await playTrackWithIntelligentTransition(track.id, fromEnded);
+  if (track) {
+    // R58: manual Next must feel immediate. Automatic song-end changes keep the
+    // existing natural transition handling in handleTrackEnded().
+    if (!fromEnded) await playMusicTrack(track.id, 0);
+    else await playTrackWithIntelligentTransition(track.id, true);
+  }
 }
 
 export async function previousMusicTrack() {
