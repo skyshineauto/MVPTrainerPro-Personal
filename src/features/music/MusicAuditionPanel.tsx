@@ -522,6 +522,30 @@ export async function deleteMusicAuditionList(listId: string) {
   }
 }
 
+export async function deleteMusicAuditionSong(songId: string) {
+  const cleanSongId = clean(songId);
+  if (!cleanSongId) return;
+
+  mutateLocal((state) => ({
+    ...state,
+    songs: state.songs.filter((song) => song.id !== cleanSongId),
+    lists: state.lists.map((list) =>
+      list.songIds.includes(cleanSongId)
+        ? { ...list, songIds: list.songIds.filter((id) => id !== cleanSongId), updatedAt: now() }
+        : list,
+    ),
+  }));
+
+  try {
+    const userId = await currentUserId();
+    if (!userId) return;
+    await supabase.from(LINK_TABLE).delete().eq("user_id", userId).eq("song_id", cleanSongId);
+    await supabase.from(SONG_TABLE).delete().eq("user_id", userId).eq("song_id", cleanSongId);
+  } catch {
+    // Keep the local delete if the device is temporarily offline.
+  }
+}
+
 export function mergeMusicAuditionLists(sourceListId: string, targetListId: string) {
   if (sourceListId === targetListId) return null;
   let target: MusicAuditionList | null = null;
@@ -1725,6 +1749,17 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     refresh();
   }
 
+  async function deleteAuditionSong(song: MusicAuditionSong) {
+    const confirmed = window.confirm(
+      `Delete "${song.artist} - ${song.title}" from Audition? This removes it from every Audition list but does not delete audio already in My Music.`,
+    );
+    if (!confirmed) return;
+    stopPreview();
+    setMessage("");
+    await deleteMusicAuditionSong(song.id);
+    refresh();
+  }
+
   function requestSongImport(song: MusicAuditionSong) {
     if (!onImportFile) return;
     pendingFileSongRef.current = song;
@@ -1815,7 +1850,10 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
 
     {view === "results" ? <section className="m37-auditionResults">
       <header><div><span>ALL AUDITIONS</span><h3>{decisionLabel(resultDecision)} Songs</h3></div><b>{resultSongs.length}</b></header>
-      {!resultSongs.length ? <div className="m37-auditionEmpty"><b>NO {decisionLabel(resultDecision)} SONGS</b></div> : <div className="m37-auditionResultGrid">{resultSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></button><button className={song.decision==="keep" ? "is-active is-keep" : "is-keep"} onClick={() => {setMusicAuditionDecision(song.id,"keep");refresh();}}><KeepPremiumIcon/><span>KEEP</span></button><button className={song.decision==="maybe" ? "is-active is-maybe" : "is-maybe"} onClick={() => {setMusicAuditionDecision(song.id,"maybe");refresh();}}><MaybePremiumIcon/><span>MAYBE</span></button><button className={song.decision==="pass" ? "is-active is-pass" : "is-pass"} onClick={() => {setMusicAuditionDecision(song.id,"pass");refresh();}}><PassPremiumIcon/><span>PASS</span></button></div></article>; })}</div>}
+      {!resultSongs.length ? <div className="m37-auditionEmpty"><b>NO {decisionLabel(resultDecision)} SONGS</b></div> : <div className="m37-auditionResultGrid">{resultSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></button>
+              <button type="button" className="mvp-auditionSongDelete" onClick={() => void deleteAuditionSong(song)} title="Delete from Audition" aria-label={`Delete ${song.artist} ${song.title} from Audition`}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8v9.2c0 1 .8 1.8 1.8 1.8h4.4c1 0 1.8-.8 1.8-1.8V8M6.8 6h10.4M9.4 6l.7-2h3.8l.7 2M10.5 10v6M13.5 10v6"/></svg>
+              </button><button className={song.decision==="keep" ? "is-active is-keep" : "is-keep"} onClick={() => {setMusicAuditionDecision(song.id,"keep");refresh();}}><KeepPremiumIcon/><span>KEEP</span></button><button className={song.decision==="maybe" ? "is-active is-maybe" : "is-maybe"} onClick={() => {setMusicAuditionDecision(song.id,"maybe");refresh();}}><MaybePremiumIcon/><span>MAYBE</span></button><button className={song.decision==="pass" ? "is-active is-pass" : "is-pass"} onClick={() => {setMusicAuditionDecision(song.id,"pass");refresh();}}><PassPremiumIcon/><span>PASS</span></button></div></article>; })}</div>}
     </section> : null}
 
     {view === "audition" && selectedList && currentStats ? <div className="m37-auditionStage">
@@ -1830,7 +1868,10 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
       </motion.article></AnimatePresence> : <div className="m37-auditionComplete"><b>AUDITION COMPLETE</b><button onClick={() => setView("history")}>VIEW HISTORY</button></div>}
     </div> : null}
 
-    {view === "kept" ? <section className="m37-auditionKept"><header><div><span>KEPT SONGS</span><h3>Ready to Add</h3></div><b>{keptSongs.length}</b></header>{!keptSongs.length ? <div className="m37-auditionEmpty"><b>NO KEPT SONGS WAITING</b></div> : <div>{keptSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></button>{onImportFile ? <button className="is-add" disabled={importingSongId===song.id} onClick={() => requestSongImport(song)}><UploadPremiumIcon/><span>{importingSongId===song.id ? "ADDING…" : "ADD TO MVP"}</span></button> : null}</div></article>; })}</div>}</section> : null}
+    {view === "kept" ? <section className="m37-auditionKept"><header><div><span>KEPT SONGS</span><h3>Ready to Add</h3></div><b>{keptSongs.length}</b></header>{!keptSongs.length ? <div className="m37-auditionEmpty"><b>NO KEPT SONGS WAITING</b></div> : <div>{keptSongs.map((song) => { const sources=musicAuditionSongSources(song.id,state.lists); return <article key={song.id}><div className="m37-auditionResultArt">{song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl) ? <img src={song.artworkUrl} alt="" onError={() => handleArtworkFailure(song,song.artworkUrl || "")} /> : <span>♫</span>}</div><div><strong>{song.title}</strong><span>{song.artist}</span><small>{sources.map((list)=>list.name).join(" • ")}</small></div><div className="m37-auditionResultActions"><button className={previewSongId===song.id ? "is-active is-preview" : "is-preview"} onClick={() => void togglePreview(song)}><PreviewRenderIcon playing={previewSongId===song.id}/><span>{previewSongId===song.id ? "STOP" : "PREVIEW"}</span></button><button className="is-youtube" onClick={() => openYoutube(song)}><YouTubePremiumIcon/><span>YOUTUBE</span></button>
+              <button type="button" className="mvp-auditionSongDelete" onClick={() => void deleteAuditionSong(song)} title="Delete from Audition" aria-label={`Delete ${song.artist} ${song.title} from Audition`}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8v9.2c0 1 .8 1.8 1.8 1.8h4.4c1 0 1.8-.8 1.8-1.8V8M6.8 6h10.4M9.4 6l.7-2h3.8l.7 2M10.5 10v6M13.5 10v6"/></svg>
+              </button>{onImportFile ? <button className="is-add" disabled={importingSongId===song.id} onClick={() => requestSongImport(song)}><UploadPremiumIcon/><span>{importingSongId===song.id ? "ADDING…" : "ADD TO MVP"}</span></button> : null}</div></article>; })}</div>}</section> : null}
 
     {importOpen ? <div className="mvp-auditionModalBackdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setImportOpen(false); }}>
       <section className="mvp-auditionModal">
