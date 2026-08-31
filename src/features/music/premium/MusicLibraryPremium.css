@@ -747,3 +747,115 @@
   .mvp-auditionSongDelete{width:30px!important;min-height:30px!important;height:30px!important;flex-basis:30px!important}
 }
 
+/* MVP_R12_5E_23_SCROLL_BACKGROUND
+   Fixes only the two remaining r22 visual regressions:
+   1) Song Control results own the scroll area and keep action buttons visible.
+   2) Song Library ambient visual fades into the page instead of rendering as a teal rectangle.
+   No MusicLibraryVisualEngine.tsx changes. */
+
+/* RESULTS MODE: header fixed, candidate list scrolls, footer always visible. */
+.tr10-inspectorScroll:has(.tr10-detailLookup){
+  min-height:0!important;
+  overflow:hidden!important;
+  display:grid!important;
+  grid-template-rows:minmax(0,1fr) auto!important;
+}
+.tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailLookup{
+  min-height:0!important;
+  height:100%!important;
+  max-height:none!important;
+  overflow:hidden!important;
+  display:grid!important;
+  grid-template-rows:auto minmax(0,1fr)!important;
+}
+.tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailLookupHead{
+  position:relative!important;
+  top:auto!important;
+  z-index:20!important;
+  flex:0 0 auto!important;
+}
+.tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailCandidates{
+  min-height:0!important;
+  height:auto!important;
+  max-height:none!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:contain!important;
+  scrollbar-gutter:stable!important;
+  padding-bottom:18px!important;
+}
+.tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailLookupFooter{
+  position:relative!important;
+  inset:auto!important;
+  z-index:60!important;
+  align-self:end!important;
+  width:100%!important;
+  min-height:62px!important;
+  visibility:visible!important;
+  opacity:1!important;
+  transform:none!important;
+  overflow:visible!important;
+  border-top:1px solid rgba(80,198,231,.17)!important;
+  background:linear-gradient(180deg,rgba(5,18,24,.99),rgba(2,9,13,.995))!important;
+  box-shadow:0 -14px 30px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.025)!important;
+}
+
+/* Some current builds place the footer immediately after the scroll body. Keep that form visible too. */
+.tr10-detailLookupFooter{
+  flex:0 0 auto!important;
+  visibility:visible!important;
+  opacity:1!important;
+  transform:none!important;
+}
+
+/* LIBRARY AMBIENT: remove the r22 rectangular surface. */
+.tr10-premiumLibrary{
+  background:transparent!important;
+  overflow:visible!important;
+}
+.tr10-premiumLibrary>.mlv-engine{
+  border-radius:0!important;
+  opacity:.42!important;
+  overflow:hidden!important;
+  -webkit-mask-image:radial-gradient(ellipse 84% 78% at 48% 38%,#000 0 38%,rgba(0,0,0,.72) 56%,rgba(0,0,0,.28) 72%,transparent 100%)!important;
+  mask-image:radial-gradient(ellipse 84% 78% at 48% 38%,#000 0 38%,rgba(0,0,0,.72) 56%,rgba(0,0,0,.28) 72%,transparent 100%)!important;
+}
+.tr10-premiumLibrary>.mlv-engine canvas{
+  opacity:.62!important;
+}
+.tr10-premiumLibrary>.mlv-engine .mlv-engineSheen{
+  opacity:.28!important;
+}
+.tr10-premiumLibrary>.mlv-engine .mlv-engineGrain{
+  opacity:.025!important;
+}
+
+/* Do not introduce a new boxed background on the library shell or tab content. */
+.tr10-premiumLibrary .tr10-main,
+.tr10-premiumLibrary .tr10-content,
+.tr10-premiumLibrary .tr10-libraryBody{
+  box-shadow:none!important;
+}
+
+@media(max-width:650px){
+  .tr10-inspectorScroll:has(.tr10-detailLookup){
+    grid-template-rows:minmax(0,1fr) auto!important;
+  }
+  .tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailCandidates{
+    padding:7px 7px 14px!important;
+  }
+  .tr10-inspectorScroll:has(.tr10-detailLookup) .tr10-detailLookupFooter{
+    min-height:0!important;
+    padding:8px!important;
+  }
+  /* Mobile stays lightweight. This only fades the existing canvas; it does not enable extra effects. */
+  .tr10-premiumLibrary>.mlv-engine{
+    opacity:.20!important;
+    -webkit-mask-image:radial-gradient(ellipse 94% 78% at 50% 34%,#000 0 30%,rgba(0,0,0,.52) 54%,transparent 100%)!important;
+    mask-image:radial-gradient(ellipse 94% 78% at 50% 34%,#000 0 30%,rgba(0,0,0,.52) 54%,transparent 100%)!important;
+  }
+  .tr10-premiumLibrary>.mlv-engine canvas{
+    opacity:.34!important;
+  }
+}
+
