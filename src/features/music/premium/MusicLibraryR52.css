@@ -2186,3 +2186,119 @@
   }
 }
 
+/* MVP_R12_5E_31_MOBILE_MORE_MENU_LAYER_FIX
+   Mobile More menu must escape the song-row stacking trap.
+   The OPEN ROW rises above adjacent rows and the menu is opaque. */
+@media(max-width:650px){
+
+  /* The list itself must never clip an opened utility menu. */
+  [data-mvp-music="flagship"] .m37-songTable,
+  [data-mvp-music="flagship"] .m37-songTable.tr10-table,
+  [data-mvp-music="flagship"] .tr10-table,
+  [data-mvp-music="flagship"] .tr10-library,
+  [data-mvp-music="flagship"] .tr10-console{
+    overflow:visible!important;
+  }
+
+  /* Normal rows stay in their normal layer. */
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row{
+    position:relative!important;
+    z-index:1!important;
+    overflow:visible!important;
+    isolation:auto!important;
+    transform:none!important;
+  }
+
+  /* Whichever row contains the OPEN More details becomes the foreground row. */
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row:has(.tr52-more[open]),
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row:has(details[open] .tr52-moreMenu),
+  [data-mvp-music="flagship"] .m37-songTable .tr10-row:has(details[open]){
+    z-index:9000!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-trackActions{
+    position:relative!important;
+    z-index:3!important;
+    overflow:visible!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-more{
+    position:relative!important;
+    z-index:4!important;
+    overflow:visible!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-more[open]{
+    z-index:9100!important;
+  }
+
+  /* Foreground menu. No translucent ghosting through rows underneath. */
+  [data-mvp-music="flagship"] .tr52-moreMenu,
+  [data-mvp-music="flagship"] .tr52-more>div{
+    position:absolute!important;
+    z-index:9200!important;
+    right:0!important;
+    left:auto!important;
+    top:auto!important;
+    bottom:38px!important;
+    width:min(190px,calc(100vw - 34px))!important;
+    min-width:170px!important;
+    margin:0!important;
+    padding:6px!important;
+    overflow:hidden!important;
+    isolation:isolate!important;
+    opacity:1!important;
+    visibility:visible!important;
+    border:1px solid rgba(83,196,230,.24)!important;
+    border-radius:11px!important;
+    background:#071116!important;
+    background-color:#071116!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+    filter:none!important;
+    mix-blend-mode:normal!important;
+    box-shadow:
+      0 18px 50px rgba(0,0,0,.72),
+      0 0 0 1px rgba(0,0,0,.22),
+      inset 0 1px 0 rgba(255,255,255,.035)!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-moreMenu::before,
+  [data-mvp-music="flagship"] .tr52-more>div::before{
+    content:""!important;
+    position:absolute!important;
+    z-index:-1!important;
+    inset:0!important;
+    background:
+      linear-gradient(180deg,#0a1920 0%,#061016 100%)!important;
+    opacity:1!important;
+    pointer-events:none!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-moreMenu button,
+  [data-mvp-music="flagship"] .tr52-more>div button{
+    position:relative!important;
+    z-index:1!important;
+    width:100%!important;
+    min-height:38px!important;
+    margin:0!important;
+    border:0!important;
+    border-radius:7px!important;
+    background:transparent!important;
+    color:#cfe1e8!important;
+    opacity:1!important;
+    text-shadow:none!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-moreMenu button+button,
+  [data-mvp-music="flagship"] .tr52-more>div button+button{
+    border-top:1px solid rgba(105,168,191,.08)!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-moreMenu button:active,
+  [data-mvp-music="flagship"] .tr52-more>div button:active{
+    background:#0c222b!important;
+    color:#ffffff!important;
+  }
+}
+
