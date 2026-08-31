@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
 
 type MusicLibraryVisualTab =
@@ -35,14 +35,14 @@ function seeded(seed: number) {
   return value - Math.floor(value);
 }
 
-function MicroDepthHighlights({ palette, mobile, reducedMotion }: {
+function MicroLightField({ palette, mobile, reducedMotion }: {
   palette: Palette;
   mobile: boolean;
   reducedMotion: boolean;
 }) {
   const ref = useRef<THREE.Points>(null);
   const geometry = useMemo(() => {
-    const count = mobile ? 26 : 64;
+    const count = mobile ? 72 : 170;
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const cool = new THREE.Color(palette.primary);
@@ -50,12 +50,12 @@ function MicroDepthHighlights({ palette, mobile, reducedMotion }: {
     const warm = new THREE.Color(palette.secondary);
 
     for (let index = 0; index < count; index += 1) {
-      positions[index * 3] = (seeded(index + 10.2) - 0.5) * (mobile ? 9 : 15.5);
-      positions[index * 3 + 1] = (seeded(index + 40.7) - 0.5) * (mobile ? 13 : 20);
-      positions[index * 3 + 2] = -6 + seeded(index + 80.4) * 4.5;
+      positions[index * 3] = (seeded(index + 10.2) - 0.5) * (mobile ? 8.5 : 14.5);
+      positions[index * 3 + 1] = (seeded(index + 40.7) - 0.5) * (mobile ? 12 : 18);
+      positions[index * 3 + 2] = -7.5 + seeded(index + 80.4) * 8.5;
 
       const tone = seeded(index + 120.9);
-      const source = tone > 0.965 ? warm : tone > 0.78 ? pale : cool;
+      const source = tone > 0.94 ? warm : tone > 0.72 ? pale : cool;
       colors[index * 3] = source.r;
       colors[index * 3 + 1] = source.g;
       colors[index * 3 + 2] = source.b;
@@ -72,18 +72,18 @@ function MicroDepthHighlights({ palette, mobile, reducedMotion }: {
   useFrame((state) => {
     if (!ref.current || reducedMotion) return;
     const time = state.clock.elapsedTime;
-    ref.current.rotation.z = Math.sin(time * 0.012) * 0.004;
-    ref.current.position.x = state.pointer.x * 0.018;
-    ref.current.position.y = state.pointer.y * 0.014;
+    ref.current.rotation.z = Math.sin(time * 0.018) * 0.009;
+    ref.current.position.x = state.pointer.x * 0.035;
+    ref.current.position.y = state.pointer.y * 0.025;
   });
 
   return (
-    <points ref={ref} geometry={geometry} renderOrder={1}>
+    <points ref={ref} geometry={geometry} renderOrder={0}>
       <pointsMaterial
         vertexColors
-        size={mobile ? 0.003 : 0.0045}
+        size={mobile ? 0.008 : 0.011}
         transparent
-        opacity={0.13}
+        opacity={0.22}
         depthWrite={false}
         sizeAttenuation
         toneMapped={false}
@@ -93,10 +93,9 @@ function MicroDepthHighlights({ palette, mobile, reducedMotion }: {
   );
 }
 
-function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
+function AmbientField({ palette, activeTab, reducedMotion }: {
   palette: Palette;
   activeTab: MusicLibraryVisualTab;
-  playing: boolean;
   reducedMotion: boolean;
 }) {
   const materialRef = useRef<THREE.ShaderMaterial>(null);
@@ -110,8 +109,7 @@ function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
     uSecondary: { value: secondary },
     uTertiary: { value: tertiary },
     uDiscover: { value: activeTab === "discover" ? 1 : 0 },
-    uPlaying: { value: playing ? 1 : 0 },
-  }), [activeTab, playing, primary, secondary, tertiary]);
+  }), [activeTab, primary, secondary, tertiary]);
 
   useFrame((state) => {
     if (!materialRef.current || reducedMotion) return;
@@ -119,8 +117,8 @@ function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
   });
 
   return (
-    <mesh frustumCulled={false} renderOrder={-10}>
-      <planeGeometry args={[2, 2]} />
+    <mesh position={[0, 0, -8.8]} scale={[15.5, 19.5, 1]} renderOrder={-2}>
+      <planeGeometry args={[1, 1, 1, 1]} />
       <shaderMaterial
         ref={materialRef}
         uniforms={uniforms}
@@ -128,12 +126,11 @@ function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
         depthWrite={false}
         depthTest={false}
         toneMapped={false}
-        blending={THREE.NormalBlending}
         vertexShader={`
           varying vec2 vUv;
           void main() {
             vUv = uv;
-            gl_Position = vec4(position.xy, 0.0, 1.0);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `}
         fragmentShader={`
@@ -143,7 +140,6 @@ function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
           uniform vec3 uSecondary;
           uniform vec3 uTertiary;
           uniform float uDiscover;
-          uniform float uPlaying;
 
           float hash(vec2 p) {
             return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -160,58 +156,33 @@ function HighTechAtmosphere({ palette, activeTab, playing, reducedMotion }: {
             return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
           }
 
-          float fbm(vec2 p) {
-            float value = 0.0;
-            float amplitude = 0.5;
-            for (int i = 0; i < 4; i++) {
-              value += amplitude * noise(p);
-              p = p * 2.03 + vec2(17.13, 9.71);
-              amplitude *= 0.5;
-            }
-            return value;
-          }
-
           void main() {
             vec2 uv = vUv;
             vec2 p = uv - 0.5;
-            float t = uTime * 0.018;
+            float t = uTime * 0.035;
 
-            float edgeFade = smoothstep(0.0, 0.17, uv.x) *
-                             smoothstep(0.0, 0.17, 1.0 - uv.x) *
-                             smoothstep(0.0, 0.14, uv.y) *
-                             smoothstep(0.0, 0.14, 1.0 - uv.y);
+            float n1 = noise(uv * 3.2 + vec2(t, -t * 0.6));
+            float n2 = noise(uv * 7.5 + vec2(-t * 0.45, t * 0.35));
 
-            float slowNoise = fbm(uv * 2.1 + vec2(t, -t * 0.61));
-            float fineNoise = noise(uv * 22.0 + vec2(-t * 0.35, t * 0.22));
+            float leftSweep = smoothstep(0.34, 0.0, abs(p.x + 0.34 + (n1 - 0.5) * 0.08));
+            leftSweep *= smoothstep(0.60, 0.02, abs(p.y - 0.10));
 
-            vec2 coolP = vec2((p.x + 0.34) * 0.72, (p.y - 0.12) * 1.12);
-            vec2 warmP = vec2((p.x - 0.43) * 0.78, (p.y + 0.29) * 1.18);
-            float coolLight = exp(-dot(coolP, coolP) * 7.0);
-            float warmLight = exp(-dot(warmP, warmP) * 10.5);
+            float rightSweep = smoothstep(0.26, 0.0, abs(p.x - 0.39 + (n2 - 0.5) * 0.05));
+            rightSweep *= smoothstep(0.48, 0.02, abs(p.y + 0.22));
 
-            float filamentA = exp(-pow((p.y + 0.20 + (slowNoise - 0.5) * 0.055) * 16.0, 2.0));
-            float filamentB = exp(-pow((p.x + p.y * 0.28 - 0.08 + (fineNoise - 0.5) * 0.020) * 19.0, 2.0));
+            float horizon = exp(-pow((p.y + 0.33 + (n1 - 0.5) * 0.025) * 7.5, 2.0));
+            float centerFalloff = 1.0 - smoothstep(0.12, 0.78, length(p * vec2(0.78, 1.0)));
+            float grain = (n2 - 0.5) * 0.015;
 
-            vec2 microCell = floor(uv * vec2(180.0, 120.0));
-            float microSeed = hash(microCell);
-            float micro = smoothstep(0.9968, 0.9995, microSeed);
-            micro *= 0.35 + 0.65 * hash(microCell + 7.41);
+            vec3 base = vec3(0.003, 0.010, 0.016);
+            vec3 color = base;
+            color += uPrimary * leftSweep * (0.045 + uDiscover * 0.014);
+            color += uSecondary * rightSweep * 0.018;
+            color += uTertiary * horizon * 0.020;
+            color += uPrimary * centerFalloff * 0.008;
+            color += grain;
 
-            float gridX = 1.0 - smoothstep(0.0, 0.055, abs(fract(uv.x * 34.0) - 0.5));
-            float gridY = 1.0 - smoothstep(0.0, 0.055, abs(fract(uv.y * 26.0) - 0.5));
-            float microGrid = max(gridX, gridY) * 0.012;
-
-            vec3 color = vec3(0.0);
-            color += uPrimary * coolLight * (0.040 + uDiscover * 0.008);
-            color += uSecondary * warmLight * 0.010;
-            color += uTertiary * filamentA * 0.010;
-            color += uPrimary * filamentB * 0.006;
-            color += uPrimary * microGrid;
-            color += mix(uPrimary, uTertiary, 0.45) * micro * (0.095 + uPlaying * 0.025);
-            color += uPrimary * (slowNoise - 0.5) * 0.004;
-
-            float luminance = max(max(color.r, color.g), color.b);
-            float alpha = edgeFade * clamp(0.12 + luminance * 2.3, 0.0, 0.34);
+            float alpha = 0.93;
             gl_FragColor = vec4(max(color, vec3(0.0)), alpha);
           }
         `}
@@ -227,28 +198,30 @@ function Scene({ activeTab, playing, mobile, reducedMotion }: {
   reducedMotion: boolean;
 }) {
   const palette = TAB_PALETTES[activeTab];
+  const discover = activeTab === "discover";
 
   return (
     <>
       <color attach="background" args={["#010407"]} />
-      <fog attach="fog" args={["#010509", 8, 20]} />
-      <HighTechAtmosphere
-        palette={palette}
-        activeTab={activeTab}
-        playing={playing}
-        reducedMotion={reducedMotion}
-      />
-      <MicroDepthHighlights palette={palette} mobile={mobile} reducedMotion={reducedMotion} />
+      <fog attach="fog" args={["#01060a", 7.5, 19]} />
+      <AmbientField palette={palette} activeTab={activeTab} reducedMotion={reducedMotion} />
+      <MicroLightField palette={palette} mobile={mobile} reducedMotion={reducedMotion} />
       {!reducedMotion ? (
         <EffectComposer multisampling={mobile ? 0 : 2} enableNormalPass={false}>
+          <DepthOfField
+            focusDistance={0.045}
+            focalLength={discover ? 0.038 : 0.032}
+            bokehScale={mobile ? 0.65 : 1.15}
+            height={mobile ? 320 : 640}
+          />
           <Bloom
-            intensity={playing ? 0.24 : 0.17}
-            luminanceThreshold={0.78}
-            luminanceSmoothing={0.90}
+            intensity={playing ? 0.40 : 0.28}
+            luminanceThreshold={0.62}
+            luminanceSmoothing={0.82}
             mipmapBlur
           />
-          <Noise opacity={mobile ? 0.001 : 0.0025} />
-          <Vignette offset={0.19} darkness={0.61} />
+          <Noise opacity={mobile ? 0 : 0.004} />
+          <Vignette offset={0.20} darkness={0.70} />
         </EffectComposer>
       ) : null}
     </>
@@ -279,13 +252,13 @@ export function MusicLibraryVisualEngine({ activeTab, playing }: {
   }, []);
 
   return (
-    <div className={`mlv-engine mlv-engine--r67 ${activeTab === "discover" ? "is-discover" : ""} ${playing ? "is-playing" : ""}`} aria-hidden="true">
+    <div className={`mlv-engine mlv-engine--r65 ${activeTab === "discover" ? "is-discover" : ""} ${playing ? "is-playing" : ""}`} aria-hidden="true">
       <Canvas
-        dpr={mobile ? [1, 1.15] : [1, 1.4]}
+        dpr={mobile ? [1, 1.2] : [1, 1.5]}
         camera={{ position: [0, 0, 8], fov: 48, near: 0.1, far: 30 }}
         gl={{ alpha: true, antialias: !mobile, powerPreference: "high-performance", premultipliedAlpha: false }}
         frameloop={reducedMotion ? "demand" : "always"}
-        performance={{ min: 0.68 }}
+        performance={{ min: 0.6 }}
       >
         <Scene activeTab={activeTab} playing={playing} mobile={mobile} reducedMotion={reducedMotion} />
       </Canvas>
