@@ -1,191 +1,242 @@
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
-import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
-import {
-  MUSIC_LIBRARY_FRAGMENT_SHADER,
-  MUSIC_LIBRARY_TAB_COLORS,
-  MUSIC_LIBRARY_VERTEX_SHADER,
-  type MusicLibraryVisualTab,
-} from "./musicLibraryShaders";
 
-function color(value: string) { return new THREE.Color(value); }
-class MusicVisualBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+type MusicLibraryVisualTab =
+  | "songs"
+  | "artists"
+  | "albums"
+  | "playlists"
+  | "smart"
+  | "intelligence"
+  | "discover"
+  | "audition";
 
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
+type Palette = {
+  primary: string;
+  secondary: string;
+  tertiary: string;
+};
 
-  componentDidCatch(error: unknown) {
-    console.warn("MVP music visual engine disabled after a rendering error.", error);
-  }
+const TAB_PALETTES: Record<MusicLibraryVisualTab, Palette> = {
+  songs: { primary: "#3edcff", secondary: "#ff9f3c", tertiary: "#8deeff" },
+  artists: { primary: "#45ddff", secondary: "#9a6cff", tertiary: "#72e6ff" },
+  albums: { primary: "#48dfff", secondary: "#ff9d36", tertiary: "#9aefff" },
+  playlists: { primary: "#45ddff", secondary: "#d35dff", tertiary: "#ff9f3b" },
+  smart: { primary: "#49e5c0", secondary: "#ffc04d", tertiary: "#63dcff" },
+  intelligence: { primary: "#45ddff", secondary: "#ff9d35", tertiary: "#78ebff" },
+  discover: { primary: "#48dcff", secondary: "#ff9d3e", tertiary: "#87ebff" },
+  audition: { primary: "#4cddff", secondary: "#ff9834", tertiary: "#8deaff" },
+};
 
-  render() {
-    return this.state.failed ? null : this.props.children;
-  }
+type BokehOrb = {
+  position: [number, number, number];
+  scale: number;
+  opacity: number;
+  phase: number;
+  drift: number;
+  warm: boolean;
+};
+
+function seeded(seed: number) {
+  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return value - Math.floor(value);
 }
 
+function makeBokeh(count: number, mobile: boolean, discover: boolean): BokehOrb[] {
+  return Array.from({ length: count }, (_, index) => {
+    const a = seeded(index + 2.17);
+    const b = seeded(index + 7.91);
+    const c = seeded(index + 19.43);
+    const d = seeded(index + 31.77);
+    const depth = -5.8 + c * 9.6;
+    const warm = d > (discover ? 0.73 : 0.82);
+    return {
+      position: [
+        (a - 0.5) * (mobile ? 9 : 13.5),
+        (b - 0.5) * (mobile ? 12 : 16.5),
+        depth,
+      ],
+      scale: (mobile ? 0.055 : 0.07) + seeded(index + 51.2) * (discover ? 0.34 : 0.24),
+      opacity: 0.14 + seeded(index + 81.3) * (discover ? 0.46 : 0.30),
+      phase: seeded(index + 112.4) * Math.PI * 2,
+      drift: 0.08 + seeded(index + 142.8) * 0.22,
+      warm,
+    };
+  });
+}
 
-function SpectralSurface({ tab, playing, mobile, reducedMotion }: {
-  tab: MusicLibraryVisualTab;
+function BokehOrbMesh({ orb, palette, reducedMotion, index }: {
+  orb: BokehOrb;
+  palette: Palette;
+  reducedMotion: boolean;
+  index: number;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    if (!ref.current || reducedMotion) return;
+    const time = state.clock.elapsedTime;
+    const x = orb.position[0] + Math.sin(time * orb.drift + orb.phase) * 0.14;
+    const y = orb.position[1] + Math.cos(time * orb.drift * 0.82 + orb.phase) * 0.11;
+    ref.current.position.x = x + state.pointer.x * (0.04 + Math.abs(orb.position[2]) * 0.006);
+    ref.current.position.y = y + state.pointer.y * (0.03 + Math.abs(orb.position[2]) * 0.004);
+    const pulse = 1 + Math.sin(time * 0.34 + orb.phase) * 0.06;
+    ref.current.scale.setScalar(orb.scale * pulse);
+  });
+
+  const tone = orb.warm ? palette.secondary : index % 5 === 0 ? palette.tertiary : palette.primary;
+  return (
+    <mesh ref={ref} position={orb.position} scale={orb.scale} renderOrder={1}>
+      <circleGeometry args={[1, 48]} />
+      <meshBasicMaterial
+        color={tone}
+        transparent
+        opacity={orb.opacity}
+        depthWrite={false}
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </mesh>
+  );
+}
+
+function DustField({ palette, mobile, reducedMotion }: {
+  palette: Palette;
+  mobile: boolean;
+  reducedMotion: boolean;
+}) {
+  const ref = useRef<THREE.Points>(null);
+  const geometry = useMemo(() => {
+    const count = mobile ? 70 : 150;
+    const positions = new Float32Array(count * 3);
+    for (let index = 0; index < count; index += 1) {
+      positions[index * 3] = (seeded(index + 210.1) - 0.5) * (mobile ? 9 : 14);
+      positions[index * 3 + 1] = (seeded(index + 260.7) - 0.5) * (mobile ? 13 : 18);
+      positions[index * 3 + 2] = -5 + seeded(index + 330.2) * 8;
+    }
+    const next = new THREE.BufferGeometry();
+    next.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return next;
+  }, [mobile]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useFrame((state) => {
+    if (!ref.current || reducedMotion) return;
+    const time = state.clock.elapsedTime;
+    ref.current.rotation.z = Math.sin(time * 0.025) * 0.018;
+    ref.current.position.x = state.pointer.x * 0.08;
+    ref.current.position.y = state.pointer.y * 0.05;
+  });
+
+  return (
+    <points ref={ref} geometry={geometry} renderOrder={0}>
+      <pointsMaterial
+        color={palette.primary}
+        size={mobile ? 0.012 : 0.016}
+        transparent
+        opacity={0.28}
+        depthWrite={false}
+        sizeAttenuation
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </points>
+  );
+}
+
+function SoftVolume({ palette, discover }: { palette: Palette; discover: boolean }) {
+  return (
+    <group>
+      <mesh position={[-4.2, 2.0, -4.8]} scale={[discover ? 4.8 : 3.8, discover ? 3.5 : 2.8, 1]}>
+        <circleGeometry args={[1, 64]} />
+        <meshBasicMaterial color={palette.primary} transparent opacity={discover ? 0.035 : 0.024} depthWrite={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+      <mesh position={[4.8, -1.6, -3.9]} scale={[discover ? 3.9 : 3.0, discover ? 3.1 : 2.4, 1]}>
+        <circleGeometry args={[1, 64]} />
+        <meshBasicMaterial color={palette.secondary} transparent opacity={discover ? 0.022 : 0.014} depthWrite={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+    </group>
+  );
+}
+
+function Scene({ activeTab, playing, mobile, reducedMotion }: {
+  activeTab: MusicLibraryVisualTab;
   playing: boolean;
   mobile: boolean;
   reducedMotion: boolean;
 }) {
-  const pointer = useRef(new THREE.Vector2(0.5, 0.5));
-  const targetPointer = useRef(new THREE.Vector2(0.5, 0.5));
-  const invalidate = useThree((state) => state.invalidate);
-  const palette = MUSIC_LIBRARY_TAB_COLORS[tab];
-  const material = useMemo(() => new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    depthTest: false,
-    vertexShader: MUSIC_LIBRARY_VERTEX_SHADER,
-    fragmentShader: MUSIC_LIBRARY_FRAGMENT_SHADER,
-    uniforms: {
-      uTime: { value: 0 },
-      uEnergy: { value: playing ? 1 : 0.32 },
-      uColorA: { value: color(palette[0]) },
-      uColorB: { value: color(palette[1]) },
-      uPointer: { value: pointer.current },
-      uMobile: { value: mobile ? 1 : 0 },
-    },
-  }), []);
+  const palette = TAB_PALETTES[activeTab];
+  const discover = activeTab === "discover";
+  const orbCount = mobile ? (discover ? 18 : 12) : discover ? 38 : 26;
+  const orbs = useMemo(() => makeBokeh(orbCount, mobile, discover), [orbCount, mobile, discover]);
 
-  useEffect(() => {
-    material.uniforms.uColorA.value.copy(color(palette[0]));
-    material.uniforms.uColorB.value.copy(color(palette[1]));
-    invalidate();
-  }, [material, palette, invalidate]);
-
-  useEffect(() => {
-    const onPointer = (event: PointerEvent) => {
-      targetPointer.current.set(
-        Math.min(1, Math.max(0, event.clientX / Math.max(1, window.innerWidth))),
-        Math.min(1, Math.max(0, 1 - event.clientY / Math.max(1, window.innerHeight))),
-      );
-    };
-    window.addEventListener("pointermove", onPointer, { passive: true });
-    return () => window.removeEventListener("pointermove", onPointer);
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion) { invalidate(); return; }
-    const fps = mobile ? (playing ? 34 : 24) : (playing ? 60 : 36);
-    const timer = window.setInterval(() => invalidate(), Math.round(1000 / fps));
-    return () => window.clearInterval(timer);
-  }, [invalidate, mobile, playing, reducedMotion]);
-
-  useEffect(() => () => material.dispose(), [material]);
-
-  useFrame((state, delta) => {
-    const uniforms = material.uniforms;
-    if (!reducedMotion) uniforms.uTime.value += Math.min(delta, 0.034);
-    uniforms.uEnergy.value += ((playing ? 1 : 0.32) - uniforms.uEnergy.value) * 0.045;
-    pointer.current.lerp(targetPointer.current, mobile ? 0.022 : 0.046);
-    uniforms.uPointer.value.copy(pointer.current);
-    state.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    state.gl.outputColorSpace = THREE.SRGBColorSpace;
-    state.gl.toneMappingExposure = THREE.MathUtils.lerp(state.gl.toneMappingExposure, playing ? 1.02 : 0.97, 0.035);
-  });
-
-  return <mesh frustumCulled={false} position={[0, 0, -0.12]}><planeGeometry args={[2, 2]} /><primitive attach="material" object={material} /></mesh>;
-}
-
-function DepthArchitecture({ mobile, playing }: { mobile: boolean; playing: boolean }) {
-  const blue = "#0361DF";
-  const orange = "#EB8B0F";
-  const alpha = mobile ? 0.018 : 0.028;
-  return <group>
-    <ambientLight intensity={0.14} />
-    <pointLight position={[-2.8, 1.6, 1.2]} color={blue} intensity={playing ? 1.8 : 1.15} distance={5} decay={2.2} />
-    <pointLight position={[3.0, -1.8, 0.8]} color={orange} intensity={playing ? 1.05 : 0.62} distance={5} decay={2.3} />
-    <RoundedBox args={[3.6, 0.42, 0.08]} radius={0.12} smoothness={8} position={[-0.8, 0.86, -1.2]} rotation={[0.08, 0.12, -0.07]}>
-      <meshPhysicalMaterial color="#06111a" roughness={0.34} metalness={0.34} clearcoat={0.55} clearcoatRoughness={0.27} transparent opacity={alpha} emissive={blue} emissiveIntensity={0.055} />
-    </RoundedBox>
-    <RoundedBox args={[3.1, 0.34, 0.07]} radius={0.11} smoothness={8} position={[1.15, -0.70, -1.8]} rotation={[-0.06, -0.18, 0.08]}>
-      <meshPhysicalMaterial color="#090f15" roughness={0.38} metalness={0.30} clearcoat={0.42} clearcoatRoughness={0.31} transparent opacity={alpha * 0.82} emissive={orange} emissiveIntensity={0.045} />
-    </RoundedBox>
-    <RoundedBox args={[2.2, 0.22, 0.05]} radius={0.09} smoothness={6} position={[-1.35, -1.32, -2.45]} rotation={[0.04, 0.22, -0.10]}>
-      <meshPhysicalMaterial color="#061018" roughness={0.44} metalness={0.24} transparent opacity={alpha * 0.62} emissive={blue} emissiveIntensity={0.035} />
-    </RoundedBox>
-  </group>;
+  return (
+    <>
+      <color attach="background" args={["#010407"]} />
+      <fog attach="fog" args={["#01060a", 6.5, 17.5]} />
+      <SoftVolume palette={palette} discover={discover} />
+      <DustField palette={palette} mobile={mobile} reducedMotion={reducedMotion} />
+      {orbs.map((orb, index) => (
+        <BokehOrbMesh key={`${activeTab}-${index}`} orb={orb} palette={palette} reducedMotion={reducedMotion} index={index} />
+      ))}
+      {!reducedMotion ? (
+        <EffectComposer multisampling={mobile ? 0 : 2} enableNormalPass={false}>
+          <DepthOfField
+            focusDistance={discover ? 0.025 : 0.03}
+            focalLength={discover ? 0.052 : 0.045}
+            bokehScale={mobile ? (discover ? 2.3 : 1.8) : discover ? 4.2 : 3.0}
+            height={mobile ? 360 : 720}
+          />
+          <Bloom
+            intensity={playing ? (discover ? 0.78 : 0.62) : discover ? 0.62 : 0.46}
+            luminanceThreshold={0.28}
+            luminanceSmoothing={0.68}
+            mipmapBlur
+          />
+          <Noise opacity={mobile ? 0 : 0.008} />
+          <Vignette offset={0.16} darkness={discover ? 0.78 : 0.72} />
+        </EffectComposer>
+      ) : null}
+    </>
+  );
 }
 
 export function MusicLibraryVisualEngine({ activeTab, playing }: {
   activeTab: MusicLibraryVisualTab;
   playing: boolean;
 }) {
-  const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches);
-  const [reducedMotion, setReducedMotion] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  const [auditionPreviewPlaying, setAuditionPreviewPlaying] = useState(false);
-  const [auditionArtworkUrl, setAuditionArtworkUrl] = useState<string | null>(null);
+  const [mobile, setMobile] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 760px)");
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const syncMobile = () => setMobile(mobileQuery.matches);
-    const syncMotion = () => setReducedMotion(motionQuery.matches);
-    mobileQuery.addEventListener("change", syncMobile);
-    motionQuery.addEventListener("change", syncMotion);
-    return () => {
-      mobileQuery.removeEventListener("change", syncMobile);
-      motionQuery.removeEventListener("change", syncMotion);
+    const sync = () => {
+      setMobile(mobileQuery.matches);
+      setReducedMotion(motionQuery.matches);
     };
-  }, []);
-
-  useEffect(() => {
-    const onAuditionPreview = (event: Event) => {
-      const detail = (event as CustomEvent<{ playing?: boolean; artworkUrl?: string | null }>).detail;
-      setAuditionPreviewPlaying(Boolean(detail?.playing));
-      if (detail?.artworkUrl) setAuditionArtworkUrl(detail.artworkUrl);
-      if (detail?.playing === false && activeTab !== "audition") setAuditionArtworkUrl(null);
-    };
-    window.addEventListener("mvp:audition-preview-state", onAuditionPreview as EventListener);
-    return () => window.removeEventListener("mvp:audition-preview-state", onAuditionPreview as EventListener);
-  }, [activeTab]);
-
-  const visualPlaying = playing || (activeTab === "audition" && auditionPreviewPlaying);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    let secondFrame = 0;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => setReady(true));
-    });
+    sync();
+    mobileQuery.addEventListener?.("change", sync);
+    motionQuery.addEventListener?.("change", sync);
     return () => {
-      window.cancelAnimationFrame(firstFrame);
-      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+      mobileQuery.removeEventListener?.("change", sync);
+      motionQuery.removeEventListener?.("change", sync);
     };
   }, []);
 
   return (
-    <div className={`mlv-engine ${activeTab === "audition" && auditionPreviewPlaying ? "is-audition-preview" : ""}`} aria-hidden="true">
-      {ready ? (
-        <MusicVisualBoundary>
-          <Canvas
-            dpr={mobile ? [1, 1.6] : [1.15, 2]}
-            gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
-            camera={{ position: [0, 0, 1.8], fov: 48, near: 0.05, far: 12 }}
-            frameloop="demand"
-            fallback={null}
-          >
-            <SpectralSurface tab={activeTab} playing={visualPlaying} mobile={mobile} reducedMotion={reducedMotion} />
-            <DepthArchitecture mobile={mobile} playing={visualPlaying} />
-            <EffectComposer multisampling={mobile ? 2 : 4} enableNormalPass={false}>
-              <DepthOfField focusDistance={0.012} focalLength={mobile ? 0.022 : 0.028} bokehScale={reducedMotion ? 0 : mobile ? 0.42 : 0.72} height={mobile ? 320 : 520} />
-              <Bloom intensity={mobile ? 0.045 : 0.065} luminanceThreshold={0.92} luminanceSmoothing={0.34} mipmapBlur />
-              <Noise opacity={mobile ? 0 : 0.0020} />
-              <Vignette offset={0.28} darkness={mobile ? 0.30 : 0.34} />
-            </EffectComposer>
-          </Canvas>
-        </MusicVisualBoundary>
-      ) : null}
-      {activeTab === "audition" && auditionArtworkUrl ? <div className="mlv-engineArtwork" style={{ backgroundImage: `url("${auditionArtworkUrl}")` }} /> : null}
-      <div className="mlv-engineSheen" />
-      <div className="mlv-engineGrain" />
+    <div className={`mlv-engine mlv-engine--r64 ${activeTab === "discover" ? "is-discover" : ""} ${playing ? "is-playing" : ""}`} aria-hidden="true">
+      <Canvas
+        dpr={mobile ? [1, 1.25] : [1, 1.65]}
+        camera={{ position: [0, 0, 8], fov: 48, near: 0.1, far: 28 }}
+        gl={{ alpha: true, antialias: !mobile, powerPreference: "high-performance", premultipliedAlpha: false }}
+        frameloop={reducedMotion ? "demand" : "always"}
+        performance={{ min: 0.55 }}
+      >
+        <Scene activeTab={activeTab} playing={playing} mobile={mobile} reducedMotion={reducedMotion} />
+      </Canvas>
     </div>
   );
 }
