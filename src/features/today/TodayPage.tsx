@@ -29,6 +29,7 @@ type SessionRow = {
   session_type: string | null;
   date: string | null;
   program_block_id: string | null;
+  status?: string | null;
 };
 
 type TemplateRow = {
@@ -328,6 +329,9 @@ export function TodayPage() {
   const [metaBySession, setMetaBySession] = useState<Map<string, SessionMeta>>(new Map());
   const [history, setHistory] = useState<HistorySignal[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  /* MVP_TRAINER_R39_SKIP_SESSION */
+  const [skipCandidate, setSkipCandidate] = useState<SessionRow | null>(null);
+  const [skipBusy, setSkipBusy] = useState(false);
   const [workoutPaused, setWorkoutPaused] = useState(() => {
     try {
       return localStorage.getItem("mvp_is_paused") === "true";
@@ -429,7 +433,7 @@ export function TodayPage() {
       if (ids.length) {
         const { data, error: sessionError } = await supabase
           .from("scheduled_sessions")
-          .select("id,template_id,session_type,date,program_block_id")
+          .select("id,template_id,session_type,date,program_block_id,status")
           .eq("user_id", userId)
           .in("id", ids);
         if (sessionError) throw sessionError;
@@ -627,7 +631,7 @@ export function TodayPage() {
     return unique(ids)
       .filter((id) => id !== activeSessionId)
       .map((id) => sessionById.get(id))
-      .filter((row): row is SessionRow => Boolean(row))
+      .filter((row): row is SessionRow => Boolean(row) && String(row?.status ?? "scheduled").toLowerCase() !== "skipped")
       .slice(0, 7);
   }, [queue, activeSessionId, sessionById]);
 
@@ -652,6 +656,19 @@ export function TodayPage() {
     goalMode,
     symptomKey,
   }));
+  const skipLabel = splitLabel(formatSessionLabel({
+    sessionType: skipCandidate?.session_type ?? nextSession?.session_type ?? "Workout",
+    goal,
+    goalMode,
+    symptomKey,
+  }));
+  const skipReplacement = !activeSessionId ? (comingUp[0] ?? null) : null;
+  const skipReplacementLabel = splitLabel(formatSessionLabel({
+    sessionType: skipReplacement?.session_type ?? "Workout",
+    goal,
+    goalMode,
+    symptomKey,
+  }));
 
   const primaryReadiness = readinessFor(activeMeta ?? nextMeta, history);
 
@@ -672,6 +689,32 @@ export function TodayPage() {
       return;
     }
     openSession(sessionId);
+  }
+
+  async function confirmSkipSession() {
+    if (!skipCandidate || activeSessionId || skipBusy) return;
+    setSkipBusy(true);
+    setError(null);
+    try {
+      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v1", {
+        p_session_id: skipCandidate.id,
+        p_reason: "user_skip",
+      });
+      if (skipError) {
+        const message = String(skipError.message ?? "");
+        if (message.includes("rpc_skip_scheduled_session_v1") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
+          throw new Error("Skip Session database update is not installed yet. Run the r39 Supabase migration once, then try again.");
+        }
+        throw skipError;
+      }
+      setSkipCandidate(null);
+      window.dispatchEvent(new CustomEvent("mvp:workout-schedule-changed", { detail: data ?? null }));
+      await load();
+    } catch (caught: any) {
+      setError(caught?.message ?? String(caught));
+    } finally {
+      setSkipBusy(false);
+    }
   }
 
   return (
@@ -724,7 +767,7 @@ export function TodayPage() {
             </div>
 
 
-            <div className="trp-primaryActions">
+            <div className={`trp-primaryActions ${!activeSessionId && nextSession ? "has-skip" : ""}`}>
               <button
                 type="button"
                 className="trp-primaryAction"
@@ -739,6 +782,11 @@ export function TodayPage() {
               {(activeSessionId ?? nextSession?.id) ? (
                 <button type="button" className="trp-editAction" onClick={() => setEditingSessionId(activeSessionId ?? nextSession!.id)}>
                   <span aria-hidden>✎</span>EDIT EXERCISES
+                </button>
+              ) : null}
+              {!activeSessionId && nextSession ? (
+                <button type="button" className="trp-skipAction" onClick={() => setSkipCandidate(nextSession)}>
+                  <span aria-hidden>↷</span>SKIP SESSION
                 </button>
               ) : null}
             </div>
@@ -805,6 +853,28 @@ export function TodayPage() {
         />
       ) : null}
 
+      {skipCandidate ? (
+        <div className="trp-skipOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !skipBusy) setSkipCandidate(null); }}>
+          <section className="trp-skipDialog" role="dialog" aria-modal="true" aria-labelledby="trp-skip-title">
+            <div className="trp-skipSignal" aria-hidden>↷</div>
+            <span className="trp-skipEyebrow">SCHEDULE CONTROL</span>
+            <h2 id="trp-skip-title">Skip {skipLabel.title}?</h2>
+            <p className="trp-skipCopy">
+              This occurrence will be recorded as skipped, not completed. {skipReplacement ? <><strong>{skipReplacementLabel.title}</strong> becomes your next workout and the rest of the schedule advances one slot.</> : <>Your remaining schedule will advance to the next available workout.</>}
+            </p>
+            <div className="trp-skipFlow" aria-label="Schedule change preview">
+              <div><small>SKIPPING</small><strong>{skipLabel.title}</strong></div>
+              <span aria-hidden>→</span>
+              <div><small>NEXT UP</small><strong>{skipReplacement ? skipReplacementLabel.title : "Next workout"}</strong></div>
+            </div>
+            <div className="trp-skipDialogActions">
+              <button type="button" className="trp-skipCancel" disabled={skipBusy} onClick={() => setSkipCandidate(null)}>KEEP SESSION</button>
+              <button type="button" className="trp-skipConfirm" disabled={skipBusy} onClick={() => void confirmSkipSession()}>{skipBusy ? "ADVANCING…" : "SKIP & ADVANCE"}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <style>{`
         .trp-page{
           --trp-cyan:#59d8ff;--trp-green:#69e6a5;--trp-amber:#f0b258;--trp-red:#ff747a;
@@ -820,11 +890,12 @@ export function TodayPage() {
         .trp-primaryBody{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.72fr);gap:22px;align-items:end;margin-top:17px}.trp-primaryCopy{display:grid;gap:8px}.trp-primaryCopy h2{margin:0;font-size:clamp(36px,5vw,62px);line-height:.96;letter-spacing:-.055em;overflow-wrap:anywhere}.trp-programLine{margin:0;color:#c5d4da;font-size:14px;font-weight:750;line-height:1.4}
         .trp-muscles{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:4px}.trp-muscle{display:flex;align-items:center;gap:7px;min-height:36px;padding:5px 9px 5px 6px;border:1px solid rgba(255,255,255,.075);border-radius:10px;background:rgba(255,255,255,.018);color:#d8e4e9;font-size:11px;font-weight:850}.trp-muscleIcon{width:26px;height:26px;display:grid;place-items:center;flex:0 0 26px;border-radius:7px;background:rgba(89,216,255,.055)}.trp-muscleIcon img{max-width:21px;max-height:21px;object-fit:contain}.trp-noMuscles{margin-top:6px;color:#7e949d;font-size:11px}
         .trp-primaryMetrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.trp-primaryMetrics article{min-height:92px;display:flex;align-items:center;gap:10px;padding:12px;border:1px solid rgba(255,255,255,.075);border-radius:13px;background:rgba(255,255,255,.018)}.trp-primaryMetrics svg,.trp-sessionStats svg{width:20px;height:20px;fill:none;stroke:#79dffc;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex:0 0 20px}.trp-primaryMetrics article>div{display:grid;gap:5px}.trp-primaryMetrics strong{font-size:22px;line-height:1;color:#fff;white-space:normal}.trp-primaryMetrics span{font-size:8px;font-weight:1000;letter-spacing:.1em;color:#89a0aa}.trp-readinessCopy{margin:13px 0 0;color:#98abb3;font-size:12px;line-height:1.45}
-        .trp-primaryActions{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(210px,.7fr);gap:9px;margin-top:15px}.trp-primaryActions button,.trp-sessionActions button{min-height:48px;border-radius:11px;font-weight:1000;letter-spacing:.035em}.trp-primaryAction{border:1px solid rgba(114,220,255,.3);background:linear-gradient(180deg,#45c7f3,#1d91c9);color:#041118;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 10px 24px rgba(0,153,215,.12)}.trp-primaryCard.is-active .trp-primaryAction{border-color:rgba(117,237,174,.3);background:linear-gradient(180deg,#65dda2,#2ea36b)}.trp-primaryAction span{margin-right:8px}.trp-editAction,.trp-editSmall{border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,#111a21,#0a1015);color:#eef8fb}.trp-editAction span,.trp-editSmall span{margin-right:6px;color:#8edff8}
+        .trp-primaryActions{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(210px,.7fr);gap:9px;margin-top:15px}.trp-primaryActions.has-skip{grid-template-columns:minmax(0,1.45fr) minmax(180px,.68fr) minmax(160px,.58fr)}.trp-primaryActions button,.trp-sessionActions button{min-height:48px;border-radius:11px;font-weight:1000;letter-spacing:.035em}.trp-primaryAction{border:1px solid rgba(114,220,255,.3);background:linear-gradient(180deg,#45c7f3,#1d91c9);color:#041118;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 10px 24px rgba(0,153,215,.12)}.trp-primaryCard.is-active .trp-primaryAction{border-color:rgba(117,237,174,.3);background:linear-gradient(180deg,#65dda2,#2ea36b)}.trp-primaryAction span{margin-right:8px}.trp-editAction,.trp-editSmall{border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,#111a21,#0a1015);color:#eef8fb}.trp-editAction span,.trp-editSmall span{margin-right:6px;color:#8edff8}.trp-skipAction{border:1px solid rgba(240,178,88,.28);background:linear-gradient(180deg,rgba(73,48,14,.58),rgba(28,19,8,.76));color:#ffd99b;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}.trp-skipAction span{margin-right:7px;color:#ffc460;font-size:17px}.trp-skipAction:hover{border-color:rgba(255,196,96,.48);background:linear-gradient(180deg,rgba(94,60,15,.68),rgba(35,23,8,.82))}
         .trp-upcomingSection{padding:18px}.trp-upcomingSection::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:2px;border-radius:99px;background:linear-gradient(var(--trp-amber),rgba(240,178,88,.08))}.trp-sectionHead{margin-bottom:12px}.trp-sectionHead>div{display:grid;gap:4px}.trp-sectionHead span{color:#e9bc73}.trp-sectionHead h2{margin:0;font-size:26px;line-height:1.05;letter-spacing:-.03em}.trp-sectionHead small{color:#889ca5;font-size:11px}.trp-upcomingGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.trp-loading{padding:18px;border:1px solid rgba(255,255,255,.06);border-radius:12px;background:rgba(255,255,255,.015);color:#a6b7be}
         .trp-sessionCard{display:grid;align-content:start;gap:12px;padding:15px;border:1px solid rgba(255,255,255,.075);border-left:3px solid rgba(180,194,201,.24);border-radius:14px;background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(255,255,255,.005))}.trp-sessionCard.is-first{border-left-color:var(--trp-amber);background:linear-gradient(145deg,rgba(240,178,88,.055),rgba(255,255,255,.006))}.trp-sessionTop{align-items:flex-start}.trp-sequence{color:#c6d2d7;font-size:9px;font-weight:1000;letter-spacing:.12em}.trp-sessionTitle{display:grid;gap:4px}.trp-sessionTitle h3{margin:0;font-size:25px;line-height:1.05;letter-spacing:-.035em;overflow-wrap:anywhere}.trp-sessionTitle p{margin:0;color:#a9bcc4;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
         .trp-sessionStats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.trp-sessionStats>div{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(0,0,0,.12)}.trp-sessionStats>div>span{display:grid;gap:3px}.trp-sessionStats strong{font-size:14px;color:#f5fbfd;white-space:normal}.trp-sessionStats small{font-size:7.5px;font-weight:1000;letter-spacing:.08em;color:#81959d}.trp-sessionStats svg{width:17px;height:17px;flex-basis:17px}
         .trp-sessionActions{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px,.65fr);gap:8px}.trp-sessionActions button{min-height:42px;font-size:10px}.trp-startSmall{border:1px solid rgba(89,216,255,.22);background:#0d2833;color:#dff8ff}.trp-editSmall{color:#eef8fb}
+        .trp-skipOverlay{position:fixed;inset:0;z-index:10040;display:grid;place-items:center;padding:18px;background:rgba(1,5,8,.78);backdrop-filter:blur(10px)}.trp-skipDialog{width:min(520px,100%);display:grid;gap:12px;padding:24px;border:1px solid rgba(240,178,88,.3);border-radius:20px;background:linear-gradient(155deg,#13171a 0%,#0a0f13 58%,#070a0d 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 28px 90px rgba(0,0,0,.66),0 0 40px rgba(240,178,88,.06)}.trp-skipSignal{width:46px;height:46px;display:grid;place-items:center;border:1px solid rgba(240,178,88,.28);border-radius:13px;background:rgba(240,178,88,.08);color:#ffc66d;font-size:25px}.trp-skipEyebrow{color:#f4bd68!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.16em!important}.trp-skipDialog h2{margin:0;font-size:31px;line-height:1;letter-spacing:-.04em}.trp-skipCopy{margin:0;color:#aebec5;font-size:13px;line-height:1.55}.trp-skipCopy strong{color:#f7fbfd}.trp-skipFlow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:12px 0;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.trp-skipFlow>div{display:grid;gap:4px}.trp-skipFlow>div:last-child{text-align:right}.trp-skipFlow small{color:#78909a;font-size:8px;font-weight:1000;letter-spacing:.12em}.trp-skipFlow strong{font-size:15px;color:#f5fbfd}.trp-skipFlow>span{color:#f0b258;font-size:18px}.trp-skipDialogActions{display:grid;grid-template-columns:1fr 1.12fr;gap:9px;margin-top:2px}.trp-skipDialogActions button{min-height:48px;border-radius:11px;font-size:10px;font-weight:1000;letter-spacing:.055em}.trp-skipCancel{border:1px solid rgba(255,255,255,.11);background:#0b1217;color:#dbe9ee}.trp-skipConfirm{border:1px solid rgba(255,190,82,.42);background:linear-gradient(180deg,#e59a29,#a9610b);color:#120b02;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 12px 28px rgba(173,100,8,.18)}
         .trp-page h1,.trp-page h2,.trp-page h3,.trp-page p,.trp-page span,.trp-page strong,.trp-page small,.trp-page button{max-width:100%;text-overflow:clip}.trp-page h1,.trp-page h2,.trp-page h3,.trp-page p{white-space:normal;overflow:visible;word-break:normal;overflow-wrap:anywhere}
         @media(max-width:900px){
           .trp-page{width:calc(100% - 18px)}.trp-primaryBody{grid-template-columns:1fr}.trp-primaryMetrics{max-width:none}.trp-upcomingGrid{grid-template-columns:1fr}.trp-primaryCopy h2{font-size:46px}
@@ -834,7 +905,7 @@ export function TodayPage() {
           .trp-primaryCard,.trp-upcomingSection{border-radius:15px}.trp-primaryCard{padding:14px 12px 13px}.trp-cardAccent{top:12px;bottom:12px}.trp-primaryTop{align-items:flex-start;flex-direction:column;gap:9px}.trp-primaryTop>div:first-child{gap:7px}.trp-dateBadge{width:100%;text-align:left;font-size:10px}.trp-readiness{min-height:25px;font-size:8.5px}
           .trp-primaryBody{gap:13px;margin-top:13px}.trp-primaryCopy h2{font-size:38px;line-height:.98}.trp-programLine{font-size:13px}.trp-muscles{gap:6px}.trp-muscle{min-height:32px;padding:4px 7px 4px 5px;font-size:10px}.trp-muscleIcon{width:23px;height:23px;flex-basis:23px}.trp-muscleIcon img{max-width:18px;max-height:18px}
           .trp-primaryMetrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.trp-primaryMetrics article{min-height:72px;padding:8px 6px;gap:5px;flex-direction:column;align-items:flex-start}.trp-primaryMetrics svg{width:17px;height:17px}.trp-primaryMetrics strong{font-size:17px;line-height:1.1}.trp-primaryMetrics span{font-size:7px}.trp-readinessCopy{font-size:11.5px}
-          .trp-primaryActions{grid-template-columns:1fr;gap:7px}.trp-primaryActions button{min-height:45px;font-size:11px;white-space:normal;line-height:1.2}.trp-upcomingSection{padding:13px 10px}.trp-sectionHead h2{font-size:23px}.trp-sectionHead small{font-size:10px}
+          .trp-primaryActions,.trp-primaryActions.has-skip{grid-template-columns:1fr;gap:7px}.trp-primaryActions button{min-height:45px;font-size:11px;white-space:normal;line-height:1.2}.trp-skipOverlay{padding:10px}.trp-skipDialog{padding:18px 15px;border-radius:16px;gap:10px}.trp-skipDialog h2{font-size:27px}.trp-skipFlow{gap:7px}.trp-skipFlow strong{font-size:13px}.trp-skipDialogActions{grid-template-columns:1fr;gap:7px}.trp-upcomingSection{padding:13px 10px}.trp-sectionHead h2{font-size:23px}.trp-sectionHead small{font-size:10px}
           .trp-upcomingGrid{gap:8px}.trp-sessionCard{padding:12px 10px;gap:10px;border-radius:12px}.trp-sessionTop{flex-direction:column;gap:7px}.trp-sessionTop>div:first-child{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}.trp-sessionDate{width:100%;text-align:left;font-size:10px}.trp-sessionTitle h3{font-size:23px}.trp-sessionTitle p{font-size:12px}.trp-sessionStats{gap:5px}.trp-sessionStats>div{padding:7px 5px;gap:5px;flex-direction:column;align-items:flex-start}.trp-sessionStats strong{font-size:13px}.trp-sessionStats small{font-size:7px}.trp-sessionActions{grid-template-columns:1fr;gap:6px}.trp-sessionActions button{min-height:42px;font-size:10.5px;white-space:normal}.trp-noMuscles{font-size:10px}
         }
         @media(max-width:390px){
