@@ -690,6 +690,7 @@ function R56TrashGlyph() {
 }
 
 
+/* MVP_TRAINER_R41_OCCURRENCE_SKIP_AND_MOBILE_SONG_ROOT_FIX */
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const artworkInputRef = useRef<HTMLInputElement | null>(null);
@@ -2357,7 +2358,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             })}
           </div>
 
-          <div className={`tr38-mobileSongList tr40-mobileSongList${mobileSelectMode ? " is-selecting" : ""}${mobileReorderMode ? " is-reordering" : ""}`} aria-label="Songs">
+          <div className={`tr41-mobileSongList${mobileSelectMode ? " is-selecting" : ""}${mobileReorderMode ? " is-reordering" : ""}`} aria-label="Songs">
             {loading ? <div className="tr38-mobileSongEmpty">Loading your music…</div> : null}
             {!loading && !pagedTracks.length ? <div className="tr38-mobileSongEmpty">No songs match this view.</div> : null}
             {pagedTracks.map((track) => {
@@ -2365,22 +2366,22 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               const reorderIndex = libraryOrderIndex.get(track.id) ?? -1;
               const needsInfo = needsMusicMetadata(track);
               const missingArt = trackNeedsArtwork(track);
-              return <article className={`tr38-mobileSongRow tr40-mobileSongRow${current ? " is-current" : ""}${current && player.playing ? " is-playing" : ""}`} key={`mobile-${track.id}`}>
-                {mobileSelectMode ? <label className="tr38-mobileSelect"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /><span /></label> : null}
-                {mobileReorderMode ? <div className="tr38-mobileReorder" aria-label="Reorder song"><button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}><ChevronUpPremiumIcon /></button><button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}><ChevronDownPremiumIcon /></button></div> : null}
-                <div className="tr38-mobileSongArt tr40-mobileSongArt">
+              return <article className={`tr41-mobileSongRow${current ? " is-current" : ""}${current && player.playing ? " is-playing" : ""}`} key={`mobile-${track.id}`}>
+                {mobileSelectMode ? <label className="tr41-mobileSelect"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /></label> : null}
+                {mobileReorderMode ? <div className="tr41-mobileReorder" aria-label="Reorder song"><button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}><ChevronUpPremiumIcon /></button><button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}><ChevronDownPremiumIcon /></button></div> : null}
+                <div className="tr41-mobileSongArt">
                   <TrackArtwork track={track} />
-                  <button type="button" className={`tr38-mobileSongPlay${current && player.playing ? " is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)} aria-label={`${current && player.playing ? "Pause" : "Play"} ${track.title}`}>{current && player.playing ? <R52PlayingGlyph /> : <PlayPremiumIcon />}</button>
+                  <button type="button" className={`tr41-mobileSongPlay${current && player.playing ? " is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)} aria-label={`${current && player.playing ? "Pause" : "Play"} ${track.title}`}>{current && player.playing ? <R52PlayingGlyph /> : <PlayPremiumIcon />}</button>
                 </div>
-                <div className="tr38-mobileSongText tr40-mobileSongText">
+                <div className="tr41-mobileSongCopy">
                   <strong title={track.title}>{track.title}</strong>
-                  <div className="tr40-mobileSubline" title={[artistLabel(track), track.album].filter(Boolean).join(" • ")}><span className="tr40-mobileArtist">{artistLabel(track)}</span>{track.album ? <><i aria-hidden>•</i><span className="tr40-mobileAlbum">{track.album}</span></> : null}</div>
-                  <small className="tr40-mobileMeta"><b>{formatDuration(track.duration_seconds)}</b><R38EnergyBadge level={track.energy_level} title="Change energy" onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} />{needsInfo ? <mark>NEEDS INFO</mark> : missingArt ? <mark>MISSING ART</mark> : null}</small>
+                  <div className="tr41-mobileSongSub" title={[artistLabel(track), track.album].filter(Boolean).join(" • ")}><span className="tr41-mobileSongArtist">{artistLabel(track)}</span>{track.album ? <><i aria-hidden>•</i><span className="tr41-mobileSongAlbum">{track.album}</span></> : null}</div>
+                  <div className="tr41-mobileSongMeta"><b>{formatDuration(track.duration_seconds)}</b><R38EnergyBadge level={track.energy_level} title="Change energy" onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} />{needsInfo ? <mark>NEEDS INFO</mark> : missingArt ? <mark>MISSING ART</mark> : null}</div>
                 </div>
-                <div className="tr38-mobileSongActions tr40-mobileSongActions">
+                <div className="tr41-mobileSongActions">
                   <button type="button" className={`is-like${track.favorite ? " is-active" : ""}`} aria-label={track.favorite ? `Unlike ${track.title}` : `Like ${track.title}`} aria-pressed={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")}><HeartPremiumIcon filled={track.favorite} /></button>
                   <button type="button" className={`is-less${track.play_less ? " is-active" : ""}`} aria-label={track.play_less ? `Play ${track.title} normally` : `Play ${track.title} less`} aria-pressed={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")}><PlayLessPremiumIcon /></button>
-                  <details className="tr52-more tr38-mobileMore">
+                  <details className="tr52-more tr41-mobileMore">
                     <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /></summary>
                     <div className="tr52-moreMenu">
                       <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>

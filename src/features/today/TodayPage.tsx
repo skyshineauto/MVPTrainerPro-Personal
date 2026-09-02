@@ -424,51 +424,26 @@ export function TodayPage() {
 
       setActiveSessionId(nextActiveId);
 
-      const sessionCandidates = [
-        ...(nextActiveId ? [{ id: nextActiveId }] : []),
-        ...(nextQueue.nextSession?.id ? [nextQueue.nextSession] : []),
-        ...nextQueue.upcoming,
-      ];
-      const ids = unique(sessionCandidates.map((row: any) => String(row?.id ?? "")).filter(Boolean));
-
+      /* MVP_TRAINER_R41_OCCURRENCE_SKIP_AND_MOBILE_SONG_ROOT_FIX
+       * Visible Training schedule comes directly from live scheduled_sessions.
+       * rpc_queue_dashboard is still used for activeBlock/goal metadata, but it
+       * can be stale immediately after a skip and must not decide visible order.
+       */
       let sessionRows: SessionRow[] = [];
-      if (ids.length) {
+      if (activeProgramId) {
         const { data, error: sessionError } = await supabase
           .from("scheduled_sessions")
-          .select("id,template_id,session_type,date,program_block_id,status")
-          .eq("user_id", userId)
-          .in("id", ids);
-        if (sessionError) throw sessionError;
-        sessionRows = (data ?? []) as SessionRow[];
-      }
-
-      /* MVP_TRAINER_R40A_SKIP_NEXT_CARD_SOURCE_FIX
-       * rpc_queue_dashboard can briefly retain a pre-skip nextSession while its
-       * repair cycle settles. trainer_skipped_sessions is the authoritative
-       * tombstone for that exact occurrence, so exclude any stale/recreated row
-       * with the same scheduled id OR the same program/date/session type.
-       */
-      if (activeProgramId && sessionRows.length) {
-        const { data: skippedRows, error: skippedRowsError } = await supabase
-          .from("trainer_skipped_sessions")
-          .select("scheduled_session_id,session_type,original_date")
+          .select("id,template_id,session_type,date,program_block_id,status,queue_index,created_at")
           .eq("user_id", userId)
           .eq("program_block_id", activeProgramId)
-          .order("skipped_at", { ascending: false })
-          .limit(64);
-        if (skippedRowsError) throw skippedRowsError;
-
-        const skippedIds = new Set((skippedRows ?? []).map((row: any) => String(row.scheduled_session_id ?? "")).filter(Boolean));
-        const skippedOccurrences = new Set((skippedRows ?? []).map((row: any) => {
-          const date = String(row.original_date ?? "");
-          const type = clean(row.session_type);
-          return date && type ? `${date}|${type}` : "";
-        }).filter(Boolean));
-
-        sessionRows = sessionRows.filter((row) => {
-          if (skippedIds.has(String(row.id))) return false;
-          const occurrence = row.date && row.session_type ? `${String(row.date)}|${clean(row.session_type)}` : "";
-          return !occurrence || !skippedOccurrences.has(occurrence);
+          .order("queue_index", { ascending: true, nullsFirst: false })
+          .order("date", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: true })
+          .limit(8);
+        if (sessionError) throw sessionError;
+        sessionRows = ((data ?? []) as SessionRow[]).filter((row) => {
+          const status = String(row.status ?? "scheduled").toLowerCase();
+          return !["completed","skipped","canceled","cancelled"].includes(status);
         });
       }
 
@@ -654,18 +629,13 @@ export function TodayPage() {
 
   const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session] as const)), [sessions]);
 
-  const upcoming = useMemo(() => {
-    const ids: string[] = [];
-    if (queue?.nextSession?.id) ids.push(String(queue.nextSession.id));
-    (queue?.upcoming ?? []).forEach((row: any) => {
-      if (row?.id) ids.push(String(row.id));
-    });
-    return unique(ids)
-      .filter((id) => id !== activeSessionId)
-      .map((id) => sessionById.get(id))
-      .filter((row): row is SessionRow => Boolean(row) && String(row?.status ?? "scheduled").toLowerCase() !== "skipped")
-      .slice(0, 7);
-  }, [queue, activeSessionId, sessionById]);
+  const upcoming = useMemo(() => sessions
+    .filter((row) => row.id !== activeSessionId)
+    .filter((row) => {
+      const status = String(row.status ?? "scheduled").toLowerCase();
+      return !["completed","skipped","canceled","cancelled"].includes(status);
+    })
+    .slice(0, 7), [sessions, activeSessionId]);
 
   const nextSession = upcoming[0] ?? null;
   const comingUp = useMemo(
