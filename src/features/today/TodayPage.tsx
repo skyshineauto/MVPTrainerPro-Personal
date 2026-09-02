@@ -442,6 +442,36 @@ export function TodayPage() {
         sessionRows = (data ?? []) as SessionRow[];
       }
 
+      /* MVP_TRAINER_R40A_SKIP_NEXT_CARD_SOURCE_FIX
+       * rpc_queue_dashboard can briefly retain a pre-skip nextSession while its
+       * repair cycle settles. trainer_skipped_sessions is the authoritative
+       * tombstone for that exact occurrence, so exclude any stale/recreated row
+       * with the same scheduled id OR the same program/date/session type.
+       */
+      if (activeProgramId && sessionRows.length) {
+        const { data: skippedRows, error: skippedRowsError } = await supabase
+          .from("trainer_skipped_sessions")
+          .select("scheduled_session_id,session_type,original_date")
+          .eq("user_id", userId)
+          .eq("program_block_id", activeProgramId)
+          .order("skipped_at", { ascending: false })
+          .limit(64);
+        if (skippedRowsError) throw skippedRowsError;
+
+        const skippedIds = new Set((skippedRows ?? []).map((row: any) => String(row.scheduled_session_id ?? "")).filter(Boolean));
+        const skippedOccurrences = new Set((skippedRows ?? []).map((row: any) => {
+          const date = String(row.original_date ?? "");
+          const type = clean(row.session_type);
+          return date && type ? `${date}|${type}` : "";
+        }).filter(Boolean));
+
+        sessionRows = sessionRows.filter((row) => {
+          if (skippedIds.has(String(row.id))) return false;
+          const occurrence = row.date && row.session_type ? `${String(row.date)}|${clean(row.session_type)}` : "";
+          return !occurrence || !skippedOccurrences.has(occurrence);
+        });
+      }
+
       if (nextActiveId) {
         const activeSession = sessionRows.find((row) => row.id === nextActiveId);
         setActiveSessionType(activeSession?.session_type ?? null);
