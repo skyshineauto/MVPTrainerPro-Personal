@@ -664,7 +664,7 @@ export function TodayPage() {
     goalMode,
     symptomKey,
   }));
-  const skipReplacement = !activeSessionId ? (comingUp[0] ?? null) : null;
+  const skipReplacement = skipCandidate ? (upcoming.find((row) => row.id !== skipCandidate.id) ?? null) : null;
   const skipReplacementLabel = splitLabel(formatSessionLabel({
     sessionType: skipReplacement?.session_type ?? "Workout",
     goal,
@@ -694,24 +694,26 @@ export function TodayPage() {
   }
 
   async function confirmSkipSession() {
-    if (!skipCandidate || activeSessionId || skipBusy) return;
+    if (!skipCandidate || skipBusy) return;
     setSkipBusy(true);
     setError(null);
     setSkipActionError(null);
     try {
-      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v1", {
+      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v2", {
         p_session_id: skipCandidate.id,
-        p_reason: "manual_skip_r41c",
+        p_reason: "manual_skip_r43_current_program_occurrence",
       });
       if (skipError) {
         const message = String(skipError.message ?? "");
         if (message.includes("rpc_skip_scheduled_session_v1") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
-          throw new Error("Skip Session database update is not installed yet. Run the r39 Supabase migration once, then try again.");
+          throw new Error("Skip Session r43 database update is not installed yet. Run the r43 Supabase SQL once, then try again.");
         }
         throw skipError;
       }
       setSkipActionError(null);
       setSkipCandidate(null);
+      /* MVP_R43_QUEUE_REPAIR_AFTER_SKIP */
+      await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
       window.dispatchEvent(new CustomEvent("mvp:workout-schedule-changed", { detail: data ?? null }));
       await load();
     } catch (caught: any) {
@@ -773,7 +775,7 @@ export function TodayPage() {
             </div>
 
 
-            <div className={`trp-primaryActions ${!activeSessionId && nextSession ? "has-skip" : ""}`}>
+            <div className={`trp-primaryActions ${(activeSessionId || nextSession) ? "has-skip" : ""}`}>
               <button
                 type="button"
                 className="trp-primaryAction"
@@ -790,8 +792,11 @@ export function TodayPage() {
                   <span aria-hidden>✎</span>EDIT EXERCISES
                 </button>
               ) : null}
-              {!activeSessionId && nextSession ? (
-                <button type="button" className="trp-skipAction" onClick={() => { setSkipActionError(null); setSkipCandidate(nextSession); }}>
+              {(activeSessionId || nextSession) ? (
+                <button type="button" className="trp-skipAction" onClick={() => {
+                  setSkipActionError(null);
+                  setSkipCandidate((activeSessionId ? sessionById.get(activeSessionId) ?? null : null) ?? nextSession);
+                }}>
                   <span aria-hidden>↷</span>SKIP SESSION
                 </button>
               ) : null}
