@@ -649,6 +649,26 @@ function R52MusicTabs({ value, onChange }: { value: MusicTab; onChange: (value: 
   </nav>;
 }
 
+/* MVP_R12_5E_37_PRO_MUSIC_UI: dedicated native mobile navigation, no Motion hit layer. */
+function R37MobileMusicTabs({ value, onChange }: { value: MusicTab; onChange: (value: MusicTab) => void }) {
+  return <nav className="tr37-mobileTabs" aria-label="Music library sections">
+    {R52_MUSIC_TABS.map((item) => {
+      const active = item.key === value;
+      return <button
+        key={item.key}
+        type="button"
+        data-music-tab={item.key}
+        className={active ? "is-active" : ""}
+        aria-current={active ? "page" : undefined}
+        onClick={() => onChange(item.key)}
+      >
+        <span className="tr52-tabIcon"><R52TabGlyph tab={item.key} /></span>
+        <span className="tr52-tabLabel">{item.label}</span>
+      </button>;
+    })}
+  </nav>;
+}
+
 function R52MoreIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>;
 }
@@ -2225,6 +2245,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) return;
     const activeButton = tabNavRef.current?.querySelector<HTMLElement>(`[data-music-tab="${tab}"]`);
     if (!activeButton) return;
     activeButton.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
@@ -2255,8 +2276,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div><span className="tr10-directoryEyebrow">DIRECTORY</span><h2>Song Library</h2></div>
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
-            <button type="button" className={`tr44-enrichLauncher${enrichment.running ? " is-running" : ""}${enrichment.minimized && enrichment.stage === "complete" ? " is-complete" : ""}`} onClick={() => { if (enrichment.running || enrichment.minimized) setEnrichment((current) => ({ ...current, open: true, minimized: false })); else void enrichTracks(tracks); }}>{enrichment.running ? `ENRICHING ${enrichment.completed}/${enrichment.total}` : enrichment.minimized && enrichment.stage === "complete" ? "ENRICHMENT COMPLETE" : "ENRICH LIBRARY"}</button>
-            <button type="button" className="is-orange" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
+            <button type="button" className={`tr44-enrichLauncher${enrichment.running ? " is-running" : ""}${enrichment.minimized && enrichment.stage === "complete" ? " is-complete" : ""}`} onClick={(event) => { if (!event.nativeEvent.isTrusted) return; if (enrichment.running || enrichment.minimized) setEnrichment((current) => ({ ...current, open: true, minimized: false })); else void enrichTracks(tracks); }}>{enrichment.running ? `ENRICHING ${enrichment.completed}/${enrichment.total}` : enrichment.minimized && enrichment.stage === "complete" ? "ENRICHMENT COMPLETE" : "ENRICH LIBRARY"}</button>
+            <button type="button" className="is-orange" disabled={uploading} onClick={(event) => { if (!event.nativeEvent.isTrusted) return; inputRef.current?.click(); }}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
           </div>
         </header>
 
@@ -2271,7 +2292,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <div ref={tabNavRef} className="tr52-tabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
+        <div ref={tabNavRef} className="tr52-tabRail tr37-desktopTabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
+        <div className="tr37-mobileTabRail"><R37MobileMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
 
         {/* MVP_ENRICH_COMPLETION_HIDDEN_V25 */ message && !/(updated or checked|already complete)/i.test(message) ? <div className="tr10-message">{message}</div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
@@ -2290,10 +2312,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
-          <div className={`m37-songTable tr10-table is-list${mobileSelectMode ? " is-mobile-selecting" : ""}${mobileReorderMode ? " is-mobile-reordering" : ""}`}>
+          <div className={`m37-songTable tr10-table tr37-desktopSongTable is-list${mobileSelectMode ? " is-mobile-selecting" : ""}${mobileReorderMode ? " is-mobile-reordering" : ""}`}>
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
-              <span className="tr10-trackHead">TRACK</span><span className="tr10-timeHead">TIME</span><span className="tr10-energyHead">ENERGY</span>
+              <span className="tr10-trackHead">TRACK</span><span className="tr37-artistHead">ARTIST</span><span className="tr37-albumHead">ALBUM</span><span className="tr10-energyHead">ENERGY</span><span className="tr10-timeHead">TIME</span>
               <span className="tr10-actionsHead">ACTIONS</span>
             </div>
             {loading ? <div className="tr10-empty">Loading your music…</div> : null}
@@ -2315,13 +2337,52 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                   <div className="tr10-trackText"><strong>{track.title}</strong><span>{artistLabel(track)}{track.album ? ` • ${track.album}` : ""}</span><small>{track.original_name}</small>{playbackErrors[track.id] ? <em className="tr10-playbackError">{playbackErrors[track.id]}</em> : null}</div>
                   {needsInfo ? <em className="tr10-healthBadge is-needs">NEEDS INFO</em> : missingArt ? <em className="tr10-healthBadge is-art">MISSING ART</em> : null}
                 </div>
-                <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
+                <span className="tr37-artistCell" title={artistLabel(track)}>{artistLabel(track)}</span>
+                <span className="tr37-albumCell" title={track.album || "Unknown album"}>{track.album || "—"}</span>
                 <button className={`tr10-energy is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} title="Click to change energy"><i className="tr10-energyLed" /><span>{track.energy_level.toUpperCase()}</span></button>
+                <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <div className="m37-trackActions tr52-trackActions">
                   <MvpAction icon={<HeartPremiumIcon filled={track.favorite} />} label={track.favorite ? "LIKED" : "LIKE"} tone="green" active={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")} />
                   <MvpAction icon={<PlayLessPremiumIcon />} label="PLAY LESS" tone="red" active={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")} />
                   <details className="tr52-more">
                     <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /><span>MORE</span></summary>
+                    <div className="tr52-moreMenu">
+                      <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
+                      <button type="button" onClick={(event) => { addMusicToQueue(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
+                      <button type="button" onClick={(event) => { openPlaylistModal([track.id]); event.currentTarget.closest("details")?.removeAttribute("open"); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
+                      <button type="button" onClick={(event) => { openDetail(track); event.currentTarget.closest("details")?.removeAttribute("open"); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
+                    </div>
+                  </details>
+                </div>
+              </article>;
+            })}
+          </div>
+
+          <div className={`tr37-mobileSongList${mobileSelectMode ? " is-selecting" : ""}${mobileReorderMode ? " is-reordering" : ""}`} aria-label="Songs">
+            {loading ? <div className="tr37-mobileSongEmpty">Loading your music…</div> : null}
+            {!loading && !pagedTracks.length ? <div className="tr37-mobileSongEmpty">No songs match this view.</div> : null}
+            {pagedTracks.map((track) => {
+              const current = player.currentTrack?.id === track.id;
+              const reorderIndex = libraryOrderIndex.get(track.id) ?? -1;
+              const needsInfo = needsMusicMetadata(track);
+              const missingArt = trackNeedsArtwork(track);
+              return <article className={`tr37-mobileSongRow ${current ? "is-current" : ""}`} key={`mobile-${track.id}`}>
+                {mobileSelectMode ? <label className="tr37-mobileSelect"><input type="checkbox" checked={selectedSongIds.has(track.id)} onChange={() => toggleSongSelection(track.id)} /><span /></label> : null}
+                {mobileReorderMode ? <div className="tr37-mobileReorder" aria-label="Reorder song"><button type="button" aria-label={`Move ${track.title} up`} disabled={reorderIndex <= 0} onClick={() => moveTrack(track.id,-1)}><ChevronUpPremiumIcon /></button><button type="button" aria-label={`Move ${track.title} down`} disabled={reorderIndex < 0 || reorderIndex >= libraryOrderedTracks.length - 1} onClick={() => moveTrack(track.id,1)}><ChevronDownPremiumIcon /></button></div> : null}
+                <div className="tr37-mobileSongArtwork">
+                  <TrackArtwork track={track} />
+                  <button type="button" className={`tr37-mobileSongPlay ${current && player.playing ? "is-playing" : ""}`} onClick={() => void toggleTrackPlayback(track)} aria-label={`${current && player.playing ? "Pause" : "Play"} ${track.title}`}>{current && player.playing ? <R52PlayingGlyph /> : <PlayPremiumIcon />}</button>
+                </div>
+                <div className="tr37-mobileSongCopy">
+                  <strong title={track.title}>{track.title}</strong>
+                  <span title={artistLabel(track)}>{artistLabel(track)}</span>
+                  <small><b>{formatDuration(track.duration_seconds)}</b><i aria-hidden /> <button type="button" className={`is-${track.energy_level}`} onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")}><em />{track.energy_level.toUpperCase()}</button>{needsInfo ? <mark>NEEDS INFO</mark> : missingArt ? <mark>MISSING ART</mark> : null}</small>
+                </div>
+                <div className="tr37-mobileSongActions">
+                  <button type="button" className={track.favorite ? "is-like is-active" : "is-like"} aria-label={track.favorite ? `Unlike ${track.title}` : `Like ${track.title}`} aria-pressed={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")}><HeartPremiumIcon filled={track.favorite} /></button>
+                  <button type="button" className={track.play_less ? "is-less is-active" : "is-less"} aria-label={track.play_less ? `Play ${track.title} normally` : `Play ${track.title} less`} aria-pressed={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")}><PlayLessPremiumIcon /></button>
+                  <details className="tr52-more tr37-mobileMore">
+                    <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /></summary>
                     <div className="tr52-moreMenu">
                       <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
                       <button type="button" onClick={(event) => { addMusicToQueue(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
@@ -2432,20 +2493,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
         {tab === "discover" ? <section className="m37-discover tr10-discover tr63-discover">
-          <header className="tr63-workspaceBanner" aria-label="Discover workspace">
-            <div className="tr63-workspaceIdentity">
-              <span className="tr63-workspaceGlyph"><SparkPremiumIcon /></span>
-              <div>
-                <small>ACTIVE TAB</small>
-                <h2>Discover</h2>
-                <p>Library Radar, Rediscover sessions, and Saved Songs.</p>
-              </div>
-            </div>
-            <div className="tr63-workspaceStat">
-              <strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong>
-              <span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span>
-            </div>
-          </header>
           {/* MVP_R12_5E_33_DISCOVER_WORKSPACE_SAVED_SONGS_BANNER */}
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
             <header className="tr10-radarHead">
