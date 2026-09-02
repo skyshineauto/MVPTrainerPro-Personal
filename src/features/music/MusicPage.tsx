@@ -92,6 +92,7 @@ import { MvpAction, MvpDensityPicker, MvpPrimaryAction } from "./premium/MusicUi
 import {
   ChevronDownPremiumIcon,
   ChevronUpPremiumIcon,
+  ClosePremiumIcon,
   EditPremiumIcon,
   HeartPremiumIcon,
   NextPremiumIcon,
@@ -102,6 +103,7 @@ import {
   QueuePremiumIcon,
   ShufflePremiumIcon,
   SparkPremiumIcon,
+  YouTubePremiumIcon,
 } from "./premium/MusicLibraryPremiumIcons";
 import "./premium/MusicLibraryPremium.css";
 import "./premium/MusicUiSystem.css";
@@ -404,6 +406,12 @@ function discoveryTypeLabel(item: MusicDiscoveryRecommendation | MusicDiscoveryS
   return "ERA MATCH";
 }
 
+function discoveryYoutubeUrl(item: { artist: string; title: string }) {
+  const query = [item.artist, item.title, "official audio"].filter(Boolean).join(" ");
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+}
+
+/* MVP_R12_5E_33_DISCOVER_WORKSPACE_SAVED_SONGS_HELPER */
 function DiscoveryCard({
   seedId,
   item,
@@ -468,18 +476,18 @@ function SavedSongCard({
 }) {
   const previewing = previewingId === item.id;
   const previewError = previewErrorId === item.id;
+  const youtubeUrl = discoveryYoutubeUrl(item);
   return <motion.article className={`m37-discoveryCard tr63-discoveryCard is-saved ${item.inLibrary ? "is-owned" : ""}`} whileHover={{ y: -2 }} transition={{ duration: .18 }}>
     <div className="m37-discoveryArt tr63-discoveryArt">{item.artworkUrl ? <img src={item.artworkUrl} alt="" /> : <div>♫</div>}<span className="tr63-discoveryStatus is-saved">SAVED</span></div>
     <div className="m37-discoveryCopy tr63-discoveryCopy"><strong>{item.title}</strong><span>{item.artist}{item.album && item.album !== item.title ? ` • ${item.album}` : ""}</span><small>Saved from {item.seedTrackTitle}</small></div>
-    <div className="m37-discoveryActions tr63-discoveryActions">
+    <div className="m37-discoveryActions tr63-discoveryActions is-savedActions">
       {item.previewUrl ? <button type="button" className={`is-preview ${previewing ? "is-active" : ""}`} onClick={() => onPreview(item)}>{previewing ? <PausePremiumIcon /> : <PlayPremiumIcon />}<span>{previewing ? "STOP PREVIEW" : previewError ? "RETRY PREVIEW" : "PREVIEW"}</span></button> : null}
+      <a className="is-youtube" href={youtubeUrl} target="_blank" rel="noreferrer"><YouTubePremiumIcon /><span>YOUTUBE</span></a>
       {item.storeUrl ? <a className="is-store" href={item.storeUrl} target="_blank" rel="noreferrer"><SparkPremiumIcon /><span>APPLE MUSIC</span></a> : null}
-      <button type="button" className="is-dismiss" disabled={removing} onClick={() => onDelete(item)}><PlayLessPremiumIcon /><span>{removing ? "REMOVING…" : "REMOVE"}</span></button>
+      <button type="button" className="is-deleteSmall" disabled={removing} aria-label={removing ? `Removing ${item.title}` : `Remove ${item.title} from Saved Songs`} title={removing ? "Removing" : "Remove from Saved Songs"} onClick={() => onDelete(item)}><ClosePremiumIcon /><span>{removing ? "REMOVING" : "DELETE"}</span></button>
     </div>
   </motion.article>;
 }
-
-
 
 type CollectionDetailViewProps = {
   kind: "artist" | "album";
@@ -2417,6 +2425,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         {tab === "audition" ? <MusicAuditionPanel tracks={tracks} previewVolume={player.volume} onPreviewStart={() => pauseMusic()} onImportFile={uploadAuditionSong} /> : null}
 
         {tab === "discover" ? <section className="m37-discover tr10-discover tr63-discover">
+          <header className="tr63-workspaceBanner" aria-label="Discover workspace">
+            <div className="tr63-workspaceIdentity">
+              <span className="tr63-workspaceGlyph"><SparkPremiumIcon /></span>
+              <div>
+                <small>ACTIVE TAB</small>
+                <h2>Discover</h2>
+                <p>Library Radar, Rediscover sessions, and Saved Songs.</p>
+              </div>
+            </div>
+            <div className="tr63-workspaceStat">
+              <strong>{discoveryView === "saved" ? savedDiscoverySongs.length : discoveryCount}</strong>
+              <span>{discoveryView === "saved" ? "SAVED SONGS" : "DISCOVERIES"}</span>
+            </div>
+          </header>
+          {/* MVP_R12_5E_33_DISCOVER_WORKSPACE_SAVED_SONGS_BANNER */}
           <section className="tr10-radarPanel" aria-label="Discovery Radar">
             <header className="tr10-radarHead">
               <div><span>DISCOVERY RADAR</span><h2>Library Radar</h2></div>

@@ -2319,3 +2319,152 @@
     padding-inline:12px!important;
   }
 }
+
+
+/* ========================================================================== */
+/* MVP_R12_5E_33_DISCOVER_WORKSPACE_SAVED_SONGS — Discover workspace separation + Saved Songs actions            */
+/* ========================================================================== */
+[data-mvp-music="flagship"] .tr63-discover{
+  position:relative!important;
+  margin-top:14px!important;
+  padding-top:16px!important;
+  border-top:1px solid rgba(94,184,219,.12)!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceBanner{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:18px!important;
+  margin:0 0 16px!important;
+  padding:16px 18px!important;
+  border:1px solid rgba(96,188,223,.18)!important;
+  border-radius:20px!important;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(68,196,255,.14), transparent 30%),
+    radial-gradient(circle at 88% 80%, rgba(140,95,255,.08), transparent 28%),
+    linear-gradient(180deg, rgba(8,20,28,.82), rgba(3,10,14,.68))!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    inset 0 -1px 0 rgba(0,0,0,.58),
+    0 18px 42px rgba(0,0,0,.22)!important;
+  overflow:hidden!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceIdentity{
+  display:flex!important;
+  align-items:center!important;
+  gap:14px!important;
+  min-width:0!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceGlyph{
+  display:grid!important;
+  place-items:center!important;
+  width:42px!important;
+  height:42px!important;
+  flex:0 0 42px!important;
+  border:1px solid rgba(88,212,255,.24)!important;
+  border-radius:14px!important;
+  color:#8be8ff!important;
+  background:linear-gradient(180deg, rgba(21,74,96,.46), rgba(7,22,30,.76))!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 10px 24px rgba(0,0,0,.24)!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceGlyph svg{width:18px!important;height:18px!important}
+[data-mvp-music="flagship"] .tr63-workspaceIdentity>div{min-width:0!important}
+[data-mvp-music="flagship"] .tr63-workspaceIdentity small{
+  display:block!important;
+  margin:0 0 4px!important;
+  color:#65dfff!important;
+  font-size:7px!important;
+  font-weight:900!important;
+  letter-spacing:.16em!important;
+  text-transform:uppercase!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceIdentity h2{
+  margin:0!important;
+  color:#fbfdff!important;
+  font-size:22px!important;
+  line-height:1.02!important;
+  font-weight:950!important;
+  letter-spacing:-.03em!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceIdentity p{
+  margin:5px 0 0!important;
+  color:#94aab4!important;
+  font-size:10px!important;
+  line-height:1.35!important;
+  font-weight:750!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceStat{
+  display:grid!important;
+  justify-items:end!important;
+  align-content:center!important;
+  min-width:108px!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceStat strong{
+  color:#ffc456!important;
+  font-size:34px!important;
+  line-height:.92!important;
+  font-weight:950!important;
+  letter-spacing:-.06em!important;
+}
+[data-mvp-music="flagship"] .tr63-workspaceStat span{
+  margin-top:6px!important;
+  color:#d9e5ea!important;
+  font-size:8px!important;
+  font-weight:900!important;
+  letter-spacing:.13em!important;
+  text-transform:uppercase!important;
+}
+[data-mvp-music="flagship"] .tr63-discoveryActions.is-savedActions{
+  grid-template-columns:repeat(3, minmax(0,1fr)) 42px!important;
+}
+[data-mvp-music="flagship"] .tr63-discoveryActions .is-youtube{
+  color:#ffd3d7!important;
+  border-color:rgba(255,114,133,.18)!important;
+  background:linear-gradient(180deg, rgba(69,23,31,.46), rgba(21,8,12,.78))!important;
+}
+[data-mvp-music="flagship"] .tr63-discoveryActions .is-deleteSmall{
+  width:42px!important;
+  min-width:42px!important;
+  max-width:42px!important;
+  padding:0!important;
+  gap:0!important;
+  color:#ffabb2!important;
+  border-color:rgba(255,114,133,.16)!important;
+  background:linear-gradient(180deg, rgba(46,14,20,.42), rgba(17,7,11,.72))!important;
+}
+[data-mvp-music="flagship"] .tr63-discoveryActions .is-deleteSmall svg{width:12px!important;height:12px!important;flex:0 0 12px!important}
+[data-mvp-music="flagship"] .tr63-discoveryActions .is-deleteSmall>span{display:none!important}
+[data-mvp-music="flagship"] .tr63-discover .tr10-radarPanel,
+[data-mvp-music="flagship"] .tr63-discover .tr10-discoverHead,
+[data-mvp-music="flagship"] .tr63-discover .tr10-discoverArchiveTools,
+[data-mvp-music="flagship"] .tr63-discover .tr10-savedSongsPager{
+  position:relative!important;
+  z-index:1!important;
+}
+@media (max-width:760px){
+  [data-mvp-music="flagship"] .tr63-workspaceBanner{
+    flex-direction:column!important;
+    align-items:stretch!important;
+    gap:12px!important;
+    padding:14px!important;
+    border-radius:18px!important;
+  }
+  [data-mvp-music="flagship"] .tr63-workspaceGlyph{width:38px!important;height:38px!important;flex-basis:38px!important}
+  [data-mvp-music="flagship"] .tr63-workspaceIdentity h2{font-size:19px!important}
+  [data-mvp-music="flagship"] .tr63-workspaceIdentity p{font-size:9px!important}
+  [data-mvp-music="flagship"] .tr63-workspaceStat{justify-items:start!important;min-width:0!important}
+  [data-mvp-music="flagship"] .tr63-workspaceStat strong{font-size:26px!important}
+  [data-mvp-music="flagship"] .tr63-discoveryActions.is-savedActions{grid-template-columns:repeat(2, minmax(0,1fr))!important}
+  [data-mvp-music="flagship"] .tr63-discoveryActions .is-deleteSmall{
+    width:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+    padding:0 10px!important;
+    gap:6px!important;
+  }
+  [data-mvp-music="flagship"] .tr63-discoveryActions .is-deleteSmall>span{display:block!important}
+}
+@media (max-width:430px){
+  [data-mvp-music="flagship"] .tr63-discoveryActions.is-savedActions{grid-template-columns:1fr!important}
+  [data-mvp-music="flagship"] .tr63-workspaceIdentity{align-items:flex-start!important}
+}
