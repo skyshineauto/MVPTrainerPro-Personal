@@ -330,8 +330,10 @@ export function TodayPage() {
   const [history, setHistory] = useState<HistorySignal[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   /* MVP_TRAINER_R39_SKIP_SESSION */
+  /* MVP_TRAINER_R39B_SKIP_FIX */
   const [skipCandidate, setSkipCandidate] = useState<SessionRow | null>(null);
   const [skipBusy, setSkipBusy] = useState(false);
+  const [skipActionError, setSkipActionError] = useState<string | null>(null);
   const [workoutPaused, setWorkoutPaused] = useState(() => {
     try {
       return localStorage.getItem("mvp_is_paused") === "true";
@@ -695,6 +697,7 @@ export function TodayPage() {
     if (!skipCandidate || activeSessionId || skipBusy) return;
     setSkipBusy(true);
     setError(null);
+    setSkipActionError(null);
     try {
       const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v1", {
         p_session_id: skipCandidate.id,
@@ -707,11 +710,14 @@ export function TodayPage() {
         }
         throw skipError;
       }
+      setSkipActionError(null);
       setSkipCandidate(null);
       window.dispatchEvent(new CustomEvent("mvp:workout-schedule-changed", { detail: data ?? null }));
       await load();
     } catch (caught: any) {
-      setError(caught?.message ?? String(caught));
+      const message = caught?.message ?? String(caught);
+      setSkipActionError(message);
+      setError(message);
     } finally {
       setSkipBusy(false);
     }
@@ -785,7 +791,7 @@ export function TodayPage() {
                 </button>
               ) : null}
               {!activeSessionId && nextSession ? (
-                <button type="button" className="trp-skipAction" onClick={() => setSkipCandidate(nextSession)}>
+                <button type="button" className="trp-skipAction" onClick={() => { setSkipActionError(null); setSkipCandidate(nextSession); }}>
                   <span aria-hidden>↷</span>SKIP SESSION
                 </button>
               ) : null}
@@ -867,8 +873,14 @@ export function TodayPage() {
               <span aria-hidden>→</span>
               <div><small>NEXT UP</small><strong>{skipReplacement ? skipReplacementLabel.title : "Next workout"}</strong></div>
             </div>
+            {skipActionError ? (
+              <div className="trp-skipError" role="alert">
+                <strong>SKIP COULD NOT COMPLETE</strong>
+                <span>{skipActionError}</span>
+              </div>
+            ) : null}
             <div className="trp-skipDialogActions">
-              <button type="button" className="trp-skipCancel" disabled={skipBusy} onClick={() => setSkipCandidate(null)}>KEEP SESSION</button>
+              <button type="button" className="trp-skipCancel" disabled={skipBusy} onClick={() => { setSkipActionError(null); setSkipCandidate(null); }}>KEEP SESSION</button>
               <button type="button" className="trp-skipConfirm" disabled={skipBusy} onClick={() => void confirmSkipSession()}>{skipBusy ? "ADVANCING…" : "SKIP & ADVANCE"}</button>
             </div>
           </section>
@@ -895,7 +907,7 @@ export function TodayPage() {
         .trp-sessionCard{display:grid;align-content:start;gap:12px;padding:15px;border:1px solid rgba(255,255,255,.075);border-left:3px solid rgba(180,194,201,.24);border-radius:14px;background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(255,255,255,.005))}.trp-sessionCard.is-first{border-left-color:var(--trp-amber);background:linear-gradient(145deg,rgba(240,178,88,.055),rgba(255,255,255,.006))}.trp-sessionTop{align-items:flex-start}.trp-sequence{color:#c6d2d7;font-size:9px;font-weight:1000;letter-spacing:.12em}.trp-sessionTitle{display:grid;gap:4px}.trp-sessionTitle h3{margin:0;font-size:25px;line-height:1.05;letter-spacing:-.035em;overflow-wrap:anywhere}.trp-sessionTitle p{margin:0;color:#a9bcc4;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
         .trp-sessionStats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.trp-sessionStats>div{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(0,0,0,.12)}.trp-sessionStats>div>span{display:grid;gap:3px}.trp-sessionStats strong{font-size:14px;color:#f5fbfd;white-space:normal}.trp-sessionStats small{font-size:7.5px;font-weight:1000;letter-spacing:.08em;color:#81959d}.trp-sessionStats svg{width:17px;height:17px;flex-basis:17px}
         .trp-sessionActions{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px,.65fr);gap:8px}.trp-sessionActions button{min-height:42px;font-size:10px}.trp-startSmall{border:1px solid rgba(89,216,255,.22);background:#0d2833;color:#dff8ff}.trp-editSmall{color:#eef8fb}
-        .trp-skipOverlay{position:fixed;inset:0;z-index:10040;display:grid;place-items:center;padding:18px;background:rgba(1,5,8,.78);backdrop-filter:blur(10px)}.trp-skipDialog{width:min(520px,100%);display:grid;gap:12px;padding:24px;border:1px solid rgba(240,178,88,.3);border-radius:20px;background:linear-gradient(155deg,#13171a 0%,#0a0f13 58%,#070a0d 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 28px 90px rgba(0,0,0,.66),0 0 40px rgba(240,178,88,.06)}.trp-skipSignal{width:46px;height:46px;display:grid;place-items:center;border:1px solid rgba(240,178,88,.28);border-radius:13px;background:rgba(240,178,88,.08);color:#ffc66d;font-size:25px}.trp-skipEyebrow{color:#f4bd68!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.16em!important}.trp-skipDialog h2{margin:0;font-size:31px;line-height:1;letter-spacing:-.04em}.trp-skipCopy{margin:0;color:#aebec5;font-size:13px;line-height:1.55}.trp-skipCopy strong{color:#f7fbfd}.trp-skipFlow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:12px 0;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.trp-skipFlow>div{display:grid;gap:4px}.trp-skipFlow>div:last-child{text-align:right}.trp-skipFlow small{color:#78909a;font-size:8px;font-weight:1000;letter-spacing:.12em}.trp-skipFlow strong{font-size:15px;color:#f5fbfd}.trp-skipFlow>span{color:#f0b258;font-size:18px}.trp-skipDialogActions{display:grid;grid-template-columns:1fr 1.12fr;gap:9px;margin-top:2px}.trp-skipDialogActions button{min-height:48px;border-radius:11px;font-size:10px;font-weight:1000;letter-spacing:.055em}.trp-skipCancel{border:1px solid rgba(255,255,255,.11);background:#0b1217;color:#dbe9ee}.trp-skipConfirm{border:1px solid rgba(255,190,82,.42);background:linear-gradient(180deg,#e59a29,#a9610b);color:#120b02;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 12px 28px rgba(173,100,8,.18)}
+        .trp-skipOverlay{position:fixed;inset:0;z-index:10040;display:grid;place-items:center;padding:18px;background:rgba(1,5,8,.78);backdrop-filter:blur(10px)}.trp-skipDialog{width:min(520px,100%);display:grid;gap:12px;padding:24px;border:1px solid rgba(240,178,88,.3);border-radius:20px;background:linear-gradient(155deg,#13171a 0%,#0a0f13 58%,#070a0d 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 28px 90px rgba(0,0,0,.66),0 0 40px rgba(240,178,88,.06)}.trp-skipSignal{width:46px;height:46px;display:grid;place-items:center;border:1px solid rgba(240,178,88,.28);border-radius:13px;background:rgba(240,178,88,.08);color:#ffc66d;font-size:25px}.trp-skipEyebrow{color:#f4bd68!important;font-size:9px!important;font-weight:1000!important;letter-spacing:.16em!important}.trp-skipDialog h2{margin:0;font-size:31px;line-height:1;letter-spacing:-.04em}.trp-skipCopy{margin:0;color:#aebec5;font-size:13px;line-height:1.55}.trp-skipCopy strong{color:#f7fbfd}.trp-skipFlow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:12px 0;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.trp-skipFlow>div{display:grid;gap:4px}.trp-skipFlow>div:last-child{text-align:right}.trp-skipFlow small{color:#78909a;font-size:8px;font-weight:1000;letter-spacing:.12em}.trp-skipFlow strong{font-size:15px;color:#f5fbfd}.trp-skipFlow>span{color:#f0b258;font-size:18px}.trp-skipError{display:grid;gap:5px;padding:10px 12px;border:1px solid rgba(255,116,122,.34);border-radius:10px;background:rgba(100,18,24,.18);color:#ffd8da}.trp-skipError strong{font-size:9px;letter-spacing:.12em;color:#ff8f95}.trp-skipError span{font-size:11px;line-height:1.45;color:#ffd8da}.trp-skipDialogActions{display:grid;grid-template-columns:1fr 1.12fr;gap:9px;margin-top:2px}.trp-skipDialogActions button{min-height:48px;border-radius:11px;font-size:10px;font-weight:1000;letter-spacing:.055em}.trp-skipCancel{border:1px solid rgba(255,255,255,.11);background:#0b1217;color:#dbe9ee}.trp-skipConfirm{border:1px solid rgba(255,190,82,.42);background:linear-gradient(180deg,#e59a29,#a9610b);color:#120b02;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 12px 28px rgba(173,100,8,.18)}
         .trp-page h1,.trp-page h2,.trp-page h3,.trp-page p,.trp-page span,.trp-page strong,.trp-page small,.trp-page button{max-width:100%;text-overflow:clip}.trp-page h1,.trp-page h2,.trp-page h3,.trp-page p{white-space:normal;overflow:visible;word-break:normal;overflow-wrap:anywhere}
         @media(max-width:900px){
           .trp-page{width:calc(100% - 18px)}.trp-primaryBody{grid-template-columns:1fr}.trp-primaryMetrics{max-width:none}.trp-upcomingGrid{grid-template-columns:1fr}.trp-primaryCopy h2{font-size:46px}
