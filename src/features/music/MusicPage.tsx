@@ -2790,3 +2790,67 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 }
 
+/* MVP_R12_5E_35_MOBILE_TOUCH_ROUTER
+   Mobile precision touch router.
+   If an overlapping invisible layer receives a tap over the music tab rail or
+   Artist/Album density picker, route that click to the visible control beneath it.
+   Desktop is untouched. */
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  const mvpTouchWindow = window as Window & {
+    __mvpMusicTouchRouterR35?: boolean;
+  };
+
+  if (!mvpTouchWindow.__mvpMusicTouchRouterR35) {
+    mvpTouchWindow.__mvpMusicTouchRouterR35 = true;
+
+    const isMvpTouchViewport = () => window.matchMedia("(max-width: 900px)").matches;
+    const pointInside = (element: Element, x: number, y: number) => {
+      const rect = element.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    const visible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
+    };
+    const modalIsOpen = () => Boolean(document.querySelector(
+      ".tr44-enrichmentBack, .tr44-detailBack, .tr10-modalBack, .mvp-auditionModalBackdrop, [role='dialog'][aria-modal='true']"
+    ));
+
+    document.addEventListener("click", (event) => {
+      if (!isMvpTouchViewport() || !event.isTrusted || modalIsOpen()) return;
+
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      const x = event.clientX;
+      const y = event.clientY;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+      const protectedZones = Array.from(document.querySelectorAll<HTMLElement>(
+        '[data-mvp-music="flagship"] .tr52-tabRail, [data-mvp-music="flagship"] .tr34-collectionTools .m37-density'
+      )).filter(visible);
+
+      const zone = protectedZones.find((item) => pointInside(item, x, y));
+      if (!zone) return;
+
+      const controls = Array.from(zone.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], summary"))
+        .filter(visible);
+      const intended = controls.find((item) => pointInside(item, x, y));
+
+      if (intended) {
+        if (intended.contains(target)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        intended.click();
+        return;
+      }
+
+      if (!zone.contains(target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+  }
+}
+

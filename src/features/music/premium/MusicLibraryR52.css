@@ -2385,3 +2385,238 @@
   }
 }
 
+/* MVP_R12_5E_35_MOBILE_TOUCH_ORANGE_3D_RAIL
+   Premium rail + mobile interaction hardening.
+   Layout remains intact. No DSP/player/audio behavior is changed. */
+
+/* Rail foundation: darker neutral material so controls no longer disappear into a blue-on-blue strip. */
+[data-mvp-music="flagship"] .tr52-tabRail{
+  position:relative!important;
+  isolation:isolate!important;
+  padding:6px!important;
+  border:1px solid rgba(116,166,188,.18)!important;
+  border-radius:15px!important;
+  background:
+    linear-gradient(180deg,rgba(14,22,28,.96),rgba(5,10,14,.985))!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.075),
+    inset 0 -2px 5px rgba(0,0,0,.52),
+    0 12px 28px rgba(0,0,0,.22),
+    0 0 0 1px rgba(52,154,194,.035)!important;
+}
+[data-mvp-music="flagship"] .tr52-tabRail::before{
+  content:"";
+  position:absolute;
+  inset:1px;
+  border-radius:13px;
+  pointer-events:none!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.028),transparent 34%)!important;
+  z-index:0;
+}
+[data-mvp-music="flagship"] .tr52-tabs{
+  position:relative!important;
+  z-index:2!important;
+  gap:5px!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button{
+  position:relative!important;
+  z-index:2!important;
+  pointer-events:auto!important;
+  touch-action:manipulation!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  border:1px solid rgba(143,177,193,.07)!important;
+  background:linear-gradient(180deg,rgba(24,34,41,.72),rgba(8,15,20,.82))!important;
+  color:#8799a2!important;
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.035),
+    inset 0 -1px rgba(0,0,0,.34)!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::before,
+[data-mvp-music="flagship"] .tr52-tabs button::after{
+  pointer-events:none!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button::before{
+  opacity:.22!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 46%)!important;
+}
+
+/* r34 correction: rail labels follow the button state again. They are NOT orange by default. */
+[data-mvp-music="flagship"] .tr52-tabLabel{
+  color:inherit!important;
+  font-weight:900!important;
+  text-shadow:none!important;
+}
+
+/* Active tab: dimensional orange control, not a flat fill. */
+[data-mvp-music="flagship"] .tr52-tabs button.is-active{
+  color:#fff!important;
+  border-color:rgba(255,185,76,.82)!important;
+  background:
+    linear-gradient(180deg,#ffb44b 0%,#ee8a1b 34%,#c76108 70%,#853703 100%)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.48),
+    inset 0 2px 7px rgba(255,227,175,.16),
+    inset 0 -4px 8px rgba(82,28,0,.48),
+    inset 1px 0 rgba(255,194,92,.18),
+    inset -1px 0 rgba(104,38,0,.20),
+    0 3px 0 rgba(91,35,2,.72),
+    0 10px 19px rgba(0,0,0,.32),
+    0 0 22px rgba(239,126,19,.23)!important;
+  transform:translateY(-1px)!important;
+  text-shadow:
+    0 1px 1px rgba(65,22,0,.82),
+    0 0 9px rgba(255,237,205,.14)!important;
+  z-index:5!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::before{
+  opacity:1!important;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.30),rgba(255,255,255,.07) 29%,transparent 54%)!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.24)!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active::after{
+  opacity:1!important;
+  border-color:rgba(255,221,163,.38)!important;
+  border-top-color:rgba(255,244,216,.72)!important;
+  border-bottom-color:rgba(104,38,0,.38)!important;
+  box-shadow:
+    inset 0 0 11px rgba(255,188,79,.11),
+    inset 0 -1px rgba(72,22,0,.30)!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabIcon{
+  color:#fff9ef!important;
+  transform:translateY(-.5px) scale(1.07)!important;
+  filter:
+    drop-shadow(0 1px 1px rgba(69,22,0,.72))
+    drop-shadow(0 0 7px rgba(255,220,155,.32))!important;
+}
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabLabel{
+  color:#fff!important;
+  font-weight:1000!important;
+  text-shadow:
+    0 1px 1px rgba(70,23,0,.80),
+    0 0 7px rgba(255,232,190,.12)!important;
+}
+@media(hover:hover){
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover{
+    color:#c5d2d8!important;
+    border-color:rgba(130,181,203,.14)!important;
+    background:linear-gradient(180deg,rgba(30,45,54,.80),rgba(9,18,24,.88))!important;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button.is-active:hover{
+    color:#fff!important;
+    border-color:rgba(255,199,102,.90)!important;
+    background:linear-gradient(180deg,#ffbd5b 0%,#f49322 34%,#cc690b 70%,#8d3b03 100%)!important;
+    transform:translateY(-1px)!important;
+  }
+}
+
+/* Artist + Album directory identity: electric-blue 3D lettering, no surrounding card. */
+[data-mvp-music="flagship"] .tr34-collectionTools>div>span{
+  display:block!important;
+  margin:0 0 7px!important;
+  color:#54d7ff!important;
+  font-size:11px!important;
+  line-height:1!important;
+  font-weight:1000!important;
+  letter-spacing:.105em!important;
+  text-transform:uppercase!important;
+  -webkit-font-smoothing:antialiased!important;
+  text-shadow:
+    0 1px 0 #153849,
+    0 2px 0 #0c2634,
+    0 3px 4px rgba(0,0,0,.72),
+    0 0 9px rgba(71,205,255,.27),
+    0 0 20px rgba(37,165,222,.12)!important;
+}
+[data-mvp-music="flagship"] .tr34-collectionTools>div>h3{
+  color:#f5fafc!important;
+  font-weight:900!important;
+}
+
+/* Mobile: isolate the real control layers from header/decorative hit boxes. */
+@media(max-width:900px){
+  [data-mvp-music="flagship"] .mlv-engine,
+  [data-mvp-music="flagship"] .mlv-engine *{
+    pointer-events:none!important;
+  }
+  [data-mvp-music="flagship"] .tr10-console{
+    position:relative!important;
+    isolation:isolate!important;
+  }
+  [data-mvp-music="flagship"] .tr10-sectionHead{
+    position:relative!important;
+    z-index:1!important;
+    overflow:clip!important;
+  }
+  [data-mvp-music="flagship"] .tr10-headActions,
+  [data-mvp-music="flagship"] .tr10-headActions button{
+    position:relative!important;
+    z-index:1!important;
+  }
+  [data-mvp-music="flagship"] .tr10-statusPanel{
+    position:relative!important;
+    z-index:3!important;
+  }
+  [data-mvp-music="flagship"] .tr52-tabRail{
+    z-index:30!important;
+    pointer-events:auto!important;
+    overflow:hidden!important;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs{
+    z-index:31!important;
+    pointer-events:auto!important;
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    -webkit-overflow-scrolling:touch!important;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button{
+    z-index:32!important;
+    pointer-events:auto!important;
+    touch-action:manipulation!important;
+  }
+  [data-mvp-music="flagship"] .tr34-collectionBrowse,
+  [data-mvp-music="flagship"] .tr34-collectionTools{
+    position:relative!important;
+    z-index:20!important;
+    isolation:isolate!important;
+    pointer-events:auto!important;
+  }
+  [data-mvp-music="flagship"] .m37-density{
+    position:relative!important;
+    z-index:22!important;
+    pointer-events:auto!important;
+    isolation:isolate!important;
+  }
+  [data-mvp-music="flagship"] .m37-density button{
+    position:relative!important;
+    z-index:23!important;
+    pointer-events:auto!important;
+    touch-action:manipulation!important;
+  }
+  [data-mvp-music="flagship"] .tr10-console button,
+  [data-mvp-music="flagship"] .tr10-console a,
+  [data-mvp-music="flagship"] .tr10-console input,
+  [data-mvp-music="flagship"] .tr10-console select,
+  [data-mvp-music="flagship"] .tr10-console summary{
+    -webkit-tap-highlight-color:transparent!important;
+  }
+  [data-mvp-music="flagship"] .tr10-console *::before,
+  [data-mvp-music="flagship"] .tr10-console *::after{
+    pointer-events:none;
+  }
+  [data-mvp-music="flagship"] .tr34-collectionTools>div>span{
+    font-size:10.2px!important;
+    letter-spacing:.095em!important;
+  }
+  [data-mvp-music="flagship"] .tr52-tabs button.is-active{
+    box-shadow:
+      inset 0 1px rgba(255,255,255,.45),
+      inset 0 -3px 6px rgba(77,26,0,.46),
+      0 2px 0 rgba(84,31,1,.68),
+      0 7px 14px rgba(0,0,0,.29),
+      0 0 16px rgba(237,122,18,.19)!important;
+  }
+}
+
