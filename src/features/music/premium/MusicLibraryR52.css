@@ -2302,3 +2302,86 @@
   }
 }
 
+/* MVP_R12_5E_34_PREMIUM_ORANGE_TAB_TYPOGRAPHY
+   Typography-only polish. No rail geometry, layout, icons, or tab behavior changed. */
+
+/* Rail names: warm premium orange so SONGS / ARTISTS / ALBUMS / PLAYLISTS /
+   SMART MIX / INTELLIGENCE / DISCOVER / AUDITION read as deliberate navigation. */
+[data-mvp-music="flagship"] .tr52-tabLabel{
+  color:#e5a64d!important;
+  font-size:10.6px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:.055em!important;
+  text-transform:uppercase!important;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,.75),
+    0 0 9px rgba(247,155,43,.055)!important;
+}
+
+[data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabLabel{
+  color:#ffc15b!important;
+  font-weight:1000!important;
+  letter-spacing:.06em!important;
+  transform:translateY(-.25px)!important;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,.72),
+    0 0 8px rgba(255,183,72,.30),
+    0 0 18px rgba(241,143,33,.13)!important;
+}
+
+@media(hover:hover){
+  [data-mvp-music="flagship"] .tr52-tabs button:not(.is-active):hover .tr52-tabLabel{
+    color:#f1b65c!important;
+    text-shadow:
+      0 1px 0 rgba(0,0,0,.72),
+      0 0 10px rgba(246,160,49,.11)!important;
+  }
+}
+
+/* Artist / Album directory eyebrow now matches the premium orange navigation language. */
+[data-mvp-music="flagship"] .tr34-collectionTools>div>span{
+  display:block!important;
+  margin:0 0 7px!important;
+  color:#f3aa42!important;
+  font-size:9.4px!important;
+  line-height:1!important;
+  font-weight:1000!important;
+  letter-spacing:.14em!important;
+  text-transform:uppercase!important;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,.7),
+    0 0 12px rgba(242,150,39,.12)!important;
+}
+
+[data-mvp-music="flagship"] .tr34-collectionTools>div>h3{
+  color:#f7fbfd!important;
+  font-size:18px!important;
+  line-height:1.05!important;
+  font-weight:950!important;
+  letter-spacing:-.025em!important;
+}
+
+@media(max-width:760px){
+  [data-mvp-music="flagship"] .tr52-tabLabel{
+    font-size:8.55px!important;
+    font-weight:950!important;
+    letter-spacing:.04em!important;
+  }
+
+  [data-mvp-music="flagship"] .tr52-tabs button.is-active .tr52-tabLabel{
+    font-size:8.7px!important;
+    letter-spacing:.045em!important;
+  }
+
+  [data-mvp-music="flagship"] .tr34-collectionTools>div>span{
+    margin-bottom:6px!important;
+    font-size:8.6px!important;
+    letter-spacing:.12em!important;
+  }
+
+  [data-mvp-music="flagship"] .tr34-collectionTools>div>h3{
+    font-size:16.5px!important;
+  }
+}
+
