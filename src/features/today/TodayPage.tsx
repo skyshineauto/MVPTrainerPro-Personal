@@ -701,7 +701,7 @@ export function TodayPage() {
     try {
       const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v1", {
         p_session_id: skipCandidate.id,
-        p_reason: "user_skip",
+        p_reason: "manual_skip_r41c",
       });
       if (skipError) {
         const message = String(skipError.message ?? "");
