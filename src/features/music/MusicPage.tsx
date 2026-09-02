@@ -683,6 +683,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
   const [healthFilter, setHealthFilter] = useState<LibraryHealth>("all");
   const [pageSize, setPageSize] = useState<PageSize>(24);
+  // MVP_R12_5E_36_MOBILE_MANAGE_MODES
+  const [mobileSelectMode, setMobileSelectMode] = useState(false);
+  const [mobileReorderMode, setMobileReorderMode] = useState(false);
   const [page, setPage] = useState(1);
   const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
   const [resolvedArtworkIds, setResolvedArtworkIds] = useState<Set<string>>(new Set());
@@ -2268,7 +2271,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           </div>
         </section>
 
-        <div ref={tabNavRef} className="tr52-tabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); if (value === "discover") setDiscoveryView("archive"); }} /></div>
+        <div ref={tabNavRef} className="tr52-tabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
 
         {/* MVP_ENRICH_COMPLETION_HIDDEN_V25 */ message && !/(updated or checked|already complete)/i.test(message) ? <div className="tr10-message">{message}</div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
@@ -2279,11 +2282,15 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             <div className="tr52-energyFilter" role="group" aria-label="Energy filter"><span>ENERGY</span><div>{(["all","low","medium","high"] as EnergyFilter[]).map((level) => <button key={level} type="button" className={`is-${level}${energyFilter === level ? " is-active" : ""}`} aria-pressed={energyFilter === level} onClick={() => setEnergyFilter(level)}>{level === "all" ? "ALL" : level.toUpperCase()}</button>)}</div></div>
             <MusicPremiumSelect label="SORT" value={songSort} onChange={(next) => setSongSort(next as SongSort)} options={(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => ({ value: sort, label: songSortLabel(sort) }))} />
             <MusicPremiumSelect label="SHOW" value={pageSize} onChange={(next) => setPageSize(Number(next) as PageSize)} options={[{value:12,label:"12"},{value:24,label:"24"},{value:48,label:"48"}]} />
+            <div className="tr36-mobileManage" aria-label="Mobile song list controls">
+              <button type="button" className={mobileSelectMode ? "is-active" : ""} aria-pressed={mobileSelectMode} onClick={() => { setMobileSelectMode((current) => { const next = !current; if (next) setMobileReorderMode(false); if (!next) setSelectedSongIds(new Set()); return next; }); }}>SELECT</button>
+              <button type="button" className={mobileReorderMode ? "is-active" : ""} aria-pressed={mobileReorderMode} onClick={() => { setMobileReorderMode((current) => { const next = !current; if (next) { setMobileSelectMode(false); setSelectedSongIds(new Set()); } return next; }); }}>ORDER</button>
+            </div>
           </div>
 
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
-          <div className="m37-songTable tr10-table is-list">
+          <div className={`m37-songTable tr10-table is-list${mobileSelectMode ? " is-mobile-selecting" : ""}${mobileReorderMode ? " is-mobile-reordering" : ""}`}>
             <div className="tr10-tableHead">
               <span className="tr10-orderHead">ORDER</span><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectVisible} /></label>
               <span className="tr10-trackHead">TRACK</span><span className="tr10-timeHead">TIME</span><span className="tr10-energyHead">ENERGY</span>
@@ -2389,7 +2396,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
         {tab === "playlists" ? <section className="m37-playlists tr21-playlists tr56-playlists">
           <aside className="tr21-playlistDock tr56-playlistDock">
-            <div className="tr21-playlistDockHead"><span>YOUR COLLECTIONS</span><b>{regularPlaylists.length}</b></div>
+            <div className="tr21-playlistDockHead"><span>PLAYLIST DIRECTORY</span><b>{regularPlaylists.length}</b></div>
             <div className="tr21-createPlaylist"><input value={newPlaylistName} onChange={(event) => setNewPlaylistName(event.target.value)} placeholder="Name a new playlist" onKeyDown={(event) => { if (event.key === "Enter") void createPlaylist(); }} /><button type="button" onClick={() => void createPlaylist()} aria-label="Create playlist"><span aria-hidden>+</span></button></div>
             <div className="tr21-playlistChoices">{regularPlaylists.map((playlist) => { const count=(playlistTrackIds[playlist.id] || []).length; const active=selectedPlaylistId === playlist.id; return <motion.button type="button" key={playlist.id} className={active ? "is-active" : ""} aria-pressed={active} onClick={() => setSelectedPlaylistId(playlist.id)} whileTap={{scale:.985}}><span className="tr56-playlistChoiceIcon"><PlaylistPremiumIcon /></span><span className="tr56-playlistChoiceCopy"><strong>{playlist.name}</strong><small>{count} SONG{count===1?"":"S"}</small></span><em aria-hidden>›</em></motion.button>; })}</div>
           </aside>
@@ -2789,68 +2796,3 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     );
   }
 }
-
-/* MVP_R12_5E_35_MOBILE_TOUCH_ROUTER
-   Mobile precision touch router.
-   If an overlapping invisible layer receives a tap over the music tab rail or
-   Artist/Album density picker, route that click to the visible control beneath it.
-   Desktop is untouched. */
-if (typeof window !== "undefined" && typeof document !== "undefined") {
-  const mvpTouchWindow = window as Window & {
-    __mvpMusicTouchRouterR35?: boolean;
-  };
-
-  if (!mvpTouchWindow.__mvpMusicTouchRouterR35) {
-    mvpTouchWindow.__mvpMusicTouchRouterR35 = true;
-
-    const isMvpTouchViewport = () => window.matchMedia("(max-width: 900px)").matches;
-    const pointInside = (element: Element, x: number, y: number) => {
-      const rect = element.getBoundingClientRect();
-      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-    };
-    const visible = (element: HTMLElement) => {
-      const style = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0 && rect.width > 0 && rect.height > 0;
-    };
-    const modalIsOpen = () => Boolean(document.querySelector(
-      ".tr44-enrichmentBack, .tr44-detailBack, .tr10-modalBack, .mvp-auditionModalBackdrop, [role='dialog'][aria-modal='true']"
-    ));
-
-    document.addEventListener("click", (event) => {
-      if (!isMvpTouchViewport() || !event.isTrusted || modalIsOpen()) return;
-
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-
-      const x = event.clientX;
-      const y = event.clientY;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-
-      const protectedZones = Array.from(document.querySelectorAll<HTMLElement>(
-        '[data-mvp-music="flagship"] .tr52-tabRail, [data-mvp-music="flagship"] .tr34-collectionTools .m37-density'
-      )).filter(visible);
-
-      const zone = protectedZones.find((item) => pointInside(item, x, y));
-      if (!zone) return;
-
-      const controls = Array.from(zone.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], summary"))
-        .filter(visible);
-      const intended = controls.find((item) => pointInside(item, x, y));
-
-      if (intended) {
-        if (intended.contains(target)) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        intended.click();
-        return;
-      }
-
-      if (!zone.contains(target)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    }, true);
-  }
-}
-
