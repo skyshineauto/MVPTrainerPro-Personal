@@ -29,6 +29,7 @@ import {
   musicMatchTier,
   needsMusicArtwork,
   needsMusicMetadata,
+  type MusicLookupDiagnostics,
   type MusicMetadataCandidate,
 } from "../../lib/musicMetadata";
 import {
@@ -744,6 +745,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [detailStatusText, setDetailStatusText] = useState("");
   const [detailIntelligence, setDetailIntelligence] = useState<MusicTrackIntelligence | null>(null);
   const [detailIntelligenceBusy, setDetailIntelligenceBusy] = useState(false);
+  const detailSessionRef = useRef(0);
+  const detailLookupRequestRef = useRef(0);
+  const detailIntelligenceRequestRef = useRef(0);
   const [playlistModalTrackIds, setPlaylistModalTrackIds] = useState<string[]>([]);
   const [playlistModalSelections, setPlaylistModalSelections] = useState<Set<string>>(new Set());
   const [playlistModalName, setPlaylistModalName] = useState("");
@@ -1427,30 +1431,106 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     if (orderSaveTimerRef.current != null) window.clearTimeout(orderSaveTimerRef.current);
   }, []);
 
+  function draftFromTrack(track: MusicTrack) {
+    return {
+      title: track.title,
+      artist: track.artist || "",
+      album: track.album || "",
+      releaseYear: track.release_year ? String(track.release_year) : "",
+      genre: track.genre || "",
+    };
+  }
+
+  function updateDetailDraftField(
+    trackId: string,
+    field: keyof DraftMap[string],
+    value: string,
+    invalidateLookup = false
+  ) {
+    setDrafts((current) => ({
+      ...current,
+      [trackId]: { ...current[trackId], [field]: value },
+    }));
+
+    if (invalidateLookup) {
+      detailLookupRequestRef.current += 1;
+      setDetailCandidates([]);
+      setDetailSelectedCandidateId(null);
+      setDetailPendingCandidate(null);
+      setDetailSaveState("idle");
+      setDetailStatusText("");
+    }
+  }
+
   function openDetail(track: MusicTrack) {
-    setDetailTrackId(track.id); setDetailMode("edit"); setDetailCandidates([]); setDetailSelectedCandidateId(null); setDetailPendingCandidate(null); setDetailSaveState("idle"); setDetailStatusText(""); setDetailIntelligence(null);
-    void getMusicTrackIntelligence(track.id).then((value) => setDetailIntelligence(value)).catch(() => undefined);
+    const sessionId = ++detailSessionRef.current;
+    detailLookupRequestRef.current += 1;
+    const intelligenceRequestId = ++detailIntelligenceRequestRef.current;
+
+    // Every song gets a clean editor workspace. Unsaved state, search results,
+    // staged artwork and async responses from the previous song cannot leak in.
+    setDrafts((current) => ({ ...current, [track.id]: draftFromTrack(track) }));
+    setDetailTrackId(track.id);
+    setDetailMode("edit");
+    setDetailCandidates([]);
+    setDetailSelectedCandidateId(null);
+    setDetailPendingCandidate(null);
+    setDetailSaveState("idle");
+    setDetailStatusText("");
+    setDetailIntelligence(null);
+    setDetailIntelligenceBusy(false);
+
+    void getMusicTrackIntelligence(track.id)
+      .then((value) => {
+        if (
+          detailSessionRef.current !== sessionId ||
+          detailIntelligenceRequestRef.current !== intelligenceRequestId
+        ) return;
+        setDetailIntelligence(value);
+      })
+      .catch(() => undefined);
   }
+
   function closeDetail() {
-    setDetailTrackId(null); setDetailMode("edit"); setDetailCandidates([]); setDetailSelectedCandidateId(null); setDetailPendingCandidate(null); setDetailSaveState("idle"); setDetailStatusText(""); setDetailIntelligence(null); setDetailIntelligenceBusy(false);
+    detailSessionRef.current += 1;
+    detailLookupRequestRef.current += 1;
+    detailIntelligenceRequestRef.current += 1;
+    setDetailTrackId(null);
+    setDetailMode("edit");
+    setDetailCandidates([]);
+    setDetailSelectedCandidateId(null);
+    setDetailPendingCandidate(null);
+    setDetailSaveState("idle");
+    setDetailStatusText("");
+    setDetailIntelligence(null);
+    setDetailIntelligenceBusy(false);
   }
+
   async function refreshDetailIntelligence(track: MusicTrack, force = false) {
     if (detailIntelligenceBusy) return;
+    const sessionId = detailSessionRef.current;
+    const requestId = ++detailIntelligenceRequestRef.current;
+    const isCurrent = () =>
+      detailSessionRef.current === sessionId &&
+      detailIntelligenceRequestRef.current === requestId;
+
     setDetailIntelligenceBusy(true);
     setDetailSaveState("idle");
     setDetailStatusText(force ? "Reanalyzing Song DNA and Artist DNA…" : "Building Song DNA and Artist DNA…");
     try {
       const intelligence = await analyzeMusicTrackIntelligence(track, {
         force,
-        onStage: (_stage, detail) => setDetailStatusText(detail),
+        onStage: (_stage, detail) => { if (isCurrent()) setDetailStatusText(detail); },
       });
+      if (!isCurrent()) return;
       setDetailIntelligence(intelligence);
       setDetailStatusText(intelligence.status === "processing" ? "MVP Intelligence ready • deep audio analysis continues in the background." : "MVP Intelligence analyzed ✓");
     } catch (caught) {
+      if (!isCurrent()) return;
       setDetailSaveState("error");
       setDetailStatusText(caught instanceof Error ? caught.message : "Could not analyze this song.");
     } finally {
-      setDetailIntelligenceBusy(false);
+      if (isCurrent()) setDetailIntelligenceBusy(false);
     }
   }
   async function saveTrack(track: MusicTrack) {
@@ -1490,29 +1570,108 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }
 
   async function findDetailMatches(track: MusicTrack, mode: "info_results" | "artwork_results") {
-    setDetailMode(mode); setDetailSaveState("searching"); setDetailStatusText(mode === "artwork_results" ? "Searching the identified recording for album artwork…" : "Searching for the exact recording…"); setDetailCandidates([]); setDetailSelectedCandidateId(null);
+    const sessionId = detailSessionRef.current;
+    const requestId = ++detailLookupRequestRef.current;
+    const isCurrent = () =>
+      detailSessionRef.current === sessionId &&
+      detailLookupRequestRef.current === requestId;
+
+    const draft = drafts[track.id] || draftFromTrack(track);
+    const lookupTrack: MusicTrack = {
+      ...track,
+      // Find Song Info searches what is on screen RIGHT NOW. The user does not
+      // need to save a corrected artist/title and reopen the editor first.
+      title: draft.title.trim() || track.title,
+      artist: draft.artist.trim() || null,
+      album: draft.album.trim() || null,
+      release_year: draft.releaseYear.trim() ? Number(draft.releaseYear) || null : null,
+      genre: draft.genre.trim() || null,
+    };
+
+    let diagnostics: MusicLookupDiagnostics = {
+      rawCandidates: 0,
+      acceptedCandidates: 0,
+      returnedCandidates: 0,
+      reason: "no_catalog_results",
+    };
+
+    setDetailMode(mode);
+    setDetailSaveState("searching");
+    setDetailStatusText(
+      mode === "artwork_results"
+        ? `Searching artwork for ${lookupTrack.artist ? `${lookupTrack.artist} • ` : ""}${lookupTrack.title}…`
+        : `Searching for ${lookupTrack.artist ? `${lookupTrack.artist} • ` : ""}${lookupTrack.title}…`
+    );
+    setDetailCandidates([]);
+    setDetailSelectedCandidateId(null);
+
     try {
-      const candidates = await findMusicMetadataCandidates(track, {
+      const candidates = await findMusicMetadataCandidates(lookupTrack, {
+        includeLowConfidence: true,
+        onDiagnostics: (info) => { diagnostics = info; },
         onRetry: ({ status, delayMs }) => {
+          if (!isCurrent()) return;
           setDetailStatusText(
             `Lookup service busy${status ? ` (${status})` : ""} • retrying automatically in ${Math.max(1, Math.ceil(delayMs / 1000))}s…`
           );
         },
       });
-      setDetailCandidates(candidates); setDetailSelectedCandidateId(candidates[0]?.sourceId || null); setDetailSaveState("idle");
+
+      if (!isCurrent()) return;
+
+      setDetailCandidates(candidates);
+      setDetailSelectedCandidateId(candidates[0]?.sourceId || null);
+      setDetailSaveState("idle");
+
       const best = candidates[0];
-      if (mode === "info_results" && best && best.confidence >= 0.86) {
-        // A high-confidence identification stages both metadata and its album art
-        // in one step. The user still gets a final Save Changes confirmation.
-        setDrafts((current) => ({ ...current, [track.id]: { title: best.title, artist: best.artist, album: best.album, releaseYear: best.releaseYear ? String(best.releaseYear) : "", genre: best.genre || "" } }));
+      const verifiedResults = diagnostics.reason === "matches";
+
+      if (mode === "info_results" && best && verifiedResults && best.confidence >= 0.86) {
+        // High-confidence identification stages metadata + the ranked official
+        // artwork in the editor. Nothing is written until SAVE CHANGES.
+        setDrafts((current) => ({
+          ...current,
+          [track.id]: {
+            title: best.title,
+            artist: best.artist,
+            album: best.album,
+            releaseYear: best.releaseYear ? String(best.releaseYear) : "",
+            genre: best.genre || "",
+          },
+        }));
         setDetailPendingCandidate(best);
         setDetailMode("edit");
         setDetailSaveState("idle");
-        setDetailStatusText(`Best match loaded • ${Math.round(best.confidence * 100)}%${best.artworkUrl ? " • ALBUM ART READY" : ""} • Review and SAVE CHANGES.`);
+        setDetailStatusText(
+          `Best match loaded • ${Math.round(best.confidence * 100)}%${best.artworkUrl ? " • HIGH-RES ART READY" : ""} • Review and SAVE CHANGES.`
+        );
         return;
       }
-      setDetailStatusText(candidates.length ? `${candidates.length} possible match${candidates.length === 1 ? "" : "es"} found • Best ${Math.round(candidates[0].confidence * 100)}%` : "No reliable matches found. Check the title/artist and search again.");
-    } catch (caught) { setDetailSaveState("error"); setDetailStatusText(caught instanceof Error ? caught.message : "Music lookup failed."); }
+
+      if (candidates.length) {
+        if (diagnostics.reason === "low_confidence") {
+          setDetailStatusText(
+            `${candidates.length} possible catalog result${candidates.length === 1 ? "" : "s"} found • confidence is too low for automatic changes • choose manually.`
+          );
+        } else {
+          setDetailStatusText(
+            `${candidates.length} match${candidates.length === 1 ? "" : "es"} found • Best ${Math.round(candidates[0].confidence * 100)}%`
+          );
+        }
+      } else if (diagnostics.reason === "low_confidence") {
+        setDetailStatusText(
+          "Catalog results were returned, but none matched the current artist/title strongly enough. Correct either field and search again."
+        );
+      } else {
+        setDetailStatusText(
+          "No catalog results were returned for the current artist/title. Check the spelling or try the title with the artist corrected."
+        );
+      }
+    } catch (caught) {
+      if (!isCurrent()) return;
+      setDetailSaveState("error");
+      setDetailStatusText(caught instanceof Error ? caught.message : "Music lookup failed.");
+    }
   }
   function applyDetailInfoCandidate(candidate: MusicMetadataCandidate) {
     if (!detailTrack) return;
@@ -1749,11 +1908,6 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     }
   }
 
-  function openReviewQueue() {
-    const next = reviewItems.find((item) => !reviewResolvedIds.has(item.trackId));
-    if (!next) return;
-    setReviewTrackId(next.trackId); setReviewSelectedCandidateId(next.candidates[0]?.sourceId || null);
-  }
   function advanceReview(currentTrackId: string) {
     const resolved = new Set([...reviewResolvedIds, currentTrackId]);
     const next = reviewItems.find((item) => !resolved.has(item.trackId));
@@ -2462,7 +2616,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             <button className={`${healthFilter === "needs_info" ? "is-active " : ""}is-needs`} onClick={() => setHealthFilter("needs_info")}><span>NEEDS INFO</span><b>{needsInfoCount}</b></button>
             <button className={`${healthFilter === "missing_art" ? "is-active " : ""}is-art`} onClick={() => setHealthFilter("missing_art")}><span>MISSING ART</span><b>{missingArtCount}</b></button>
             <button className={`${healthFilter === "liked" ? "is-active " : ""}is-liked`} onClick={() => setHealthFilter("liked")}><span>LIKED</span><b>{likedCount}</b></button>
-            <button className={`${healthFilter === "review" ? "is-active " : ""}is-review`} onClick={() => setHealthFilter("review")}><span>REVIEW</span><b>{Math.max(reviewCount, reviewItems.length)}</b></button>
+            <button className={`${healthFilter === "review" ? "is-active " : ""}is-review`} onClick={() => setHealthFilter("review")}><span>REVIEW</span><b>{Math.max(reviewCount, reviewRemainingCount)}</b></button>
           </div>
         </section>
 
@@ -2806,10 +2960,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Complete records are skipped. MVP searches only missing or outdated song info, artwork and intelligence.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => { if (!enrichment.running) setMessage(""); setEnrichment((current) => ({ ...current, open: false, minimized: current.running })); }}>{enrichment.running ? "RUN IN BACKGROUND" : "CLOSE"}</button></div></footer>
       </motion.section></div>, document.body) : null}
 
-      {reviewItems.length && reviewRemainingCount > 0 ? <button className="tr10-reviewDock" onClick={openReviewQueue}>REVIEW {reviewRemainingCount} POSSIBLE MATCH{reviewRemainingCount === 1 ? "" : "ES"} ›</button> : null}
-
-      {detailTrack && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-detailPortal tr44-detailBack" onMouseDown={closeDetail}><motion.section className="tr10-inspector tr44-songInspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 320, damping: 32 }}>
-        <header className="tr44-songHeader"><div className="tr10-inspectIdentity tr44-songIdentity">{detailPendingCandidate?.artworkUrl ? <img className="tr10-detailPreviewArt" src={detailPendingCandidate.artworkUrl} alt="" /> : <TrackArtwork track={detailTrack} size="detail" />}<div><span>SONG CONTROL</span><h2>{detailTrack.title}</h2><p>{artistLabel(detailTrack)}{detailTrack.album ? ` • ${detailTrack.album}` : ""}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button className="tr44-close" onClick={closeDetail} aria-label="Close song control">×</button></header>
+      {detailTrack && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-detailPortal tr44-detailBack" onMouseDown={closeDetail}><motion.section key={detailTrack.id} className="tr10-inspector tr44-songInspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 320, damping: 32 }}>
+        <header className="tr44-songHeader"><div className="tr10-inspectIdentity tr44-songIdentity">{detailPendingCandidate?.artworkUrl ? <img className="tr10-detailPreviewArt" src={detailPendingCandidate.artworkUrl} alt="" /> : <TrackArtwork track={detailTrack} size="detail" />}<div><span>SONG CONTROL</span><h2>{detailDraft?.title || detailTrack.title}</h2><p>{detailDraft?.artist || artistLabel(detailTrack)}{(detailDraft?.album || detailTrack.album) ? ` • ${detailDraft?.album || detailTrack.album}` : ""}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button className="tr44-close" onClick={closeDetail} aria-label="Close song control">×</button></header>
         {detailMode === "edit" ? <>
           <div className="tr10-inspectorScroll tr44-inspectorScroll">
             <div className="tr10-inspectCommands tr44-commandRail">
@@ -2822,7 +2974,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
             </div>
             {detailStatusText ? <div className={`tr10-detailStatus tr44-detailStatus is-${detailSaveState}`}>{detailStatusText}</div> : null}
 
-            <section className="tr44-recordSection"><div className="tr44-sectionHeading"><div><span>LIBRARY RECORD</span><h3>Song information</h3></div><small>Manual edits stay yours. Find Song Info can stage a verified match before you save.</small></div><div className="tr10-inspectGrid tr44-metadataGrid"><label><span>TITLE</span><input value={drafts[detailTrack.id]?.title || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],title:event.target.value}}))} /></label><label><span>ARTIST</span><input value={drafts[detailTrack.id]?.artist || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],artist:event.target.value}}))} /></label><label><span>ALBUM</span><input value={drafts[detailTrack.id]?.album || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],album:event.target.value}}))} /></label><label><span>YEAR</span><input inputMode="numeric" value={drafts[detailTrack.id]?.releaseYear || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],releaseYear:event.target.value}}))} /></label><label><span>GENRE / STYLE</span><input value={drafts[detailTrack.id]?.genre || ""} onChange={(event) => setDrafts((current) => ({...current,[detailTrack.id]:{...current[detailTrack.id],genre:event.target.value}}))} /></label><div className="tr10-artControls tr44-artControls"><input ref={artworkInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void replaceArtwork(detailTrack,event.target.files?.[0] || null)} /><span>ARTWORK</span><div><button onClick={() => artworkInputRef.current?.click()}>{needsMusicArtwork(detailTrack) ? "+ ADD" : "REPLACE"}</button>{!needsMusicArtwork(detailTrack) ? <button className="is-danger" onClick={() => void clearArtwork(detailTrack)}>REMOVE</button> : null}</div></div></div></section>
+            <section className="tr44-recordSection"><div className="tr44-sectionHeading"><div><span>LIBRARY RECORD</span><h3>Song information</h3></div><small>Manual edits stay yours. Find Song Info can stage a verified match before you save.</small></div><div className="tr10-inspectGrid tr44-metadataGrid"><label><span>TITLE</span><input value={drafts[detailTrack.id]?.title || ""} onChange={(event) => updateDetailDraftField(detailTrack.id,"title",event.target.value,true)} /></label><label><span>ARTIST</span><input value={drafts[detailTrack.id]?.artist || ""} onChange={(event) => updateDetailDraftField(detailTrack.id,"artist",event.target.value,true)} /></label><label><span>ALBUM</span><input value={drafts[detailTrack.id]?.album || ""} onChange={(event) => updateDetailDraftField(detailTrack.id,"album",event.target.value)} /></label><label><span>YEAR</span><input inputMode="numeric" value={drafts[detailTrack.id]?.releaseYear || ""} onChange={(event) => updateDetailDraftField(detailTrack.id,"releaseYear",event.target.value)} /></label><label><span>GENRE / STYLE</span><input value={drafts[detailTrack.id]?.genre || ""} onChange={(event) => updateDetailDraftField(detailTrack.id,"genre",event.target.value)} /></label><div className="tr10-artControls tr44-artControls"><input ref={artworkInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void replaceArtwork(detailTrack,event.target.files?.[0] || null)} /><span>ARTWORK</span><div><button onClick={() => artworkInputRef.current?.click()}>{needsMusicArtwork(detailTrack) ? "+ ADD" : "REPLACE"}</button>{!needsMusicArtwork(detailTrack) ? <button className="is-danger" onClick={() => void clearArtwork(detailTrack)}>REMOVE</button> : null}</div></div></div></section>
 
             <section className="tr44-intelligenceSection"><div className="tr44-sectionHeading"><div><span>MVP INTELLIGENCE</span><h3>Song DNA + Artist DNA</h3></div><div className={`tr44-intelligenceState is-${detailIntelligenceForTrack?.status || "missing"}`}><i />{intelligenceStatusLabel(detailIntelligenceForTrack)}</div></div>
               {detailIntelligenceForTrack ? <>
@@ -2842,7 +2994,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <footer className="tr44-songFooter"><button onClick={() => openPlaylistModal([detailTrack.id])}><PlaylistPremiumIcon /> PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => void deleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : "SAVE CHANGES"}</button></footer>
         </> : <>
           <div className="tr10-detailLookup"><div className="tr10-detailLookupHead"><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>← BACK TO SONG</button><div><span>{detailMode === "artwork_results" ? "ARTWORK RESULTS" : "SONG MATCH RESULTS"}</span><h3>{detailMode === "artwork_results" ? "Choose the correct cover" : "Choose the correct recording"}</h3><p>{detailStatusText}</p></div></div>
-          <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const tier = musicMatchTier(candidate.confidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No useful matches found.</div> : null}</div></div>
+          <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const tier = musicMatchTier(candidate.confidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No matching catalog results to show.</div> : null}</div></div>
           <div className="tr10-detailLookupFooter"><div><strong>{detailSelectedCandidate ? `${detailSelectedCandidate.title} • ${detailSelectedCandidate.artist}` : "Select a result"}</strong><small>Nothing changes until you apply the selection.</small></div><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>CANCEL</button><button className="is-primary" disabled={!detailSelectedCandidate || detailSaveState === "saving"} onClick={() => { if (!detailSelectedCandidate) return; if (detailMode === "artwork_results") void applyDetailArtworkCandidate(detailSelectedCandidate); else applyDetailInfoCandidate(detailSelectedCandidate); }}>{detailMode === "artwork_results" ? "USE ARTWORK" : "APPLY MATCH"}</button></div>
         </>}
       </motion.section></div>, document.body) : null}

@@ -15,6 +15,7 @@ export type MusicMetadataCandidate = {
   durationSeconds: number | null;
   confidence: number;
   source: "itunes" | "musicbrainz";
+  releaseQuality?: number;
 };
 
 export type MusicEnrichmentResult = {
@@ -75,8 +76,17 @@ export type MusicLookupRetryInfo = {
   delayMs: number;
 };
 
+export type MusicLookupDiagnostics = {
+  rawCandidates: number;
+  acceptedCandidates: number;
+  returnedCandidates: number;
+  reason: "matches" | "no_catalog_results" | "low_confidence";
+};
+
 type LookupOptions = {
   onRetry?: (info: MusicLookupRetryInfo) => void;
+  onDiagnostics?: (info: MusicLookupDiagnostics) => void;
+  includeLowConfidence?: boolean;
 };
 
 type LookupSignals = {
@@ -153,12 +163,24 @@ function normalizeArtist(value: string) {
   return normalize(value).replace(/^the\s+/, "").trim();
 }
 
+function compactArtistIdentity(value: string) {
+  return normalizeArtist(value).replace(/\s+/g, "");
+}
+
 function artistTextScore(left: string, right: string) {
   const direct = textScore(left, right);
   const a = normalizeArtist(left);
   const b = normalizeArtist(right);
   if (!a || !b) return direct;
-  if (a === b) return Math.max(direct, 0.99);
+  if (a === b) return Math.max(direct, 0.995);
+
+  // Artist identity must survive missing spaces and punctuation from imported
+  // filenames/tags. Examples: PapaRoach = Papa Roach, ThreeDaysGrace =
+  // Three Days Grace. This is an identity comparison, not a broad fuzzy pass.
+  const compactA = compactArtistIdentity(left);
+  const compactB = compactArtistIdentity(right);
+  if (compactA && compactA === compactB) return Math.max(direct, 0.995);
+
   return Math.max(direct, tokenScore(a, b));
 }
 
@@ -419,11 +441,36 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
   };
 }
 
-function artwork600(url?: string) {
+function artwork1200(url?: string) {
   if (!url) return null;
   return url
-    .replace(/\/100x100bb\./, "/600x600bb.")
-    .replace(/\/100x100bb-/, "/600x600bb-");
+    .replace(/\/\d+x\d+bb\./, "/1200x1200bb.")
+    .replace(/\/\d+x\d+bb-/, "/1200x1200bb-");
+}
+
+function releaseQualityFromAlbum(album: string | null | undefined) {
+  const value = (album || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return 0.2;
+
+  if (/\b(karaoke|tribute|cover versions?|sound alike)\b/.test(value)) return 0.05;
+  if (/\b(various artists|compilation)\b/.test(value)) return 0.18;
+  if (/\b(greatest hits|best of|the best|essential|anthology|collection|ultimate hits|hits collection)\b/.test(value)) return 0.34;
+  if (/\b(remix|remixes|club mix)\b/.test(value)) return 0.42;
+  if (/\b(live|concert)\b/.test(value)) return 0.5;
+  if (/\b(soundtrack|motion picture|original score)\b/.test(value)) return 0.62;
+  if (/\b(single)\b/.test(value)) return 0.84;
+  if (/\b(deluxe|remaster|anniversary|expanded edition)\b/.test(value)) return 0.9;
+  return 1;
+}
+
+function candidateReleaseQuality(candidate: Pick<MusicMetadataCandidate, "album" | "releaseQuality">) {
+  return candidate.releaseQuality ?? releaseQualityFromAlbum(candidate.album);
 }
 
 function yearFromDate(value?: string) {
@@ -452,7 +499,12 @@ function exactAgainst(values: string[], candidate: string) {
 
 function artistExactAgainst(values: string[], candidate: string) {
   const target = normalizeArtist(candidate);
-  return values.some((value) => normalizeArtist(value) === target);
+  const compactTarget = compactArtistIdentity(candidate);
+  return values.some((value) => {
+    if (normalizeArtist(value) === target) return true;
+    const compactValue = compactArtistIdentity(value);
+    return Boolean(compactValue && compactTarget && compactValue === compactTarget);
+  });
 }
 
 function scoreCandidate(
@@ -608,11 +660,12 @@ async function searchItunes(
           album: item.collectionName || "",
           releaseYear: yearFromDate(item.releaseDate),
           genre: item.primaryGenreName || null,
-          artworkUrl: artwork600(item.artworkUrl100),
+          artworkUrl: artwork1200(item.artworkUrl100),
           durationSeconds: item.trackTimeMillis
             ? Math.round(item.trackTimeMillis / 1000)
             : null,
           source: "itunes" as const,
+          releaseQuality: releaseQualityFromAlbum(item.collectionName || ""),
         }));
 
       LOOKUP_CACHE.set(cacheKey, rows);
@@ -707,9 +760,19 @@ async function searchMusicBrainz(
       const rows = (payload.recordings || [])
         .filter((recording) => recording.id && recording.title)
         .map((recording) => {
-          const release =
-            recording.releases?.find((item) => item.id && item.title) ||
-            recording.releases?.[0];
+          const releases = (recording.releases || [])
+            .filter((item) => item.id && item.title)
+            .sort((left, right) => {
+              const qualityDifference =
+                releaseQualityFromAlbum(right.title || "") -
+                releaseQualityFromAlbum(left.title || "");
+              if (Math.abs(qualityDifference) > 0.001) return qualityDifference;
+
+              const leftYear = yearFromDate(left.date) || 9999;
+              const rightYear = yearFromDate(right.date) || 9999;
+              return leftYear - rightYear;
+            });
+          const release = releases[0] || recording.releases?.[0];
           const releaseId = release?.id || null;
           return {
             sourceId: `mb:${recording.id}`,
@@ -719,12 +782,13 @@ async function searchMusicBrainz(
             releaseYear: yearFromDate(recording["first-release-date"] || release?.date),
             genre: null,
             artworkUrl: releaseId
-              ? `https://coverartarchive.org/release/${releaseId}/front-500`
+              ? `https://coverartarchive.org/release/${releaseId}/front-1200`
               : null,
             durationSeconds: recording.length
               ? Math.round(recording.length / 1000)
               : null,
             source: "musicbrainz" as const,
+            releaseQuality: releaseQualityFromAlbum(release?.title || ""),
           };
         })
         .filter((row) => row.artist);
@@ -783,9 +847,10 @@ export async function findMusicMetadataCandidates(
   // title-index searches and normalized filename/title variants. The wider
   // requests only run when the precise pass does not already produce an
   // authoritative match.
-  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 35);
-  addSearch(primaryTitle, "songTerm", 35);
-  addSearch(primaryTitle, null, 35);
+  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 50);
+  if (bestArtist) addSearch(`${primaryTitle} ${bestArtist}`, null, 50);
+  addSearch(primaryTitle, "songTerm", 50);
+  addSearch(primaryTitle, null, 50);
 
   for (const title of secondaryTitles) {
     if (bestArtist) addSearch(`${bestArtist} ${title}`, null, 30);
@@ -802,7 +867,7 @@ export async function findMusicMetadataCandidates(
       ? Math.round(row.durationSeconds / 3) * 3
       : 0;
     return [
-      normalizeArtist(row.artist),
+      compactArtistIdentity(row.artist),
       normalize(titleBaseVariants(row.title)[0] || row.title),
       normalize(row.album),
       roundedDuration,
@@ -837,6 +902,10 @@ export async function findMusicMetadataCandidates(
         artworkUrl: winner.artworkUrl || fallback.artworkUrl,
         durationSeconds:
           winner.durationSeconds ?? fallback.durationSeconds,
+        releaseQuality: Math.max(
+          candidateReleaseQuality(winner),
+          candidateReleaseQuality(fallback)
+        ),
       });
     }
   };
@@ -850,8 +919,8 @@ export async function findMusicMetadataCandidates(
       return titleExact && artistOkay && candidate.confidence >= 0.985;
     });
 
-  // First three are the fast/precise pass.
-  for (const request of searchPlan.slice(0, 3)) {
+  // First four are the fast/precise pass.
+  for (const request of searchPlan.slice(0, 4)) {
     try {
       addRows(
         await searchItunes(
@@ -876,7 +945,7 @@ export async function findMusicMetadataCandidates(
   // using filename/title variants. Cap the total requests to keep full-library
   // enrichment respectful of provider limits.
   if (!hasAuthoritativeMatch()) {
-    for (const request of searchPlan.slice(3, 7)) {
+    for (const request of searchPlan.slice(4, 10)) {
       try {
         addRows(
           await searchItunes(
@@ -911,7 +980,8 @@ export async function findMusicMetadataCandidates(
     addRows(await searchMusicBrainz(primaryTitle, null, 35, options, true));
   }
 
-  let filtered = [...combined.values()].filter((candidate) => {
+  const rawCandidates = [...combined.values()];
+  let filtered = rawCandidates.filter((candidate) => {
     const titleSimilarity = bestTextScore(
       signals.titleVariants,
       candidate.title
@@ -966,8 +1036,8 @@ export async function findMusicMetadataCandidates(
   );
   if (exactTitleMatches.length) filtered = exactTitleMatches;
 
-  return filtered
-    .sort((left, right) => {
+  const sortCandidates = (rows: MusicMetadataCandidate[]) =>
+    [...rows].sort((left, right) => {
       const leftTitleExact = exactAgainst(
         signals.titleVariants,
         left.title
@@ -987,6 +1057,17 @@ export async function findMusicMetadataCandidates(
       const rightPerfect = rightTitleExact && rightArtistExact;
       if (leftPerfect !== rightPerfect) return leftPerfect ? -1 : 1;
       if (leftTitleExact !== rightTitleExact) return leftTitleExact ? -1 : 1;
+
+      // Once BOTH candidates agree on exact recording identity, prefer an
+      // original-looking studio album over compilations, tribute/karaoke
+      // releases, live albums and random soundtrack appearances. Album/artwork
+      // preference is never allowed to rescue a weaker song identity.
+      const releaseDifference =
+        candidateReleaseQuality(right) - candidateReleaseQuality(left);
+      if (leftPerfect && rightPerfect && Math.abs(releaseDifference) > 0.08) {
+        return releaseDifference;
+      }
+
       if (right.confidence !== left.confidence) {
         return right.confidence - left.confidence;
       }
@@ -998,9 +1079,38 @@ export async function findMusicMetadataCandidates(
       const rightDifference = Math.abs(
         trackDuration - (right.durationSeconds || trackDuration)
       );
-      return leftDifference - rightDifference;
-    })
-    .slice(0, 12);
+      if (leftDifference !== rightDifference) return leftDifference - rightDifference;
+
+      return candidateReleaseQuality(right) - candidateReleaseQuality(left);
+    });
+
+  const accepted = sortCandidates(filtered).slice(0, 12);
+
+  let returned = accepted;
+  if (!returned.length && options?.includeLowConfidence && rawCandidates.length) {
+    const manualPossibilities = rawCandidates.filter((candidate) => {
+      const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
+      const titleExact = exactAgainst(signals.titleVariants, candidate.title);
+      const artistSimilarity = signals.artistVariants.length
+        ? bestArtistScore(signals.artistVariants, candidate.artist)
+        : 0.7;
+      return titleExact || (titleSimilarity >= 0.68 && artistSimilarity >= 0.55);
+    });
+    returned = sortCandidates(manualPossibilities).slice(0, 12);
+  }
+
+  options?.onDiagnostics?.({
+    rawCandidates: rawCandidates.length,
+    acceptedCandidates: accepted.length,
+    returnedCandidates: returned.length,
+    reason: accepted.length
+      ? "matches"
+      : rawCandidates.length
+        ? "low_confidence"
+        : "no_catalog_results",
+  });
+
+  return returned;
 }
 
 export function musicMatchTier(confidence: number) {
