@@ -368,11 +368,10 @@ export function TodayPage() {
       if (!auth.user) throw new Error("Sign in to view workouts.");
       const userId = auth.user.id;
 
-      const { data: queueData, error: queueError } = /* MVP_R44_TRUE_ROTATION_REFILL */
-      await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
-      if (queueError) throw queueError;
+      const { data: queueData, error: queueError } = await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
 
-      const nextQueue: QueueDash = {
+      if (queueError) throw queueError;
+const nextQueue: QueueDash = {
         activeBlock: (queueData as any)?.activeBlock ?? null,
         nextSession: (queueData as any)?.nextSession ?? null,
         upcoming: Array.isArray((queueData as any)?.upcoming) ? (queueData as any).upcoming : [],
@@ -700,21 +699,19 @@ export function TodayPage() {
     setError(null);
     setSkipActionError(null);
     try {
-      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v3", {
+      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v5", {
         p_session_id: skipCandidate.id,
-        p_reason: "manual_skip_r44_true_program_rotation",
+        p_reason: "manual_skip_r45a_canonical_rotation",
       });
       if (skipError) {
         const message = String(skipError.message ?? "");
-        if (message.includes("rpc_skip_scheduled_session_v3") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
+        if (message.includes("rpc_skip_scheduled_session_v5") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
           throw new Error("Skip Session r44 database update is not installed yet. Run the r44 Supabase SQL once, then try again.");
         }
         throw skipError;
       }
       setSkipActionError(null);
       setSkipCandidate(null);
-      /* MVP_R43_QUEUE_REPAIR_AFTER_SKIP */
-      await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
       window.dispatchEvent(new CustomEvent("mvp:workout-schedule-changed", { detail: data ?? null }));
       await load();
     } catch (caught: any) {
