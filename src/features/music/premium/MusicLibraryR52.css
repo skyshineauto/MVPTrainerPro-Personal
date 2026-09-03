@@ -2894,3 +2894,219 @@
   [data-mvp-music="flagship"] .tr41-mobileSongActions>button,[data-mvp-music="flagship"] .tr41-mobileMore>summary{width:23px!important;height:23px!important;min-width:23px!important;min-height:23px!important}
 }
 
+
+/* ========================================================================== */
+/* R66 REAL UPLOAD STATUS + EPHEMERAL NOTICES                                 */
+/* ========================================================================== */
+[data-mvp-music="flagship"] .tr66-uploadRail{
+  position:relative;
+  margin:0 12px 10px;
+  padding:9px 11px 7px;
+  overflow:hidden;
+  border:1px solid rgba(78,205,255,.20);
+  border-radius:10px;
+  background:
+    radial-gradient(110% 140% at 0% 50%,rgba(24,177,232,.10),transparent 55%),
+    linear-gradient(180deg,rgba(8,21,29,.94),rgba(4,12,18,.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.045),
+    inset 0 -1px 0 rgba(0,0,0,.35),
+    0 8px 24px rgba(0,0,0,.20),
+    0 0 20px rgba(38,192,255,.055);
+  transform-origin:top center;
+}
+[data-mvp-music="flagship"] .tr66-uploadRail:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(105deg,transparent 0 28%,rgba(116,224,255,.045) 46%,transparent 64%);
+  transform:translateX(-70%);
+  animation:tr66UploadSweep 2.8s ease-in-out infinite;
+}
+[data-mvp-music="flagship"] .tr66-uploadTop{
+  position:relative;
+  z-index:1;
+  display:grid;
+  grid-template-columns:30px minmax(0,1fr) auto;
+  align-items:center;
+  gap:10px;
+  min-height:34px;
+}
+[data-mvp-music="flagship"] .tr66-uploadPulse{
+  width:30px;
+  height:30px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+  border:1px solid rgba(79,214,255,.22);
+  border-radius:8px;
+  background:rgba(30,172,220,.065);
+  box-shadow:inset 0 1px rgba(255,255,255,.05),0 0 14px rgba(43,195,243,.08);
+}
+[data-mvp-music="flagship"] .tr66-uploadPulse i{
+  display:block;
+  width:2px;
+  border-radius:2px;
+  background:#62d9ff;
+  box-shadow:0 0 6px rgba(82,214,255,.62);
+  animation:tr66UploadBars .82s ease-in-out infinite alternate;
+}
+[data-mvp-music="flagship"] .tr66-uploadPulse i:nth-child(1){height:7px;animation-delay:-.36s}
+[data-mvp-music="flagship"] .tr66-uploadPulse i:nth-child(2){height:13px;animation-delay:-.18s}
+[data-mvp-music="flagship"] .tr66-uploadPulse i:nth-child(3){height:9px}
+[data-mvp-music="flagship"] .tr66-uploadIdentity{
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:baseline;
+  column-gap:9px;
+  row-gap:2px;
+}
+[data-mvp-music="flagship"] .tr66-uploadIdentity>strong{
+  color:#62d9ff;
+  font-size:8px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:.13em;
+  white-space:nowrap;
+}
+[data-mvp-music="flagship"] .tr66-uploadIdentity>span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#e9f6fb;
+  font-size:10.5px;
+  line-height:1.15;
+  font-weight:800;
+}
+[data-mvp-music="flagship"] .tr66-uploadIdentity>small{
+  grid-column:1/-1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#73909e;
+  font-size:8.5px;
+  line-height:1.2;
+  font-weight:650;
+}
+[data-mvp-music="flagship"] .tr66-uploadNumbers{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  padding-left:8px;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+[data-mvp-music="flagship"] .tr66-uploadNumbers strong{
+  color:#dff5fd;
+  font-size:9.5px;
+  font-weight:900;
+  letter-spacing:.025em;
+}
+[data-mvp-music="flagship"] .tr66-uploadNumbers span{
+  color:#6bdcff;
+  font-size:10px;
+  font-weight:950;
+}
+[data-mvp-music="flagship"] .tr66-uploadTrack{
+  position:relative;
+  z-index:1;
+  height:3px;
+  margin-top:7px;
+  overflow:visible;
+  border-radius:999px;
+  background:rgba(91,139,159,.12);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.55);
+}
+[data-mvp-music="flagship"] .tr66-uploadTrack i{
+  position:absolute;
+  inset:0;
+  display:block;
+  border-radius:999px;
+  transform-origin:left center;
+  background:linear-gradient(90deg,#1498d1 0%,#3fc8f4 58%,#89eaff 100%);
+  box-shadow:0 0 8px rgba(55,202,249,.42),0 0 16px rgba(37,185,235,.18);
+}
+[data-mvp-music="flagship"] .tr66-uploadTrack b{
+  position:absolute;
+  top:50%;
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  transform:translate(-50%,-50%);
+  background:#c4f5ff;
+  box-shadow:0 0 5px #8be9ff,0 0 12px rgba(77,216,255,.75);
+  transition:left .24s cubic-bezier(.22,1,.36,1);
+}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success{
+  border-color:rgba(92,232,184,.24);
+  background:
+    radial-gradient(90% 130% at 0% 50%,rgba(49,201,151,.08),transparent 56%),
+    linear-gradient(180deg,rgba(7,21,24,.94),rgba(4,13,17,.96));
+}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadPulse{
+  border-color:rgba(91,235,187,.22);
+  background:rgba(43,205,153,.06);
+}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadPulse i,
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadTrack i{background:#58e0ad;box-shadow:0 0 9px rgba(79,226,174,.5)}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadIdentity>strong,
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadNumbers span{color:#76e8bd}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-success .tr66-uploadTrack b{background:#c8ffe9;box-shadow:0 0 8px rgba(90,233,181,.7)}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error{
+  border-color:rgba(255,118,124,.27);
+  background:linear-gradient(180deg,rgba(30,13,17,.92),rgba(15,8,11,.96));
+}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error .tr66-uploadPulse{
+  border-color:rgba(255,118,124,.24);
+  background:rgba(255,84,96,.06);
+}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error .tr66-uploadPulse i,
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error .tr66-uploadTrack i{background:#ff7f88;box-shadow:0 0 8px rgba(255,95,108,.45)}
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error .tr66-uploadIdentity>strong,
+[data-mvp-music="flagship"] .tr66-uploadRail.is-error .tr66-uploadNumbers span{color:#ff9299}
+[data-mvp-music="flagship"] .tr10-message{
+  display:inline-flex;
+  width:auto;
+  max-width:calc(100% - 28px);
+  min-height:30px;
+  align-items:center;
+  margin:0 14px 10px;
+  padding:7px 10px;
+  border:1px solid rgba(87,226,177,.17);
+  border-left:2px solid rgba(87,226,177,.65);
+  border-radius:8px;
+  background:linear-gradient(180deg,rgba(13,42,35,.72),rgba(6,25,22,.72));
+  box-shadow:inset 0 1px rgba(255,255,255,.035),0 6px 18px rgba(0,0,0,.16);
+  color:#a9ebd2;
+  font-size:9.5px;
+  font-weight:750;
+}
+[data-mvp-music="flagship"] .tr10-headActions .is-orange[disabled]{
+  opacity:.68;
+  cursor:wait;
+}
+@keyframes tr66UploadBars{from{transform:scaleY(.55);opacity:.58}to{transform:scaleY(1.12);opacity:1}}
+@keyframes tr66UploadSweep{0%,18%{transform:translateX(-70%)}72%,100%{transform:translateX(72%)}}
+
+@media(max-width:700px){
+  [data-mvp-music="flagship"] .tr66-uploadRail{margin:0 7px 9px;padding:8px 9px 7px}
+  [data-mvp-music="flagship"] .tr66-uploadTop{grid-template-columns:28px minmax(0,1fr) auto;gap:8px}
+  [data-mvp-music="flagship"] .tr66-uploadPulse{width:28px;height:28px}
+  [data-mvp-music="flagship"] .tr66-uploadIdentity{grid-template-columns:1fr;gap:2px}
+  [data-mvp-music="flagship"] .tr66-uploadIdentity>strong{font-size:7.5px}
+  [data-mvp-music="flagship"] .tr66-uploadIdentity>span{font-size:9.5px}
+  [data-mvp-music="flagship"] .tr66-uploadIdentity>small{grid-column:auto;font-size:7.8px}
+  [data-mvp-music="flagship"] .tr66-uploadNumbers{display:grid;gap:1px;text-align:right;padding-left:3px}
+  [data-mvp-music="flagship"] .tr66-uploadNumbers strong{font-size:8.5px}
+  [data-mvp-music="flagship"] .tr66-uploadNumbers span{font-size:9px}
+  [data-mvp-music="flagship"] .tr10-message{margin-left:7px;margin-right:7px;max-width:calc(100% - 14px)}
+}
+@media(prefers-reduced-motion:reduce){
+  [data-mvp-music="flagship"] .tr66-uploadRail:before,
+  [data-mvp-music="flagship"] .tr66-uploadPulse i{animation:none!important}
+}

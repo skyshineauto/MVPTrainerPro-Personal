@@ -153,6 +153,19 @@ type EnrichmentState = {
   label: string; serviceMessage: string; stage: EnrichmentVisualStage; currentTrackId: string | null;
   failedTrackIds: string[]; activity: EnrichmentActivity[];
 };
+type UploadProgressState = {
+  visible: boolean;
+  status: "active" | "success" | "error";
+  stage: "uploading" | "enriching" | "analyzing" | "complete";
+  currentFile: number;
+  totalFiles: number;
+  completedSteps: number;
+  totalSteps: number;
+  fileName: string;
+  displayName: string;
+  intelligenceReady: number;
+  summary: string;
+};
 type BurnMode = "mp3" | "audio";
 type BurnDisc = { number: number; tracks: MusicTrack[]; bytes: number; seconds: number };
 type LibraryCollectionDetail =
@@ -761,6 +774,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [previewErrorRecommendationId, setPreviewErrorRecommendationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+  const uploadHideTimerRef = useRef<number | null>(null);
+  const messageTimerRef = useRef<number | null>(null);
+  const enrichmentCompletionTimerRef = useRef<number | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -819,7 +836,54 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   useEffect(() => () => {
     if (enrichmentFlushTimerRef.current !== null) window.clearTimeout(enrichmentFlushTimerRef.current);
+    if (uploadHideTimerRef.current !== null) window.clearTimeout(uploadHideTimerRef.current);
+    if (messageTimerRef.current !== null) window.clearTimeout(messageTimerRef.current);
+    if (enrichmentCompletionTimerRef.current !== null) window.clearTimeout(enrichmentCompletionTimerRef.current);
   }, []);
+
+  function showTemporaryMessage(text: string, durationMs = 1900) {
+    if (messageTimerRef.current !== null) window.clearTimeout(messageTimerRef.current);
+    setMessage(text);
+    messageTimerRef.current = window.setTimeout(() => {
+      messageTimerRef.current = null;
+      setMessage("");
+    }, durationMs);
+  }
+
+  function hideUploadProgressAfter(delayMs = 2200) {
+    if (uploadHideTimerRef.current !== null) window.clearTimeout(uploadHideTimerRef.current);
+    uploadHideTimerRef.current = window.setTimeout(() => {
+      uploadHideTimerRef.current = null;
+      setUploadProgress(null);
+    }, delayMs);
+  }
+
+  useEffect(() => {
+    if (enrichmentCompletionTimerRef.current !== null) {
+      window.clearTimeout(enrichmentCompletionTimerRef.current);
+      enrichmentCompletionTimerRef.current = null;
+    }
+    if (enrichment.running || enrichment.stage !== "complete") return;
+
+    // A minimized/background enrichment completion is a brief acknowledgement,
+    // not a permanent button state. The detailed panel remains untouched if the
+    // user is actively looking at it.
+    if (enrichment.minimized || !enrichment.open) {
+      enrichmentCompletionTimerRef.current = window.setTimeout(() => {
+        enrichmentCompletionTimerRef.current = null;
+        setEnrichment((current) => {
+          if (current.running || current.open) return current;
+          return {
+            ...current,
+            minimized: false,
+            stage: "idle",
+            label: "LIBRARY INTELLIGENCE",
+            serviceMessage: "Ready to enrich your music library.",
+          };
+        });
+      }, 2200);
+    }
+  }, [enrichment.running, enrichment.stage, enrichment.minimized, enrichment.open]);
 
   const totalSize = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.file_size_bytes || 0), 0), [tracks]);
   const totalDuration = useMemo(() => tracks.reduce((sum, track) => sum + Number(track.duration_seconds || 0), 0), [tracks]);
@@ -1079,32 +1143,125 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   async function uploadFiles(files: FileList | null) {
     if (!files?.length) return;
-    setUploading(true); setMessage(""); setError("");
+
+    const batch = Array.from(files);
+    const totalSteps = batch.length * 3;
+    if (uploadHideTimerRef.current !== null) {
+      window.clearTimeout(uploadHideTimerRef.current);
+      uploadHideTimerRef.current = null;
+    }
+    if (messageTimerRef.current !== null) {
+      window.clearTimeout(messageTimerRef.current);
+      messageTimerRef.current = null;
+    }
+
+    setUploading(true);
+    setMessage("");
+    setError("");
+    setUploadProgress({
+      visible: true,
+      status: "active",
+      stage: "uploading",
+      currentFile: 1,
+      totalFiles: batch.length,
+      completedSteps: 0,
+      totalSteps,
+      fileName: batch[0]?.name || "Music file",
+      displayName: batch[0]?.name || "Music file",
+      intelligenceReady: 0,
+      summary: "Starting secure music import…",
+    });
+
     try {
       let order = tracks.length;
       let intelligenceReady = 0;
-      for (const file of Array.from(files)) {
-        setMessage(`Uploading ${file.name}…`);
+
+      for (let index = 0; index < batch.length; index += 1) {
+        const file = batch[index];
+        const currentFile = index + 1;
+        const stepBase = index * 3;
+
+        setUploadProgress((current) => ({
+          ...(current || {
+            visible: true, status: "active", stage: "uploading", currentFile, totalFiles: batch.length, completedSteps: stepBase, totalSteps, fileName: file.name, displayName: file.name, intelligenceReady, summary: "",
+          }),
+          visible: true,
+          status: "active",
+          stage: "uploading",
+          currentFile,
+          totalFiles: batch.length,
+          completedSteps: stepBase,
+          totalSteps,
+          fileName: file.name,
+          displayName: file.name,
+          intelligenceReady,
+          summary: "Uploading to your private music library…",
+        }));
+
         let uploaded = await uploadMusicTrack(file, order++);
+
+        setUploadProgress((current) => current ? ({
+          ...current,
+          stage: "enriching",
+          completedSteps: stepBase + 1,
+          displayName: uploaded.title || file.name,
+          summary: "Finding the best song info and artwork…",
+        }) : current);
+
         try {
-          setMessage(`Enriching ${uploaded.title}…`);
           if (needsMusicMetadata(uploaded) || needsMusicArtwork(uploaded)) {
             const result = await enrichMusicTrack(uploaded, { autoApplyThreshold: 0.98 });
             uploaded = result.track;
           }
-          setMessage(`Analyzing ${uploaded.title} intelligence…`);
+
+          setUploadProgress((current) => current ? ({
+            ...current,
+            stage: "analyzing",
+            completedSteps: stepBase + 2,
+            displayName: uploaded.title || file.name,
+            summary: "Building Song DNA and Artist DNA…",
+          }) : current);
+
           await analyzeMusicTrackIntelligence(uploaded);
           intelligenceReady += 1;
         } catch (analysisError) {
           console.warn("Automatic music intelligence enrichment will retry from Enrich Library:", analysisError);
         }
+
+        setUploadProgress((current) => current ? ({
+          ...current,
+          stage: "analyzing",
+          completedSteps: stepBase + 3,
+          intelligenceReady,
+          summary: currentFile < batch.length ? "Song ready • moving to the next file…" : "Finishing library refresh…",
+        }) : current);
       }
+
       await refreshTracks();
       await loadMusicLibrary(true);
-      setMessage(`${files.length} song${files.length === 1 ? "" : "s"} uploaded • ${intelligenceReady} intelligence profile${intelligenceReady === 1 ? "" : "s"} ready.`);
+
+      const summary = `${batch.length} song${batch.length === 1 ? "" : "s"} uploaded • ${intelligenceReady} intelligence profile${intelligenceReady === 1 ? "" : "s"} ready`;
+      setUploadProgress((current) => current ? ({
+        ...current,
+        status: "success",
+        stage: "complete",
+        currentFile: batch.length,
+        completedSteps: totalSteps,
+        intelligenceReady,
+        summary,
+      }) : current);
+      hideUploadProgressAfter(2200);
     } catch (caught) {
       const raw = caught instanceof Error ? caught.message : "Music upload failed.";
-      setError(/unsupported|audio type|file type/i.test(raw) ? "THIS AUDIO FORMAT IS NOT SUPPORTED FOR UPLOAD" : raw);
+      const friendly = /unsupported|audio type|file type/i.test(raw)
+        ? "THIS AUDIO FORMAT IS NOT SUPPORTED FOR UPLOAD"
+        : raw;
+      setError(friendly);
+      setUploadProgress((current) => current ? ({
+        ...current,
+        status: "error",
+        summary: friendly,
+      }) : current);
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -1112,6 +1269,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   }
 
   async function uploadAuditionSong(file: File, auditionSong: MusicAuditionSong) {
+    if (messageTimerRef.current !== null) { window.clearTimeout(messageTimerRef.current); messageTimerRef.current = null; }
     setUploading(true); setMessage(""); setError("");
     try {
       setMessage(`Adding ${auditionSong.artist} - ${auditionSong.title}…`);
@@ -1137,7 +1295,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       }
       await refreshTracks();
       await loadMusicLibrary(true);
-      setMessage(`${auditionSong.title} added to your music library.`);
+      showTemporaryMessage(`${auditionSong.title} added to your music library.`);
       return uploaded;
     } catch (caught) {
       const raw = caught instanceof Error ? caught.message : "Music upload failed.";
@@ -1304,7 +1462,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       // A confident provider match is authoritative for this edit, so its artwork may replace stale/incorrect art.
       if (detailPendingCandidate?.artworkUrl) updated = await uploadRemoteMusicArtwork(updated, detailPendingCandidate.artworkUrl);
       replaceTrackLocally(updated); setDetailPendingCandidate(null); setDetailSaveState("changed"); setDetailStatusText("SAVED ✓ • SONG INFO + ARTWORK UPDATED");
-      setMessage(`${updated.title} saved.`);
+      showTemporaryMessage("Song info saved ✓");
       await markMusicTrackIntelligenceStale(updated.id).catch(() => undefined);
       void analyzeMusicTrackIntelligence(updated, { force: true }).then((value) => setDetailIntelligence(value)).catch(() => undefined);
       window.setTimeout(() => { closeDetail(); }, 620);
@@ -1326,7 +1484,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   async function deleteTrack(track: MusicTrack) {
     if (!window.confirm(`Delete “${track.title}” from your private music library?`)) return;
     setBusyId(track.id);
-    try { await removeMusicTrack(track.id); closeDetail(); await refreshTracks(); setMessage("Song deleted."); }
+    try { await removeMusicTrack(track.id); closeDetail(); await refreshTracks(); showTemporaryMessage("Song deleted."); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete song."); }
     finally { setBusyId(null); }
   }
@@ -1583,7 +1741,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       }));
 
       if (!reviewQueue.length) {
-        setMessage(`${work.length - failed} updated or checked • ${skipped} already complete${failed ? ` • ${failed} retry` : ""}.`);
+        showTemporaryMessage(`${work.length - failed} updated or checked • ${skipped} already complete${failed ? ` • ${failed} retry` : ""}.`, 2200);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not finish library enrichment.");
@@ -1607,7 +1765,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setBusyId(`match-${reviewTrack.id}`);
     try {
       const updated = await applyMusicMetadataCandidate(reviewTrack, reviewSelectedCandidate, "manual"); replaceTrackLocally(updated);
-      setReviewSavedIds((current) => new Set(current).add(reviewTrack.id)); setMessage("Correct song information saved.");
+      setReviewSavedIds((current) => new Set(current).add(reviewTrack.id)); showTemporaryMessage("Correct song information saved ✓");
       if (advance) advanceReview(reviewTrack.id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save this match."); }
     finally { setBusyId(null); }
@@ -1637,18 +1795,18 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         const next = chosen ? Array.from(new Set([...current, ...playlistModalTrackIds])) : current.filter((id) => !targets.has(id));
         if (next.join("|") !== current.join("|")) await replaceMusicPlaylistTracks(playlist.id, next);
       }
-      await refreshPlaylists(preferred || selectedPlaylistId); setPlaylistModalTrackIds([]); setPlaylistModalSelections(new Set()); setPlaylistModalName(""); setSelectedSongIds(new Set()); setMessage("Playlist routing updated."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT));
+      await refreshPlaylists(preferred || selectedPlaylistId); setPlaylistModalTrackIds([]); setPlaylistModalSelections(new Set()); setPlaylistModalName(""); setSelectedSongIds(new Set()); showTemporaryMessage("Playlist routing updated."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT));
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update playlists."); }
     finally { setBusyId(null); }
   }
   async function createPlaylist() {
     if (!newPlaylistName.trim()) return;
-    try { const created = await createMusicPlaylist(newPlaylistName.trim()); setNewPlaylistName(""); await refreshPlaylists(created.id); setSelectedPlaylistId(created.id); setMessage("Playlist created."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT)); }
+    try { const created = await createMusicPlaylist(newPlaylistName.trim()); setNewPlaylistName(""); await refreshPlaylists(created.id); setSelectedPlaylistId(created.id); showTemporaryMessage("Playlist created."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create playlist."); }
   }
   async function removePlaylist(playlist: MusicPlaylist) {
     if (!window.confirm(`Delete playlist “${playlist.name}”? Your songs remain in the library.`)) return;
-    try { await deleteMusicPlaylist(playlist.id); await refreshPlaylists(null); setMessage("Playlist deleted. Songs were not deleted."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT)); }
+    try { await deleteMusicPlaylist(playlist.id); await refreshPlaylists(null); showTemporaryMessage("Playlist deleted. Songs were not deleted."); window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete playlist."); }
   }
 
@@ -2098,7 +2256,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       await refreshPlaylists(playlist.id);
       window.dispatchEvent(new Event(PLAYLISTS_CHANGED_EVENT));
       await playMusicPlaylist(playlist, mix);
-      setMessage(`${name} rebuilt and playing • ${mix.length} songs.`);
+      showTemporaryMessage(`${name} rebuilt and playing • ${mix.length} songs.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not build Smart Mix.");
     }
@@ -2261,6 +2419,18 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const averageTrackSeconds = tracks.length ? tracks.reduce((sum, track) => sum + Math.max(120, Number(track.duration_seconds || 210)), 0) / tracks.length : 210;
   const smartEstimatedSongs = Math.max(1, Math.round((smartMinutes * 60) / averageTrackSeconds));
   const smartEligibleCount = tracks.filter((track) => !track.play_less).length;
+  const uploadPercent = uploadProgress
+    ? Math.max(0, Math.min(100, Math.round((uploadProgress.completedSteps / Math.max(1, uploadProgress.totalSteps)) * 100)))
+    : 0;
+  const uploadStageLabel = uploadProgress?.status === "success"
+    ? "UPLOAD COMPLETE"
+    : uploadProgress?.status === "error"
+      ? "UPLOAD NEEDS ATTENTION"
+      : uploadProgress?.stage === "enriching"
+        ? "MATCHING SONG INFO"
+        : uploadProgress?.stage === "analyzing"
+          ? "BUILDING INTELLIGENCE"
+          : "UPLOADING";
 
   function goBack() { if (navigate) navigate("/"); else window.location.pathname = "/"; }
 
@@ -2281,7 +2451,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className="tr10-headActions">
             <input ref={inputRef} hidden type="file" multiple accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/wav" onChange={(event) => void uploadFiles(event.target.files)} />
             <button type="button" className={`tr44-enrichLauncher${enrichment.running ? " is-running" : ""}${enrichment.minimized && enrichment.stage === "complete" ? " is-complete" : ""}`} onClick={(event) => { if (!event.nativeEvent.isTrusted) return; if (enrichment.running || enrichment.minimized) setEnrichment((current) => ({ ...current, open: true, minimized: false })); else void enrichTracks(tracks); }}>{enrichment.running ? `ENRICHING ${enrichment.completed}/${enrichment.total}` : enrichment.minimized && enrichment.stage === "complete" ? "ENRICHMENT COMPLETE" : "ENRICH LIBRARY"}</button>
-            <button type="button" className="is-orange" disabled={uploading} onClick={(event) => { if (!event.nativeEvent.isTrusted) return; inputRef.current?.click(); }}>{uploading ? "UPLOADING…" : "+ UPLOAD SONGS"}</button>
+            <button type="button" className="is-orange" disabled={uploading} aria-busy={uploading} onClick={(event) => { if (!event.nativeEvent.isTrusted) return; inputRef.current?.click(); }}>+ UPLOAD SONGS</button>
           </div>
         </header>
 
@@ -2299,7 +2469,33 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <div ref={tabNavRef} className="tr52-tabRail tr37-desktopTabRail"><R52MusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
         <div className="tr37-mobileTabRail"><R37MobileMusicTabs value={tab} onChange={(value) => { setTab(value); setCollectionDetail(null); setMobileSelectMode(false); setMobileReorderMode(false); setSelectedSongIds(new Set()); if (value === "discover") setDiscoveryView("archive"); }} /></div>
 
-        {/* MVP_ENRICH_COMPLETION_HIDDEN_V25 */ message && !/(updated or checked|already complete)/i.test(message) ? <div className="tr10-message">{message}</div> : null}
+        {uploadProgress?.visible ? <motion.section
+          className={`tr66-uploadRail is-${uploadProgress.status}`}
+          role={uploadProgress.status === "error" ? "alert" : "status"}
+          aria-live="polite"
+          initial={{ opacity: 0, y: -6, scaleY: .96 }}
+          animate={{ opacity: 1, y: 0, scaleY: 1 }}
+          transition={{ duration: .24, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <div className="tr66-uploadTop">
+            <span className="tr66-uploadPulse" aria-hidden><i /><i /><i /></span>
+            <div className="tr66-uploadIdentity">
+              <strong>{uploadStageLabel}</strong>
+              <span title={uploadProgress.fileName}>{uploadProgress.status === "success" ? uploadProgress.summary : uploadProgress.displayName}</span>
+              {uploadProgress.status !== "success" ? <small>{uploadProgress.summary}</small> : null}
+            </div>
+            <div className="tr66-uploadNumbers">
+              <strong>{uploadProgress.status === "success" ? "DONE" : `${uploadProgress.currentFile} / ${uploadProgress.totalFiles}`}</strong>
+              <span>{uploadPercent}%</span>
+            </div>
+          </div>
+          <div className="tr66-uploadTrack" aria-hidden>
+            <motion.i initial={false} animate={{ scaleX: uploadPercent / 100 }} transition={{ type: "spring", stiffness: 190, damping: 28 }} />
+            <b style={{ left: `${uploadPercent}%` }} />
+          </div>
+        </motion.section> : null}
+
+        {/* MVP_ENRICH_COMPLETION_HIDDEN_V25 */ message && !/(updated or checked|already complete)/i.test(message) ? <motion.div className="tr10-message" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}>{message}</motion.div> : null}
         {error ? <div className="tr10-error">{error}</div> : null}
 
         {tab === "songs" ? <>

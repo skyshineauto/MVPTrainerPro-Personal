@@ -133,15 +133,69 @@ function normalize(value: string) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    // Apostrophes are usually catalog punctuation, not word boundaries.
+    // Removing them makes imported titles like "Cupids Chokehold" line up with
+    // catalog titles like "Cupid's Chokehold" instead of scoring them as
+    // different token shapes.
+    .replace(/[’'`]/g, "")
     .replace(/&/g, " and ")
     .replace(/\b(feat|featuring|ft)\.?\b.*$/i, "")
     .replace(
-      /\b(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version|album version)\b/gi,
+      /\b(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version|album version|mono|stereo|edit|version)\b/gi,
       " "
     )
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeArtist(value: string) {
+  return normalize(value).replace(/^the\s+/, "").trim();
+}
+
+function artistTextScore(left: string, right: string) {
+  const direct = textScore(left, right);
+  const a = normalizeArtist(left);
+  const b = normalizeArtist(right);
+  if (!a || !b) return direct;
+  if (a === b) return Math.max(direct, 0.99);
+  return Math.max(direct, tokenScore(a, b));
+}
+
+function stripTrailingVersionText(value: string) {
+  let result = value.trim();
+  const patterns = [
+    /\s*[\[(][^\]\)]*(remaster(?:ed)?|deluxe|explicit|clean|radio edit|single version|album version|mono|stereo|edit|version|live)[^\]\)]*[\])]\s*$/i,
+    /\s*[\[(](official\s+)?(music\s+)?(video|audio|lyrics?|lyric\s+video|visuali[sz]er)[\])]\s*$/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pattern of patterns) {
+      const next = result.replace(pattern, "").trim();
+      if (next !== result) {
+        result = next;
+        changed = true;
+      }
+    }
+  }
+  return result;
+}
+
+function titleBaseVariants(value: string) {
+  const cleaned = removeLookupNoise(value);
+  if (!cleaned) return [];
+
+  const values = [
+    cleaned,
+    stripTrailingVersionText(cleaned),
+    cleaned.replace(/\s*\([^)]*\)\s*$/g, "").trim(),
+    cleaned.replace(/\s*\[[^\]]*\]\s*$/g, "").trim(),
+    cleaned.split(/\s+[/|]\s+/)[0]?.trim() || "",
+    cleaned.replace(/\s*[-–—:]\s*(remaster(?:ed)?|deluxe|radio edit|single version|album version|live).*$/i, "").trim(),
+  ];
+
+  return uniqueUseful(values).filter((item) => item.length >= 2);
 }
 
 function uniqueUseful(values: Array<string | null | undefined>) {
@@ -290,8 +344,13 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
   const titleVariants: string[] = [];
   const artistVariants: string[] = [];
 
-  if (rawTitle && !looksGeneric(rawTitle)) titleVariants.push(rawTitle);
-  if (stem && !looksGeneric(stem)) titleVariants.push(stem);
+  const addTitleFamily = (value: string | null | undefined) => {
+    if (!value) return;
+    for (const variant of titleBaseVariants(value)) titleVariants.push(variant);
+  };
+
+  addTitleFamily(rawTitle);
+  addTitleFamily(stem);
   if (knownArtist) artistVariants.push(knownArtist);
 
   const titleSplit = splitArtistTitle(rawTitle);
@@ -301,17 +360,17 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
     if (!split) return;
 
     if (knownArtist) {
-      const leftArtistScore = textScore(split.left, knownArtist);
-      const rightArtistScore = textScore(split.right, knownArtist);
+      const leftArtistScore = artistTextScore(split.left, knownArtist);
+      const rightArtistScore = artistTextScore(split.right, knownArtist);
 
       if (leftArtistScore >= rightArtistScore && leftArtistScore >= 0.62) {
-        titleVariants.push(split.right);
+        addTitleFamily(split.right);
         artistVariants.push(split.left);
         return;
       }
 
       if (rightArtistScore > leftArtistScore && rightArtistScore >= 0.62) {
-        titleVariants.push(split.left);
+        addTitleFamily(split.left);
         artistVariants.push(split.right);
         return;
       }
@@ -319,7 +378,8 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
 
     // With no reliable artist tag, "Artist - Title" is the most common import
     // filename pattern. Search both directions, but prefer the right side as title.
-    titleVariants.push(split.right, split.left);
+    addTitleFamily(split.right);
+    addTitleFamily(split.left);
     artistVariants.push(split.left);
   };
 
@@ -332,12 +392,13 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
         `^${knownArtist.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[-–—|:]\\s*`,
         "i"
       );
-      titleVariants.push(title.replace(artistPrefix, "").trim());
+      addTitleFamily(title.replace(artistPrefix, "").trim());
     }
   }
 
   const titles = uniqueUseful(titleVariants)
     .map(removeLookupNoise)
+    .flatMap((value) => titleBaseVariants(value))
     .filter((value) => value.length >= 2);
 
   const artists = uniqueUseful(artistVariants)
@@ -352,8 +413,8 @@ function buildLookupSignals(track: MusicTrack): LookupSignals {
 
   return {
     primaryTitle,
-    titleVariants: uniqueUseful([primaryTitle, ...titles]).slice(0, 6),
-    artistVariants: uniqueUseful(artists).slice(0, 4),
+    titleVariants: uniqueUseful([primaryTitle, ...titles]).slice(0, 12),
+    artistVariants: uniqueUseful(artists).slice(0, 6),
     knownArtist,
   };
 }
@@ -373,12 +434,25 @@ function yearFromDate(value?: string) {
 
 function bestTextScore(values: string[], candidate: string) {
   if (!values.length) return 0;
-  return Math.max(...values.map((value) => textScore(value, candidate)));
+  const candidateForms = titleBaseVariants(candidate);
+  const forms = candidateForms.length ? candidateForms : [candidate];
+  return Math.max(...values.flatMap((value) => forms.map((form) => textScore(value, form))));
+}
+
+function bestArtistScore(values: string[], candidate: string) {
+  if (!values.length) return 0;
+  return Math.max(...values.map((value) => artistTextScore(value, candidate)));
 }
 
 function exactAgainst(values: string[], candidate: string) {
-  const target = normalize(candidate);
-  return values.some((value) => normalize(value) === target);
+  const candidateForms = titleBaseVariants(candidate);
+  const targets = new Set((candidateForms.length ? candidateForms : [candidate]).map(normalize));
+  return values.some((value) => targets.has(normalize(value)));
+}
+
+function artistExactAgainst(values: string[], candidate: string) {
+  const target = normalizeArtist(candidate);
+  return values.some((value) => normalizeArtist(value) === target);
 }
 
 function scoreCandidate(
@@ -388,13 +462,23 @@ function scoreCandidate(
 ) {
   const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
   const titleExact = exactAgainst(signals.titleVariants, candidate.title);
+  const titleDirectExact = signals.titleVariants.some(
+    (value) => normalize(value) === normalize(candidate.title)
+  );
+  const candidateTitleForms = titleBaseVariants(candidate.title).map(normalize);
+  const titleContainment = signals.titleVariants
+    .map(normalize)
+    .filter((value) => value.length >= 7)
+    .some((value) => candidateTitleForms.some((form) =>
+      form.startsWith(`${value} `) || value.startsWith(`${form} `)
+    ));
 
   const artistKnown = Boolean(signals.knownArtist);
   const artistSimilarity = signals.artistVariants.length
-    ? bestTextScore(signals.artistVariants, candidate.artist)
+    ? bestArtistScore(signals.artistVariants, candidate.artist)
     : 0.72;
   const artistExact = signals.artistVariants.length
-    ? exactAgainst(signals.artistVariants, candidate.artist)
+    ? artistExactAgainst(signals.artistVariants, candidate.artist)
     : false;
 
   const albumSimilarity = track.album
@@ -406,38 +490,56 @@ function scoreCandidate(
     candidate.durationSeconds
   );
 
+  // Exact normalized title + artist identity is authoritative. Duration then
+  // decides how close to 100% the recording is, allowing common catalog
+  // punctuation and a leading "The" in artist names without creating a false
+  // miss.
   if (titleExact && artistExact) {
-    return Math.min(1, 0.972 + duration * 0.028);
+    if (titleDirectExact) return Math.min(1, 0.97 + duration * 0.03);
+    if (duration >= 0.94) return Math.min(0.997, 0.962 + duration * 0.035);
+    return Math.min(0.965, 0.89 + duration * 0.075);
   }
 
   if (titleExact && artistKnown && artistSimilarity >= 0.9) {
-    return Math.min(0.972, 0.91 + artistSimilarity * 0.035 + duration * 0.027);
+    if (!titleDirectExact && duration < 0.94) {
+      return Math.min(0.955, 0.87 + artistSimilarity * 0.03 + duration * 0.055);
+    }
+    return Math.min(0.995, 0.925 + artistSimilarity * 0.035 + duration * 0.035);
   }
 
   if (titleExact && !artistKnown) {
     // Exact title is meaningful, but without a verified artist it remains
     // conservative unless duration also agrees.
-    return Math.min(0.944, 0.835 + duration * 0.105);
+    return Math.min(0.955, 0.845 + duration * 0.11);
   }
 
   if (artistExact && titleSimilarity >= 0.82) {
+    if (titleContainment && duration >= 0.94) {
+      return Math.min(0.992, 0.952 + duration * 0.04);
+    }
     return Math.min(
-      0.92,
-      titleSimilarity * 0.7 + duration * 0.16 + albumSimilarity * 0.04
+      0.96,
+      titleSimilarity * 0.72 + duration * 0.18 + albumSimilarity * 0.04
     );
   }
 
   let score =
-    titleSimilarity * 0.7 +
-    artistSimilarity * 0.17 +
-    duration * 0.09 +
+    titleSimilarity * 0.68 +
+    artistSimilarity * 0.18 +
+    duration * 0.1 +
     albumSimilarity * 0.04;
 
-  // Strongly punish "same artist, wrong song". This was the most damaging
-  // failure mode in the previous matcher.
+  // Strongly punish "same artist, wrong song". This remains the most
+  // important safety rail even with a wider search net.
   if (artistExact && titleSimilarity < 0.72) score *= 0.18;
   if (titleSimilarity < 0.5) score *= 0.32;
   if (titleSimilarity < 0.3) score *= 0.22;
+
+  // A near-exact title + artist + close duration is a strong catalog match even
+  // if the provider appends a subtitle such as "(Open Fire)".
+  if (artistSimilarity >= 0.94 && titleSimilarity >= 0.9 && duration >= 0.94) {
+    score = Math.max(score, 0.94 + duration * 0.04);
+  }
 
   // If a filename/title split produced a very strong title match, keep it
   // competitive even when the imported artist field was blank.
@@ -445,7 +547,7 @@ function scoreCandidate(
     score = Math.max(score, 0.82 + duration * 0.08);
   }
 
-  return Math.max(0, Math.min(0.9, score));
+  return Math.max(0, Math.min(0.985, score));
 }
 
 async function searchItunes(
@@ -557,19 +659,30 @@ async function searchMusicBrainz(
   title: string,
   artist: string | null,
   limit = 25,
-  options?: LookupOptions
+  options?: LookupOptions,
+  relaxed = false
 ): Promise<Omit<MusicMetadataCandidate, "confidence">[]> {
   const cleanTitle = title.replace(/\s+/g, " ").trim();
   const cleanArtist = artist?.replace(/\s+/g, " ").trim() || null;
   if (!cleanTitle) return [];
-  const cacheKey = `musicbrainz:${normalize(cleanArtist || "")}:${normalize(cleanTitle)}:${limit}`;
+
+  const cacheKey = `musicbrainz:${relaxed ? "relaxed" : "exact"}:${normalize(cleanArtist || "")}:${normalize(cleanTitle)}:${limit}`;
   const cached = LOOKUP_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const escapeQuery = (value: string) => value.replace(/([+\-&|!(){}\[\]^"~*?:\/])/g, "\\$1");
-  const query = cleanArtist
-    ? `recording:"${escapeQuery(cleanTitle)}" AND artist:"${escapeQuery(cleanArtist)}"`
-    : `recording:"${escapeQuery(cleanTitle)}"`;
+  const escapeQuery = (value: string) =>
+    value.replace(/([+\-&|!(){}\[\]^"~*?:\/])/g, "\\$1");
+
+  const escapedTitle = escapeQuery(cleanTitle);
+  const escapedArtist = cleanArtist ? escapeQuery(cleanArtist) : null;
+  const query = relaxed
+    ? escapedArtist
+      ? `recording:${escapedTitle} AND artist:${escapedArtist}`
+      : `recording:${escapedTitle}`
+    : escapedArtist
+      ? `recording:"${escapedTitle}" AND artist:"${escapedArtist}"`
+      : `recording:"${escapedTitle}"`;
+
   const params = new URLSearchParams({ query, fmt: "json", limit: String(limit) });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -594,7 +707,9 @@ async function searchMusicBrainz(
       const rows = (payload.recordings || [])
         .filter((recording) => recording.id && recording.title)
         .map((recording) => {
-          const release = recording.releases?.find((item) => item.id && item.title) || recording.releases?.[0];
+          const release =
+            recording.releases?.find((item) => item.id && item.title) ||
+            recording.releases?.[0];
           const releaseId = release?.id || null;
           return {
             sourceId: `mb:${recording.id}`,
@@ -603,8 +718,12 @@ async function searchMusicBrainz(
             album: release?.title || "",
             releaseYear: yearFromDate(recording["first-release-date"] || release?.date),
             genre: null,
-            artworkUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-500` : null,
-            durationSeconds: recording.length ? Math.round(recording.length / 1000) : null,
+            artworkUrl: releaseId
+              ? `https://coverartarchive.org/release/${releaseId}/front-500`
+              : null,
+            durationSeconds: recording.length
+              ? Math.round(recording.length / 1000)
+              : null,
             source: "musicbrainz" as const,
           };
         })
@@ -631,9 +750,9 @@ export async function findMusicMetadataCandidates(
 
   const primaryTitle = signals.primaryTitle;
   const bestArtist = signals.knownArtist || signals.artistVariants[0] || null;
-  const secondaryTitle = signals.titleVariants.find(
-    (title) => normalize(title) !== normalize(primaryTitle)
-  );
+  const secondaryTitles = signals.titleVariants
+    .filter((title) => normalize(title) !== normalize(primaryTitle))
+    .slice(0, 5);
 
   const searchPlan: Array<{
     term: string;
@@ -641,26 +760,54 @@ export async function findMusicMetadataCandidates(
     limit: number;
   }> = [];
 
-  const addSearch = (term: string, attribute: SearchAttribute = null, limit = 25) => {
+  const addSearch = (
+    term: string,
+    attribute: SearchAttribute = null,
+    limit = 25
+  ) => {
     const clean = term.replace(/\s+/g, " ").trim();
     if (!clean) return;
     const key = `${attribute || "all"}:${normalize(clean)}`;
-    if (searchPlan.some((item) => `${item.attribute || "all"}:${normalize(item.term)}` === key)) return;
+    if (
+      searchPlan.some(
+        (item) =>
+          `${item.attribute || "all"}:${normalize(item.term)}` === key
+      )
+    ) {
+      return;
+    }
     searchPlan.push({ term: clean, attribute, limit });
   };
 
-  // Keep automated enrichment deliberately light on the catalog. A precise
-  // artist + title query is first, followed by the song-title index. One broad
-  // fallback is used only if needed. This prevents library scans from creating
-  // the request burst that previously triggered 403 responses.
-  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 25);
-  addSearch(primaryTitle, "songTerm", 25);
-  if (secondaryTitle) {
-    if (bestArtist) addSearch(`${bestArtist} ${secondaryTitle}`, null, 20);
-    else addSearch(secondaryTitle, "songTerm", 20);
-  } else {
-    addSearch(primaryTitle, null, 20);
+  // Progressive Apple search. Precise artist/title comes first, followed by
+  // title-index searches and normalized filename/title variants. The wider
+  // requests only run when the precise pass does not already produce an
+  // authoritative match.
+  if (bestArtist) addSearch(`${bestArtist} ${primaryTitle}`, null, 35);
+  addSearch(primaryTitle, "songTerm", 35);
+  addSearch(primaryTitle, null, 35);
+
+  for (const title of secondaryTitles) {
+    if (bestArtist) addSearch(`${bestArtist} ${title}`, null, 30);
+    addSearch(title, "songTerm", 30);
   }
+
+  // Last-resort artist catalog search can recover songs whose provider title
+  // includes a subtitle that defeats the normal term index. Ranking still
+  // requires a strong title + artist identity before anything is accepted.
+  if (bestArtist) addSearch(bestArtist, "artistTerm", 50);
+
+  const canonicalKey = (row: Omit<MusicMetadataCandidate, "confidence">) => {
+    const roundedDuration = row.durationSeconds
+      ? Math.round(row.durationSeconds / 3) * 3
+      : 0;
+    return [
+      normalizeArtist(row.artist),
+      normalize(titleBaseVariants(row.title)[0] || row.title),
+      normalize(row.album),
+      roundedDuration,
+    ].join("|");
+  };
 
   const addRows = (rows: Omit<MusicMetadataCandidate, "confidence">[]) => {
     for (const row of rows) {
@@ -669,17 +816,41 @@ export async function findMusicMetadataCandidates(
         confidence: scoreCandidate(track, signals, row),
       };
 
-      const dedupeKey = row.sourceId
-        ? `id:${row.sourceId}`
-        : `${normalize(row.artist)}|${normalize(row.title)}|${normalize(row.album)}`;
-
-      const previous = combined.get(dedupeKey);
-      if (!previous || scored.confidence > previous.confidence) {
-        combined.set(dedupeKey, scored);
+      const key = canonicalKey(row);
+      const previous = combined.get(key);
+      if (!previous) {
+        combined.set(key, scored);
+        continue;
       }
+
+      // Prefer the higher-confidence recording, but merge useful catalog
+      // details so an Apple artwork/genre result can complement a MusicBrainz
+      // identity match (and vice versa).
+      const winner =
+        scored.confidence > previous.confidence ? scored : previous;
+      const fallback = winner === scored ? previous : scored;
+      combined.set(key, {
+        ...winner,
+        album: winner.album || fallback.album,
+        releaseYear: winner.releaseYear ?? fallback.releaseYear,
+        genre: winner.genre || fallback.genre,
+        artworkUrl: winner.artworkUrl || fallback.artworkUrl,
+        durationSeconds:
+          winner.durationSeconds ?? fallback.durationSeconds,
+      });
     }
   };
 
+  const hasAuthoritativeMatch = () =>
+    [...combined.values()].some((candidate) => {
+      const titleExact = exactAgainst(signals.titleVariants, candidate.title);
+      const artistOkay = signals.artistVariants.length
+        ? bestArtistScore(signals.artistVariants, candidate.artist) >= 0.94
+        : true;
+      return titleExact && artistOkay && candidate.confidence >= 0.985;
+    });
+
+  // First three are the fast/precise pass.
   for (const request of searchPlan.slice(0, 3)) {
     try {
       addRows(
@@ -691,58 +862,105 @@ export async function findMusicMetadataCandidates(
         )
       );
     } catch {
-      // Apple can temporarily throttle browser lookups. The fallback catalog below
-      // still gets a chance instead of turning the song into a false miss.
+      // Apple can throttle browser lookups. MusicBrainz and the remaining
+      // adaptive passes still get a chance instead of creating a false miss.
     }
-
-    const perfect = [...combined.values()].some((candidate) =>
-      exactAgainst(signals.titleVariants, candidate.title) &&
-      signals.artistVariants.length > 0 &&
-      exactAgainst(signals.artistVariants, candidate.artist) &&
-      candidate.confidence >= 0.95
-    );
-
-    if (perfect) break;
+    if (hasAuthoritativeMatch()) break;
   }
 
-  const appleHasStrongMatch = [...combined.values()].some((candidate) =>
-    candidate.confidence >= 0.94 &&
-    exactAgainst(signals.titleVariants, candidate.title) &&
-    (!signals.artistVariants.length || bestTextScore(signals.artistVariants, candidate.artist) >= 0.9)
-  );
+  // Always compare at least one MusicBrainz result set so the final ranking is
+  // cross-catalog instead of simply trusting whichever provider answered first.
+  addRows(await searchMusicBrainz(primaryTitle, bestArtist, 30, options, false));
 
-  if (!appleHasStrongMatch) {
-    const mbRows = await searchMusicBrainz(primaryTitle, bestArtist, 25, options);
-    addRows(mbRows);
-    if (!mbRows.length && secondaryTitle) {
-      addRows(await searchMusicBrainz(secondaryTitle, bestArtist, 20, options));
+  // If the exact pass did not settle the recording, widen the Apple search
+  // using filename/title variants. Cap the total requests to keep full-library
+  // enrichment respectful of provider limits.
+  if (!hasAuthoritativeMatch()) {
+    for (const request of searchPlan.slice(3, 7)) {
+      try {
+        addRows(
+          await searchItunes(
+            request.term,
+            request.attribute,
+            request.limit,
+            options
+          )
+        );
+      } catch {
+        // Continue to the next catalog strategy.
+      }
+      if (hasAuthoritativeMatch()) break;
     }
+  }
+
+  // Relaxed MusicBrainz search is intentionally second-stage. It catches
+  // punctuation, subtitle, apostrophe and version differences while the scoring
+  // layer still blocks wrong-song matches.
+  if (!hasAuthoritativeMatch()) {
+    addRows(await searchMusicBrainz(primaryTitle, bestArtist, 35, options, true));
+
+    for (const title of secondaryTitles.slice(0, 2)) {
+      addRows(await searchMusicBrainz(title, bestArtist, 25, options, false));
+      if (hasAuthoritativeMatch()) break;
+    }
+  }
+
+  // Final title-only MusicBrainz fallback. When an artist is known, filtering
+  // below still requires that artist to agree before the candidate can survive.
+  if (!hasAuthoritativeMatch() && bestArtist) {
+    addRows(await searchMusicBrainz(primaryTitle, null, 35, options, true));
   }
 
   let filtered = [...combined.values()].filter((candidate) => {
-    const titleSimilarity = bestTextScore(signals.titleVariants, candidate.title);
-    const titleExact = exactAgainst(signals.titleVariants, candidate.title);
+    const titleSimilarity = bestTextScore(
+      signals.titleVariants,
+      candidate.title
+    );
+    const titleExact = exactAgainst(
+      signals.titleVariants,
+      candidate.title
+    );
+    const duration = durationScore(
+      track.duration_seconds,
+      candidate.durationSeconds
+    );
 
     if (signals.artistVariants.length) {
-      const artistSimilarity = bestTextScore(signals.artistVariants, candidate.artist);
-      const artistExact = exactAgainst(signals.artistVariants, candidate.artist);
+      const artistSimilarity = bestArtistScore(
+        signals.artistVariants,
+        candidate.artist
+      );
+      const artistExact = artistExactAgainst(
+        signals.artistVariants,
+        candidate.artist
+      );
 
-      // Known artist: a wrong title is never allowed to float to the top merely
-      // because the artist matches. Exact titles may tolerate minor artist-credit
-      // differences (feat., punctuation, etc.), while fuzzy titles require both
-      // sides to be very strong.
-      if (titleExact) return artistExact || artistSimilarity >= 0.82;
-      return titleSimilarity >= 0.86 && artistSimilarity >= 0.86;
+      if (titleExact) {
+        return artistExact || artistSimilarity >= 0.8;
+      }
+
+      // Fuzzy title candidates must agree strongly on artist and either have a
+      // very strong title or corroborating duration. This is the safety fence
+      // that lets the search widen without attaching the wrong song.
+      return (
+        artistSimilarity >= 0.88 &&
+        (
+          titleSimilarity >= 0.88 ||
+          (titleSimilarity >= 0.8 && duration >= 0.94)
+        )
+      );
     }
 
-    // Unknown artist: the title and duration have to do the heavy lifting.
-    // Loose partial-title catalog results are intentionally discarded.
-    return titleExact || titleSimilarity >= 0.86;
+    // Unknown artist: title + duration must carry the identification.
+    return (
+      titleExact ||
+      titleSimilarity >= 0.92 ||
+      (titleSimilarity >= 0.86 && duration >= 0.98)
+    );
   });
 
-  // Once the catalog contains the exact requested title, do not clutter the
-  // review window with other songs. Keep release/version variants of that exact
-  // title so album artwork and recording duration can still be compared.
+  // If verified exact/base-title matches exist, keep those release/version
+  // variants together and discard unrelated fuzzy catalog noise.
   const exactTitleMatches = filtered.filter((candidate) =>
     exactAgainst(signals.titleVariants, candidate.title)
   );
@@ -750,27 +968,39 @@ export async function findMusicMetadataCandidates(
 
   return filtered
     .sort((left, right) => {
-      const leftTitleExact = exactAgainst(signals.titleVariants, left.title);
-      const rightTitleExact = exactAgainst(signals.titleVariants, right.title);
+      const leftTitleExact = exactAgainst(
+        signals.titleVariants,
+        left.title
+      );
+      const rightTitleExact = exactAgainst(
+        signals.titleVariants,
+        right.title
+      );
       const leftArtistExact = signals.artistVariants.length
-        ? exactAgainst(signals.artistVariants, left.artist)
+        ? artistExactAgainst(signals.artistVariants, left.artist)
         : false;
       const rightArtistExact = signals.artistVariants.length
-        ? exactAgainst(signals.artistVariants, right.artist)
+        ? artistExactAgainst(signals.artistVariants, right.artist)
         : false;
 
       const leftPerfect = leftTitleExact && leftArtistExact;
       const rightPerfect = rightTitleExact && rightArtistExact;
       if (leftPerfect !== rightPerfect) return leftPerfect ? -1 : 1;
       if (leftTitleExact !== rightTitleExact) return leftTitleExact ? -1 : 1;
-      if (right.confidence !== left.confidence) return right.confidence - left.confidence;
+      if (right.confidence !== left.confidence) {
+        return right.confidence - left.confidence;
+      }
 
       const trackDuration = track.duration_seconds || 0;
-      const leftDifference = Math.abs(trackDuration - (left.durationSeconds || trackDuration));
-      const rightDifference = Math.abs(trackDuration - (right.durationSeconds || trackDuration));
+      const leftDifference = Math.abs(
+        trackDuration - (left.durationSeconds || trackDuration)
+      );
+      const rightDifference = Math.abs(
+        trackDuration - (right.durationSeconds || trackDuration)
+      );
       return leftDifference - rightDifference;
     })
-    .slice(0, 10);
+    .slice(0, 12);
 }
 
 export function musicMatchTier(confidence: number) {
