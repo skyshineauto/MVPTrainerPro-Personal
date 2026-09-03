@@ -699,13 +699,13 @@ const nextQueue: QueueDash = {
     setError(null);
     setSkipActionError(null);
     try {
-      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v5", {
+      const { data, error: skipError } = await supabase.rpc("rpc_skip_scheduled_session_v6", {
         p_session_id: skipCandidate.id,
-        p_reason: "manual_skip_r45a_canonical_rotation",
+        p_reason: "manual_skip_r46_rotation",
       });
       if (skipError) {
         const message = String(skipError.message ?? "");
-        if (message.includes("rpc_skip_scheduled_session_v5") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
+        if (message.includes("rpc_skip_scheduled_session_v6") || message.toLowerCase().includes("function") && message.toLowerCase().includes("does not exist")) {
           throw new Error("Skip Session r44 database update is not installed yet. Run the r44 Supabase SQL once, then try again.");
         }
         throw skipError;
