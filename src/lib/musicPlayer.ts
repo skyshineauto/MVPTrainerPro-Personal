@@ -459,7 +459,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v21-r68-output-profile-isolation";
+const AUDIO_ENGINE_VERSION = "v22-r69-clean-output-gain";
 const OUTPUT_PROFILE_STATE_VERSION = 1;
 const listeners = new Set<() => void>();
 
@@ -777,6 +777,10 @@ if (
   writeOutputProfileSnapshot(state.outputProfile, cleanProfile);
 }
 
+// R69: remove hidden speaker-drive state left by earlier releases while
+// preserving the user's chosen musical EQ preset. Runs once per browser.
+migrateSpeakerCleanPathR69();
+
 let audioElement: HTMLAudioElement | null = null;
 let audioContext: AudioContext | null = null;
 let mediaSource: MediaElementAudioSourceNode | null = null;
@@ -842,6 +846,7 @@ let analyserNode: AnalyserNode | null = null;
 let referenceLevelAnalyser: AnalyserNode | null = null;
 let processedLevelAnalyser: AnalyserNode | null = null;
 let levelMeterSink: GainNode | null = null;
+let postLimiterVolumeGain: GainNode | null = null;
 let musicGain: GainNode | null = null;
 let analyserBuffer: Uint8Array<ArrayBuffer> | null = null;
 let visualizerEnvelope = new Float32Array(64);
@@ -900,20 +905,12 @@ function gainToDb(gain: number) {
   return 20 * Math.log10(Math.max(0.000001, gain));
 }
 function volumeToGain(volume: number) {
-  const normalized = Math.max(0, Math.min(1, Number(volume) || 0));
-  if (normalized <= 0) return 0;
-
-  // Headphones reach calibrated unity earlier so there is meaningful control
-  // travel above a loud listening level. The upper range is a protected reserve,
-  // not raw clipping. Output Reserve remains the explicit final-drive control.
-  const unityPoint = state.outputProfile === "headphones" ? 0.68 : 0.8;
-  if (normalized <= unityPoint) return normalized / unityPoint;
-
-  if (state.outputProfile === "reference" || state.dspBypass || !state.limiterEnabled) return 1;
-  const reserve = (normalized - unityPoint) / Math.max(0.01, 1 - unityPoint);
-  const maxReserveDb = state.outputProfile === "headphones" ? 4.5 : 8;
-  return dbToGain(reserve * maxReserveDb);
+  // R69 CLEAN OUTPUT: the normal volume control is a true post-limiter attenuator.
+  // 100% = unity (0 dB). It never adds hidden boost and therefore can never
+  // overdrive EQ/DSP simply because the user raised the volume slider.
+  return Math.max(0, Math.min(1, Number(volume) || 0));
 }
+
 function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.018) {
   param.cancelScheduledValues(now);
   param.setTargetAtTime(value, now, timeConstant);
@@ -1132,12 +1129,19 @@ function calculateProcessingGain() {
     : 0;
   const response = measureProcessingResponse();
   const makeupDb = currentOutputTuning()?.makeupDb ?? 0;
+  // Bluetooth Speaker uses real EQ headroom instead of asking the limiter to
+  // absorb every positive preset peak. This keeps high/mid/low detail intact
+  // at high playback levels. Other profiles retain their existing behavior.
+  const autoHeadroomDb = state.outputProfile === "speaker" && eqProcessingRequested()
+    ? Math.max(0, Math.min(8, requested + response.peakDb + 0.6))
+    : 0;
+  const effectivePreampDb = requested - autoHeadroomDb;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
-    : Math.max(-6, Math.min(3, requested + response.averageDb + makeupDb));
+    : Math.max(-6, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
   return {
-    effectivePreampDb: requested,
-    autoHeadroomDb: 0,
+    effectivePreampDb,
+    autoHeadroomDb,
     makeupDb,
     referenceMatchDb: measuredMatch,
   };
@@ -1347,7 +1351,7 @@ function applyLimiterSettings(now: number, limiterActive: boolean) {
     const ceiling = workletParam(limiterWorkletNode, "ceilingDb");
     const release = workletParam(limiterWorkletNode, "releaseMs");
     if (enabled) setAudioParam(enabled, limiterActive ? 1 : 0, now, 0.01);
-    if (ceiling) setAudioParam(ceiling, state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0, now, 0.02);
+    if (ceiling) setAudioParam(ceiling, state.outputProfile === "car_hifi" ? -1.2 : -1.0, now, 0.02);
     if (release) setAudioParam(release, state.outputProfile === "speaker" ? 125 : state.outputProfile === "car_hifi" ? 88 : 98, now, 0.03);
   }
   if (limiterFallbackNode) {
@@ -1379,7 +1383,10 @@ function applyProcessingSettings() {
   const headphones = processed && state.outputProfile === "headphones" && Boolean(headphoneProcessorNode || nativeImmersionAvailable());
   const standard = processed && !headphones;
 
-  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
+  // Keep the DSP input at unity. User volume lives after the limiter so raising
+  // volume cannot change how hard the signal drives EQ, DSP, or limiting.
+  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
+  if (postLimiterVolumeGain) setAudioParam(postLimiterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
   if (referenceRouteGain) {
     const referenceGain = pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0;
     setAudioParam(referenceRouteGain.gain, referenceGain, now, 0.008);
@@ -1471,6 +1478,7 @@ function releaseGraph() {
     referenceLevelAnalyser,
     processedLevelAnalyser,
     levelMeterSink,
+    postLimiterVolumeGain,
     musicGain,
   ].forEach(disconnectNode);
   professionalPeakFilters.forEach(disconnectNode);
@@ -1538,6 +1546,7 @@ function releaseGraph() {
   referenceLevelAnalyser = null;
   processedLevelAnalyser = null;
   levelMeterSink = null;
+  postLimiterVolumeGain = null;
   musicGain = null;
   analyserBuffer = null;
   if (levelMeterTimer && typeof window !== "undefined") window.clearInterval(levelMeterTimer);
@@ -1568,8 +1577,34 @@ function calculateStudioGain() {
   const requested = state.eqEnabled
     ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
     : 0;
-  const autoHeadroomDb = 0;
-  const effectivePreampDb = requested;
+  // The Studio WASM path cannot use the browser Biquad bank to measure its
+  // response, so estimate the worst graphic-EQ peak directly. Speaker gets
+  // enough pre-EQ headroom to keep normal preset boosts away from sustained
+  // limiting while preserving the musical EQ curve.
+  const maxEqBoostDb = state.eqEnabled
+    ? state.eqGains.reduce((peak, gain) => Math.max(peak, Number(gain) || 0), 0)
+    : 0;
+  let adjacentBoostBonusDb = 0;
+  if (state.eqEnabled) {
+    for (let index = 0; index < state.eqGains.length - 1; index += 1) {
+      const overlap = Math.max(0, Math.min(Number(state.eqGains[index]) || 0, Number(state.eqGains[index + 1]) || 0));
+      adjacentBoostBonusDb = Math.max(adjacentBoostBonusDb, overlap * 0.22);
+    }
+  }
+  const parametricBoostDb = state.parametricEnabled
+    ? state.parametricBands.reduce((peak, band) => band.enabled ? Math.max(peak, Math.max(0, Number(band.gainDb) || 0)) : peak, 0)
+    : 0;
+  const manualToneBoostDb = state.toneEngineEnabled
+    ? Math.max(0, state.presenceDb, state.clarityDb, state.airDb) * 0.35
+    : 0;
+  const manualBassBoostDb = state.bassEngineEnabled
+    ? Math.max(0, state.bassSubDb, state.bassPunchDb, state.bassBodyDb) * 0.35
+    : 0;
+  const estimatedPeakBoostDb = maxEqBoostDb + adjacentBoostBonusDb + Math.max(parametricBoostDb, manualToneBoostDb, manualBassBoostDb);
+  const autoHeadroomDb = state.outputProfile === "speaker" && state.eqEnabled
+    ? Math.max(0, Math.min(8, requested + estimatedPeakBoostDb + 0.55))
+    : 0;
+  const effectivePreampDb = requested - autoHeadroomDb;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb));
@@ -1581,7 +1616,10 @@ function applyStudioProcessingSettings(now: number) {
   const pureReference = state.outputProfile === "reference";
   const abBypass = !pureReference && state.dspBypass;
   const processed = !pureReference && !abBypass;
-  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
+  // Studio path also runs at unity into WASM. Listener volume is applied after
+  // the WASM limiter, preventing volume-dependent distortion.
+  if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
+  if (postLimiterVolumeGain) setAudioParam(postLimiterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
   if (referenceRouteGain) {
     setAudioParam(referenceRouteGain.gain, pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0, now, 0.008);
   }
@@ -1635,7 +1673,7 @@ function applyStudioProcessingSettings(now: number) {
     // MVP_STUDIO_WASM_V3_PHASE4_TRUE_PEAK_LIMITER
     // BS.1770-style 4x FIR true-peak detection drives the Studio limiter.
     limiterEnabled: processed && state.limiterEnabled,
-    limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : state.outputProfile === "speaker" ? -1.15 : -1.0,
+    limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : -1.0,
     outputProfileCode: studioOutputProfileCode(),
     headphoneEnabled,
     headphoneWidth: headphoneEnabled ? (proof ? 1 : state.headphoneWidth / 100) : 0,
@@ -1737,6 +1775,8 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     analyserNode.smoothingTimeConstant = 0.38;
     analyserNode.minDecibels = -92;
     analyserNode.maxDecibels = -10;
+    postLimiterVolumeGain = context.createGain();
+    postLimiterVolumeGain.gain.value = volumeToGain(state.volume);
     musicGain = context.createGain();
     musicGain.gain.value = 1;
     referenceLevelAnalyser = context.createAnalyser();
@@ -1776,7 +1816,8 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioProcessorNode.connect(standardRouteGain);
     standardRouteGain.connect(mixBus);
     mixBus.connect(analyserNode);
-    analyserNode.connect(musicGain);
+    analyserNode.connect(postLimiterVolumeGain);
+    postLimiterVolumeGain.connect(musicGain);
     musicGain.connect(context.destination);
 
     masterVolumeGain.connect(referenceLevelAnalyser);
@@ -1977,6 +2018,8 @@ async function connectMusicGraph() {
       analyserNode.smoothingTimeConstant = 0.38;
       analyserNode.minDecibels = -92;
       analyserNode.maxDecibels = -10;
+      postLimiterVolumeGain = context.createGain();
+      postLimiterVolumeGain.gain.value = volumeToGain(state.volume);
       musicGain = context.createGain();
       musicGain.gain.value = 1;
       referenceLevelAnalyser = context.createAnalyser();
@@ -2112,7 +2155,8 @@ async function connectMusicGraph() {
         limiterTail = limiterFallbackNode;
       }
       limiterTail.connect(analyserNode);
-      analyserNode.connect(musicGain);
+      analyserNode.connect(postLimiterVolumeGain);
+      postLimiterVolumeGain.connect(musicGain);
       musicGain.connect(context.destination);
       if (referenceLevelAnalyser && processedLevelAnalyser && levelMeterSink) {
         masterVolumeGain.connect(referenceLevelAnalyser);
@@ -3144,8 +3188,8 @@ export function setMusicVolume(value: number) {
   const next = Math.max(0, Math.min(1, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.volume, String(next));
   emit({ volume: next });
-  if (audioContext && mediaSourceConnected && masterVolumeGain) {
-    setAudioParam(masterVolumeGain.gain, volumeToGain(next), audioContext.currentTime, 0.01);
+  if (audioContext && mediaSourceConnected && postLimiterVolumeGain) {
+    setAudioParam(postLimiterVolumeGain.gain, volumeToGain(next), audioContext.currentTime, 0.01);
   } else if (audioElement) {
     audioElement.volume = next;
   }
@@ -3512,7 +3556,9 @@ function cleanOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileS
     eqGains: [...MUSIC_EQ_PRESETS.flat.gains],
     eqTopology: "minimum_phase",
     preampDb: 0,
-    outputReserveDb: profile === "headphones" ? 4.0 : profile === "speaker" ? 2.5 : 3.0,
+    // Bluetooth Speaker starts at true unity. Extra gain must be explicit; it is
+    // never injected as a hidden device-profile default.
+    outputReserveDb: profile === "headphones" ? 4.0 : profile === "speaker" ? 0 : 3.0,
     autoMakeupEnabled: false,
     parametricEnabled: false,
     parametricBands: defaultParametricBands(),
@@ -3595,6 +3641,51 @@ function readOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileSn
 
 function writeOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: OutputProfileSnapshot) {
   savePlayerSetting(outputProfileStateKey(profile), JSON.stringify(snapshot));
+}
+
+const SPEAKER_CLEAN_PATH_R69_KEY = "mvp_music_speaker_clean_path_r69_v1";
+
+function cleanSpeakerSnapshotPreservingEq(source: OutputProfileSnapshot): OutputProfileSnapshot {
+  const clean = cleanOutputProfileSnapshot("speaker");
+  // Preserve the musical choice; remove only stacked DSP/gain state that can
+  // turn high-volume Bluetooth playback into limiter-driven distortion.
+  clean.eqEnabled = source.eqEnabled;
+  clean.eqPreset = source.eqPreset;
+  clean.eqGains = [...source.eqGains];
+  clean.eqTopology = source.eqTopology;
+  clean.preampDb = source.preampDb;
+  clean.outputReserveDb = 0;
+  clean.autoMakeupEnabled = false;
+  clean.normalizationEnabled = false;
+  clean.multibandEnabled = false;
+  clean.dynamicEqEnabled = false;
+  clean.smartDspEnabled = false;
+  clean.dynamicsRestoreEnabled = false;
+  clean.exciterEnabled = false;
+  clean.limiterEnabled = true;
+  return clean;
+}
+
+function migrateSpeakerCleanPathR69() {
+  if (readStored(SPEAKER_CLEAN_PATH_R69_KEY) === "1") return;
+  const storedSpeaker = readOutputProfileSnapshot("speaker");
+  const source = state.outputProfile === "speaker"
+    ? currentOutputProfileSnapshot()
+    : storedSpeaker;
+  if (source) {
+    const clean = cleanSpeakerSnapshotPreservingEq(source);
+    writeOutputProfileSnapshot("speaker", clean);
+    if (state.outputProfile === "speaker") {
+      persistSnapshotToActiveStorage(clean);
+      state = {
+        ...state,
+        ...clean,
+        eqGains: [...clean.eqGains],
+        parametricBands: clean.parametricBands.map((band) => ({ ...band })),
+      };
+    }
+  }
+  savePlayerSetting(SPEAKER_CLEAN_PATH_R69_KEY, "1");
 }
 
 function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
