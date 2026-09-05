@@ -63,7 +63,7 @@ export type MusicDspEngineMode = "studio_wasm" | "advanced_worklet" | "native_fa
 export type MusicImmersionStatus = "active" | "native_fallback" | "bypassed" | "unavailable";
 export type MusicDspVerificationMode = "off" | "eq" | "spatial";
 export type MusicEqTopology = "minimum_phase" | "linear_phase";
-export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "stage" | "focus" | "bass_impact";
+export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "deep" | "stage" | "focus" | "bass_impact";
 export type MusicOutputProfile = "reference" | "car_hifi" | "headphones" | "speaker";
 export type MusicTransitionMode = "auto" | "gapless" | "smooth" | "off";
 export type MusicParametricFilterType = "bell" | "low_shelf" | "high_shelf" | "high_pass" | "low_pass" | "notch";
@@ -252,13 +252,21 @@ export const MUSIC_HEADPHONE_MODES: Record<
   { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }
 > = {
   off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 100, depth: 18, crossfeed: 4, center: 54, bass: 0 },
-  spatial: { label: "Deep", width: 84, depth: 92, crossfeed: 10, center: 58, bass: 0 },
-  // Legacy values remain readable so old saved presets do not break. The simple
-  // Headphones UI exposes only Off / Wide / Deep.
-  stage: { label: "Deep", width: 84, depth: 92, crossfeed: 10, center: 58, bass: 0 },
+
+  // WIDE is intentionally a pure stereo-width mode. No short delay, artificial
+  // reflections or crossfeed are requested, so the WASM stage widens the musical
+  // image without adding a Haas/echo character.
+  wide: { label: "Wide", width: 100, depth: 0, crossfeed: 0, center: 50, bass: 0 },
+
+  // SPATIAL and DEEP use the browser HRTF virtual-speaker path. These values are
+  // retained as geometry controls/fallback hints rather than a second widener.
+  spatial: { label: "Spatial", width: 76, depth: 56, crossfeed: 0, center: 50, bass: 0 },
+  deep: { label: "Deep", width: 86, depth: 100, crossfeed: 0, center: 50, bass: 0 },
+
+  // Legacy saved values remain readable. "stage" maps to the new Deep HRTF mode.
+  stage: { label: "Deep", width: 86, depth: 100, crossfeed: 0, center: 50, bass: 0 },
   focus: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  bass_impact: { label: "Wide", width: 100, depth: 18, crossfeed: 4, center: 54, bass: 0 },
+  bass_impact: { label: "Wide", width: 100, depth: 0, crossfeed: 0, center: 50, bass: 0 },
 };
 // MVP_STUDIO_V4_5_HEADPHONE_CONTINUITY
 export const MUSIC_OUTPUT_PROFILES: Record<
@@ -278,12 +286,12 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   headphones: {
     label: "Headphones",
     shortLabel: "HEADPHONES",
-    description: "Studio HD headphone path: full-range clarity, high clean output and optional Wide / Deep immersion.",
+    description: "Studio HD headphone path: full-range clarity, high clean output and optional Wide / Spatial / Deep immersion.",
   },
   speaker: {
     label: "Bluetooth Speaker",
     shortLabel: "BLUETOOTH",
-    description: "Near-neutral Bluetooth path with gentle codec-detail compensation and no heavy bass removal.",
+    description: "Clean HD Bluetooth path with maximum usable output, full-range clarity and automatic peak protection.",
   },
 };
 
@@ -1124,18 +1132,18 @@ function calculateProcessingGain() {
   // R9.2: the Preamp Trim readout is the requested gain. Do not silently subtract
   // EQ-derived headroom from the user control. The protected limiter is the final
   // peak-safety stage on processed paths.
-  const requested = eqProcessingRequested()
-    ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
-    : 0;
+  const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const requested = simplifiedProfile
+    ? 0
+    : eqProcessingRequested()
+      ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
+      : 0;
   const response = measureProcessingResponse();
   const makeupDb = currentOutputTuning()?.makeupDb ?? 0;
-  // Bluetooth Speaker uses real EQ headroom instead of asking the limiter to
-  // absorb every positive preset peak. This keeps high/mid/low detail intact
-  // at high playback levels. Other profiles retain their existing behavior.
-  const autoHeadroomDb = state.outputProfile === "speaker" && eqProcessingRequested()
-    ? Math.max(0, Math.min(8, requested + response.peakDb + 0.6))
-    : 0;
-  const effectivePreampDb = requested - autoHeadroomDb;
+  // R70: simplified Headphones / Bluetooth Speaker never receive a hidden EQ
+  // safety trim. Their clean-output stage and limiter handle real peaks instead.
+  const autoHeadroomDb = 0;
+  const effectivePreampDb = requested;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
@@ -1175,7 +1183,7 @@ function workletParam(node: AudioWorkletNode | null, name: string) {
 function headphoneModeCode(mode: MusicHeadphoneMode) {
   if (mode === "wide") return 1;
   if (mode === "spatial") return 2;
-  if (mode === "stage") return 3;
+  if (mode === "deep" || mode === "stage") return 3;
   if (mode === "focus") return 4;
   if (mode === "bass_impact") return 5;
   return 0;
@@ -1241,14 +1249,15 @@ function applyHeadphoneSettings(now: number) {
   if (!headphoneProcessorNode) applyNativeHeadphoneSettings(now, enabled);
 }
 function studioHrtfRequested() {
-  return false; // V10 unified engine: headphone spatial processing now lives inside WASM.
+  if (state.dspBypass || state.outputProfile !== "headphones") return false;
+  return state.headphoneMode === "spatial" || state.headphoneMode === "deep" || state.headphoneMode === "stage";
 }
 
 function configureStudioHrtf(now: number) {
   if (!audioContext || !studioDirectInputGain || !studioHrtfInputGain) return;
   const active = studioHrtfRequested() && Boolean(studioHrtfLeftPanner && studioHrtfRightPanner && studioHrtfBassShelf);
   setAudioParam(studioDirectInputGain.gain, active ? 0 : 1, now, 0.018);
-  setAudioParam(studioHrtfInputGain.gain, active ? 0.86 : 0, now, 0.018);
+  setAudioParam(studioHrtfInputGain.gain, active ? 1 : 0, now, 0.018);
   if (!active || !studioHrtfLeftPanner || !studioHrtfRightPanner || !studioHrtfBassShelf) {
     if (studioHrtfReflectionGainA) setAudioParam(studioHrtfReflectionGainA.gain, 0, now, 0.025);
     if (studioHrtfReflectionGainB) setAudioParam(studioHrtfReflectionGainB.gain, 0, now, 0.025);
@@ -1258,19 +1267,22 @@ function configureStudioHrtf(now: number) {
   const proof = state.dspVerificationMode === "spatial";
   const width = proof ? 1 : Math.max(0, Math.min(1, state.headphoneWidth / 100));
   const depth = proof ? 1 : Math.max(0, Math.min(1, state.headphoneDepth / 100));
-  const crossfeed = proof ? 0.55 : Math.max(0, Math.min(1, state.headphoneCrossfeed / 100));
   const center = proof ? 0.5 : Math.max(0, Math.min(1, state.headphoneCenter / 100));
   const bass = proof ? 0 : Math.max(0, Math.min(1, state.headphoneBassImpact / 100));
 
   const mode = state.headphoneMode;
-  const baseAngle = mode === "wide" ? 38 : mode === "spatial" ? 34 : mode === "stage" ? 28 : mode === "focus" ? 17 : 27;
-  const widthSpan = mode === "wide" ? 24 : mode === "spatial" ? 22 : mode === "stage" ? 16 : mode === "focus" ? 6 : 12;
-  const centerPull = Math.max(0, center - 0.5) * 13;
-  const crossfeedPull = crossfeed * 7;
-  const angleDeg = Math.max(12, Math.min(62, baseAngle + width * widthSpan - centerPull - crossfeedPull));
+  const deepMode = mode === "deep" || mode === "stage";
+  const spatialMode = mode === "spatial";
+
+  // HRTF geometry: Spatial is a natural pair of front speakers; Deep moves the
+  // same pair farther forward and slightly inward to add front/back separation.
+  // rolloffFactor is zero, so perceived distance never becomes a hidden volume cut.
+  const baseAngle = deepMode ? 29 : 35;
+  const widthSpan = deepMode ? 16 : 20;
+  const centerPull = Math.max(0, center - 0.5) * 8;
+  const angleDeg = Math.max(18, Math.min(58, baseAngle + width * widthSpan - centerPull));
   const angle = angleDeg * Math.PI / 180;
-  const depthScale = mode === "spatial" ? 1.65 : mode === "stage" ? 1.15 : mode === "wide" ? 0.45 : mode === "focus" ? 0.25 : 0.55;
-  const distance = 1.0 + depth * depthScale;
+  const distance = deepMode ? (1.85 + depth * 1.15) : (1.15 + depth * 0.45);
   const x = Math.sin(angle) * distance;
   const z = -Math.cos(angle) * distance;
 
@@ -1280,13 +1292,15 @@ function configureStudioHrtf(now: number) {
   setAudioParam(studioHrtfRightPanner.positionX, x, now, 0.045);
   setAudioParam(studioHrtfRightPanner.positionY, 0, now, 0.045);
   setAudioParam(studioHrtfRightPanner.positionZ, z, now, 0.045);
-  setAudioParam(studioHrtfBassShelf.gain, bass * (mode === "bass_impact" ? 5.2 : 3.2), now, 0.05);
+  setAudioParam(studioHrtfBassShelf.gain, bass * 2.0, now, 0.05);
 
-  const reflectionAmount = depth * (mode === "spatial" ? 0.13 : mode === "stage" ? 0.09 : 0.045);
-  if (studioHrtfReflectionDelayA) setAudioParam(studioHrtfReflectionDelayA.delayTime, 0.009 + depth * 0.009, now, 0.05);
-  if (studioHrtfReflectionDelayB) setAudioParam(studioHrtfReflectionDelayB.delayTime, 0.015 + depth * 0.014, now, 0.05);
+  // HRTF already supplies the localization cues. Reflections are deliberately
+  // tiny and only add a hint of depth, never an audible reverb tail.
+  const reflectionAmount = deepMode ? Math.min(0.035, depth * 0.035) : spatialMode ? Math.min(0.012, depth * 0.012) : 0;
+  if (studioHrtfReflectionDelayA) setAudioParam(studioHrtfReflectionDelayA.delayTime, deepMode ? 0.013 : 0.009, now, 0.05);
+  if (studioHrtfReflectionDelayB) setAudioParam(studioHrtfReflectionDelayB.delayTime, deepMode ? 0.021 : 0.014, now, 0.05);
   if (studioHrtfReflectionGainA) setAudioParam(studioHrtfReflectionGainA.gain, reflectionAmount, now, 0.05);
-  if (studioHrtfReflectionGainB) setAudioParam(studioHrtfReflectionGainB.gain, reflectionAmount * 0.62, now, 0.05);
+  if (studioHrtfReflectionGainB) setAudioParam(studioHrtfReflectionGainB.gain, reflectionAmount * 0.55, now, 0.05);
 }
 
 function currentImmersionStatus(): MusicImmersionStatus {
@@ -1394,7 +1408,11 @@ function applyProcessingSettings() {
   if (standardRouteGain) setAudioParam(standardRouteGain.gain, standard ? 1 : 0, now, 0.008);
   if (headphoneRouteGain) setAudioParam(headphoneRouteGain.gain, headphones ? 1 : 0, now, 0.008);
   if (preampGain) setAudioParam(preampGain.gain, dbToGain(effectivePreampDb), now, 0.018);
-  if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb), now, 0.025);
+  const compatibilityCleanDriveDb =
+    processed && (state.outputProfile === "headphones" || state.outputProfile === "speaker")
+      ? Math.min(3, Math.max(0, state.outputReserveDb))
+      : 0;
+  if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb), now, 0.025);
 
   applyTransientSettings(now, processed);
   applyMultibandSettings(now, processed);
@@ -1566,50 +1584,31 @@ function studioOutputProfileCode(): 0 | 1 | 2 {
   return 0;
 }
 function calculateStudioGain() {
-  // MVP_STUDIO_WASM_V1_1_GAIN_STAGING_FIX
-  // EQ bands are tonal controls, not a global-volume control. Studio V1 previously
-  // derived auto headroom from the largest positive band and then subtracted that
-  // value from the entire signal. V1.1 keeps user/preset preamp independent from
-  // EQ-band movement and lets the WASM output limiter handle real peak events.
+  // R70 CLEAN-HD GAIN ARCHITECTURE
+  // Headphones and Bluetooth Speaker never receive a hidden blanket trim from
+  // an EQ preset. Their musical EQ is allowed to remain exactly as selected and
+  // the true-peak stage deals only with actual peaks. Car / Hi-Fi keeps its
+  // explicit user preamp because that profile intentionally exposes advanced DSP.
   if (state.outputProfile === "reference") {
     return { effectivePreampDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
   }
-  const requested = state.eqEnabled
-    ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
-    : 0;
-  // The Studio WASM path cannot use the browser Biquad bank to measure its
-  // response, so estimate the worst graphic-EQ peak directly. Speaker gets
-  // enough pre-EQ headroom to keep normal preset boosts away from sustained
-  // limiting while preserving the musical EQ curve.
-  const maxEqBoostDb = state.eqEnabled
-    ? state.eqGains.reduce((peak, gain) => Math.max(peak, Number(gain) || 0), 0)
-    : 0;
-  let adjacentBoostBonusDb = 0;
-  if (state.eqEnabled) {
-    for (let index = 0; index < state.eqGains.length - 1; index += 1) {
-      const overlap = Math.max(0, Math.min(Number(state.eqGains[index]) || 0, Number(state.eqGains[index + 1]) || 0));
-      adjacentBoostBonusDb = Math.max(adjacentBoostBonusDb, overlap * 0.22);
-    }
-  }
-  const parametricBoostDb = state.parametricEnabled
-    ? state.parametricBands.reduce((peak, band) => band.enabled ? Math.max(peak, Math.max(0, Number(band.gainDb) || 0)) : peak, 0)
-    : 0;
-  const manualToneBoostDb = state.toneEngineEnabled
-    ? Math.max(0, state.presenceDb, state.clarityDb, state.airDb) * 0.35
-    : 0;
-  const manualBassBoostDb = state.bassEngineEnabled
-    ? Math.max(0, state.bassSubDb, state.bassPunchDb, state.bassBodyDb) * 0.35
-    : 0;
-  const estimatedPeakBoostDb = maxEqBoostDb + adjacentBoostBonusDb + Math.max(parametricBoostDb, manualToneBoostDb, manualBassBoostDb);
-  const autoHeadroomDb = state.outputProfile === "speaker" && state.eqEnabled
-    ? Math.max(0, Math.min(8, requested + estimatedPeakBoostDb + 0.55))
-    : 0;
-  const effectivePreampDb = requested - autoHeadroomDb;
+
+  const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const requested = simplifiedProfile
+    ? 0
+    : state.eqEnabled
+      ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
+      : 0;
+
+  const autoHeadroomDb = 0;
+  const effectivePreampDb = requested;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb));
+
   return { effectivePreampDb, autoHeadroomDb, referenceMatchDb: measuredMatch };
 }
+
 function applyStudioProcessingSettings(now: number) {
   if (!audioContext || !studioProcessorNode) return;
   const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
@@ -1626,7 +1625,12 @@ function applyStudioProcessingSettings(now: number) {
   if (standardRouteGain) setAudioParam(standardRouteGain.gain, processed ? 1 : 0, now, 0.008);
   configureStudioHrtf(now);
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
-  const headphoneEnabled = processed && state.outputProfile === "headphones" && state.headphoneMode !== "off";
+  const hrtfImmersion = processed && studioHrtfRequested();
+  const headphoneEnabled =
+    processed &&
+    state.outputProfile === "headphones" &&
+    state.headphoneMode !== "off" &&
+    !hrtfImmersion;
   // MVP_STUDIO_WASM_V2_TRANSIENT
   // The same preset/source-aware transient amount used by the Compatibility engine
   // now drives a stereo-linked shaper inside the WASM core. It never changes EQ
@@ -1642,7 +1646,12 @@ function applyStudioProcessingSettings(now: number) {
     // Both EQ topologies now run inside the same Studio WASM processor.
     eqTopologyCode: state.eqTopology === "linear_phase" ? 1 : 0,
     eqGains: [...state.eqGains],
-    preampDb: state.eqEnabled ? state.preampDb : 0,
+    preampDb:
+      state.outputProfile === "headphones" || state.outputProfile === "speaker"
+        ? 0
+        : state.eqEnabled
+          ? state.preampDb
+          : 0,
     headroomDb: autoHeadroomDb,
     transientEnabled: studioTransientAmount > 0.001,
     transientAmount: studioTransientAmount,
@@ -1755,7 +1764,7 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
       panner.distanceModel = "inverse";
       panner.refDistance = 1;
       panner.maxDistance = 10000;
-      panner.rolloffFactor = 0.12;
+      panner.rolloffFactor = 0;
     }
     studioHrtfSum = context.createGain();
     studioHrtfSum.gain.value = 1;
@@ -3558,7 +3567,7 @@ function cleanOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileS
     preampDb: 0,
     // Bluetooth Speaker starts at true unity. Extra gain must be explicit; it is
     // never injected as a hidden device-profile default.
-    outputReserveDb: profile === "headphones" ? 4.0 : profile === "speaker" ? 0 : 3.0,
+    outputReserveDb: profile === "headphones" || profile === "speaker" ? 0 : 3.0,
     autoMakeupEnabled: false,
     parametricEnabled: false,
     parametricBands: defaultParametricBands(),
@@ -3691,6 +3700,73 @@ function migrateSpeakerCleanPathR69() {
 // R69A: run only after SPEAKER_CLEAN_PATH_R69_KEY has been initialized.
 migrateSpeakerCleanPathR69();
 
+const CLEAN_HD_R70_KEY = "mvp_music_clean_hd_r70_v1";
+
+function cleanR70SnapshotPreservingMusic(profile: "headphones" | "speaker", source: OutputProfileSnapshot): OutputProfileSnapshot {
+  const clean = cleanOutputProfileSnapshot(profile);
+  clean.eqEnabled = source.eqEnabled;
+  clean.eqPreset = source.eqPreset;
+  clean.eqGains = [...source.eqGains];
+  clean.eqTopology = source.eqTopology;
+  clean.preampDb = 0;
+  clean.outputReserveDb = 0;
+  clean.autoMakeupEnabled = false;
+  clean.normalizationEnabled = false;
+  clean.multibandEnabled = false;
+  clean.dynamicEqEnabled = false;
+  clean.smartDspEnabled = false;
+  clean.dynamicsRestoreEnabled = false;
+  clean.exciterEnabled = false;
+  clean.deharshAmount = 0;
+  clean.limiterEnabled = true;
+
+  if (profile === "headphones") {
+    clean.headphoneMode =
+      source.headphoneMode === "wide" ||
+      source.headphoneMode === "spatial" ||
+      source.headphoneMode === "deep" ||
+      source.headphoneMode === "stage"
+        ? source.headphoneMode
+        : "off";
+    const values = MUSIC_HEADPHONE_MODES[clean.headphoneMode];
+    clean.headphoneWidth = values.width;
+    clean.headphoneDepth = values.depth;
+    clean.headphoneCrossfeed = values.crossfeed;
+    clean.headphoneCenter = values.center;
+    clean.headphoneBassImpact = values.bass;
+  } else {
+    clean.headphoneMode = "off";
+  }
+
+  return clean;
+}
+
+function migrateCleanHdR70() {
+  if (readStored(CLEAN_HD_R70_KEY) === "1") return;
+
+  (["headphones", "speaker"] as const).forEach((profile) => {
+    const stored = readOutputProfileSnapshot(profile);
+    const source = state.outputProfile === profile ? currentOutputProfileSnapshot() : stored;
+    if (!source) return;
+    const clean = cleanR70SnapshotPreservingMusic(profile, source);
+    writeOutputProfileSnapshot(profile, clean);
+    if (state.outputProfile === profile) {
+      persistSnapshotToActiveStorage(clean);
+      state = {
+        ...state,
+        ...clean,
+        eqGains: [...clean.eqGains],
+        parametricBands: clean.parametricBands.map((band) => ({ ...band })),
+      };
+    }
+  });
+
+  savePlayerSetting(CLEAN_HD_R70_KEY, "1");
+}
+
+// R70 migration runs only after all state/profile helpers exist.
+migrateCleanHdR70();
+
 function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(snapshot.eqEnabled));
   savePlayerSetting(STORAGE_KEYS.eqPreset, snapshot.eqPreset);
@@ -3759,14 +3835,17 @@ function applyOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: Outpu
 
 export function applyMusicHeadphoneStudioHd() {
   const snapshot = cleanOutputProfileSnapshot("headphones");
-  snapshot.outputReserveDb = 4.0;
+  snapshot.outputReserveDb = 0;
   applyOutputProfileSnapshot("headphones", snapshot);
 }
 
 export function setMusicHeadphoneHighOutput(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
-  next.outputReserveDb = enabled ? 6.0 : 4.0;
+  // Requested drive is handled by the clean-drive stage immediately before the
+  // true-peak limiter. The DSP may use less on already-hot masters rather than
+  // turning extra gain into distortion.
+  next.outputReserveDb = enabled ? 6.0 : 0;
   next.autoMakeupEnabled = false;
   next.limiterEnabled = true;
   applyOutputProfileSnapshot("headphones", next);
@@ -3776,11 +3855,47 @@ export function setMusicHeadphoneClear(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
-  next.presenceDb = enabled ? 1.5 : 0;
+  next.presenceDb = enabled ? 1.4 : 0;
   next.clarityDb = enabled ? 2.0 : 0;
-  next.airDb = enabled ? 2.5 : 0;
+  next.airDb = enabled ? 2.4 : 0;
   next.deharshAmount = 0;
   applyOutputProfileSnapshot("headphones", next);
+}
+
+export function applyMusicSpeakerHdSound() {
+  const snapshot = cleanOutputProfileSnapshot("speaker");
+  applyOutputProfileSnapshot("speaker", snapshot);
+}
+
+export function setMusicSpeakerMaxOutput(enabled: boolean) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  next.outputReserveDb = enabled ? 6.0 : 0;
+  next.autoMakeupEnabled = false;
+  next.limiterEnabled = true;
+  applyOutputProfileSnapshot("speaker", next);
+}
+
+export function setMusicSpeakerClear(enabled: boolean) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  next.toneEngineEnabled = enabled;
+  next.presenceDb = enabled ? 1.25 : 0;
+  next.clarityDb = enabled ? 1.8 : 0;
+  next.airDb = enabled ? 2.1 : 0;
+  next.deharshAmount = 0;
+  applyOutputProfileSnapshot("speaker", next);
+}
+
+export function setMusicSpeakerPunch(enabled: boolean) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  next.bassEngineEnabled = enabled;
+  next.bassSubDb = enabled ? 1.25 : 0;
+  next.bassPunchDb = enabled ? 2.6 : 0;
+  next.bassBodyDb = enabled ? 1.1 : 0;
+  next.bassTightness = 72;
+  applyOutputProfileSnapshot("speaker", next);
 }
 
 export function getNextMusicTrackPreview() {
@@ -3928,6 +4043,51 @@ export async function rebuildMusicAudioEngine() {
   await loadTrack(track, position);
   if (wasPlaying) await ensureAudioElement().play();
 }
+
+let cleanHdRouteRecoveryTimer: number | null = null;
+
+function scheduleCleanHdRouteRecovery(delayMs = 450) {
+  if (typeof window === "undefined") return;
+  if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
+  if (!state.currentTrack) return;
+  if (cleanHdRouteRecoveryTimer != null) window.clearTimeout(cleanHdRouteRecoveryTimer);
+  cleanHdRouteRecoveryTimer = window.setTimeout(() => {
+    cleanHdRouteRecoveryTimer = null;
+    if (studioRecoveryInFlight) return;
+    studioRecoveryInFlight = true;
+    lastStudioRecoveryAt = Date.now();
+    void rebuildMusicAudioEngine()
+      .catch(() => emit({ dspStatus: "unavailable" }))
+      .finally(() => { studioRecoveryInFlight = false; });
+  }, Math.max(120, delayMs));
+}
+
+function installCleanHdRouteRecovery() {
+  if (typeof window === "undefined") return;
+  const guardedWindow = window as Window & { __mvpCleanHdRouteWatchInstalled?: boolean };
+  if (guardedWindow.__mvpCleanHdRouteWatchInstalled) return;
+  guardedWindow.__mvpCleanHdRouteWatchInstalled = true;
+
+  try {
+    navigator.mediaDevices?.addEventListener?.("devicechange", () => scheduleCleanHdRouteRecovery(500));
+  } catch {
+    /* Browser does not expose output-route change events. */
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
+    if (!audioContext || audioContext.state === "running") return;
+    scheduleCleanHdRouteRecovery(250);
+  });
+
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    scheduleCleanHdRouteRecovery(250);
+  });
+}
+
+installCleanHdRouteRecovery();
 
 export function getMusicVisualizerLevels(barCount = 10) {
   const count = Math.max(4, Math.min(64, Math.floor(barCount)));

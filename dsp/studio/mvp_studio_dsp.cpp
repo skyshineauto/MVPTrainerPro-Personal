@@ -375,6 +375,7 @@ Biquad outputLow[2];
 Biquad outputPresence[2];
 Biquad outputHigh[2];
 Biquad headphoneBass[2];
+Biquad headphoneSideLowpass;
 // V3 Phase 6 Stereo Integrity: mono-compatible low bass + adaptive anti-phase guard.
 Biquad stereoSideLowpass;
 
@@ -498,6 +499,7 @@ int autoMakeupEnabled = 0;
 float autoMakeupGain = 1.0f;
 float outputReserveDb = 0.0f;
 float outputReserveGain = 1.0f;
+float cleanOutputDriveGain = 1.0f;
 float meterAutoMakeupDb = 0.0f;
 float meterOutputReserveDb = 0.0f;
 float meterAvailableHeadroomDb = 12.0f;
@@ -647,6 +649,8 @@ void resetBuffers() {
   crossfeedStateL = crossfeedStateR = 0.0;
   headphoneOutputDriveGain = 1.0f;
   meterHeadphoneOutputDriveDb = 0.0f;
+  cleanOutputDriveGain = 1.0f;
+  headphoneSideLowpass.reset();
   stereoSideLowpass.reset();
   stereoCorrelationEnergy = 0.0f;
   stereoCorrelationCross = 0.0f;
@@ -1054,19 +1058,47 @@ void processSmartDsp(float &left, float &right) {
 void processOutputGain(float &left, float &right) {
   const float preLimitPeak = absf(left) > absf(right) ? absf(left) : absf(right);
   if (preLimitPeak > meterInternalPeak) meterInternalPeak = preLimitPeak;
+
   float makeupTargetDb = 0.0f;
   if (autoMakeupEnabled) {
     makeupTargetDb = clampf(multibandEnabled ? meterMultibandGainReductionDb * 0.35f : 0.0f, 0.0f, 2.0f);
     makeupTargetDb += clampf(deharshAmount * meterDeharshReductionDb * 0.15f, 0.0f, 0.8f);
   }
   const float makeupTarget = static_cast<float>(dbToGain(makeupTargetDb));
-  const float coeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
-  autoMakeupGain += (makeupTarget-autoMakeupGain)*coeff;
-  outputReserveGain = static_cast<float>(dbToGain(outputReserveDb));
+  const float makeupCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
+  autoMakeupGain += (makeupTarget-autoMakeupGain)*makeupCoeff;
+
+  const float requestedDrive = static_cast<float>(dbToGain(outputReserveDb));
+  if (outputProfile == 1 || outputProfile == 2) {
+    // R70 CLEAN DRIVE
+    // "High/Max Output" is a requested reserve, not a command to ram every
+    // mastered track into the limiter. Fill available digital headroom first,
+    // then allow only about 1 dB of peak-limiter work on already-hot material.
+    // This keeps the output at full scale without the crushed/distorted sound
+    // caused by a fixed +6 dB drive on every song.
+    const float desiredPeak = limiterDetectorCeilingGain * 1.08392691f; // ~+0.7 dB over detector ceiling.
+    float cleanCap = requestedDrive;
+    if (preLimitPeak > 0.000001f) cleanCap = desiredPeak / preLimitPeak;
+    if (cleanCap < 1.0f) cleanCap = 1.0f;
+    const float driveTarget = requestedDrive < cleanCap ? requestedDrive : cleanCap;
+
+    // Fast release of excess drive, slower increase into newly available room.
+    const float coeff = driveTarget < cleanOutputDriveGain
+      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.010)))
+      : static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.220)));
+    cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
+    outputReserveGain = cleanOutputDriveGain;
+  } else {
+    // Car / Hi-Fi remains an explicit advanced gain stage.
+    cleanOutputDriveGain = requestedDrive;
+    outputReserveGain = requestedDrive;
+  }
+
   left *= autoMakeupGain * outputReserveGain;
   right *= autoMakeupGain * outputReserveGain;
+
   meterAutoMakeupDb = autoMakeupGain > 0.000001f ? static_cast<float>(20.0*log10(autoMakeupGain)) : 0.0f;
-  meterOutputReserveDb = outputReserveDb;
+  meterOutputReserveDb = outputReserveGain > 0.000001f ? static_cast<float>(20.0*log10(outputReserveGain)) : 0.0f;
   const float after = absf(left)>absf(right)?absf(left):absf(right);
   meterAvailableHeadroomDb = after > 0.000001f ? clampf(static_cast<float>(-20.0*log10(after)), -12.0f, 24.0f) : 24.0f;
 }
@@ -1132,6 +1164,11 @@ void configureHeadphoneBass() {
   const double boost = headphoneEnabled ? clampd(headphoneBassImpact, 0.0, 1.0) * 4.8 : 0.0;
   headphoneBass[0].setLowShelf(sampleRateHz, 92.0, boost);
   headphoneBass[1].setLowShelf(sampleRateHz, 92.0, boost);
+
+  // WIDE keeps bass/low fundamentals substantially centered while allowing the
+  // upper image to expand. This avoids the thin, phasey bass that full-band
+  // widening can create on headphones.
+  headphoneSideLowpass.setLowpass(sampleRateHz, 180.0, 0.7071067811865476);
 }
 
 void configureMultiband() {
@@ -1309,10 +1346,18 @@ void processHeadphone(float &left, float &right) {
   const float center = clampf(headphoneCenter, 0.0f, 1.0f);
   const float mid = 0.5f * (left + right);
   const float side = 0.5f * (left - right);
-  const float sideScale = 1.0f + width * 0.48f;
-  const float midScale = 0.92f + center * 0.16f;
-  float widenedL = mid * midScale + side * sideScale;
-  float widenedR = mid * midScale - side * sideScale;
+
+  // Frequency-dependent M/S width: low-frequency stereo remains nearly intact,
+  // while the upper side channel expands. With depth/crossfeed at zero this is
+  // a pure width mode, not a short-delay spatial trick.
+  const float lowSide = headphoneSideLowpass.process(side);
+  const float highSide = side - lowSide;
+  const float lowSideScale = 1.0f + width * 0.06f;
+  const float highSideScale = 1.0f + width * 0.52f;
+  const float widenedSide = lowSide * lowSideScale + highSide * highSideScale;
+  const float midScale = 0.98f + center * 0.04f;
+  float widenedL = mid * midScale + widenedSide;
+  float widenedR = mid * midScale - widenedSide;
 
   const float cf = clampf(headphoneCrossfeed + angleNorm * 0.05f * advanced, 0.0f, 1.0f);
   if (cf > 0.0001f) {
@@ -1344,7 +1389,9 @@ void processHeadphone(float &left, float &right) {
     widenedR = widenedR * (1.0f - mix * 0.30f) + delayedL * mix;
   }
 
-  const float compensation = 1.0f / (1.0f + width * 0.018f + depth * 0.012f);
+  // Preserve level. The true-peak limiter downstream owns peak protection, so
+  // immersion never gets a blanket volume penalty just for being enabled.
+  const float compensation = 1.0f;
   widenedL *= compensation;
   widenedR *= compensation;
   const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 1.0f;
