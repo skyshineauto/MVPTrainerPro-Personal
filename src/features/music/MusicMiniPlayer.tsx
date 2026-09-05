@@ -1940,18 +1940,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : player.activePlaylistName || "All Uploaded Songs";
 
-  const headphoneStudioHdActive =
-    player.outputProfile === "headphones" &&
-    player.eqEnabled &&
-    player.eqPreset === "flat" &&
-    !player.parametricEnabled &&
-    !player.bassEngineEnabled &&
-    !player.exciterEnabled &&
-    !player.dynamicsRestoreEnabled &&
-    !player.smartDspEnabled &&
-    !player.normalizationEnabled &&
-    !player.multibandEnabled &&
-    !player.dynamicEqEnabled;
+  // Studio HD is the permanent clean headphone foundation, not a selectable effect.
+  // EQ presets (Hard Rock, Rock, etc.) shape this baseline without turning it off.
+  const headphoneStudioHdActive = player.outputProfile === "headphones";
   const headphoneHighOutputActive =
     player.outputProfile === "headphones" && player.outputReserveDb >= 5.5;
   const headphoneClearActive =
@@ -2278,45 +2269,68 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               </div>
 
               <div className="tr-headphoneQuickGrid">
-                <button
-                  type="button"
-                  className={headphoneStudioHdActive ? "is-active" : ""}
-                  onClick={() => void runDspMutation(() => applyMusicHeadphoneStudioHd())}
+                <div
+                  className={`tr-headphoneBaselineCard ${headphoneStudioHdActive ? "is-active" : ""}`}
+                  data-control="studio"
+                  aria-label="Studio HD active baseline"
                 >
                   <i><PlayerIcon name="headphones" /></i>
                   <b>STUDIO HD</b>
-                  <small>Clean full-range reference</small>
-                </button>
+                  <small>Clean full-range foundation</small>
+                  <em>ACTIVE BASELINE</em>
+                </div>
 
                 <button
                   type="button"
+                  data-control="output"
                   className={headphoneHighOutputActive ? "is-active" : ""}
+                  aria-pressed={headphoneHighOutputActive}
                   onClick={() => void runDspMutation(() => setMusicHeadphoneHighOutput(!headphoneHighOutputActive))}
                 >
                   <i><PlayerIcon name="volume" /></i>
                   <b>HIGH OUTPUT</b>
                   <small>{headphoneHighOutputActive ? "Maximum clean reserve" : "Standard clean output"}</small>
+                  <em>{headphoneHighOutputActive ? "ON" : "OFF"}</em>
                 </button>
 
                 <button
                   type="button"
+                  data-control="clear"
                   className={headphoneClearActive ? "is-active" : ""}
+                  aria-pressed={headphoneClearActive}
                   onClick={() => void runDspMutation(() => setMusicHeadphoneClear(!headphoneClearActive))}
                 >
                   <i><PlayerIcon name="melodic" /></i>
                   <b>CLEAR</b>
                   <small>Presence • clarity • air</small>
+                  <em>{headphoneClearActive ? "ON" : "OFF"}</em>
                 </button>
 
                 <button
                   type="button"
+                  data-control="reset"
+                  className="tr-headphoneResetButton"
                   onClick={() => void runDspMutation(() => applyMusicHeadphoneStudioHd())}
                 >
                   <i><PlayerIcon name="equalizer" /></i>
                   <b>RESET</b>
-                  <small>Return to Studio HD baseline</small>
+                  <small>Return to clean Studio HD + Flat EQ</small>
+                  <em>ACTION</em>
                 </button>
               </div>
+
+              <label className="tr-headphonePresetSimple">
+                <span>EQ PRESET</span>
+                <div>
+                  <strong>{activeBuiltInEq || activeSavedProfile?.name || "Flat"}</strong>
+                  <small>One preset at a time • shapes Studio HD without replacing it</small>
+                </div>
+                <select value={presetSelectValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => handlePresetSelection(event.target.value as MusicEqPreset)}>
+                  {(Object.entries(MUSIC_EQ_PRESETS) as Array<[string, { label: string }]>).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
+                  {DSP_SLOTS.map((slot) => <option key={slot} value={slot}>{dspProfiles[slot]?.name ?? slotFallbackLabel(slot)}</option>)}
+                  <option value="custom">{activeSavedProfile && activeProfileDirty ? `${activeSavedProfile.name} • Modified` : "Unsaved Custom"}</option>
+                </select>
+              </label>
 
               <div className="tr-headphoneImmersionSimple">
                 <span>HEADPHONE IMMERSION</span>
@@ -12352,48 +12366,67 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-audioDeck--pro7 .tr-neuralCommand:hover:not(:disabled){transform:none!important;filter:none!important}
         }
 
-              /* R68 HEADPHONES — simple Studio HD controls only. */
+              /* R68B HEADPHONES — high-contrast Studio HD controls + visible EQ presets. */
         .tr-headphoneSimplePanel{
           display:grid;
           gap:14px;
           padding:16px;
-          border:1px solid rgba(83,218,255,.22);
+          border:1px solid rgba(83,218,255,.38);
           border-radius:16px;
           background:
-            radial-gradient(560px 180px at 12% 0%,rgba(58,210,249,.10),transparent 68%),
-            linear-gradient(180deg,rgba(8,28,36,.94),rgba(3,13,18,.96));
-          box-shadow:inset 0 1px rgba(255,255,255,.05),0 16px 36px rgba(0,0,0,.26);
+            radial-gradient(620px 210px at 10% -5%,rgba(58,210,249,.16),transparent 70%),
+            linear-gradient(180deg,rgba(13,38,48,.98),rgba(5,20,27,.98));
+          box-shadow:inset 0 1px rgba(255,255,255,.08),0 16px 36px rgba(0,0,0,.30);
         }
         .tr-headphoneSimpleHead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
         .tr-headphoneSimpleHead>div{display:grid;gap:4px;min-width:0}
-        .tr-headphoneSimpleHead small{font-size:8px;font-weight:1000;letter-spacing:.12em;color:#78cfe4}
-        .tr-headphoneSimpleHead strong{font-size:20px;line-height:1;color:#f4fdff;letter-spacing:.02em}
-        .tr-headphoneSimpleHead span{font-size:10px;color:#9fb9c2}
-        .tr-headphoneCleanStatus{flex:0 0 auto;border:1px solid rgba(98,231,178,.30);border-radius:999px;padding:7px 9px;font-size:7px;font-weight:1000;letter-spacing:.08em;color:#8ef0c4;background:rgba(14,71,50,.30)}
-        .tr-headphoneCleanStatus.is-hot{border-color:rgba(255,188,83,.34);color:#ffd28a;background:rgba(91,54,12,.32)}
-        .tr-headphoneQuickGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-        .tr-headphoneQuickGrid>button{
-          min-height:78px;display:grid;place-items:center;align-content:center;gap:4px;padding:8px;
-          border:1px solid rgba(122,190,211,.15);border-radius:12px;
-          background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.18));
-          color:#8faab3;cursor:pointer;
+        .tr-headphoneSimpleHead small{font-size:8px;font-weight:1000;letter-spacing:.12em;color:#78dfff}
+        .tr-headphoneSimpleHead strong{font-size:20px;line-height:1;color:#fff;letter-spacing:.02em}
+        .tr-headphoneSimpleHead span{font-size:10px;color:#c3d9e2}
+        .tr-headphoneCleanStatus{flex:0 0 auto;border:1px solid rgba(98,231,178,.40);border-radius:999px;padding:7px 9px;font-size:7px;font-weight:1000;letter-spacing:.08em;color:#9df5ce;background:rgba(14,71,50,.42)}
+        .tr-headphoneCleanStatus.is-hot{border-color:rgba(255,188,83,.45);color:#ffe0a5;background:rgba(91,54,12,.45)}
+        .tr-headphoneQuickGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+        .tr-headphoneQuickGrid>button,.tr-headphoneBaselineCard{
+          position:relative;min-height:92px;display:grid;place-items:center;align-content:center;gap:4px;padding:10px 8px;
+          border:1px solid rgba(136,210,234,.32);border-radius:13px;
+          background:linear-gradient(180deg,rgba(28,58,69,.90),rgba(7,25,33,.96));
+          color:#e9f8fc;
+          box-shadow:inset 0 1px rgba(255,255,255,.07),0 6px 16px rgba(0,0,0,.18);
         }
-        .tr-headphoneQuickGrid>button i{width:26px;height:26px;display:grid;place-items:center;color:#79c9dc}
-        .tr-headphoneQuickGrid>button i svg{width:17px;height:17px}
-        .tr-headphoneQuickGrid>button b{font-size:9px;letter-spacing:.075em;color:#e8f8fc}
-        .tr-headphoneQuickGrid>button small{font-size:7.2px;line-height:1.25;color:#78939d;text-align:center}
+        .tr-headphoneQuickGrid>button{cursor:pointer}
+        .tr-headphoneQuickGrid>button:active{transform:translateY(1px)}
+        .tr-headphoneQuickGrid i,.tr-headphoneBaselineCard i{width:30px;height:30px;display:grid;place-items:center;color:#fff}
+        .tr-headphoneQuickGrid i svg,.tr-headphoneBaselineCard i svg{width:19px;height:19px;overflow:visible}
+        .tr-headphoneQuickGrid i svg path,.tr-headphoneQuickGrid i svg circle,.tr-headphoneBaselineCard i svg path,.tr-headphoneBaselineCard i svg circle{fill:currentColor!important;stroke:currentColor!important}
+        .tr-headphoneQuickGrid b,.tr-headphoneBaselineCard b{font-size:9.5px;letter-spacing:.075em;color:#fff}
+        .tr-headphoneQuickGrid small,.tr-headphoneBaselineCard small{font-size:7.4px;line-height:1.25;color:#b8ced7;text-align:center}
+        .tr-headphoneQuickGrid em,.tr-headphoneBaselineCard em{margin-top:2px;font-style:normal;font-size:6.5px;font-weight:1000;letter-spacing:.10em;color:#9eb5be}
+        .tr-headphoneQuickGrid [data-control="studio"]{border-color:rgba(74,221,255,.62);background:linear-gradient(180deg,rgba(14,82,102,.94),rgba(4,38,51,.98));box-shadow:0 0 18px rgba(56,209,248,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid [data-control="studio"] i,.tr-headphoneQuickGrid [data-control="studio"] em{color:#5ee6ff}
+        .tr-headphoneQuickGrid [data-control="output"] i{color:#ffad3d}
+        .tr-headphoneQuickGrid [data-control="clear"] i{color:#53ead5}
+        .tr-headphoneQuickGrid [data-control="reset"] i{color:#edf7fb}
         .tr-headphoneQuickGrid>button.is-active{
-          border-color:rgba(76,218,253,.48);
-          background:linear-gradient(180deg,rgba(13,73,91,.88),rgba(4,31,41,.94));
-          box-shadow:0 0 18px rgba(58,205,244,.10),inset 0 1px rgba(255,255,255,.07);
+          border-color:rgba(76,218,253,.62);
+          background:linear-gradient(180deg,rgba(17,91,112,.96),rgba(5,43,56,.98));
+          box-shadow:0 0 20px rgba(58,205,244,.18),inset 0 1px rgba(255,255,255,.10);
         }
-        .tr-headphoneQuickGrid>button.is-active i,.tr-headphoneQuickGrid>button.is-active b{color:#c9f6ff}
-        .tr-headphoneImmersionSimple{display:grid;grid-template-columns:auto minmax(250px,1fr) auto;align-items:center;gap:10px;padding-top:11px;border-top:1px solid rgba(127,194,215,.12)}
-        .tr-headphoneImmersionSimple>span{font-size:8px;font-weight:1000;letter-spacing:.10em;color:#a4c4ce}
-        .tr-headphoneImmersionSimple>div{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-        .tr-headphoneImmersionSimple button{height:34px;border:1px solid rgba(122,190,211,.14);border-radius:9px;background:rgba(1,10,14,.58);color:#76929c;font-size:8px;font-weight:1000;letter-spacing:.08em;cursor:pointer}
-        .tr-headphoneImmersionSimple button.is-active{border-color:rgba(184,140,255,.50);background:linear-gradient(180deg,rgba(59,36,90,.78),rgba(24,13,41,.90));color:#decaff;box-shadow:0 0 15px rgba(184,140,255,.10)}
-        .tr-headphoneImmersionSimple>small{font-size:7px;font-weight:900;letter-spacing:.06em;color:#77919a;text-align:right}
+        .tr-headphoneQuickGrid>button.is-active em{color:#9cf5d0}
+        .tr-headphoneQuickGrid>button[data-control="output"].is-active{border-color:rgba(255,174,61,.70);box-shadow:0 0 20px rgba(255,162,42,.18),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="clear"].is-active{border-color:rgba(83,234,213,.68);box-shadow:0 0 20px rgba(83,234,213,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphonePresetSimple{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(180px,240px);align-items:center;gap:12px;padding:12px 13px;border:1px solid rgba(111,198,224,.30);border-radius:12px;background:linear-gradient(180deg,rgba(24,51,61,.88),rgba(7,24,31,.94))}
+        .tr-headphonePresetSimple>span{font-size:8px;font-weight:1000;letter-spacing:.11em;color:#79ddf7}
+        .tr-headphonePresetSimple>div{display:grid;gap:2px;min-width:0}
+        .tr-headphonePresetSimple strong{font-size:11px;color:#fff}
+        .tr-headphonePresetSimple small{font-size:7px;color:#adc3cc}
+        .tr-headphonePresetSimple select{width:100%;height:38px;border:1px solid rgba(100,211,242,.42);border-radius:9px;padding:0 34px 0 11px;background:#061820;color:#fff;font-size:9px;font-weight:900;letter-spacing:.04em;outline:none}
+        .tr-headphonePresetSimple select:focus{border-color:#55dcff;box-shadow:0 0 0 2px rgba(85,220,255,.12)}
+        .tr-headphoneImmersionSimple{display:grid;grid-template-columns:auto minmax(250px,1fr) auto;align-items:center;gap:10px;padding-top:11px;border-top:1px solid rgba(127,194,215,.20)}
+        .tr-headphoneImmersionSimple>span{font-size:8px;font-weight:1000;letter-spacing:.10em;color:#d0e1e7}
+        .tr-headphoneImmersionSimple>div{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+        .tr-headphoneImmersionSimple button{height:38px;border:1px solid rgba(136,210,234,.30);border-radius:9px;background:rgba(8,28,36,.94);color:#c1d4db;font-size:8px;font-weight:1000;letter-spacing:.08em;cursor:pointer}
+        .tr-headphoneImmersionSimple button.is-active{border-color:rgba(184,140,255,.72);background:linear-gradient(180deg,rgba(73,44,108,.92),rgba(31,18,51,.96));color:#f0e4ff;box-shadow:0 0 18px rgba(184,140,255,.18)}
+        .tr-headphoneImmersionSimple>small{font-size:7px;font-weight:900;letter-spacing:.06em;color:#a9bdc5;text-align:right}
 
         /* The Headphones profile intentionally exposes only the simple path.
            Car / Hi-Fi and Bluetooth Speaker retain the full advanced workspace. */
@@ -12414,6 +12447,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           .tr-headphoneSimpleHead{display:grid}
           .tr-headphoneCleanStatus{justify-self:start}
           .tr-headphoneQuickGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+          .tr-headphoneQuickGrid>button,.tr-headphoneBaselineCard{min-height:100px}
+          .tr-headphonePresetSimple{grid-template-columns:1fr;gap:7px}
+          .tr-headphonePresetSimple select{height:42px;font-size:10px}
           .tr-headphoneImmersionSimple{grid-template-columns:1fr;gap:7px}
           .tr-headphoneImmersionSimple>small{text-align:left}
         }
