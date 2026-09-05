@@ -50,6 +50,7 @@ import icoArms from "../../assets/biceps.png";
 import icoLegs from "../../assets/leg.png";
 import icoQuads from "../../assets/front.png";
 import icoCalves from "../../assets/muscles.png";
+import workoutCompleteHero from "../../assets/workout-complete-hero.png";
 
 const END_WORKOUT_REQUEST_EVENT = "mvp:end-workout-request";
 const EDIT_RESULTS_BATCH_SIZE_DESKTOP = 6;
@@ -569,6 +570,32 @@ async function loadWorkoutExercisesWithExercises(workoutId: string): Promise<Wor
 
   return rows.map((r) => ({ ...r, exercise: exMap.get(r.exercise_id) || null }));
 }
+
+function workoutExerciseTombstoneKey(workoutId: string) {
+  return `mvp_workout_removed_exercises_v1:${workoutId}`;
+}
+
+function readWorkoutExerciseTombstones(workoutId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(workoutExerciseTombstoneKey(workoutId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map((value) => String(value)).filter(Boolean) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function rememberWorkoutExerciseRemoval(workoutId: string, exerciseId: string | null | undefined) {
+  if (!exerciseId) return;
+  try {
+    const values = readWorkoutExerciseTombstones(workoutId);
+    values.add(String(exerciseId));
+    localStorage.setItem(workoutExerciseTombstoneKey(workoutId), JSON.stringify(Array.from(values)));
+  } catch {
+    /* local persistence is best-effort */
+  }
+}
+
 
 function formatPreviousDate(ts: string | null | undefined) {
   if (!ts) return "Previous workout";
@@ -2767,6 +2794,12 @@ function SessionCompleteOverlay({
   doneCount: number;
   totalExercises: number;
 }) {
+  const [completionHeroFailed, setCompletionHeroFailed] = useState(false);
+
+  useEffect(() => {
+    if (open) setCompletionHeroFailed(false);
+  }, [open]);
+
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
@@ -2778,7 +2811,12 @@ function SessionCompleteOverlay({
           <div className="tr-completeCoachWrap">
             <div className="tr-completeCoachRing" aria-hidden />
             <div className="tr-completeCoachBurst" aria-hidden />
-            <img src="/coach.png" alt="Coach" className="tr-completeCoach" />
+            <img
+              src={completionHeroFailed ? icoDumbbell : workoutCompleteHero}
+              alt={completionHeroFailed ? "MVP Trainer Pro" : "MVP Trainer Pro workout complete"}
+              className={`tr-completeCoach ${completionHeroFailed ? "is-fallback" : ""}`}
+              onError={() => setCompletionHeroFailed(true)}
+            />
           </div>
 
           <div className="tr-completeCopy">
@@ -2945,12 +2983,23 @@ function SessionCompleteOverlay({
         .tr-completeCoach{
           position:relative;
           z-index:1;
-          width:min(270px, 100%);
+          width:min(330px, 100%);
+          max-height: 390px;
           height:auto;
           object-fit:contain;
+          animation: trCompleteHeroIn .42s cubic-bezier(.2,.78,.2,1) both;
           filter:
             drop-shadow(0 24px 50px rgba(0,0,0,.52))
             drop-shadow(0 0 28px rgba(0,170,255,.24));
+        }
+        .tr-completeCoach.is-fallback{
+          width:min(132px, 34vw);
+          opacity:.92;
+          filter:drop-shadow(0 18px 34px rgba(0,0,0,.48)) drop-shadow(0 0 24px rgba(0,170,255,.34));
+        }
+        @keyframes trCompleteHeroIn{
+          from{ opacity:0; transform:translateY(14px) scale(.94); }
+          to{ opacity:1; transform:none; }
         }
         .tr-completeCopy{
           display:grid;
@@ -3034,7 +3083,7 @@ function SessionCompleteOverlay({
           .tr-completeCoachWrap{ min-height: 220px; }
           .tr-completeCoachRing{ width: 190px; height: 190px; }
           .tr-completeCoachBurst{ width: 230px; height: 230px; }
-          .tr-completeCoach{ width:min(205px, 100%); }
+          .tr-completeCoach{ width:min(260px, 88vw); max-height:280px; }
           .tr-completeCopy{ justify-items:center; }
           .tr-completeSub{ max-width: 100%; }
           .tr-completeStatRow{ width:100%; }
@@ -3064,7 +3113,7 @@ function SessionCompleteOverlay({
           .tr-completeCoachWrap{ min-height: 165px; }
           .tr-completeCoachRing{ width: 145px; height: 145px; }
           .tr-completeCoachBurst{ width: 180px; height: 180px; }
-          .tr-completeCoach{ width:min(160px, 100%); }
+          .tr-completeCoach{ width:min(230px, 84vw); max-height:240px; }
           .tr-completeStatRow{ grid-template-columns: 1fr; }
           .tr-completeActions{ flex-direction:column; width:100%; }
           .tr-completeActions .tr-btn{ width:100%; }
@@ -3510,22 +3559,59 @@ export function WorkoutPlayerPage({ params }: any) {
     }
     setRpcMediaMap(nextRpcMap);
 
-    const { data: existingWe, error: exErr } = await supabase
-      .from("workout_exercises")
-      .select("id")
-      .eq("workout_id", wId)
-      .limit(1);
+    /*
+     * RELIABILITY: a workout is not "hydrated" merely because one
+     * workout_exercises row exists. The scheduled session / rpc payload is the
+     * expected executable list. Reconcile every missing expected exercise so a
+     * 6-exercise session cannot become a 5-exercise player with a 6-exercise
+     * counter.
+     *
+     * Intentional deletes/swaps are remembered for this active workout so a
+     * refresh/resume does not resurrect something the user deliberately removed.
+     */
+    let loaded = await loadWorkoutExercisesWithExercises(wId);
+    const removedExerciseIds = readWorkoutExerciseTombstones(wId);
 
-    if (exErr) throw exErr;
+    if (!loaded.length) {
+      const seedItems = (rpcItems || [])
+        .filter((it: any) => it?.exercise_id && !removedExerciseIds.has(String(it.exercise_id)))
+        .map((it: any, idx: number) => ({
+          exercise_id: it.exercise_id,
+          order_index: idx,
+          prescription_snapshot:
+            it.prescription_snapshot ?? {
+              sets: it.sets ?? 3,
+              rep_min: it.rep_min ?? 8,
+              rep_max: it.rep_max ?? 12,
+              rest_seconds: it.rest_seconds ?? 90,
+              rir_min: it.rir_min ?? 2,
+              rir_max: it.rir_max ?? 3,
+            },
+          pain: 0,
+          difficulty: null,
+        }));
 
-    let loaded: WorkoutExerciseRow[] = [];
-    if (existingWe && existingWe.length > 0) {
-      loaded = await loadWorkoutExercisesWithExercises(wId);
+      if (seedItems.length) {
+        const { error: repErr } = await supabase.rpc("rpc_workout_exercises_replace", {
+          p_workout_id: wId,
+          p_items: seedItems,
+        });
+        if (repErr) throw repErr;
+        loaded = await loadWorkoutExercisesWithExercises(wId);
+      }
     } else {
-      const seedItems = (rpcItems || []).map((it: any, idx: number) => ({
-        exercise_id: it.exercise_id,
-        order_index: idx,
-        prescription_snapshot:
+      const existingExerciseIds = new Set(loaded.map((row) => String(row.exercise_id)));
+      let nextOrder =
+        loaded.reduce((highest, row) => Math.max(highest, Number(row.order_index ?? -1)), -1) + 1;
+      let repaired = 0;
+
+      for (const it of rpcItems || []) {
+        const exerciseId = String(it?.exercise_id ?? "");
+        if (!exerciseId || existingExerciseIds.has(exerciseId) || removedExerciseIds.has(exerciseId)) {
+          continue;
+        }
+
+        const prescription =
           it.prescription_snapshot ?? {
             sets: it.sets ?? 3,
             rep_min: it.rep_min ?? 8,
@@ -3533,19 +3619,26 @@ export function WorkoutPlayerPage({ params }: any) {
             rest_seconds: it.rest_seconds ?? 90,
             rir_min: it.rir_min ?? 2,
             rir_max: it.rir_max ?? 3,
-          },
-        pain: 0,
-        difficulty: null,
-      }));
+          };
 
-      const { error: repErr } = await supabase.rpc("rpc_workout_exercises_replace", {
-        p_workout_id: wId,
-        p_items: seedItems,
-      });
+        const { error: insertErr } = await supabase.from("workout_exercises").insert({
+          workout_id: wId,
+          exercise_id: exerciseId,
+          order_index: nextOrder,
+          prescription_snapshot: prescription,
+          pain: 0,
+          difficulty: null,
+        });
 
-      if (repErr) throw repErr;
+        if (insertErr) throw insertErr;
+        existingExerciseIds.add(exerciseId);
+        nextOrder += 1;
+        repaired += 1;
+      }
 
-      loaded = await loadWorkoutExercisesWithExercises(wId);
+      if (repaired > 0) {
+        loaded = await loadWorkoutExercisesWithExercises(wId);
+      }
     }
 
     let restoredActiveIdx = 0;
@@ -3860,6 +3953,10 @@ export function WorkoutPlayerPage({ params }: any) {
   }
 
   async function deleteWorkoutExercise(weId: string) {
+    const removing = items.find((row) => String(row.id) === String(weId));
+    if (workoutId && removing?.exercise_id) {
+      rememberWorkoutExerciseRemoval(workoutId, removing.exercise_id);
+    }
     await supabase.from("workout_sets").delete().eq("workout_exercise_id", weId);
     const { error } = await supabase.from("workout_exercises").delete().eq("id", weId);
     if (error) throw error;
@@ -3939,6 +4036,10 @@ export function WorkoutPlayerPage({ params }: any) {
   }
 
   async function swapExercise(weId: string, newExerciseId: string) {
+    const replacing = items.find((row) => String(row.id) === String(weId));
+    if (workoutId && replacing?.exercise_id) {
+      rememberWorkoutExerciseRemoval(workoutId, replacing.exercise_id);
+    }
     await supabase.from("workout_sets").delete().eq("workout_exercise_id", weId);
 
     const { error } = await supabase
@@ -4731,6 +4832,9 @@ export function WorkoutPlayerPage({ params }: any) {
             showToast={showToast}
             exerciseIndex={activeIdx + 1}
             totalExercises={items.length}
+            isFinalIncompleteExercise={
+              !current.completed_at && items.filter((row) => !row.completed_at).length <= 1
+            }
             sessionComplete={sessionComplete}
             onStartRest={restTimer.start}
           />
@@ -8837,18 +8941,28 @@ function EditSessionPanel(props: {
   const mode = swapTargetWeId ? "swap" : "add";
   const [mobileTab, setMobileTab] = useState<"current" | "add">("add");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const addMuscleDetailOptions = useMemo(
     () => getMuscleDetailOptions(addMuscle as MuscleKey),
     [addMuscle]
   );
 
   useEffect(() => {
-    if (swapTargetWeId) setMobileTab("add");
+    if (swapTargetWeId) {
+      setMobileTab("add");
+      setMobileFiltersOpen(true);
+    }
   }, [swapTargetWeId]);
+
+  function keepSearchVisible() {
+    window.setTimeout(() => {
+      searchInputRef.current?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    }, 120);
+  }
 
   function handleSwap(weId: string) {
     setMobileTab("add");
-    setMobileFiltersOpen(false);
+    setMobileFiltersOpen(true);
     onSwap(weId);
   }
 
@@ -8974,24 +9088,21 @@ function EditSessionPanel(props: {
             </div>
 
             <div className="tr-editAddLayout">
-              {mode === "add" ? (
-                <div className="tr-mobileExercisePickerBar">
-                  <button
-                    type="button"
-                    className={`tr-btn ${mobileFiltersOpen ? "tr-btn--primary" : "tr-btn--blueOutline"}`}
-                    onClick={() => setMobileFiltersOpen((value) => !value)}
-                    aria-expanded={mobileFiltersOpen}
-                  >
-                    {mobileFiltersOpen ? "HIDE FILTERS" : "FILTERS"}
-                  </button>
-                  <button type="button" className="tr-btn tr-btn--blueOutline" onClick={onCreateNew}>
-                    + NEW EXERCISE
-                  </button>
-                </div>
-              ) : null}
+              <div className="tr-mobileExercisePickerBar">
+                <button
+                  type="button"
+                  className={`tr-btn ${mobileFiltersOpen ? "tr-btn--primary" : "tr-btn--blueOutline"}`}
+                  onClick={() => setMobileFiltersOpen((value) => !value)}
+                  aria-expanded={mobileFiltersOpen}
+                >
+                  {mobileFiltersOpen ? "HIDE FILTERS" : "FILTERS"}
+                </button>
+                <button type="button" className="tr-btn tr-btn--blueOutline" onClick={onCreateNew}>
+                  + NEW EXERCISE
+                </button>
+              </div>
 
-              {mode === "add" ? (
-                <div className={`tr-editFilterScroll ${mobileFiltersOpen ? "is-open" : "is-collapsed"}`}>
+              <div className={`tr-editFilterScroll ${mobileFiltersOpen ? "is-open" : "is-collapsed"}`}>
                   <div className="tr-editFilterGroup">
                     <div className="tr-filterLabel">MUSCLE</div>
                     <div className="tr-chipRow tr-chipRow--wrap">
@@ -9034,15 +9145,21 @@ function EditSessionPanel(props: {
                     </div>
                   </div>
 
-                  {addEquip === "cardio" ? (
-                    <div className="tr-editFilterNote">Muscle filters are unavailable for cardio exercises.</div>
-                  ) : null}
-                </div>
-              ) : null}
+                {addEquip === "cardio" ? (
+                  <div className="tr-editFilterNote">Muscle filters are unavailable for cardio exercises.</div>
+                ) : null}
+              </div>
 
               <label className="tr-editSearchField">
                 <span className="tr-filterLabel">SEARCH EXERCISES</span>
-                <input value={searchQ} onChange={(e) => void onSearch(e.target.value)} placeholder="Search exercises…" />
+                <input
+                  ref={searchInputRef}
+                  value={searchQ}
+                  onFocus={keepSearchVisible}
+                  onClick={keepSearchVisible}
+                  onChange={(e) => void onSearch(e.target.value)}
+                  placeholder="Search exercises…"
+                />
               </label>
 
               <div className="tr-editPickerPrompt">
@@ -9162,6 +9279,7 @@ function ExerciseRunner({
   showToast,
   exerciseIndex,
   totalExercises,
+  isFinalIncompleteExercise,
   sessionComplete,
   onStartRest,
 }: {
@@ -9174,6 +9292,7 @@ function ExerciseRunner({
   showToast: (msg: string, tone?: ToastTone) => void;
   exerciseIndex: number;
   totalExercises: number;
+  isFinalIncompleteExercise: boolean;
   sessionComplete: boolean;
   onStartRest: (
     seconds: number,
@@ -9496,7 +9615,7 @@ function ExerciseRunner({
   }, [sets, historyStats]);
 
   const readyToLock = timed || allSetsLogged;
-  const finalExercise = exerciseIndex >= totalExercises;
+  const finalExercise = isFinalIncompleteExercise;
 
   const upsertSet = async (idx: number, patch: any) => {
     if (isDone || timed) return;

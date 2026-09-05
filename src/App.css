@@ -12395,3 +12395,38 @@ body{
   .tr-editSessionTitle{font-size:12.5px;}
   .tr-editSessionCount{justify-self:start;}
 }
+
+
+/* MVP R68 reliability: active-session Add/Swap share one complete mobile picker.
+   Keep the focused search field above iOS keyboard/sticky controls. */
+.tr-editModal--sessionPicker .tr-editSearchField{
+  position:relative;
+  z-index:8;
+  scroll-margin-top:150px;
+  scroll-margin-bottom:180px;
+}
+.tr-editModal--sessionPicker .tr-editSearchField input{
+  position:relative;
+  z-index:9;
+}
+@media (max-width:720px){
+  .tr-editModal--sessionPicker{
+    height:min(100%, var(--tr-modal-visual-height, 100dvh))!important;
+    max-height:var(--tr-modal-visual-height, 100dvh)!important;
+  }
+  .tr-editModal--sessionPicker .tr-editModalBody{
+    min-height:0!important;
+    overflow-y:auto!important;
+    overscroll-behavior-y:contain!important;
+    -webkit-overflow-scrolling:touch!important;
+    padding-bottom:max(180px, env(safe-area-inset-bottom))!important;
+  }
+  .tr-editModal--sessionPicker .tr-editMobileTabs{
+    top:0!important;
+    z-index:12!important;
+  }
+  .tr-editModal--sessionPicker .tr-editSearchField{
+    scroll-margin-top:170px!important;
+    scroll-margin-bottom:240px!important;
+  }
+}

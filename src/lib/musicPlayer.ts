@@ -252,11 +252,13 @@ export const MUSIC_HEADPHONE_MODES: Record<
   { label: string; width: number; depth: number; crossfeed: number; center: number; bass: number }
 > = {
   off: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
-  wide: { label: "Wide", width: 100, depth: 8, crossfeed: 2, center: 48, bass: 4 },
-  spatial: { label: "Spatial", width: 92, depth: 95, crossfeed: 18, center: 54, bass: 6 },
-  stage: { label: "Stage", width: 58, depth: 82, crossfeed: 62, center: 72, bass: 8 },
-  focus: { label: "Focus", width: 0, depth: 0, crossfeed: 30, center: 100, bass: 0 },
-  bass_impact: { label: "Bass Impact", width: 46, depth: 16, crossfeed: 8, center: 60, bass: 90 },
+  wide: { label: "Wide", width: 100, depth: 18, crossfeed: 4, center: 54, bass: 0 },
+  spatial: { label: "Deep", width: 84, depth: 92, crossfeed: 10, center: 58, bass: 0 },
+  // Legacy values remain readable so old saved presets do not break. The simple
+  // Headphones UI exposes only Off / Wide / Deep.
+  stage: { label: "Deep", width: 84, depth: 92, crossfeed: 10, center: 58, bass: 0 },
+  focus: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
+  bass_impact: { label: "Wide", width: 100, depth: 18, crossfeed: 4, center: 54, bass: 0 },
 };
 // MVP_STUDIO_V4_5_HEADPHONE_CONTINUITY
 export const MUSIC_OUTPUT_PROFILES: Record<
@@ -276,7 +278,7 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   headphones: {
     label: "Headphones",
     shortLabel: "HEADPHONES",
-    description: "Near-neutral headphone path with optional binaural crossfeed, spatial processing and transparent true-peak protection.",
+    description: "Studio HD headphone path: full-range clarity, high clean output and optional Wide / Deep immersion.",
   },
   speaker: {
     label: "Bluetooth Speaker",
@@ -457,7 +459,8 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v20-r10-mvp-studio-v5-advanced";
+const AUDIO_ENGINE_VERSION = "v21-r68-output-profile-isolation";
+const OUTPUT_PROFILE_STATE_VERSION = 1;
 const listeners = new Set<() => void>();
 
 function readStored(key: string) {
@@ -757,6 +760,23 @@ let state: MusicPlayerState = {
   dspVerificationMode: "off",
 };
 
+// One-time device-path cleanup for the two profiles that were previously most
+// vulnerable to inherited/stacked DSP. Car / Hi-Fi is deliberately preserved.
+if (
+  (state.outputProfile === "headphones" || state.outputProfile === "speaker") &&
+  !readOutputProfileSnapshot(state.outputProfile)
+) {
+  const cleanProfile = cleanOutputProfileSnapshot(state.outputProfile);
+  state = {
+    ...state,
+    ...cleanProfile,
+    eqGains: [...cleanProfile.eqGains],
+    parametricBands: cleanProfile.parametricBands.map((band) => ({ ...band })),
+  };
+  persistSnapshotToActiveStorage(cleanProfile);
+  writeOutputProfileSnapshot(state.outputProfile, cleanProfile);
+}
+
 let audioElement: HTMLAudioElement | null = null;
 let audioContext: AudioContext | null = null;
 let mediaSource: MediaElementAudioSourceNode | null = null;
@@ -882,12 +902,17 @@ function gainToDb(gain: number) {
 function volumeToGain(volume: number) {
   const normalized = Math.max(0, Math.min(1, Number(volume) || 0));
   if (normalized <= 0) return 0;
-  // 80% is calibrated unity. The top 20% is protected high-output reserve.
-  if (normalized <= 0.8) return normalized / 0.8;
-  // Reserve is only available on a protected processed path. Reference / limiter-off stays at unity.
+
+  // Headphones reach calibrated unity earlier so there is meaningful control
+  // travel above a loud listening level. The upper range is a protected reserve,
+  // not raw clipping. Output Reserve remains the explicit final-drive control.
+  const unityPoint = state.outputProfile === "headphones" ? 0.68 : 0.8;
+  if (normalized <= unityPoint) return normalized / unityPoint;
+
   if (state.outputProfile === "reference" || state.dspBypass || !state.limiterEnabled) return 1;
-  const reserve = (normalized - 0.8) / 0.2;
-  return dbToGain(reserve * 8);
+  const reserve = (normalized - unityPoint) / Math.max(0.01, 1 - unityPoint);
+  const maxReserveDb = state.outputProfile === "headphones" ? 4.5 : 8;
+  return dbToGain(reserve * maxReserveDb);
 }
 function setAudioParam(param: AudioParam, value: number, now: number, timeConstant = 0.018) {
   param.cancelScheduledValues(now);
@@ -921,6 +946,11 @@ function currentProPreset() {
 function currentTransientAmount() {
   if (eqProofActive()) return 0;
   if (!eqProcessingRequested() || !isBuiltInPreset(state.eqPreset)) return 0;
+  // Headphones are a clean Studio HD path. Bluetooth Speaker also starts clean;
+  // its adaptive transient personality is only allowed when Smart DSP is
+  // deliberately enabled.
+  if (state.outputProfile === "headphones") return 0;
+  if (state.outputProfile === "speaker" && !state.smartDspEnabled) return 0;
   return MUSIC_PRO_PRESETS[state.eqPreset].transientAmount;
 }
 function currentOutputTuning() {
@@ -1593,7 +1623,10 @@ function applyStudioProcessingSettings(now: number) {
     outputCorrectionAmount: studioPersonality.outputCorrectionAmount,
     // MVP_STUDIO_WASM_V3_PHASE6_STEREO_INTEGRITY
     // Automatic mono-compatible low bass and anti-phase image protection.
-    stereoIntegrityEnabled: processed,
+    stereoIntegrityEnabled:
+      processed &&
+      (state.outputProfile === "car_hifi" ||
+        (state.outputProfile === "speaker" && state.smartDspEnabled)),
     stereoIntegrityAmount: studioPersonality.stereoIntegrityAmount,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
@@ -2153,12 +2186,18 @@ function startLevelMeter() {
         : [0, 0, 0, 0]) as [number, number, number, number];
       const dynamicEqChanged = dynamicEqGainReductionDb !== state.dynamicEqGainReductionDb
         || dynamicEqBandReductionDb.some((value, index) => value !== state.dynamicEqBandReductionDb[index]);
-      const outputCorrectionActive = state.outputProfile !== "reference" && !state.dspBypass;
+      const outputCorrectionActive =
+        state.smartDspEnabled &&
+        state.outputProfile !== "reference" &&
+        !state.dspBypass;
       const outputCorrectionReductionDb = outputCorrectionActive && Number.isFinite(telemetry.outputCorrectionReductionDb)
         ? Math.round(telemetry.outputCorrectionReductionDb * 10) / 10
         : 0;
       const outputCorrectionChanged = outputCorrectionReductionDb !== state.outputCorrectionReductionDb;
-      const stereoIntegrityActive = state.outputProfile !== "reference" && !state.dspBypass;
+      const stereoIntegrityActive =
+        !state.dspBypass &&
+        (state.outputProfile === "car_hifi" ||
+          (state.outputProfile === "speaker" && state.smartDspEnabled));
       const stereoCorrelation = stereoIntegrityActive && Number.isFinite(telemetry.stereoCorrelation)
         ? Math.round(Math.max(-1, Math.min(1, telemetry.stereoCorrelation)) * 100) / 100
         : 1;
@@ -2177,7 +2216,11 @@ function startLevelMeter() {
       const limiterGainReductionDb = state.limiterEnabled && Number.isFinite(telemetry.gainReductionDb)
         ? Math.round(Math.max(0, telemetry.gainReductionDb) * 10) / 10
         : 0;
-      const transientActive = state.outputProfile !== "reference" && state.eqEnabled && !state.dspBypass;
+      const transientActive =
+        state.outputProfile !== "reference" &&
+        state.eqEnabled &&
+        !state.dspBypass &&
+        currentTransientAmount() > 0.001;
       const transientBoostDb = transientActive && Number.isFinite(telemetry.transientBoostDb)
         ? Math.round(Math.max(0, telemetry.transientBoostDb) * 10) / 10
         : 0;
@@ -3275,23 +3318,23 @@ function setAdvancedNumber(key: keyof MusicPlayerState, storageKey: string, valu
   const next=Math.max(min,Math.min(max,Number(value)||0)); savePlayerSetting(storageKey,String(next)); emit({[key]:next} as Partial<MusicPlayerState>); applyProcessingSettings();
 }
 export function setMusicBassEngineEnabled(enabled:boolean){savePlayerSetting(STORAGE_KEYS.bassEngineEnabled,String(enabled));emit({bassEngineEnabled:enabled});applyProcessingSettings();}
-export function setMusicBassSub(value:number){setAdvancedNumber("bassSubDb",STORAGE_KEYS.bassSubDb,value,-8,8);learnSoundDna("bassSubDb",state.bassSubDb);persistCurrentSongDspMemory()}
-export function setMusicBassPunch(value:number){setAdvancedNumber("bassPunchDb",STORAGE_KEYS.bassPunchDb,value,-8,8);learnSoundDna("bassPunchDb",state.bassPunchDb);persistCurrentSongDspMemory()}
-export function setMusicBassBody(value:number){setAdvancedNumber("bassBodyDb",STORAGE_KEYS.bassBodyDb,value,-8,8);learnSoundDna("bassBodyDb",state.bassBodyDb);persistCurrentSongDspMemory()}
+export function setMusicBassSub(value:number){if(!state.bassEngineEnabled)setMusicBassEngineEnabled(true);setAdvancedNumber("bassSubDb",STORAGE_KEYS.bassSubDb,value,-8,8);learnSoundDna("bassSubDb",state.bassSubDb);persistCurrentSongDspMemory()}
+export function setMusicBassPunch(value:number){if(!state.bassEngineEnabled)setMusicBassEngineEnabled(true);setAdvancedNumber("bassPunchDb",STORAGE_KEYS.bassPunchDb,value,-8,8);learnSoundDna("bassPunchDb",state.bassPunchDb);persistCurrentSongDspMemory()}
+export function setMusicBassBody(value:number){if(!state.bassEngineEnabled)setMusicBassEngineEnabled(true);setAdvancedNumber("bassBodyDb",STORAGE_KEYS.bassBodyDb,value,-8,8);learnSoundDna("bassBodyDb",state.bassBodyDb);persistCurrentSongDspMemory()}
 export function setMusicBassTightness(value:number){setAdvancedNumber("bassTightness",STORAGE_KEYS.bassTightness,value,0,100)}
 export function setMusicToneEngineEnabled(enabled:boolean){savePlayerSetting(STORAGE_KEYS.toneEngineEnabled,String(enabled));emit({toneEngineEnabled:enabled});applyProcessingSettings();}
-export function setMusicPresence(value:number){setAdvancedNumber("presenceDb",STORAGE_KEYS.presenceDb,value,-8,8);learnSoundDna("presenceDb",state.presenceDb);persistCurrentSongDspMemory()}
-export function setMusicClarity(value:number){setAdvancedNumber("clarityDb",STORAGE_KEYS.clarityDb,value,-8,8);learnSoundDna("clarityDb",state.clarityDb);persistCurrentSongDspMemory()}
-export function setMusicAir(value:number){setAdvancedNumber("airDb",STORAGE_KEYS.airDb,value,-8,8);learnSoundDna("airDb",state.airDb);persistCurrentSongDspMemory()}
+export function setMusicPresence(value:number){if(!state.toneEngineEnabled)setMusicToneEngineEnabled(true);setAdvancedNumber("presenceDb",STORAGE_KEYS.presenceDb,value,-8,8);learnSoundDna("presenceDb",state.presenceDb);persistCurrentSongDspMemory()}
+export function setMusicClarity(value:number){if(!state.toneEngineEnabled)setMusicToneEngineEnabled(true);setAdvancedNumber("clarityDb",STORAGE_KEYS.clarityDb,value,-8,8);learnSoundDna("clarityDb",state.clarityDb);persistCurrentSongDspMemory()}
+export function setMusicAir(value:number){if(!state.toneEngineEnabled)setMusicToneEngineEnabled(true);setAdvancedNumber("airDb",STORAGE_KEYS.airDb,value,-8,8);learnSoundDna("airDb",state.airDb);persistCurrentSongDspMemory()}
 export function setMusicDeharsh(value:number){setAdvancedNumber("deharshAmount",STORAGE_KEYS.deharshAmount,value,0,100)}
 export function setMusicExciterEnabled(enabled:boolean){savePlayerSetting(STORAGE_KEYS.exciterEnabled,String(enabled));emit({exciterEnabled:enabled});applyProcessingSettings();}
-export function setMusicExciterAmount(value:number){setAdvancedNumber("exciterAmount",STORAGE_KEYS.exciterAmount,value,0,100)}
+export function setMusicExciterAmount(value:number){if(!state.exciterEnabled)setMusicExciterEnabled(true);setAdvancedNumber("exciterAmount",STORAGE_KEYS.exciterAmount,value,0,100)}
 export function setMusicSaturationLow(value:number){setAdvancedNumber("saturationLow",STORAGE_KEYS.saturationLow,value,0,100)}
 export function setMusicSaturationMid(value:number){setAdvancedNumber("saturationMid",STORAGE_KEYS.saturationMid,value,0,100)}
 export function setMusicSaturationHigh(value:number){setAdvancedNumber("saturationHigh",STORAGE_KEYS.saturationHigh,value,0,100)}
 export function setMusicStereoFieldEnabled(enabled:boolean){savePlayerSetting(STORAGE_KEYS.stereoFieldEnabled,String(enabled));emit({stereoFieldEnabled:enabled});applyProcessingSettings();}
-export function setMusicStereoWidth(value:number){setAdvancedNumber("stereoUserWidth",STORAGE_KEYS.stereoUserWidth,value,50,165);learnSoundDna("stereoUserWidth",state.stereoUserWidth);persistCurrentSongDspMemory()}
-export function setMusicCenterFocus(value:number){setAdvancedNumber("stereoCenterFocus",STORAGE_KEYS.stereoCenterFocus,value,75,130);learnSoundDna("stereoCenterFocus",state.stereoCenterFocus);persistCurrentSongDspMemory()}
+export function setMusicStereoWidth(value:number){if(!state.stereoFieldEnabled)setMusicStereoFieldEnabled(true);setAdvancedNumber("stereoUserWidth",STORAGE_KEYS.stereoUserWidth,value,50,165);learnSoundDna("stereoUserWidth",state.stereoUserWidth);persistCurrentSongDspMemory()}
+export function setMusicCenterFocus(value:number){if(!state.stereoFieldEnabled)setMusicStereoFieldEnabled(true);setAdvancedNumber("stereoCenterFocus",STORAGE_KEYS.stereoCenterFocus,value,75,130);learnSoundDna("stereoCenterFocus",state.stereoCenterFocus);persistCurrentSongDspMemory()}
 export function setMusicBassMonoHz(value:number){setAdvancedNumber("bassMonoHz",STORAGE_KEYS.bassMonoHz,value,60,160)}
 export function setMusicDynamicsRestoreEnabled(enabled:boolean){savePlayerSetting(STORAGE_KEYS.dynamicsRestoreEnabled,String(enabled));emit({dynamicsRestoreEnabled:enabled});applyProcessingSettings();}
 export function setMusicDynamicsRestoreAmount(value:number){setAdvancedNumber("dynamicsRestoreAmount",STORAGE_KEYS.dynamicsRestoreAmount,value,0,100)}
@@ -3350,6 +3393,300 @@ export function setMusicLimiterEnabled(enabled: boolean) {
 export function setMusicDuckingStrength(value: MusicDuckingStrength) {
   savePlayerSetting(STORAGE_KEYS.duckingStrength, value);
   emit({ duckingStrength: value });
+}
+
+
+type OutputProfileSnapshot = Pick<
+  MusicPlayerState,
+  | "eqEnabled"
+  | "eqPreset"
+  | "eqGains"
+  | "eqTopology"
+  | "preampDb"
+  | "outputReserveDb"
+  | "autoMakeupEnabled"
+  | "parametricEnabled"
+  | "parametricBands"
+  | "bassEngineEnabled"
+  | "bassSubDb"
+  | "bassPunchDb"
+  | "bassBodyDb"
+  | "bassTightness"
+  | "toneEngineEnabled"
+  | "presenceDb"
+  | "clarityDb"
+  | "airDb"
+  | "deharshAmount"
+  | "exciterEnabled"
+  | "exciterAmount"
+  | "saturationLow"
+  | "saturationMid"
+  | "saturationHigh"
+  | "stereoFieldEnabled"
+  | "stereoUserWidth"
+  | "stereoCenterFocus"
+  | "bassMonoHz"
+  | "dynamicsRestoreEnabled"
+  | "dynamicsRestoreAmount"
+  | "smartDspEnabled"
+  | "smartDspAmount"
+  | "headphoneAdvancedEnabled"
+  | "headphoneSpeakerAngle"
+  | "headphoneDistance"
+  | "headphoneReflections"
+  | "headphoneWet"
+  | "normalizationEnabled"
+  | "multibandEnabled"
+  | "dynamicEqEnabled"
+  | "limiterEnabled"
+  | "headphoneMode"
+  | "headphoneWidth"
+  | "headphoneDepth"
+  | "headphoneCrossfeed"
+  | "headphoneCenter"
+  | "headphoneBassImpact"
+>;
+
+function outputProfileStateKey(profile: MusicOutputProfile) {
+  return `mvp_music_output_profile_state_v${OUTPUT_PROFILE_STATE_VERSION}:${profile}`;
+}
+
+function currentOutputProfileSnapshot(): OutputProfileSnapshot {
+  return {
+    eqEnabled: state.eqEnabled,
+    eqPreset: state.eqPreset,
+    eqGains: [...state.eqGains],
+    eqTopology: state.eqTopology,
+    preampDb: state.preampDb,
+    outputReserveDb: state.outputReserveDb,
+    autoMakeupEnabled: state.autoMakeupEnabled,
+    parametricEnabled: state.parametricEnabled,
+    parametricBands: state.parametricBands.map((band) => ({ ...band })),
+    bassEngineEnabled: state.bassEngineEnabled,
+    bassSubDb: state.bassSubDb,
+    bassPunchDb: state.bassPunchDb,
+    bassBodyDb: state.bassBodyDb,
+    bassTightness: state.bassTightness,
+    toneEngineEnabled: state.toneEngineEnabled,
+    presenceDb: state.presenceDb,
+    clarityDb: state.clarityDb,
+    airDb: state.airDb,
+    deharshAmount: state.deharshAmount,
+    exciterEnabled: state.exciterEnabled,
+    exciterAmount: state.exciterAmount,
+    saturationLow: state.saturationLow,
+    saturationMid: state.saturationMid,
+    saturationHigh: state.saturationHigh,
+    stereoFieldEnabled: state.stereoFieldEnabled,
+    stereoUserWidth: state.stereoUserWidth,
+    stereoCenterFocus: state.stereoCenterFocus,
+    bassMonoHz: state.bassMonoHz,
+    dynamicsRestoreEnabled: state.dynamicsRestoreEnabled,
+    dynamicsRestoreAmount: state.dynamicsRestoreAmount,
+    smartDspEnabled: state.smartDspEnabled,
+    smartDspAmount: state.smartDspAmount,
+    headphoneAdvancedEnabled: state.headphoneAdvancedEnabled,
+    headphoneSpeakerAngle: state.headphoneSpeakerAngle,
+    headphoneDistance: state.headphoneDistance,
+    headphoneReflections: state.headphoneReflections,
+    headphoneWet: state.headphoneWet,
+    normalizationEnabled: state.normalizationEnabled,
+    multibandEnabled: state.multibandEnabled,
+    dynamicEqEnabled: state.dynamicEqEnabled,
+    limiterEnabled: state.limiterEnabled,
+    headphoneMode: state.headphoneMode,
+    headphoneWidth: state.headphoneWidth,
+    headphoneDepth: state.headphoneDepth,
+    headphoneCrossfeed: state.headphoneCrossfeed,
+    headphoneCenter: state.headphoneCenter,
+    headphoneBassImpact: state.headphoneBassImpact,
+  };
+}
+
+function cleanOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileSnapshot {
+  const base = currentOutputProfileSnapshot();
+  const clean: OutputProfileSnapshot = {
+    ...base,
+    eqEnabled: true,
+    eqPreset: "flat",
+    eqGains: [...MUSIC_EQ_PRESETS.flat.gains],
+    eqTopology: "minimum_phase",
+    preampDb: 0,
+    outputReserveDb: profile === "headphones" ? 4.0 : profile === "speaker" ? 2.5 : 3.0,
+    autoMakeupEnabled: false,
+    parametricEnabled: false,
+    parametricBands: defaultParametricBands(),
+    bassEngineEnabled: false,
+    bassSubDb: 0,
+    bassPunchDb: 0,
+    bassBodyDb: 0,
+    bassTightness: 55,
+    toneEngineEnabled: false,
+    presenceDb: 0,
+    clarityDb: 0,
+    airDb: 0,
+    deharshAmount: 0,
+    exciterEnabled: false,
+    exciterAmount: 0,
+    saturationLow: 0,
+    saturationMid: 0,
+    saturationHigh: 0,
+    stereoFieldEnabled: false,
+    stereoUserWidth: 100,
+    stereoCenterFocus: 100,
+    bassMonoHz: 100,
+    dynamicsRestoreEnabled: false,
+    dynamicsRestoreAmount: 0,
+    smartDspEnabled: false,
+    smartDspAmount: 30,
+    headphoneAdvancedEnabled: false,
+    headphoneSpeakerAngle: 30,
+    headphoneDistance: 0,
+    headphoneReflections: 0,
+    headphoneWet: 0,
+    normalizationEnabled: false,
+    multibandEnabled: false,
+    dynamicEqEnabled: false,
+    limiterEnabled: true,
+    headphoneMode: "off",
+    headphoneWidth: 0,
+    headphoneDepth: 0,
+    headphoneCrossfeed: 0,
+    headphoneCenter: 50,
+    headphoneBassImpact: 0,
+  };
+  return clean;
+}
+
+function normalizeOutputProfileSnapshot(value: unknown, profile: MusicOutputProfile): OutputProfileSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const fallback = cleanOutputProfileSnapshot(profile);
+  const raw = value as Partial<OutputProfileSnapshot>;
+  const presetName = raw.eqPreset as MusicEqPreset | undefined;
+  const eqPreset =
+    presetName === "custom" || isCustomPresetSlot(presetName as MusicEqPreset) || isBuiltInPreset(presetName as MusicEqPreset)
+      ? (presetName as MusicEqPreset)
+      : fallback.eqPreset;
+  const eqGains =
+    Array.isArray(raw.eqGains) && raw.eqGains.length === MUSIC_EQ_FREQUENCIES.length
+      ? raw.eqGains.map((gain) => Math.max(-12, Math.min(12, Number(gain) || 0)))
+      : [...fallback.eqGains];
+  const parametricBands =
+    Array.isArray(raw.parametricBands)
+      ? defaultParametricBands().map((baseBand, index) => ({ ...baseBand, ...(raw.parametricBands?.[index] ?? {}) }))
+      : defaultParametricBands();
+  return {
+    ...fallback,
+    ...raw,
+    eqPreset,
+    eqGains,
+    parametricBands,
+  } as OutputProfileSnapshot;
+}
+
+function readOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileSnapshot | null {
+  try {
+    const raw = readStored(outputProfileStateKey(profile));
+    return raw ? normalizeOutputProfileSnapshot(JSON.parse(raw), profile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: OutputProfileSnapshot) {
+  savePlayerSetting(outputProfileStateKey(profile), JSON.stringify(snapshot));
+}
+
+function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
+  savePlayerSetting(STORAGE_KEYS.eqEnabled, String(snapshot.eqEnabled));
+  savePlayerSetting(STORAGE_KEYS.eqPreset, snapshot.eqPreset);
+  savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(snapshot.eqGains));
+  savePlayerSetting(STORAGE_KEYS.eqTopology, snapshot.eqTopology);
+  savePlayerSetting(STORAGE_KEYS.preampDb, String(snapshot.preampDb));
+  savePlayerSetting(STORAGE_KEYS.outputReserveDb, String(snapshot.outputReserveDb));
+  savePlayerSetting(STORAGE_KEYS.autoMakeupEnabled, String(snapshot.autoMakeupEnabled));
+  savePlayerSetting(STORAGE_KEYS.parametricEnabled, String(snapshot.parametricEnabled));
+  savePlayerSetting(STORAGE_KEYS.parametricBands, JSON.stringify(snapshot.parametricBands));
+  savePlayerSetting(STORAGE_KEYS.bassEngineEnabled, String(snapshot.bassEngineEnabled));
+  savePlayerSetting(STORAGE_KEYS.bassSubDb, String(snapshot.bassSubDb));
+  savePlayerSetting(STORAGE_KEYS.bassPunchDb, String(snapshot.bassPunchDb));
+  savePlayerSetting(STORAGE_KEYS.bassBodyDb, String(snapshot.bassBodyDb));
+  savePlayerSetting(STORAGE_KEYS.bassTightness, String(snapshot.bassTightness));
+  savePlayerSetting(STORAGE_KEYS.toneEngineEnabled, String(snapshot.toneEngineEnabled));
+  savePlayerSetting(STORAGE_KEYS.presenceDb, String(snapshot.presenceDb));
+  savePlayerSetting(STORAGE_KEYS.clarityDb, String(snapshot.clarityDb));
+  savePlayerSetting(STORAGE_KEYS.airDb, String(snapshot.airDb));
+  savePlayerSetting(STORAGE_KEYS.deharshAmount, String(snapshot.deharshAmount));
+  savePlayerSetting(STORAGE_KEYS.exciterEnabled, String(snapshot.exciterEnabled));
+  savePlayerSetting(STORAGE_KEYS.exciterAmount, String(snapshot.exciterAmount));
+  savePlayerSetting(STORAGE_KEYS.saturationLow, String(snapshot.saturationLow));
+  savePlayerSetting(STORAGE_KEYS.saturationMid, String(snapshot.saturationMid));
+  savePlayerSetting(STORAGE_KEYS.saturationHigh, String(snapshot.saturationHigh));
+  savePlayerSetting(STORAGE_KEYS.stereoFieldEnabled, String(snapshot.stereoFieldEnabled));
+  savePlayerSetting(STORAGE_KEYS.stereoUserWidth, String(snapshot.stereoUserWidth));
+  savePlayerSetting(STORAGE_KEYS.stereoCenterFocus, String(snapshot.stereoCenterFocus));
+  savePlayerSetting(STORAGE_KEYS.bassMonoHz, String(snapshot.bassMonoHz));
+  savePlayerSetting(STORAGE_KEYS.dynamicsRestoreEnabled, String(snapshot.dynamicsRestoreEnabled));
+  savePlayerSetting(STORAGE_KEYS.dynamicsRestoreAmount, String(snapshot.dynamicsRestoreAmount));
+  savePlayerSetting(STORAGE_KEYS.smartDspEnabled, String(snapshot.smartDspEnabled));
+  savePlayerSetting(STORAGE_KEYS.smartDspAmount, String(snapshot.smartDspAmount));
+  savePlayerSetting(STORAGE_KEYS.headphoneAdvancedEnabled, String(snapshot.headphoneAdvancedEnabled));
+  savePlayerSetting(STORAGE_KEYS.headphoneSpeakerAngle, String(snapshot.headphoneSpeakerAngle));
+  savePlayerSetting(STORAGE_KEYS.headphoneDistance, String(snapshot.headphoneDistance));
+  savePlayerSetting(STORAGE_KEYS.headphoneReflections, String(snapshot.headphoneReflections));
+  savePlayerSetting(STORAGE_KEYS.headphoneWet, String(snapshot.headphoneWet));
+  savePlayerSetting(STORAGE_KEYS.normalizationEnabled, String(snapshot.normalizationEnabled));
+  savePlayerSetting(STORAGE_KEYS.multibandEnabled, String(snapshot.multibandEnabled));
+  savePlayerSetting(STORAGE_KEYS.dynamicEqEnabled, String(snapshot.dynamicEqEnabled));
+  savePlayerSetting(STORAGE_KEYS.limiterEnabled, String(snapshot.limiterEnabled));
+  savePlayerSetting(STORAGE_KEYS.headphoneMode, snapshot.headphoneMode);
+  savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(snapshot.headphoneWidth));
+  savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(snapshot.headphoneDepth));
+  savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(snapshot.headphoneCrossfeed));
+  savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(snapshot.headphoneCenter));
+  savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(snapshot.headphoneBassImpact));
+}
+
+function applyOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: OutputProfileSnapshot) {
+  persistSnapshotToActiveStorage(snapshot);
+  emit({
+    ...snapshot,
+    eqGains: [...snapshot.eqGains],
+    parametricBands: snapshot.parametricBands.map((band) => ({ ...band })),
+    outputProfile: profile,
+    dspBypass: false,
+    dspVerificationMode: "off",
+    songMemoryActive: false,
+  });
+  writeOutputProfileSnapshot(profile, snapshot);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
+export function applyMusicHeadphoneStudioHd() {
+  const snapshot = cleanOutputProfileSnapshot("headphones");
+  snapshot.outputReserveDb = 4.0;
+  applyOutputProfileSnapshot("headphones", snapshot);
+}
+
+export function setMusicHeadphoneHighOutput(enabled: boolean) {
+  if (state.outputProfile !== "headphones") return;
+  const next = currentOutputProfileSnapshot();
+  next.outputReserveDb = enabled ? 6.0 : 4.0;
+  next.autoMakeupEnabled = false;
+  next.limiterEnabled = true;
+  applyOutputProfileSnapshot("headphones", next);
+}
+
+export function setMusicHeadphoneClear(enabled: boolean) {
+  if (state.outputProfile !== "headphones") return;
+  const next = currentOutputProfileSnapshot();
+  next.toneEngineEnabled = enabled;
+  next.presenceDb = enabled ? 1.5 : 0;
+  next.clarityDb = enabled ? 2.0 : 0;
+  next.airDb = enabled ? 2.5 : 0;
+  next.deharshAmount = 0;
+  applyOutputProfileSnapshot("headphones", next);
 }
 
 export function getNextMusicTrackPreview() {
@@ -3425,14 +3762,33 @@ export function setMusicDspVerificationMode(mode: MusicDspVerificationMode) {
 
 export function setMusicOutputProfile(profile: MusicOutputProfile) {
   if (!Object.prototype.hasOwnProperty.call(MUSIC_OUTPUT_PROFILES, profile)) return;
+  if (profile === state.outputProfile) {
+    savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
+    emit({ dspBypass: false, dspVerificationMode: "off" });
+    applyProcessingSettings();
+    return;
+  }
+
+  // Store the profile we are leaving before changing any global active keys.
+  writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
+
   savePlayerSetting(STORAGE_KEYS.outputProfile, profile);
   savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
-  emit({
-    outputProfile: profile,
-    dspBypass: false,
-    dspVerificationMode: "off",
-  });
-  applyProcessingSettings();
+
+  if (profile === "reference") {
+    emit({
+      outputProfile: profile,
+      dspBypass: false,
+      dspVerificationMode: "off",
+    });
+    applyProcessingSettings();
+    return;
+  }
+
+  // Restore the target device's own state. A never-used target starts from a
+  // safe clean baseline instead of inheriting the previous device's DSP.
+  const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
+  applyOutputProfileSnapshot(profile, target);
 }
 
 export function setMusicDspBypass(bypassed: boolean) {
