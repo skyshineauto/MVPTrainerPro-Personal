@@ -777,9 +777,9 @@ if (
   writeOutputProfileSnapshot(state.outputProfile, cleanProfile);
 }
 
-// R69: remove hidden speaker-drive state left by earlier releases while
-// preserving the user's chosen musical EQ preset. Runs once per browser.
-migrateSpeakerCleanPathR69();
+// R69A: speaker cleanup is invoked after its migration key is initialized.
+// Calling it here used to hit the const key while it was still in the TDZ and
+// could crash the entire app before React mounted.
 
 let audioElement: HTMLAudioElement | null = null;
 let audioContext: AudioContext | null = null;
@@ -3687,6 +3687,9 @@ function migrateSpeakerCleanPathR69() {
   }
   savePlayerSetting(SPEAKER_CLEAN_PATH_R69_KEY, "1");
 }
+
+// R69A: run only after SPEAKER_CLEAN_PATH_R69_KEY has been initialized.
+migrateSpeakerCleanPathR69();
 
 function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(snapshot.eqEnabled));
