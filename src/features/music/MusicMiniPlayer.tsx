@@ -61,6 +61,8 @@ import {
   setMusicHeadphoneImpact,
   setMusicHeadphoneAnalog,
   setMusicSpeakerAnalog,
+  setMusicHeadphoneHdXpander,
+  setMusicSpeakerHdXpander,
   setMusicHeadphoneWidth,
   setMusicOutputReserve,
   setMusicAutoMakeupEnabled,
@@ -115,6 +117,7 @@ import {
   type MusicDspEngineMode,
   type MusicTransitionMode,
   type MusicAnalogMode,
+  type MusicHdXpanderLevel,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack, requestMusicRediscoverFocus } from "../../lib/musicDiscovery";
 import {
@@ -1971,6 +1974,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     player.outputProfile === "headphones" && player.exciterEnabled
       ? player.saturationMid >= 7 ? "warm" : "studio"
       : "off";
+  const headphoneHdXpanderLevel = player.outputProfile === "headphones"
+    ? Math.max(0, Math.min(3, Math.round(player.hdXpanderLevel || 0))) as MusicHdXpanderLevel
+    : 0;
 
   const speakerHdActive = player.outputProfile === "speaker";
   const speakerMaxOutputActive =
@@ -1994,6 +2000,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     player.outputProfile === "speaker" && player.exciterEnabled
       ? player.saturationMid >= 7 ? "warm" : "studio"
       : "off";
+  const speakerHdXpanderLevel = player.outputProfile === "speaker"
+    ? Math.max(0, Math.min(3, Math.round(player.hdXpanderLevel || 0))) as MusicHdXpanderLevel
+    : 0;
+  const peakGuardReductionDb = Math.max(0, Number(player.limiterGainReductionDb) || 0);
+  const peakGuardActive = peakGuardReductionDb >= 1.0;
 
 
   return (
@@ -2300,7 +2311,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               {player.outputProfile === "headphones" || player.outputProfile === "speaker" ? (
                 <>
                   <span>HD CORE <b>ACTIVE</b></span>
-                  <span>PEAK GUARD <b>{player.limiterGainReductionDb > 1.5 ? "WORKING" : "READY"}</b></span>
+                  <span>PEAK GUARD <b>{peakGuardActive ? `${peakGuardReductionDb.toFixed(1)} dB` : "READY"}</b></span>
                   <span>HIDDEN TRIM <b>NONE</b></span>
                   <span>SOURCE <b>{musicSourceQualityLabel(player.currentTrack)}</b></span>
                 </>
@@ -2324,8 +2335,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   <strong>STUDIO HD</strong>
                   <span>Full-range clarity, high clean output and only the effects you choose.</span>
                 </div>
-                <span className={`tr-headphoneCleanStatus ${player.limiterGainReductionDb > 4 ? "is-hot" : "is-clean"}`}>
-                  {player.limiterGainReductionDb > 4 ? "PEAK PROTECTION ACTIVE" : "CLEAN OUTPUT"}
+                <span className={`tr-headphoneCleanStatus ${peakGuardActive ? "is-hot" : "is-clean"}`}>
+                  {peakGuardActive ? `PEAK GUARD • ${peakGuardReductionDb.toFixed(1)} dB` : "CLEAN OUTPUT"}
                 </span>
               </div>
 
@@ -2391,6 +2402,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   <b>IMPACT</b>
                   <small>Kick • snare • attack transients</small>
                   <em>{headphoneImpactActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="xpander"
+                  className={headphoneHdXpanderLevel > 0 ? "is-active" : ""}
+                  aria-pressed={headphoneHdXpanderLevel > 0}
+                  onClick={() => void runDspMutation(() => setMusicHeadphoneHdXpander(((headphoneHdXpanderLevel + 1) % 4) as MusicHdXpanderLevel))}
+                >
+                  <i><PlayerIcon name="source" /></i>
+                  <b>HD XPANDER</b>
+                  <small>Detail • attack • air restoration</small>
+                  <em>{headphoneHdXpanderLevel > 0 ? `LEVEL ${headphoneHdXpanderLevel}` : "OFF"}</em>
                 </button>
 
                 <button
@@ -2485,8 +2509,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   <strong>HD SOUND</strong>
                   <span>Full-range clarity, maximum clean output and simple controls. The backend handles the gain structure.</span>
                 </div>
-                <span className={`tr-headphoneCleanStatus ${player.limiterGainReductionDb > 2 ? "is-hot" : "is-clean"}`}>
-                  {player.limiterGainReductionDb > 2 ? "PEAK GUARD ACTIVE" : "CLEAN HD OUTPUT"}
+                <span className={`tr-headphoneCleanStatus ${peakGuardActive ? "is-hot" : "is-clean"}`}>
+                  {peakGuardActive ? `PEAK GUARD • ${peakGuardReductionDb.toFixed(1)} dB` : "CLEAN HD OUTPUT"}
                 </span>
               </div>
 
@@ -2565,6 +2589,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   <b>WIDE</b>
                   <small>Safe stereo expansion • bass stays centered</small>
                   <em>{speakerWideActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="xpander"
+                  className={speakerHdXpanderLevel > 0 ? "is-active" : ""}
+                  aria-pressed={speakerHdXpanderLevel > 0}
+                  onClick={() => void runDspMutation(() => setMusicSpeakerHdXpander(((speakerHdXpanderLevel + 1) % 4) as MusicHdXpanderLevel))}
+                >
+                  <i><PlayerIcon name="source" /></i>
+                  <b>HD XPANDER</b>
+                  <small>Detail • attack • codec restoration</small>
+                  <em>{speakerHdXpanderLevel > 0 ? `LEVEL ${speakerHdXpanderLevel}` : "OFF"}</em>
                 </button>
 
                 <button
@@ -12672,6 +12709,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphoneQuickGrid [data-control="punch"] i{color:#8ef08e}
         .tr-headphoneQuickGrid [data-control="bass"] i{color:#8ee8ff}
         .tr-headphoneQuickGrid [data-control="impact"] i{color:#ffbf62}
+        .tr-headphoneQuickGrid [data-control="xpander"] i{color:#77f4ff}
         .tr-headphoneQuickGrid [data-control="analog"] i{color:#d89cff}
         .tr-headphoneQuickGrid [data-control="wide"] i{color:#a986ff}
         .tr-headphoneQuickGrid [data-control="eq"] i{color:#43dcff}
@@ -12686,6 +12724,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphoneQuickGrid>button[data-control="punch"].is-active{border-color:rgba(113,232,136,.68);box-shadow:0 0 20px rgba(92,221,119,.15),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="bass"].is-active{border-color:rgba(92,220,255,.68);box-shadow:0 0 20px rgba(72,210,255,.15),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="impact"].is-active{border-color:rgba(255,190,98,.72);box-shadow:0 0 20px rgba(255,174,65,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="xpander"].is-active{border-color:rgba(119,244,255,.74);box-shadow:0 0 20px rgba(80,225,255,.18),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="analog"].is-active{border-color:rgba(216,156,255,.72);box-shadow:0 0 20px rgba(190,120,255,.16),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="wide"].is-active{border-color:rgba(169,134,255,.72);box-shadow:0 0 20px rgba(147,105,255,.16),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphonePresetSimple{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(180px,240px);align-items:center;gap:12px;padding:12px 13px;border:1px solid rgba(111,198,224,.30);border-radius:12px;background:linear-gradient(180deg,rgba(24,51,61,.88),rgba(7,24,31,.94))}

@@ -731,6 +731,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [mobileReorderMode, setMobileReorderMode] = useState(false);
   const [page, setPage] = useState(1);
   const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
+  const [openSongMenuId, setOpenSongMenuId] = useState<string | null>(null);
   const [resolvedArtworkIds, setResolvedArtworkIds] = useState<Set<string>>(new Set());
   const orderSaveTimerRef = useRef<number | null>(null);
   const orderSaveChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -1462,7 +1463,32 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     }
   }
 
+  useEffect(() => {
+    if (!openSongMenuId) return;
+    const close = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element) {
+        const menu = target.closest(".tr52-more");
+        if (menu?.getAttribute("data-song-menu-id") === openSongMenuId) return;
+      }
+      setOpenSongMenuId(null);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpenSongMenuId(null); };
+    const onScroll = () => setOpenSongMenuId(null);
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", close, true);
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [openSongMenuId]);
+
+  useEffect(() => { setOpenSongMenuId(null); }, [tab, page]);
+
   function openDetail(track: MusicTrack) {
+    setOpenSongMenuId(null);
     const sessionId = ++detailSessionRef.current;
     detailLookupRequestRef.current += 1;
     const intelligenceRequestId = ++detailIntelligenceRequestRef.current;
@@ -2694,13 +2720,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 <div className="tr38-desktopSongActions tr40-desktopSongActions">
                   <button type="button" className={`is-like${track.favorite ? " is-active" : ""}`} aria-label={track.favorite ? `Unlike ${track.title}` : `Like ${track.title}`} aria-pressed={track.favorite} title={track.favorite ? "Liked" : "Like"} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")}><HeartPremiumIcon filled={track.favorite} /></button>
                   <button type="button" className={`is-less${track.play_less ? " is-active" : ""}`} aria-label={track.play_less ? `Play ${track.title} normally` : `Play ${track.title} less`} aria-pressed={track.play_less} title="Play less" onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")}><PlayLessPremiumIcon /></button>
-                  <details className="tr52-more tr38-desktopMore">
+                  <details
+                    className="tr52-more tr38-desktopMore"
+                    data-song-menu-id={track.id}
+                    open={openSongMenuId === track.id}
+                    onToggle={(event) => {
+                      const isOpen = event.currentTarget.open;
+                      setOpenSongMenuId((current) => isOpen ? track.id : current === track.id ? null : current);
+                    }}
+                  >
                     <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /></summary>
                     <div className="tr52-moreMenu">
-                      <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
-                      <button type="button" onClick={(event) => { addMusicToQueue(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
-                      <button type="button" onClick={(event) => { openPlaylistModal([track.id]); event.currentTarget.closest("details")?.removeAttribute("open"); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
-                      <button type="button" onClick={(event) => { openDetail(track); event.currentTarget.closest("details")?.removeAttribute("open"); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
+                      <button type="button" onClick={() => { playMusicNext(track.id); setOpenSongMenuId(null); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
+                      <button type="button" onClick={() => { addMusicToQueue(track.id); setOpenSongMenuId(null); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
+                      <button type="button" onClick={() => { openPlaylistModal([track.id]); setOpenSongMenuId(null); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
+                      <button type="button" onClick={() => { setOpenSongMenuId(null); openDetail(track); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
                     </div>
                   </details>
                 </div>
@@ -2731,13 +2765,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                 <div className="tr41-mobileSongActions">
                   <button type="button" className={`is-like${track.favorite ? " is-active" : ""}`} aria-label={track.favorite ? `Unlike ${track.title}` : `Like ${track.title}`} aria-pressed={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")}><HeartPremiumIcon filled={track.favorite} /></button>
                   <button type="button" className={`is-less${track.play_less ? " is-active" : ""}`} aria-label={track.play_less ? `Play ${track.title} normally` : `Play ${track.title} less`} aria-pressed={track.play_less} onClick={() => void changePreference(track, track.play_less ? "neutral" : "play_less")}><PlayLessPremiumIcon /></button>
-                  <details className="tr52-more tr41-mobileMore">
+                  <details
+                    className="tr52-more tr41-mobileMore"
+                    data-song-menu-id={track.id}
+                    open={openSongMenuId === track.id}
+                    onToggle={(event) => {
+                      const isOpen = event.currentTarget.open;
+                      setOpenSongMenuId((current) => isOpen ? track.id : current === track.id ? null : current);
+                    }}
+                  >
                     <summary aria-label={`More actions for ${track.title}`} title="More actions"><R52MoreIcon /></summary>
                     <div className="tr52-moreMenu">
-                      <button type="button" onClick={(event) => { playMusicNext(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
-                      <button type="button" onClick={(event) => { addMusicToQueue(track.id); event.currentTarget.closest("details")?.removeAttribute("open"); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
-                      <button type="button" onClick={(event) => { openPlaylistModal([track.id]); event.currentTarget.closest("details")?.removeAttribute("open"); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
-                      <button type="button" onClick={(event) => { openDetail(track); event.currentTarget.closest("details")?.removeAttribute("open"); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
+                      <button type="button" onClick={() => { playMusicNext(track.id); setOpenSongMenuId(null); }}><NextPremiumIcon /><span>PLAY NEXT</span></button>
+                      <button type="button" onClick={() => { addMusicToQueue(track.id); setOpenSongMenuId(null); }}><QueuePremiumIcon /><span>ADD TO QUEUE</span></button>
+                      <button type="button" onClick={() => { openPlaylistModal([track.id]); setOpenSongMenuId(null); }}><PlaylistPremiumIcon /><span>ADD TO PLAYLIST</span></button>
+                      <button type="button" onClick={() => { setOpenSongMenuId(null); openDetail(track); }}><EditPremiumIcon /><span>EDIT SONG</span></button>
                     </div>
                   </details>
                 </div>
@@ -3119,101 +3161,4 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       
     </main>
   );
-}
-
-/* MVP_R12_5E_32_MOBILE_SINGLE_MORE_MENU
-   Mobile-only controller for Song Library More menus.
-   Desktop behavior is untouched. */
-if (typeof window !== "undefined" && typeof document !== "undefined") {
-  const mvpMoreWindow = window as Window & {
-    __mvpMobileSingleMoreMenuV32?: boolean;
-  };
-
-  if (!mvpMoreWindow.__mvpMobileSingleMoreMenuV32) {
-    mvpMoreWindow.__mvpMobileSingleMoreMenuV32 = true;
-
-    const isMvpMobileMore = () =>
-      window.matchMedia("(max-width: 650px)").matches;
-
-    let mvpOpenMore: HTMLDetailsElement | null = null;
-
-    const closeMvpMore = () => {
-      if (!mvpOpenMore) return;
-      mvpOpenMore.open = false;
-      mvpOpenMore = null;
-    };
-
-    document.addEventListener(
-      "toggle",
-      (event) => {
-        if (!isMvpMobileMore()) return;
-
-        const details = event.target;
-        if (!(details instanceof HTMLDetailsElement)) return;
-        if (!details.matches(".tr52-more")) return;
-
-        if (!details.open) {
-          if (mvpOpenMore === details) mvpOpenMore = null;
-          return;
-        }
-
-        if (mvpOpenMore && mvpOpenMore !== details) {
-          mvpOpenMore.open = false;
-        }
-
-        mvpOpenMore = details;
-      },
-      true,
-    );
-
-    document.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (!isMvpMobileMore() || !mvpOpenMore) return;
-
-        const target = event.target;
-        if (!(target instanceof Node)) return;
-        if (mvpOpenMore.contains(target)) return;
-
-        closeMvpMore();
-      },
-      true,
-    );
-
-    document.addEventListener(
-      "click",
-      (event) => {
-        if (!isMvpMobileMore() || !mvpOpenMore) return;
-
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-
-        if (
-          target.closest(
-            ".tr52-moreMenu button, .tr52-more > div button, .tr52-more [role='menuitem']",
-          )
-        ) {
-          window.setTimeout(closeMvpMore, 0);
-        }
-      },
-      true,
-    );
-
-    document.addEventListener(
-      "scroll",
-      () => {
-        if (!isMvpMobileMore()) return;
-        closeMvpMore();
-      },
-      { capture: true, passive: true },
-    );
-
-    window.addEventListener(
-      "resize",
-      () => {
-        if (!isMvpMobileMore()) closeMvpMore();
-      },
-      { passive: true },
-    );
-  }
 }

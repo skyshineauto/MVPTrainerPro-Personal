@@ -349,6 +349,7 @@ export type MusicPlayerState = {
   dynamicsRestoreAmount: number;
   smartDspEnabled: boolean;
   smartDspAmount: number;
+  hdXpanderLevel: number;
   smartActivity: number;
   bassActivityDb: number;
   toneActivityDb: number;
@@ -438,6 +439,7 @@ const STORAGE_KEYS = {
   dynamicsRestoreAmount: "mvp_music_dynamics_restore_amount_v10",
   smartDspEnabled: "mvp_music_smart_dsp_v10",
   smartDspAmount: "mvp_music_smart_dsp_amount_v10",
+  hdXpanderLevel: "mvp_music_hd_xpander_level_v1",
   headphoneAdvancedEnabled: "mvp_music_headphone_advanced_v10",
   headphoneSpeakerAngle: "mvp_music_headphone_angle_v10",
   headphoneDistance: "mvp_music_headphone_distance_v10",
@@ -724,6 +726,7 @@ let state: MusicPlayerState = {
   dynamicsRestoreAmount: readNumber(STORAGE_KEYS.dynamicsRestoreAmount, 0, 0, 100),
   smartDspEnabled: readBoolean(STORAGE_KEYS.smartDspEnabled, false),
   smartDspAmount: readNumber(STORAGE_KEYS.smartDspAmount, 30, 0, 100),
+  hdXpanderLevel: readNumber(STORAGE_KEYS.hdXpanderLevel, 0, 0, 3),
   smartActivity: 0,
   bassActivityDb: 0,
   toneActivityDb: 0,
@@ -1685,12 +1688,22 @@ function applyVirtualAmpSettings(now: number) {
   }
 }
 
+function hdXpanderProfile(level: number) {
+  const normalized = Math.max(0, Math.min(3, Math.round(Number(level) || 0)));
+  if (normalized === 1) return { level: 1, presenceDb: 0.35, clarityDb: 0.65, airDb: 0.85, exciterAmount: 0.025, transientAmount: 0.08 };
+  if (normalized === 2) return { level: 2, presenceDb: 0.70, clarityDb: 1.20, airDb: 1.55, exciterAmount: 0.045, transientAmount: 0.12 };
+  if (normalized === 3) return { level: 3, presenceDb: 1.05, clarityDb: 1.75, airDb: 2.25, exciterAmount: 0.070, transientAmount: 0.17 };
+  return { level: 0, presenceDb: 0, clarityDb: 0, airDb: 0, exciterAmount: 0, transientAmount: 0 };
+}
+
 function applyStudioProcessingSettings(now: number) {
   if (!audioContext || !studioProcessorNode) return;
   const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
   const pureReference = state.outputProfile === "reference";
   const abBypass = !pureReference && state.dspBypass;
   const processed = !pureReference && !abBypass;
+  const cleanHdProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const xpander = hdXpanderProfile(processed && cleanHdProfile ? state.hdXpanderLevel : 0);
   // Studio path also runs at unity into WASM. Listener volume is applied after
   // the WASM limiter, preventing volume-dependent distortion.
   if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
@@ -1716,6 +1729,13 @@ function applyStudioProcessingSettings(now: number) {
   const studioTransientAmount = processed && state.eqEnabled
     ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale() * studioPersonality.transientScale))
     : 0;
+  // HD Xpander is an independent restoration layer. It adds detail/attack on
+  // top of the user's EQ without rewriting the EQ curve or requiring Clear/Analog.
+  const effectiveTransientAmount = Math.max(studioTransientAmount, xpander.transientAmount);
+  const effectivePresenceDb = Math.max(-6, Math.min(6, state.presenceDb + xpander.presenceDb));
+  const effectiveClarityDb = Math.max(-6, Math.min(6, state.clarityDb + xpander.clarityDb));
+  const effectiveAirDb = Math.max(-6, Math.min(6, state.airDb + xpander.airDb));
+  const effectiveExciterAmount = Math.max(state.exciterAmount / 100, xpander.exciterAmount);
   setMvpStudioState(studioProcessorNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
@@ -1730,8 +1750,8 @@ function applyStudioProcessingSettings(now: number) {
           ? state.preampDb
           : 0,
     headroomDb: autoHeadroomDb,
-    transientEnabled: studioTransientAmount > 0.001,
-    transientAmount: studioTransientAmount,
+    transientEnabled: effectiveTransientAmount > 0.001,
+    transientAmount: effectiveTransientAmount,
     // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
     multibandEnabled: processed && state.multibandEnabled,
     multibandAmount: studioPersonality.multibandAmount,
@@ -1778,13 +1798,13 @@ function applyStudioProcessingSettings(now: number) {
     bassPunchDb: state.bassPunchDb,
     bassBodyDb: state.bassBodyDb,
     bassTightness: state.bassTightness / 100,
-    toneEngineEnabled: processed && state.toneEngineEnabled,
-    presenceDb: state.presenceDb,
-    clarityDb: state.clarityDb,
-    airDb: state.airDb,
+    toneEngineEnabled: processed && (state.toneEngineEnabled || xpander.level > 0),
+    presenceDb: effectivePresenceDb,
+    clarityDb: effectiveClarityDb,
+    airDb: effectiveAirDb,
     deharshAmount: processed ? state.deharshAmount / 100 : 0,
-    exciterEnabled: processed && state.exciterEnabled,
-    exciterAmount: state.exciterAmount / 100,
+    exciterEnabled: processed && (state.exciterEnabled || xpander.level > 0),
+    exciterAmount: effectiveExciterAmount,
     saturationLow: state.saturationLow / 100,
     saturationMid: state.saturationMid / 100,
     saturationHigh: state.saturationHigh / 100,
@@ -3631,6 +3651,7 @@ type OutputProfileSnapshot = Pick<
   | "dynamicsRestoreAmount"
   | "smartDspEnabled"
   | "smartDspAmount"
+  | "hdXpanderLevel"
   | "headphoneAdvancedEnabled"
   | "headphoneSpeakerAngle"
   | "headphoneDistance"
@@ -3686,6 +3707,7 @@ function currentOutputProfileSnapshot(): OutputProfileSnapshot {
     dynamicsRestoreAmount: state.dynamicsRestoreAmount,
     smartDspEnabled: state.smartDspEnabled,
     smartDspAmount: state.smartDspAmount,
+    hdXpanderLevel: state.hdXpanderLevel,
     headphoneAdvancedEnabled: state.headphoneAdvancedEnabled,
     headphoneSpeakerAngle: state.headphoneSpeakerAngle,
     headphoneDistance: state.headphoneDistance,
@@ -3742,6 +3764,7 @@ function cleanOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileS
     dynamicsRestoreAmount: 0,
     smartDspEnabled: false,
     smartDspAmount: 30,
+    hdXpanderLevel: 0,
     headphoneAdvancedEnabled: false,
     headphoneSpeakerAngle: 30,
     headphoneDistance: 0,
@@ -3982,6 +4005,7 @@ function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.dynamicsRestoreAmount, String(snapshot.dynamicsRestoreAmount));
   savePlayerSetting(STORAGE_KEYS.smartDspEnabled, String(snapshot.smartDspEnabled));
   savePlayerSetting(STORAGE_KEYS.smartDspAmount, String(snapshot.smartDspAmount));
+  savePlayerSetting(STORAGE_KEYS.hdXpanderLevel, String(snapshot.hdXpanderLevel));
   savePlayerSetting(STORAGE_KEYS.headphoneAdvancedEnabled, String(snapshot.headphoneAdvancedEnabled));
   savePlayerSetting(STORAGE_KEYS.headphoneSpeakerAngle, String(snapshot.headphoneSpeakerAngle));
   savePlayerSetting(STORAGE_KEYS.headphoneDistance, String(snapshot.headphoneDistance));
@@ -4158,6 +4182,23 @@ export function setMusicSpeakerAnalog(mode: MusicAnalogMode) {
   const next = currentOutputProfileSnapshot();
   applyAnalogModeToSnapshot(next, mode);
   applyOutputProfileSnapshot("speaker", next);
+}
+
+export type MusicHdXpanderLevel = 0 | 1 | 2 | 3;
+
+function setMusicHdXpanderForProfile(profile: "headphones" | "speaker", level: MusicHdXpanderLevel) {
+  if (state.outputProfile !== profile) return;
+  const next = currentOutputProfileSnapshot();
+  next.hdXpanderLevel = Math.max(0, Math.min(3, Math.round(level))) as MusicHdXpanderLevel;
+  applyOutputProfileSnapshot(profile, next);
+}
+
+export function setMusicHeadphoneHdXpander(level: MusicHdXpanderLevel) {
+  setMusicHdXpanderForProfile("headphones", level);
+}
+
+export function setMusicSpeakerHdXpander(level: MusicHdXpanderLevel) {
+  setMusicHdXpanderForProfile("speaker", level);
 }
 
 export function getNextMusicTrackPreview() {
