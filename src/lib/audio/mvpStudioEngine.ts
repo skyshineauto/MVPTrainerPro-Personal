@@ -24,6 +24,8 @@ export type MvpStudioTelemetry = {
   loudnessProgramLufs: number;
   autoMakeupDb: number;
   outputReserveDb: number;
+  finalCompressorReductionDb: number;
+  maxHdInputTruePeakDbtp: number;
   availableHeadroomDb: number;
   internalPeak: number;
   bassActivityDb: number;
@@ -107,7 +109,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.3.0-r75-audio-exercise-core";
+const MVP_STUDIO_ASSET_VERSION = "5.4.0-r76-stable-maxhd-audition-art";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -133,6 +135,8 @@ const EMPTY_TELEMETRY: MvpStudioTelemetry = {
   loudnessProgramLufs: -70,
   autoMakeupDb: 0,
   outputReserveDb: 0,
+  finalCompressorReductionDb: 0,
+  maxHdInputTruePeakDbtp: -120,
   availableHeadroomDb: 24,
   internalPeak: 0,
   bassActivityDb: 0,
@@ -196,6 +200,8 @@ function updateTelemetry(data: Record<string, unknown>) {
     loudnessProgramLufs: finite(data.loudnessProgramLufs, -70),
     autoMakeupDb: finite(data.autoMakeupDb),
     outputReserveDb: finite(data.outputReserveDb),
+    finalCompressorReductionDb: finite(data.finalCompressorReductionDb),
+    maxHdInputTruePeakDbtp: finite(data.maxHdInputTruePeakDbtp, -120),
     availableHeadroomDb: finite(data.availableHeadroomDb, 24),
     internalPeak: finite(data.internalPeak),
     bassActivityDb: finite(data.bassActivityDb),

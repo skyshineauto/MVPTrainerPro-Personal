@@ -109,7 +109,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v5.1-r71-max-hd",
+        version: "studio-wasm-v5.4-r76-stable-maxhd",
       });
     } catch (error) {
       this.failed = true;
@@ -518,6 +518,8 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
           : -70,
         autoMakeupDb: typeof this.exports.mvp_meter_auto_makeup_db === "function" ? this.exports.mvp_meter_auto_makeup_db() : 0,
         outputReserveDb: typeof this.exports.mvp_meter_output_reserve_db === "function" ? this.exports.mvp_meter_output_reserve_db() : 0,
+        finalCompressorReductionDb: typeof this.exports.mvp_meter_final_compressor_reduction_db === "function" ? this.exports.mvp_meter_final_compressor_reduction_db() : 0,
+        maxHdInputTruePeakDbtp: typeof this.exports.mvp_meter_max_hd_input_true_peak_dbtp === "function" ? this.exports.mvp_meter_max_hd_input_true_peak_dbtp() : -120,
         availableHeadroomDb: typeof this.exports.mvp_meter_available_headroom_db === "function" ? this.exports.mvp_meter_available_headroom_db() : 24,
         internalPeak: typeof this.exports.mvp_meter_internal_peak === "function" ? this.exports.mvp_meter_internal_peak() : 0,
         bassActivityDb: typeof this.exports.mvp_meter_bass_activity_db === "function" ? this.exports.mvp_meter_bass_activity_db() : 0,

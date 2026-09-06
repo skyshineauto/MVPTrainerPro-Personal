@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import type { MusicTrack } from "../../lib/musicStorage";
+import { findMusicArtworkCandidates, type MusicMetadataCandidate } from "../../lib/musicMetadata";
 import { supabase } from "../../lib/supabase";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -110,10 +111,13 @@ const LIST_TABLE = "music_audition_lists";
 const SONG_TABLE = "music_audition_songs";
 const LINK_TABLE = "music_audition_list_songs";
 const metadataRequests = new Map<string, Promise<MusicAuditionSong>>();
+const artworkRequests = new Map<string, Promise<MusicAuditionSong>>();
 const previewFailures = new Map<string, number>();
+const artworkFailures = new Map<string, number>();
 // Provider audio URLs are temporary signed/CDN samples. Never trust them for days.
 const PREVIEW_URL_CACHE_MS = 10 * 60 * 1000;
 const PREVIEW_FAILURE_RETRY_MS = 5 * 60 * 1000;
+const ARTWORK_FAILURE_RETRY_MS = 12 * 60 * 1000;
 const APPLE_STOREFRONTS = ["US", "GB", "CA", "AU", "NZ", "IE", "DE", "FR", "NL", "SE", "NO", "DK", "ES", "IT", "BR", "MX"] as const;
 const MAX_PREVIEW_PROBES = 14;
 const PREVIEW_UNLOCK_AUDIO = "data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
@@ -989,6 +993,123 @@ async function firstPlayableCandidate(
   return null;
 }
 
+function auditionArtworkLookupTrack(song: MusicAuditionSong): MusicTrack {
+  const iso = new Date(song.updatedAt || song.createdAt || now()).toISOString();
+  return {
+    id: song.id,
+    user_id: "audition",
+    storage_path: "",
+    title: song.title,
+    artist: song.artist,
+    album: song.album || null,
+    release_year: song.releaseYear,
+    genre: song.genre,
+    artwork_path: null,
+    external_artwork_url: song.artworkUrl,
+    original_name: `${song.artist} - ${song.title}.mp3`,
+    mime_type: "audio/mpeg",
+    file_size_bytes: null,
+    duration_seconds: null,
+    sort_order: 0,
+    favorite: false,
+    play_less: false,
+    energy_level: "medium",
+    play_count: 0,
+    skip_count: 0,
+    completed_play_count: 0,
+    last_played_at: null,
+    last_skipped_at: null,
+    last_completed_at: null,
+    metadata_status: "unknown",
+    metadata_confidence: null,
+    metadata_source: "audition",
+    metadata_updated_at: song.metadataUpdatedAt ? new Date(song.metadataUpdatedAt).toISOString() : null,
+    created_at: iso,
+    updated_at: iso,
+  };
+}
+
+function artworkUrlForCandidate(candidate: MusicMetadataCandidate, blocked: Set<string>) {
+  const primary = clean(candidate.artworkUrl);
+  const fallback = clean(candidate.artworkFallbackUrl);
+  if (primary && !blocked.has(primary)) return primary;
+  if (fallback && !blocked.has(fallback)) return fallback;
+  return null;
+}
+
+async function resolveMusicAuditionArtwork(
+  songId: string,
+  options: { forceFresh?: boolean; blockedArtworkUrls?: Set<string> } = {},
+) {
+  const state = readLocal();
+  const song = state.songs.find((item) => item.id === songId);
+  if (!song) throw new Error("Song not found.");
+
+  const blockedArtworkUrls = options.blockedArtworkUrls || new Set<string>();
+  if (!options.forceFresh && song.artworkUrl && !blockedArtworkUrls.has(song.artworkUrl)) return song;
+  const existing = artworkRequests.get(songId);
+  if (existing) return existing;
+
+  const failedAt = artworkFailures.get(songId) || 0;
+  if (!options.forceFresh && failedAt && now() - failedAt < ARTWORK_FAILURE_RETRY_MS) return song;
+
+  const request = (async () => {
+    try {
+      const candidates = await findMusicArtworkCandidates(auditionArtworkLookupTrack(song), {
+        includeLowConfidence: true,
+      });
+      const ranked = candidates
+        .map((candidate) => ({ candidate, url: artworkUrlForCandidate(candidate, blockedArtworkUrls) }))
+        .filter((row): row is { candidate: MusicMetadataCandidate; url: string } => Boolean(row.url))
+        .filter(({ candidate }) =>
+          (candidate.releaseConfidence ?? candidate.confidence) >= 0.58 || candidate.confidence >= 0.68
+        )
+        .sort((a, b) => {
+          const releaseDelta = (b.candidate.releaseConfidence ?? 0) - (a.candidate.releaseConfidence ?? 0);
+          if (Math.abs(releaseDelta) > 0.02) return releaseDelta;
+          return b.candidate.confidence - a.candidate.confidence;
+        });
+
+      const best = ranked[0];
+      if (!best) throw new Error("No reliable release artwork found.");
+
+      let changed: MusicAuditionSong | null = null;
+      mutateLocal((current) => ({
+        ...current,
+        songs: current.songs.map((item) => {
+          if (item.id !== songId) return item;
+          changed = {
+            ...item,
+            // Imported title/artist remain authoritative. Release-aware artwork may
+            // repair/fill album identity because that is exactly what artwork needs.
+            album: clean(best.candidate.album) || item.album,
+            releaseYear: best.candidate.releaseYear ?? item.releaseYear,
+            genre: clean(best.candidate.genre) || item.genre,
+            artworkUrl: best.url,
+            metadataUpdatedAt: now(),
+            updatedAt: now(),
+          };
+          return changed;
+        }),
+      }));
+      const changedSong = changed as MusicAuditionSong | null;
+      if (changedSong) {
+        artworkFailures.delete(songId);
+        void persistSong(changedSong);
+      }
+      return changedSong || song;
+    } catch {
+      artworkFailures.set(songId, now());
+      return song;
+    } finally {
+      artworkRequests.delete(songId);
+    }
+  })();
+
+  artworkRequests.set(songId, request);
+  return request;
+}
+
 function previewProviderLabel(url: string | null) {
   const value = clean(url).toLowerCase();
   if (!value) return "NO SAMPLE";
@@ -1014,7 +1135,8 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
         !options.forceFresh &&
         song.previewUrl &&
         !blockedPreviewUrls.has(song.previewUrl) &&
-        (!song.artworkUrl || !blockedArtworkUrls.has(song.artworkUrl)) &&
+        song.artworkUrl &&
+        !blockedArtworkUrls.has(song.artworkUrl) &&
         await probePreviewUrl(song.previewUrl)
       ) return song;
 
@@ -1082,10 +1204,11 @@ export async function resolveMusicAuditionMetadata(songId: string, options: { fo
           changed = {
             ...item,
             // Imported artist/title are always authoritative. Providers only enrich the record.
-            album: clean(metadataItem.albumName),
-            releaseYear: metadataItem.releaseYear,
-            genre: clean(metadataItem.genre) || null,
+            album: item.album || clean(metadataItem.albumName),
+            releaseYear: item.releaseYear ?? metadataItem.releaseYear,
+            genre: item.genre || clean(metadataItem.genre) || null,
             artworkUrl:
+              (item.artworkUrl && !blockedArtworkUrls.has(item.artworkUrl) ? item.artworkUrl : null) ||
               (metadataItem.artworkUrl && !blockedArtworkUrls.has(metadataItem.artworkUrl) ? metadataItem.artworkUrl : null) ||
               (previewItem?.artworkUrl && !blockedArtworkUrls.has(previewItem.artworkUrl) ? previewItem.artworkUrl : null) ||
               null,
@@ -1343,6 +1466,22 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     setCurrentIndex((index) => Math.min(index, selectedSongs.length - 1));
   }, [selectedSongs.length, selectedListId]);
 
+  // R76: artwork is an independent release-resolution job. Preview failure/cooldown
+  // must never prevent album art from resolving (and a working preview must never
+  // short-circuit missing artwork).
+  useEffect(() => {
+    if (!currentSong) return;
+    const songId = currentSong.id;
+    const blocked = failedArtworkUrls;
+    if (currentSong.artworkUrl && !blocked.has(currentSong.artworkUrl)) return;
+    const failedAt = artworkFailures.get(songId) || 0;
+    if (failedAt && now() - failedAt < ARTWORK_FAILURE_RETRY_MS) return;
+
+    setLookupSongId(songId);
+    void resolveMusicAuditionArtwork(songId, { blockedArtworkUrls: blocked })
+      .finally(() => setLookupSongId((id) => id === songId ? null : id));
+  }, [currentSong?.id, currentSong?.artworkUrl, failedArtworkUrls]);
+
   useEffect(() => {
     if (!currentSong) return;
     const songId = currentSong.id;
@@ -1384,6 +1523,20 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
   useEffect(() => {
     if (!currentSong || !selectedSongs.length) return;
     const timer = window.setTimeout(() => {
+      const upcoming = selectedSongs.slice(currentIndex + 1, currentIndex + 5);
+      for (const song of upcoming) {
+        if (song.artworkUrl && !failedArtworkUrls.has(song.artworkUrl)) continue;
+        const failedAt = artworkFailures.get(song.id) || 0;
+        if (failedAt && now() - failedAt < ARTWORK_FAILURE_RETRY_MS) continue;
+        void resolveMusicAuditionArtwork(song.id, { blockedArtworkUrls: failedArtworkUrls });
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [currentSong?.id, currentIndex, selectedSongs, failedArtworkUrls]);
+
+  useEffect(() => {
+    if (!currentSong || !selectedSongs.length) return;
+    const timer = window.setTimeout(() => {
       const upcoming = selectedSongs.slice(currentIndex + 1, currentIndex + 6);
       for (const song of upcoming) {
         if (verifiedMetadataIdsRef.current.has(song.id)) continue;
@@ -1415,21 +1568,11 @@ export function MusicAuditionPanel({ tracks, previewVolume = 0.95, onPreviewStar
     const blocked = new Set<string>(failedArtworkUrls);
     blocked.add(url);
     setFailedArtworkUrls(blocked);
-    verifiedMetadataIdsRef.current.delete(song.id);
-    setVerifiedMetadataIds((previous) => {
-      const next = new Set(previous);
-      next.delete(song.id);
-      return next;
-    });
-
+    // Artwork and preview verification are intentionally independent. A dead cover
+    // must never invalidate a working preview or trigger preview-provider cooldowns.
+    artworkFailures.delete(song.id);
     setLookupSongId(song.id);
-    void resolveMusicAuditionMetadata(song.id, { forceFresh: true, blockedArtworkUrls: blocked })
-      .then((resolved) => {
-        if (resolved.artworkUrl && !blocked.has(resolved.artworkUrl)) {
-          verifiedMetadataIdsRef.current.add(song.id);
-          setVerifiedMetadataIds((previous) => new Set(previous).add(song.id));
-        }
-      })
+    void resolveMusicAuditionArtwork(song.id, { forceFresh: true, blockedArtworkUrls: blocked })
       .finally(() => setLookupSongId((id) => id === song.id ? null : id));
   }
 

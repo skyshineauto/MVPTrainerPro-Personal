@@ -1446,7 +1446,7 @@ function applyProcessingSettings() {
   if (preampGain) setAudioParam(preampGain.gain, dbToGain(effectivePreampDb), now, 0.018);
   const compatibilityCleanDriveDb =
     processed && (state.outputProfile === "headphones" || state.outputProfile === "speaker")
-      ? Math.min(3, Math.max(0, state.outputReserveDb))
+      ? Math.min(2, Math.max(0, state.outputReserveDb))
       : 0;
   if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb), now, 0.025);
 
@@ -1669,21 +1669,17 @@ function applyVirtualAmpSettings(now: number) {
   if (!virtualAmpGainNode || !loudnessCompressorNode) return;
   const active = !state.dspBypass && cleanHdHighOutputActive();
 
-  // R74: NEVER pre-drive the compressor. R71's fixed +6.5 dB boost was the main
-  // reason Peak Guard could show several dB of reduction even with Flat EQ and
-  // low listener volume. Unity enters the compressor; adaptive makeup happens
-  // later inside WASM after the user's EQ/effects are known.
+  // R76: no fixed pre-drive. On the compatibility graph this compressor now sits
+  // AFTER EQ/effects, matching Studio WASM. It creates modest crest-factor room;
+  // a small post-compressor makeup stage provides the fallback High/Max Output.
   setAudioParam(virtualAmpGainNode.gain, 1, now, 0.025);
 
   if (active) {
-    // Gentle crest-factor control, not mastering-by-crushing. A soft knee and
-    // modest ratio shave only hot peaks so the downstream adaptive Max-HD stage
-    // can recover useful level without forcing the limiter to work continuously.
-    setAudioParam(loudnessCompressorNode.threshold, -7.0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.knee, 7.0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.ratio, 1.7, now, 0.05);
-    setAudioParam(loudnessCompressorNode.attack, 0.006, now, 0.05);
-    setAudioParam(loudnessCompressorNode.release, 0.14, now, 0.05);
+    setAudioParam(loudnessCompressorNode.threshold, -10.0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.knee, 8.0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.ratio, 2.2, now, 0.05);
+    setAudioParam(loudnessCompressorNode.attack, 0.004, now, 0.05);
+    setAudioParam(loudnessCompressorNode.release, 0.10, now, 0.05);
   } else {
     setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
     setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);
@@ -2252,14 +2248,15 @@ async function connectMusicGraph() {
       masterVolumeGain.connect(referenceRouteGain);
       referenceRouteGain.connect(mixBus);
 
-      masterVolumeGain.connect(virtualAmpGainNode);
-      virtualAmpGainNode.connect(loudnessCompressorNode);
+      // R76 fallback parity: EQ/effects must happen BEFORE the loudness compressor,
+      // matching the flagship Studio-WASM topology. The old fallback compressed raw
+      // audio first, then let later EQ/effects create new peaks and a different sound.
       if (loudnessNormalizerNode) {
-        loudnessCompressorNode.connect(loudnessNormalizerNode, 0, 0);
+        masterVolumeGain.connect(loudnessNormalizerNode, 0, 0);
         mediaSource.connect(loudnessNormalizerNode, 0, 1);
         loudnessNormalizerNode.connect(preampGain);
       } else {
-        loudnessCompressorNode.connect(preampGain);
+        masterVolumeGain.connect(preampGain);
       }
       let processedTail: AudioNode = preampGain;
       if (transientProcessorNode) {
@@ -2306,7 +2303,11 @@ async function connectMusicGraph() {
       }
       headphoneRouteGain.connect(mixBus);
 
-      mixBus.connect(makeupGain);
+      // Final loudness control is after EQ/output/headphone processing in every
+      // fallback mode. High/Max Output therefore sees the finished sound instead
+      // of pre-compressing the source and fighting the limiter later.
+      mixBus.connect(loudnessCompressorNode);
+      loudnessCompressorNode.connect(makeupGain);
       let limiterTail: AudioNode = makeupGain;
       if (limiterWorkletNode) {
         limiterTail.connect(limiterWorkletNode);

@@ -410,6 +410,18 @@ float truePeakHistoryL[kTruePeakTapsPerPhase] = {};
 float truePeakHistoryR[kTruePeakTapsPerPhase] = {};
 float truePeakOutputHistoryL[kTruePeakTapsPerPhase] = {};
 float truePeakOutputHistoryR[kTruePeakTapsPerPhase] = {};
+// R76 Max-HD controller uses the SAME oversampled true-peak model as Peak Guard.
+// This removes the sample-peak/true-peak mismatch that caused the old controller
+// to repeatedly chase the limiter ceiling on real mastered music.
+float maxHdTruePeakHistoryL[kTruePeakTapsPerPhase] = {};
+float maxHdTruePeakHistoryR[kTruePeakTapsPerPhase] = {};
+float maxHdHeldTruePeak = 0.0f;
+float maxHdLimiterFeedbackDb = 0.0f;
+float maxHdPeakReleaseCoeff = 0.00002f;
+float maxHdGainRiseCoeff = 0.00001f;
+float maxHdGainFallCoeff = 0.001f;
+float maxHdFeedbackReleaseCoeff = 0.00002f;
+float meterMaxHdInputTruePeakDbtp = -120.0f;
 float meterTruePeakLinear = 0.0f;
 
 float spatialDelayL[kSpatialDelayMax];
@@ -514,6 +526,16 @@ float finalCompDetectorReleaseCoeff = 0.001f;
 float finalCompGainAttackCoeff = 0.02f;
 float finalCompGainReleaseCoeff = 0.001f;
 float meterFinalCompressorReductionDb = 0.0f;
+// R76 hidden Max-HD loudness limiter. It deliberately performs the normal
+// crest-factor reduction needed for loud playback BEFORE the visible Peak Guard.
+// Peak Guard then remains an emergency true-peak safety net instead of flashing
+// continuously as part of the loudness algorithm.
+float maxHdCompDelayL[kMaxLookahead] = {};
+float maxHdCompDelayR[kMaxLookahead] = {};
+int maxHdCompWrite = 0;
+int maxHdCompLookahead = 1;
+float maxHdCompTruePeakHistoryL[kTruePeakTapsPerPhase] = {};
+float maxHdCompTruePeakHistoryR[kTruePeakTapsPerPhase] = {};
 
 int autoMakeupEnabled = 0;
 float autoMakeupGain = 1.0f;
@@ -658,16 +680,26 @@ void resetLoudnessState() {
 }
 
 void resetBuffers() {
-  for (int i = 0; i < kMaxLookahead; ++i) { limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f; }
+  for (int i = 0; i < kMaxLookahead; ++i) {
+    limiterDelayL[i] = 0.0f; limiterDelayR[i] = 0.0f;
+    maxHdCompDelayL[i] = 0.0f; maxHdCompDelayR[i] = 0.0f;
+  }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
-  limiterWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
+  limiterWrite = 0; maxHdCompWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
   meterTruePeakLinear = 0.0f;
   for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
     truePeakHistoryL[tap] = 0.0f;
     truePeakHistoryR[tap] = 0.0f;
     truePeakOutputHistoryL[tap] = 0.0f;
     truePeakOutputHistoryR[tap] = 0.0f;
+    maxHdTruePeakHistoryL[tap] = 0.0f;
+    maxHdTruePeakHistoryR[tap] = 0.0f;
+    maxHdCompTruePeakHistoryL[tap] = 0.0f;
+    maxHdCompTruePeakHistoryR[tap] = 0.0f;
   }
+  maxHdHeldTruePeak = 0.0f;
+  maxHdLimiterFeedbackDb = 0.0f;
+  meterMaxHdInputTruePeakDbtp = -120.0f;
   crossfeedStateL = crossfeedStateR = 0.0;
   headphoneOutputDriveGain = 1.0f;
   meterHeadphoneOutputDriveDb = 0.0f;
@@ -1109,44 +1141,56 @@ void processSmartDsp(float &left, float &right) {
   meterSmartActivity = absf(imbalance)*smartDspAmount;
 }
 
+inline float updateTruePeakDetector(float *history, float sample);
+
 void processFinalCompressor(float &left, float &right) {
-  const bool simplifiedMaxHd = (outputProfile == 1 || outputProfile == 2) && outputReserveDb > 0.01f;
-  if (!simplifiedMaxHd) {
-    const float release = finalCompGainReleaseCoeff > 0.0f ? finalCompGainReleaseCoeff : 0.001f;
-    finalCompGain += (1.0f - finalCompGain) * release;
-    finalCompEnvelope += (0.0f - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
-    meterFinalCompressorReductionDb = finalCompGain < 0.999999f
-      ? static_cast<float>(-20.0 * log10(finalCompGain)) : 0.0f;
+  const bool simplifiedProfile = outputProfile == 1 || outputProfile == 2;
+  const bool simplifiedMaxHd = simplifiedProfile && outputReserveDb > 0.01f;
+
+  if (!simplifiedProfile) {
+    finalCompGain = 1.0f;
+    meterFinalCompressorReductionDb = 0.0f;
     return;
   }
 
-  // Stereo-linked peak-envelope detector. A moderate threshold/ratio creates a
-  // small amount of crest-factor room on already-hot masters while leaving most
-  // music untouched. This is not a brickwall limiter and never exceeds 2.75 dB GR.
-  const float detector = absf(left) > absf(right) ? absf(left) : absf(right);
-  const float detCoeff = detector > finalCompEnvelope
-    ? finalCompDetectorAttackCoeff : finalCompDetectorReleaseCoeff;
-  finalCompEnvelope += (detector - finalCompEnvelope) * detCoeff;
+  // Always keep the tiny lookahead delay warm on Headphones/Bluetooth so toggling
+  // High/Max Output does not change timing or force a new graph. The OFF state is
+  // bit-level gain neutral apart from this inaudible ~2.5 ms latency.
+  const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
+  const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
+  const float detector = tpL > tpR ? tpL : tpR;
 
-  const float envDb = finalCompEnvelope > 0.000001f
-    ? static_cast<float>(20.0 * log10(finalCompEnvelope)) : -120.0f;
-  const float thresholdDb = -7.0f;
-  const float ratio = 1.85f;
-  float reductionDb = 0.0f;
-  if (envDb > thresholdDb) {
-    reductionDb = (envDb - thresholdDb) * (1.0f - 1.0f / ratio);
-    reductionDb = clampf(reductionDb, 0.0f, 2.75f);
+  maxHdCompDelayL[maxHdCompWrite] = left;
+  maxHdCompDelayR[maxHdCompWrite] = right;
+  int read = maxHdCompWrite - maxHdCompLookahead;
+  if (read < 0) read += kMaxLookahead;
+  const float delayedL = maxHdCompDelayL[read];
+  const float delayedR = maxHdCompDelayR[read];
+  maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
+
+  float required = 1.0f;
+  if (simplifiedMaxHd && detector > 0.0000001f) {
+    // The hidden loudness limiter controls normal programme peaks around -4 dBTP.
+    // The following adaptive makeup stage then raises the denser signal toward the
+    // final -1.3 dBTP target. This is the same separation used in commercial
+    // loudness playback: loudness control first, safety limiter last.
+    const float loudnessCeiling = static_cast<float>(dbToGain(-4.0f));
+    if (detector > loudnessCeiling) required = loudnessCeiling / detector;
   }
 
-  const float targetGain = static_cast<float>(dbToGain(-reductionDb));
-  const float gainCoeff = targetGain < finalCompGain
-    ? finalCompGainAttackCoeff : finalCompGainReleaseCoeff;
-  finalCompGain += (targetGain - finalCompGain) * gainCoeff;
-  if (finalCompGain > 1.0f) finalCompGain = 1.0f;
+  if (required < finalCompGain) {
+    // Lookahead gives us the attack; make gain reduction essentially immediate.
+    finalCompGain = required;
+  } else {
+    // ~80 ms recovery keeps drums punchy without audible pumping.
+    finalCompGain += (1.0f - finalCompGain) * finalCompGainReleaseCoeff;
+  }
+  if (!simplifiedMaxHd) finalCompGain += (1.0f - finalCompGain) * 0.08f;
+  finalCompGain = clampf(finalCompGain, 0.25f, 1.0f);
 
-  left *= finalCompGain;
-  right *= finalCompGain;
-  meterFinalCompressorReductionDb = finalCompGain < 0.999999f
+  left = delayedL * finalCompGain;
+  right = delayedR * finalCompGain;
+  meterFinalCompressorReductionDb = simplifiedMaxHd && finalCompGain < 0.999999f
     ? static_cast<float>(-20.0 * log10(finalCompGain)) : 0.0f;
 }
 
@@ -1165,40 +1209,57 @@ void processOutputGain(float &left, float &right) {
 
   const float requestedDrive = static_cast<float>(dbToGain(outputReserveDb));
   if (outputProfile == 1 || outputProfile == 2) {
-    // R74 SINGLE MAX-HD MAKEUP STAGE
-    // Output Reserve is now only the *maximum allowed adaptive makeup*. There is
-    // no fixed pre-compressor boost and no automatic second LUFS gain stage. Fill
-    // real peak headroom, stay just below the true-peak detector ceiling, and use
-    // previous limiter activity as feedback so Peak Guard does not sit at 3-5 dB.
-    const float desiredPeak = limiterDetectorCeilingGain * 0.965f;
+    // R76 STABLE MAX-HD CONTROLLER
+    // Measure the finished, post-compressor signal with the exact same 4x
+    // oversampled true-peak detector family used by Peak Guard. Hold/decay the
+    // programme peak slowly so makeup gain does not oscillate between every kick
+    // and snare. Extra gain may fall to unity, but this stage never attenuates the
+    // user's dry source or EQ below unity.
+    const float tpL = updateTruePeakDetector(maxHdTruePeakHistoryL, left);
+    const float tpR = updateTruePeakDetector(maxHdTruePeakHistoryR, right);
+    const float truePeak = tpL > tpR ? tpL : tpR;
+    if (truePeak > maxHdHeldTruePeak) maxHdHeldTruePeak = truePeak;
+    else maxHdHeldTruePeak += (truePeak - maxHdHeldTruePeak) * maxHdPeakReleaseCoeff;
+    if (maxHdHeldTruePeak < 0.0000001f) maxHdHeldTruePeak = 0.0f;
+    meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
+      ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
+
+    // Leave a small but real margin between the controller target and the -1.1 dB internal
+    // Peak-Guard detector ceiling. Because R76 measures with the same oversampled
+    // detector family, it no longer needs the old ~1 dB sample-vs-true-peak cushion.
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.30f));
     float cleanCap = requestedDrive;
-    if (preLimitPeak > 0.000001f) cleanCap = desiredPeak / preLimitPeak;
-    if (cleanCap < 1.0f) cleanCap = 1.0f; // never blanket-attenuate the dry source
+    if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
+    cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
 
-    float driveTarget = requestedDrive < cleanCap ? requestedDrive : cleanCap;
-
-    // Feedback acts ONLY on added Max-HD makeup. If the previous limiter sample
-    // needed meaningful gain reduction, give that extra drive back immediately.
-    // The floor stays unity, so user EQ/source are never reduced by this stage.
+    // If Peak Guard had to work unexpectedly, remember that event and remove only
+    // the extra Max-HD makeup. The feedback decays slowly, so the controller cannot
+    // immediately climb back into the limiter and flash again on the next transient.
     const float limiterReductionDb = limiterGain < 0.999999f
-      ? static_cast<float>(-20.0 * log10(limiterGain))
-      : 0.0f;
-    if (limiterReductionDb > 0.35f && driveTarget > 1.0f) {
-      const float feedbackDb = clampf((limiterReductionDb - 0.35f) * 0.90f, 0.0f, 6.0f);
+      ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f;
+    if (limiterReductionDb > maxHdLimiterFeedbackDb) maxHdLimiterFeedbackDb = limiterReductionDb;
+    else maxHdLimiterFeedbackDb += (0.0f - maxHdLimiterFeedbackDb) * maxHdFeedbackReleaseCoeff;
+
+    float driveTarget = cleanCap;
+    if (maxHdLimiterFeedbackDb > 0.12f && driveTarget > 1.0f) {
+      const float feedbackDb = clampf(maxHdLimiterFeedbackDb + 0.30f, 0.0f, 6.0f);
       driveTarget *= static_cast<float>(dbToGain(-feedbackDb));
       if (driveTarget < 1.0f) driveTarget = 1.0f;
     }
 
-    // Back off excess gain very quickly; increase into newly available room more
-    // slowly to avoid audible pumping from the makeup controller.
+    // Downward response is fast enough to stay clean; upward recovery is deliberately
+    // slow and programme-like. This is a mastering envelope, not an AGC riding every beat.
     const float coeff = driveTarget < cleanOutputDriveGain
-      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.006)))
-      : static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.280)));
+      ? maxHdGainFallCoeff
+      : maxHdGainRiseCoeff;
     cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
-    if (cleanOutputDriveGain < 1.0f) cleanOutputDriveGain = 1.0f;
+    cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {
     // Car / Hi-Fi remains an explicit advanced gain stage.
+    maxHdHeldTruePeak = 0.0f;
+    maxHdLimiterFeedbackDb = 0.0f;
+    meterMaxHdInputTruePeakDbtp = -120.0f;
     cleanOutputDriveGain = requestedDrive;
     outputReserveGain = requestedDrive;
   }
@@ -1751,11 +1812,18 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   limiterLookahead = static_cast<int>(sampleRateHz * 0.005f + 0.5f);
   if (limiterLookahead < 1) limiterLookahead = 1;
   if (limiterLookahead >= kMaxLookahead) limiterLookahead = kMaxLookahead - 1;
+  maxHdCompLookahead = static_cast<int>(sampleRateHz * 0.0025f + 0.5f);
+  if (maxHdCompLookahead < 1) maxHdCompLookahead = 1;
+  if (maxHdCompLookahead >= kMaxLookahead) maxHdCompLookahead = kMaxLookahead - 1;
   limiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
   finalCompDetectorAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0030)));
-  finalCompDetectorReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
-  finalCompGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0040)));
-  finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.135)));
+  finalCompDetectorReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.090)));
+  finalCompGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0045)));
+  finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.080)));
+  maxHdPeakReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.32)));
+  maxHdGainRiseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.60)));
+  maxHdGainFallCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.010)));
+  maxHdFeedbackReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.55)));
   // Envelope constants are intentionally conservative for mastered rock/pop material.
   transientFastAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0012)));
   transientFastReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.028)));
@@ -2058,6 +2126,7 @@ __attribute__((visibility("default"))) float mvp_meter_loudness_program_lufs() {
 
 __attribute__((visibility("default"))) float mvp_meter_auto_makeup_db() { return meterAutoMakeupDb; }
 __attribute__((visibility("default"))) float mvp_meter_output_reserve_db() { return meterOutputReserveDb; }
+__attribute__((visibility("default"))) float mvp_meter_max_hd_input_true_peak_dbtp() { return meterMaxHdInputTruePeakDbtp; }
 __attribute__((visibility("default"))) float mvp_meter_available_headroom_db() { return meterAvailableHeadroomDb; }
 __attribute__((visibility("default"))) float mvp_meter_internal_peak() { return meterInternalPeak; }
 __attribute__((visibility("default"))) float mvp_meter_bass_activity_db() { return meterBassActivityDb; }
