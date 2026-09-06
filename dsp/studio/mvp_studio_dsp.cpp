@@ -1169,21 +1169,36 @@ void processFinalCompressor(float &left, float &right) {
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
   float required = 1.0f;
-  const float crestCeiling = static_cast<float>(dbToGain(0.20f));
+  // R77G: Bluetooth needs a transparent pre-guard safety envelope because
+  // lossy/hot masters can create >0 dBTP intersample peaks even with every
+  // creative effect off. Headphones already stay clean in the field, so their
+  // existing near-unity crest behavior is preserved.
+  const float crestCeiling = static_cast<float>(dbToGain(outputProfile == 2 ? -1.05f : 0.20f));
   if (detector > crestCeiling && detector > 0.0000001f) {
-    const float overshootDb = static_cast<float>(20.0 * log10(detector / crestCeiling));
-    // 3:1 soft safety action above +0.2 dBFS, capped at 1.5 dB so this stage
-    // can never flatten the song. Larger accidents are left to Peak Guard.
-    const float reductionDb = clampf(overshootDb * (2.0f / 3.0f), 0.0f, 1.5f);
-    required = static_cast<float>(dbToGain(-reductionDb));
+    if (outputProfile == 2) {
+      required = crestCeiling / detector;
+      required = clampf(required, static_cast<float>(dbToGain(-4.5f)), 1.0f);
+    } else {
+      const float overshootDb = static_cast<float>(20.0 * log10(detector / crestCeiling));
+      const float reductionDb = clampf(overshootDb * (2.0f / 3.0f), 0.0f, 1.5f);
+      required = static_cast<float>(dbToGain(-reductionDb));
+    }
   }
 
   if (required < finalCompGain) {
-    finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
+    // The existing lookahead lets the gain ramp arrive before the transient.
+    // Use a fast but interpolated attack so there are no sample-step artifacts.
+    finalCompGain += (required - finalCompGain) * (outputProfile == 2 ? 0.035f : finalCompGainAttackCoeff);
   } else {
-    finalCompGain += (1.0f - finalCompGain) * finalCompGainReleaseCoeff;
+    // Bluetooth release is intentionally very slow. Once a hot master proves it
+    // needs safety trim, hold that trim as a stable programme gain instead of
+    // pumping between kicks and snares.
+    const float release = outputProfile == 2
+      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 1.60)))
+      : finalCompGainReleaseCoeff;
+    finalCompGain += (1.0f - finalCompGain) * release;
   }
-  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-1.5f)), 1.0f);
+  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(outputProfile == 2 ? -4.5f : -1.5f)), 1.0f);
 
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;

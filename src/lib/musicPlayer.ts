@@ -4374,6 +4374,16 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
     return;
   }
 
+  // R77G: Headphones High Output and Bluetooth Max Output are the same user
+  // intent on two clean-HD device paths. Carry that ON/OFF intent across a
+  // direct Headphones <-> Bluetooth switch so the audible level does not jump
+  // simply because the target profile happened to remember an older toggle.
+  const leavingCleanHd = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const enteringCleanHd = profile === "headphones" || profile === "speaker";
+  const carryCleanOutputEnabled = leavingCleanHd && enteringCleanHd
+    ? state.outputReserveDb >= 5.5
+    : null;
+
   // Store the profile we are leaving before changing any global active keys.
   writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
 
@@ -4390,9 +4400,14 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
     return;
   }
 
-  // Restore the target device's own state. A never-used target starts from a
-  // safe clean baseline instead of inheriting the previous device's DSP.
+  // Restore the target device's own tone/effect state. Only the equivalent
+  // clean-output toggle is synchronized between Headphones and Bluetooth.
   const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
+  if (carryCleanOutputEnabled != null && enteringCleanHd) {
+    target.outputReserveDb = carryCleanOutputEnabled ? 8.0 : 0;
+    target.autoMakeupEnabled = false;
+    target.limiterEnabled = true;
+  }
   applyOutputProfileSnapshot(profile, target);
 }
 
