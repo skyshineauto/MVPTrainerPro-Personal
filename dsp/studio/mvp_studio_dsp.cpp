@@ -1152,9 +1152,10 @@ void processFinalCompressor(float &left, float &right) {
     return;
   }
 
-  // Always keep the tiny lookahead delay warm on Headphones/Bluetooth so toggling
-  // High/Max Output does not change timing or force a new graph. The OFF state is
-  // bit-level gain neutral apart from this inaudible ~2.5 ms latency.
+  // R77E: this is a crest SAFETY controller, not a hidden loudness limiter.
+  // Transparent pre-effect headroom does the normal work. This stage therefore
+  // stays unity on normal mastered material and only softens an unexpected
+  // internal overshoot above full scale before the clean-output stage.
   const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
   const float detector = tpL > tpR ? tpL : tpR;
@@ -1168,24 +1169,21 @@ void processFinalCompressor(float &left, float &right) {
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
   float required = 1.0f;
-  if (detector > 0.0000001f) {
-    // R77D: Peak Guard is emergency-only. The final crest controller owns normal
-    // post-EQ/effects peak management on Headphones/Bluetooth with Max Output
-    // both OFF and ON. Keep a real true-peak margin below the limiter detector.
-    const float crestCeiling = static_cast<float>(dbToGain(-1.80f));
-    if (detector > crestCeiling) {
-      required = crestCeiling / detector;
-    }
+  const float crestCeiling = static_cast<float>(dbToGain(0.20f));
+  if (detector > crestCeiling && detector > 0.0000001f) {
+    const float overshootDb = static_cast<float>(20.0 * log10(detector / crestCeiling));
+    // 3:1 soft safety action above +0.2 dBFS, capped at 1.5 dB so this stage
+    // can never flatten the song. Larger accidents are left to Peak Guard.
+    const float reductionDb = clampf(overshootDb * (2.0f / 3.0f), 0.0f, 1.5f);
+    required = static_cast<float>(dbToGain(-reductionDb));
   }
 
   if (required < finalCompGain) {
-    // Lookahead gives us the attack; make gain reduction essentially immediate.
-    finalCompGain = required;
+    finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
   } else {
-    // ~80 ms recovery keeps drums punchy without audible pumping.
     finalCompGain += (1.0f - finalCompGain) * finalCompGainReleaseCoeff;
   }
-  finalCompGain = clampf(finalCompGain, 0.25f, 1.0f);
+  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-1.5f)), 1.0f);
 
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
@@ -1223,10 +1221,12 @@ void processOutputGain(float &left, float &right) {
     meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
       ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-    // Leave a small but real margin between the controller target and the -1.1 dB internal
-    // Peak-Guard detector ceiling. Because R76 measures with the same oversampled
-    // detector family, it no longer needs the old ~1 dB sample-vs-true-peak cushion.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.30f));
+    // Leave a real margin between the clean-output target and the simplified-profile
+    // Peak Guard detector. Both use the same oversampled detector family.
+    // R77E: run the adaptive clean-output stage close to full scale without
+    // touching Peak Guard. The remaining 1.00 dB is reserved for detector error
+    // and unexpected intersample movement.
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.40f));
     float cleanCap = requestedDrive;
     if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
     cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
@@ -1246,14 +1246,13 @@ void processOutputGain(float &left, float &right) {
       if (driveTarget < 1.0f) driveTarget = 1.0f;
     }
 
-    // R77D: optional Max/High Output may rise slowly, but it must surrender extra
-    // makeup immediately when the finished true peak demands it. This prevents
-    // the optional loudness stage from feeding normal transients into Peak Guard.
-    if (driveTarget < cleanOutputDriveGain) {
-      cleanOutputDriveGain = driveTarget;
-    } else {
-      cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * maxHdGainRiseCoeff;
-    }
+    // R77E: never step gain sample-to-sample. A 2 ms downward envelope is fast
+    // enough to relinquish optional makeup while avoiding the zipper/crunch that
+    // the instantaneous R77D drop could create. Upward recovery remains slow.
+    const float coeff = driveTarget < cleanOutputDriveGain
+      ? maxHdGainFallCoeff
+      : maxHdGainRiseCoeff;
+    cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
     cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {
@@ -1823,7 +1822,7 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.080)));
   maxHdPeakReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.32)));
   maxHdGainRiseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.60)));
-  maxHdGainFallCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.010)));
+  maxHdGainFallCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.002)));
   maxHdFeedbackReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.55)));
   // Envelope constants are intentionally conservative for mastered rock/pop material.
   transientFastAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0012)));
@@ -1990,7 +1989,7 @@ __attribute__((visibility("default"))) void mvp_set_stereo_field(int enabled, fl
 }
 __attribute__((visibility("default"))) void mvp_set_dynamics_restore(int enabled, float amount) { dynamicsRestoreEnabled=enabled?1:0; dynamicsRestoreAmount=clampf(amount,0.0f,1.0f); }
 __attribute__((visibility("default"))) void mvp_set_smart_dsp(int enabled, float amount) { smartDspEnabled=enabled?1:0; smartDspAmount=clampf(amount,0.0f,1.0f); }
-__attribute__((visibility("default"))) void mvp_set_output_gain(int autoMakeup, float reserveDb) { autoMakeupEnabled=autoMakeup?1:0; outputReserveDb=clampf(reserveDb,0.0f,12.0f); }
+__attribute__((visibility("default"))) void mvp_set_output_gain(int autoMakeup, float reserveDb) { autoMakeupEnabled=autoMakeup?1:0; outputReserveDb=clampf(reserveDb,0.0f,18.0f); }
 __attribute__((visibility("default"))) void mvp_set_headphone_advanced(int enabled, float angle, float distance, float reflections, float wet) { headphoneAdvancedEnabled=enabled?1:0; headphoneSpeakerAngle=clampf(angle,15.0f,60.0f); headphoneDistance=clampf(distance,0.0f,1.0f); headphoneReflections=clampf(reflections,0.0f,0.30f); headphoneWet=clampf(wet,0.0f,1.0f); }
 
 __attribute__((visibility("default"))) void mvp_reset() { resetBuffers(); }
@@ -2010,7 +2009,11 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
   double inputEnergy = 0.0;
   double outputEnergy = 0.0;
   const float targetGain = static_cast<float>(dbToGain(targetPreampDb - headroomDb));
-  const float preampCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.018)));
+  // R77E: when more headroom is requested, get there before a newly-enabled
+  // boost can overshoot. Recovery is deliberately slower so normal playback is
+  // never gain-ridden. This only moves the linear pre-effect gain.
+  const float preampDownCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0015)));
+  const float preampUpCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.040)));
 
   for (int i = 0; i < frames; ++i) {
     const float rawL = inputL[i];
@@ -2028,6 +2031,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
       continue;
     }
 
+    const float preampCoeff = targetGain < currentPreampGain ? preampDownCoeff : preampUpCoeff;
     currentPreampGain += (targetGain - currentPreampGain) * preampCoeff;
     float left = rawL * currentPreampGain;
     float right = rawR * currentPreampGain;

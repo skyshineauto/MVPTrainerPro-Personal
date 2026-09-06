@@ -109,7 +109,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v5.6-r77d-peakguard-emergency-only",
+        version: "studio-wasm-v5.7-r77e-clean-source-headroom",
       });
     } catch (error) {
       this.failed = true;

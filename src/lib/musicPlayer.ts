@@ -1157,10 +1157,11 @@ function calculateProcessingGain() {
       : 0;
   const response = measureProcessingResponse();
   const makeupDb = currentOutputTuning()?.makeupDb ?? 0;
-  // R70: simplified Headphones / Bluetooth Speaker never receive a hidden EQ
-  // safety trim. Their clean-output stage and limiter handle real peaks instead.
-  const autoHeadroomDb = 0;
-  const effectivePreampDb = requested;
+  // R77E compatibility parity: reserve transparent headroom before EQ/effects.
+  // Unlike the removed hidden compressor this is linear gain, so it cannot add
+  // pumping or harmonic distortion.
+  const autoHeadroomDb = simplifiedProfile ? cleanHdSafetyHeadroomDb() : 0;
+  const effectivePreampDb = requested - autoHeadroomDb;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb + response.averageDb + makeupDb));
@@ -1400,12 +1401,12 @@ function applyLimiterSettings(now: number, limiterActive: boolean) {
     const ceiling = workletParam(limiterWorkletNode, "ceilingDb");
     const release = workletParam(limiterWorkletNode, "releaseMs");
     if (enabled) setAudioParam(enabled, limiterActive ? 1 : 0, now, 0.01);
-    if (ceiling) setAudioParam(ceiling, state.outputProfile === "car_hifi" ? -1.2 : -1.0, now, 0.02);
+    if (ceiling) setAudioParam(ceiling, state.outputProfile === "car_hifi" ? -1.2 : -0.30, now, 0.02);
     if (release) setAudioParam(release, state.outputProfile === "speaker" ? 125 : state.outputProfile === "car_hifi" ? 88 : 98, now, 0.03);
   }
   if (limiterFallbackNode) {
     if (limiterActive) {
-      limiterFallbackNode.threshold.value = -0.9;
+      limiterFallbackNode.threshold.value = state.outputProfile === "car_hifi" ? -1.1 : -0.25;
       limiterFallbackNode.knee.value = 0;
       limiterFallbackNode.ratio.value = 20;
       limiterFallbackNode.attack.value = 0.0015;
@@ -1635,12 +1636,66 @@ function studioOutputProfileCode(): 0 | 1 | 2 {
   if (state.outputProfile === "speaker") return 2;
   return 0;
 }
+function cleanHdSafetyHeadroomDb() {
+  if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return 0;
+
+  // R77E CLEAN SOURCE FIRST. Reserve transparent working headroom BEFORE the
+  // musical processors instead of flattening the finished song with a hidden
+  // limiter. The same amount becomes recoverable clean makeup after processing,
+  // so quiet material can regain level while hot material keeps the space it needs.
+  let required = 1.20; // true-peak / intersample margin for a flat, effects-off path
+
+  if (state.eqEnabled) {
+    const maxEqBoost = Math.max(0, ...state.eqGains.map((value) => Number(value) || 0));
+    required += Math.min(7.2, maxEqBoost * 0.82);
+  }
+
+  if (state.parametricEnabled) {
+    const maxParametricBoost = Math.max(
+      0,
+      ...state.parametricBands
+        .filter((band) => band.enabled)
+        .map((band) => Number(band.gainDb) || 0),
+    );
+    required += Math.min(3.2, maxParametricBoost * 0.55);
+  }
+
+  if (state.bassEngineEnabled) {
+    const bassBoost = Math.max(0, state.bassSubDb, state.bassPunchDb, state.bassBodyDb);
+    required += Math.min(4.6, bassBoost * 1.02);
+  }
+
+  if (state.toneEngineEnabled) {
+    const toneBoost = Math.max(0, state.presenceDb, state.clarityDb, state.airDb);
+    required += Math.min(3.6, toneBoost * 0.76);
+  }
+
+  if (state.dynamicsRestoreEnabled) {
+    required += Math.min(4.0, Math.max(0, state.dynamicsRestoreAmount) / 100 * 4.0);
+  }
+
+  if (state.hdXpanderLevel > 0) {
+    const xpander = hdXpanderProfile(state.hdXpanderLevel);
+    const xpanderToneBoost = Math.max(0, xpander.presenceDb, xpander.clarityDb, xpander.airDb);
+    required += Math.min(5.2, xpanderToneBoost * 0.76 + xpander.transientAmount * 4.0 + xpander.exciterAmount * 1.2);
+  }
+  if (state.exciterEnabled) required += Math.min(0.9, Math.max(0, state.exciterAmount) / 100 * 1.2);
+
+  if (state.stereoFieldEnabled && state.stereoUserWidth > 100) {
+    const widthRatio = Math.max(1, state.stereoUserWidth / 100);
+    required += Math.min(4.0, 20 * Math.log10(widthRatio));
+  }
+
+  if (state.outputProfile === "headphones" && state.headphoneMode !== "off") {
+    // Reserve for the strongest possible side-channel/HRTF summation. The clean
+    // output stage can recover unused room, so this does not become a fixed loss.
+    required += state.headphoneMode === "wide" ? 2.6 : state.headphoneMode === "spatial" ? 1.8 : state.headphoneMode === "deep" ? 2.3 : 2.9;
+  }
+
+  return Math.max(1.20, Math.min(18.0, required));
+}
+
 function calculateStudioGain() {
-  // R70 CLEAN-HD GAIN ARCHITECTURE
-  // Headphones and Bluetooth Speaker never receive a hidden blanket trim from
-  // an EQ preset. Their musical EQ is allowed to remain exactly as selected and
-  // the true-peak stage deals only with actual peaks. Car / Hi-Fi keeps its
-  // explicit user preamp because that profile intentionally exposes advanced DSP.
   if (state.outputProfile === "reference") {
     return { effectivePreampDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
   }
@@ -1652,7 +1707,7 @@ function calculateStudioGain() {
       ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
       : 0;
 
-  const autoHeadroomDb = 0;
+  const autoHeadroomDb = simplifiedProfile ? cleanHdSafetyHeadroomDb() : 0;
   const effectivePreampDb = requested;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
@@ -1667,26 +1722,16 @@ function cleanHdHighOutputActive() {
 
 function applyVirtualAmpSettings(now: number) {
   if (!virtualAmpGainNode || !loudnessCompressorNode) return;
-  const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const active = !state.dspBypass && simplifiedProfile;
-
-  // R77 fallback parity: crest management stays active with High/Max Output
-  // both ON and OFF. High/Max Output only controls clean post-crest makeup.
+  // R77E: never use the browser compatibility compressor as a hidden loudness
+  // processor. It remains wired only so the graph topology stays stable, but it
+  // is unity at all times. Headroom is reserved before effects and Peak Guard is
+  // emergency-only after them.
   setAudioParam(virtualAmpGainNode.gain, 1, now, 0.025);
-
-  if (active) {
-    setAudioParam(loudnessCompressorNode.threshold, -4.8, now, 0.05);
-    setAudioParam(loudnessCompressorNode.knee, 5.5, now, 0.05);
-    setAudioParam(loudnessCompressorNode.ratio, 1.55, now, 0.05);
-    setAudioParam(loudnessCompressorNode.attack, 0.0045, now, 0.05);
-    setAudioParam(loudnessCompressorNode.release, 0.12, now, 0.05);
-  } else {
-    setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.ratio, 1, now, 0.05);
-    setAudioParam(loudnessCompressorNode.attack, 0.003, now, 0.05);
-    setAudioParam(loudnessCompressorNode.release, 0.12, now, 0.05);
-  }
+  setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
+  setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);
+  setAudioParam(loudnessCompressorNode.ratio, 1, now, 0.05);
+  setAudioParam(loudnessCompressorNode.attack, 0.003, now, 0.05);
+  setAudioParam(loudnessCompressorNode.release, 0.12, now, 0.05);
 }
 
 function hdXpanderProfile(level: number) {
@@ -1786,7 +1831,7 @@ function applyStudioProcessingSettings(now: number) {
     // MVP_STUDIO_WASM_V3_PHASE4_TRUE_PEAK_LIMITER
     // BS.1770-style 4x FIR true-peak detection drives the Studio limiter.
     limiterEnabled: processed && state.limiterEnabled,
-    limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : -1.0,
+    limiterCeilingDb: state.outputProfile === "car_hifi" ? -1.2 : -0.30,
     outputProfileCode: studioOutputProfileCode(),
     headphoneEnabled,
     headphoneWidth: headphoneEnabled ? (proof ? 1 : state.headphoneWidth / 100) : 0,
@@ -1794,7 +1839,9 @@ function applyStudioProcessingSettings(now: number) {
     headphoneCrossfeed: headphoneEnabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0,
     headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
     headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
-    outputReserveDb: processed ? state.outputReserveDb : 0,
+    // Recover only the transparent safety headroom first. High/Max Output adds
+    // extra allowance on top, but the WASM true-peak controller may use less.
+    outputReserveDb: processed ? state.outputReserveDb + autoHeadroomDb : 0,
     autoMakeupEnabled: processed && state.autoMakeupEnabled,
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),

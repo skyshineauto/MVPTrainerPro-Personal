@@ -109,7 +109,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.6.0-r77d-peakguard-emergency-only";
+const MVP_STUDIO_ASSET_VERSION = "5.7.0-r77e-clean-source-headroom";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
