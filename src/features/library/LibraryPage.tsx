@@ -7,13 +7,13 @@ import {
   getMuscleDetailOptions,
   matchFilters,
   resolveRowIcon,
-  normalizeText,
   type EquipKey,
   type MuscleDetailKey,
   type MuscleKey,
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
 import { AlertIcon, CheckIcon } from "../../lib/exerciseIcons";
+import { rankExercises } from "../../lib/exerciseSearch";
 import { CreateExerciseModal } from "./CreateExerciseModal";
 
 /** Icons for filter pills */
@@ -112,71 +112,6 @@ function formatMetaList(values: string[] | null | undefined, fallback: string) {
   return list.length ? list.join(", ") : fallback;
 }
 
-function expandSearchTerms(raw: string): string[] {
-  const q = normalizeText(raw);
-  if (!q) return [];
-
-  const out = new Set<string>();
-  out.add(q);
-
-  const hasStair =
-    q.includes("stair") || q.includes("climb") || q.includes("step") || q.includes("stepper") || q.includes("stepmill") || q.includes("stairmaster");
-
-  if (hasStair) {
-    [
-      "stair climber",
-      "stairclimber",
-      "stair stepper",
-      "stairmaster",
-      "stair master",
-      "stepmill",
-      "step mill",
-      "stepper",
-      "climber",
-    ].forEach((t) => out.add(t));
-  }
-
-  return Array.from(out).filter(Boolean);
-}
-
-function buildNameOrIlike(terms: string[]) {
-  const uniq = Array.from(new Set(terms.map((t) => t.trim()).filter(Boolean)));
-  return uniq.map((t) => `name.ilike.%${t.replace(/%/g, "").replace(/_/g, "")}%`).join(",");
-}
-
-function cardioBrowseOrIlike() {
-  const terms = [
-    "treadmill",
-    "elliptical",
-    "cross trainer",
-    "arc trainer",
-    "jog",
-    "jogging",
-    "running",
-    "sprint",
-    "bike",
-    "bicycle",
-    "cycling",
-    "spin",
-    "spinning",
-    "air bike",
-    "assault bike",
-    "rower",
-    "rowing",
-    "erg",
-    "ergometer",
-    "concept2",
-    "stair climber",
-    "stairclimber",
-    "stair stepper",
-    "stairmaster",
-    "stepmill",
-    "step mill",
-    "skierg",
-    "ski erg",
-  ];
-  return buildNameOrIlike(terms);
-}
 
 export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   const [loading, setLoading] = useState(true);
@@ -257,18 +192,8 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   }, [rows, userMediaByExercise]);
 
   const filtered = useMemo(() => {
-    const termRaw = q.trim();
-    const term = normalizeText(termRaw);
-
-    return decorated.filter((r: any) => {
-      const nameNorm = normalizeText(r.name || "");
-
-      if (term.length >= 2) {
-        const family = expandSearchTerms(termRaw).map(normalizeText);
-        const ok = family.some((t) => t && nameNorm.includes(t));
-        if (!ok) return false;
-      }
-
+    const ranked = rankExercises(decorated as any[], q.trim());
+    return ranked.filter((r: any) => {
       if (!matchFilters(r, muscle, equip, muscleDetail)) return false;
 
       if (media === "ok" && !r.effectiveHasMedia) return false;
@@ -297,9 +222,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
   }
 
   async function fetchPage(nextPage: number) {
-    const termRaw = q.trim();
-    const termNorm = normalizeText(termRaw);
-
     const from = nextPage * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
@@ -308,13 +230,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
       .select("id,name,source,primary_muscles,secondary_muscles,equipment,media,template_params")
       .order("name", { ascending: true })
       .range(from, to);
-
-    if (termNorm.length >= 2) {
-      const terms = expandSearchTerms(termRaw);
-      query = query.or(buildNameOrIlike(terms));
-    } else if (equip === "cardio") {
-      query = query.or(cardioBrowseOrIlike());
-    }
 
     const { data: exs, error: exErr } = await query;
     if (exErr) throw exErr;
@@ -400,10 +315,6 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     void loadInitial();
   }, []);
 
-  useEffect(() => {
-    const t = setTimeout(() => void loadInitial(), 250);
-    return () => clearTimeout(t);
-  }, [q, muscle, muscleDetail, equip]);
 
   return (
     <div className="tr-exerciseLibraryPage">

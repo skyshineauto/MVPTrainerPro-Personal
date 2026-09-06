@@ -859,6 +859,10 @@ const nextQueue: QueueDash = {
           sessionId={editingSessionId}
           onClose={() => setEditingSessionId(null)}
           onSaved={load}
+          onEditExercise={(exerciseId) => {
+            setEditingSessionId(null);
+            navigateWithinToday(`/library/${exerciseId}`);
+          }}
         />
       ) : null}
 

@@ -171,6 +171,46 @@ function isNonEmptyString(x: any) {
   return typeof x === "string" && x.trim().length > 0;
 }
 
+const BUILT_MEDIA_FAILURE_KEY = "mvp_exercise_built_media_failures_v1";
+
+function readBuiltMediaFailures(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(BUILT_MEDIA_FAILURE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeBuiltMediaFailures(value: Record<string, number>) {
+  try {
+    localStorage.setItem(BUILT_MEDIA_FAILURE_KEY, JSON.stringify(value));
+  } catch {
+    // Media health persistence is best-effort only.
+  }
+}
+
+export function markBuiltMediaInvalid(exerciseId: string) {
+  if (!exerciseId) return;
+  const map = readBuiltMediaFailures();
+  map[exerciseId] = Date.now();
+  writeBuiltMediaFailures(map);
+}
+
+export function clearBuiltMediaInvalid(exerciseId: string) {
+  if (!exerciseId) return;
+  const map = readBuiltMediaFailures();
+  if (!(exerciseId in map)) return;
+  delete map[exerciseId];
+  writeBuiltMediaFailures(map);
+}
+
+export function isBuiltMediaInvalid(exerciseId: string) {
+  if (!exerciseId) return false;
+  return Boolean(readBuiltMediaFailures()[exerciseId]);
+}
+
 export function builtHasUsableMedia(media: any) {
   if (!media || typeof media !== "object") return false;
   const gif = media?.gif;
@@ -201,6 +241,7 @@ export function effectiveHasMedia(ex: any, userMediaRows: UserMediaLite[]) {
     (m) => m.use_user_upload && isNonEmptyString(m.storage_path)
   );
   if (enabled) return true;
+  if (isBuiltMediaInvalid(String(ex?.id ?? ""))) return false;
   return builtHasUsableMedia(ex?.media);
 }
 

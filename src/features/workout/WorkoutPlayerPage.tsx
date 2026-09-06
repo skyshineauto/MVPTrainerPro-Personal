@@ -13,13 +13,13 @@ import {
   effectiveHasMedia,
   getMuscleDetailOptions,
   matchFilters,
-  normalizeText,
   resolveRowIcon,
   type EquipKey,
   type MuscleDetailKey,
   type MuscleKey,
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
+import { rankExercises } from "../../lib/exerciseSearch";
 import { AlertIcon, CheckIcon } from "../../lib/exerciseIcons";
 import {
   formatSessionLabel,
@@ -2565,53 +2565,6 @@ const EQUIP_CHIPS: { key: Exclude<EquipKey, "all">; label: string; icon: string 
   { key: "cardio", label: "CARDIO", icon: icoRunner },
 ];
 
-function expandSearchTerms(raw: string): string[] {
-  const q = normalizeText(raw);
-  if (!q) return [];
-  const out = new Set<string>();
-  out.add(q);
-
-  const hasStair =
-    q.includes("stair") ||
-    q.includes("climb") ||
-    q.includes("step") ||
-    q.includes("stepper") ||
-    q.includes("stepmill") ||
-    q.includes("stairmaster");
-
-  if (hasStair) {
-    [
-      "stair climber",
-      "stairclimber",
-      "stair stepper",
-      "stairmaster",
-      "stair master",
-      "stepmill",
-      "step mill",
-      "stepper",
-      "climber",
-    ].forEach((t) => out.add(t));
-  }
-
-  return Array.from(out).filter(Boolean);
-}
-
-function buildNameOrIlike(terms: string[]) {
-  const uniq = Array.from(new Set(terms.map((t) => t.trim()).filter(Boolean)));
-  return uniq
-    .map((t) => `name.ilike.%${t.replace(/%/g, "").replace(/_/g, "")}%`)
-    .join(",");
-}
-
-function cardioBrowseOrIlike() {
-  const terms = [
-    "treadmill","elliptical","cross trainer","arc trainer","jog","jogging","running","sprint","bike","bicycle",
-    "cycling","spin","spinning","air bike","assault bike","rower","rowing","erg","ergometer","concept2",
-    "stair climber","stairclimber","stair stepper","stairmaster","stepmill","step mill","skierg","ski erg",
-  ];
-  return buildNameOrIlike(terms);
-}
-
 function friendlyPainState(pain: number) {
   if (pain <= 2) return "Clear";
   if (pain <= 6) return "Watch";
@@ -4100,12 +4053,11 @@ export function WorkoutPlayerPage({ params }: any) {
 
   async function runSearch(q: string, opts?: { force?: boolean }) {
     const termRaw = q.trim();
-    const termNorm = normalizeText(termRaw);
     setSearchQ(q);
     setSearchError(null);
 
     const browsing = addMuscle !== "all" || addMuscleDetail !== "all" || addEquip !== "all";
-    if (!opts?.force && !browsing && termNorm.length < 2) {
+    if (!opts?.force && !browsing && termRaw.length < 2) {
       setSearchResults([]);
       setSearchPage(0);
       setSearchHasMore(false);
@@ -4114,45 +4066,26 @@ export function WorkoutPlayerPage({ params }: any) {
 
     setSearchBusy(true);
     try {
-      const from = 0;
-      const to = 999;
-
-      let query = supabase
+      let { data, error } = await supabase
         .from("exercises")
         .select("id,name,source,primary_muscles,secondary_muscles,equipment,media")
         .order("name", { ascending: true })
-        .range(from, to);
-
-      if (termNorm.length >= 2) {
-        query = query.or(buildNameOrIlike(expandSearchTerms(termRaw)));
-      } else if (addEquip === "cardio") {
-        query = query.or(cardioBrowseOrIlike());
-      }
-
-      let { data, error } = await query;
+        .range(0, 999);
 
       if (error) {
-        let fallbackQuery = supabase
+        const fallback = await supabase
           .from("exercises")
           .select("id,name,source,primary_muscles,secondary_muscles,equipment")
           .order("name", { ascending: true })
-          .range(from, to);
-
-        if (termNorm.length >= 2) {
-          fallbackQuery = fallbackQuery.or(buildNameOrIlike(expandSearchTerms(termRaw)));
-        } else if (addEquip === "cardio") {
-          fallbackQuery = fallbackQuery.or(cardioBrowseOrIlike());
-        }
-
-        const fallback = await fallbackQuery;
+          .range(0, 999);
         data = fallback.data as any;
         error = fallback.error;
       }
 
       if (error) throw error;
 
-      const list = (data ?? []) as SearchExerciseRow[];
-      const local = list.filter((row) =>
+      const ranked = rankExercises((data ?? []) as SearchExerciseRow[], termRaw);
+      const local = ranked.filter((row) =>
         matchFilters(
           row,
           addMuscle === "all" ? "all" : (addMuscle as any),
@@ -4854,6 +4787,12 @@ export function WorkoutPlayerPage({ params }: any) {
       showToast("DELETED FROM THIS SESSION.", "ok");
     }}
     onSwap={(weId) => setSwapTargetWeId(weId)}
+    onEditExercise={(exerciseId) => {
+      setEditing(false);
+      const to = `/library/${exerciseId}`;
+      window.history.pushState({}, "", to);
+      window.dispatchEvent(new Event("popstate"));
+    }}
     swapTargetWeId={swapTargetWeId}
     searchQ={searchQ}
     searchBusy={searchBusy}
@@ -8886,6 +8825,7 @@ function EditSessionPanel(props: {
   onSaveAllFuture: () => Promise<void>;
   onDelete: (weId: string) => Promise<void>;
   onSwap: (weId: string) => void;
+  onEditExercise: (exerciseId: string) => void;
   swapTargetWeId: string | null;
   searchQ: string;
   searchBusy: boolean;
@@ -8915,6 +8855,7 @@ function EditSessionPanel(props: {
     onSaveAllFuture,
     onDelete,
     onSwap,
+    onEditExercise,
     swapTargetWeId,
     searchQ,
     searchBusy,
@@ -9065,6 +9006,9 @@ function EditSessionPanel(props: {
                   <div className="tr-editExerciseActions">
                     <button className={`tr-seg ${swapTargetWeId === we.id ? "is-active" : ""}`} onClick={() => handleSwap(we.id)}>
                       SWAP
+                    </button>
+                    <button className="tr-seg tr-exerciseEditBtn" onClick={() => onEditExercise(we.exercise_id)}>
+                      EDIT
                     </button>
                     <button className="tr-editDeleteBtn" onClick={() => onDelete(we.id)}>
                       DELETE

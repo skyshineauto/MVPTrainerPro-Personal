@@ -503,6 +503,18 @@ float smartHighEnvelope = 0.0f;
 Biquad smartLowDetector;
 Biquad smartHighDetector;
 
+// R75 final linked music compressor for simplified Headphones/Bluetooth paths.
+// It runs AFTER EQ/effects/spatial so it manages the sound the listener actually hears.
+// It only creates modest crest-factor room for High/Max Output; the adaptive makeup
+// stage then fills that room and Peak Guard remains the final emergency catcher.
+float finalCompEnvelope = 0.0f;
+float finalCompGain = 1.0f;
+float finalCompDetectorAttackCoeff = 0.02f;
+float finalCompDetectorReleaseCoeff = 0.001f;
+float finalCompGainAttackCoeff = 0.02f;
+float finalCompGainReleaseCoeff = 0.001f;
+float meterFinalCompressorReductionDb = 0.0f;
+
 int autoMakeupEnabled = 0;
 float autoMakeupGain = 1.0f;
 float outputReserveDb = 0.0f;
@@ -677,6 +689,9 @@ void resetBuffers() {
   meterMultibandGainReductionDb = 0.0f;
   meterDynamicEqMaxReductionDb = 0.0f;
   meterOutputCorrectionReductionDb = 0.0f;
+  finalCompEnvelope = 0.0f;
+  finalCompGain = 1.0f;
+  meterFinalCompressorReductionDb = 0.0f;
   outputGuard.reset();
   for (int band = 0; band < 4; ++band) {
     meterMultibandBandReductionDb[band] = 0.0f;
@@ -1094,6 +1109,47 @@ void processSmartDsp(float &left, float &right) {
   meterSmartActivity = absf(imbalance)*smartDspAmount;
 }
 
+void processFinalCompressor(float &left, float &right) {
+  const bool simplifiedMaxHd = (outputProfile == 1 || outputProfile == 2) && outputReserveDb > 0.01f;
+  if (!simplifiedMaxHd) {
+    const float release = finalCompGainReleaseCoeff > 0.0f ? finalCompGainReleaseCoeff : 0.001f;
+    finalCompGain += (1.0f - finalCompGain) * release;
+    finalCompEnvelope += (0.0f - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
+    meterFinalCompressorReductionDb = finalCompGain < 0.999999f
+      ? static_cast<float>(-20.0 * log10(finalCompGain)) : 0.0f;
+    return;
+  }
+
+  // Stereo-linked peak-envelope detector. A moderate threshold/ratio creates a
+  // small amount of crest-factor room on already-hot masters while leaving most
+  // music untouched. This is not a brickwall limiter and never exceeds 2.75 dB GR.
+  const float detector = absf(left) > absf(right) ? absf(left) : absf(right);
+  const float detCoeff = detector > finalCompEnvelope
+    ? finalCompDetectorAttackCoeff : finalCompDetectorReleaseCoeff;
+  finalCompEnvelope += (detector - finalCompEnvelope) * detCoeff;
+
+  const float envDb = finalCompEnvelope > 0.000001f
+    ? static_cast<float>(20.0 * log10(finalCompEnvelope)) : -120.0f;
+  const float thresholdDb = -7.0f;
+  const float ratio = 1.85f;
+  float reductionDb = 0.0f;
+  if (envDb > thresholdDb) {
+    reductionDb = (envDb - thresholdDb) * (1.0f - 1.0f / ratio);
+    reductionDb = clampf(reductionDb, 0.0f, 2.75f);
+  }
+
+  const float targetGain = static_cast<float>(dbToGain(-reductionDb));
+  const float gainCoeff = targetGain < finalCompGain
+    ? finalCompGainAttackCoeff : finalCompGainReleaseCoeff;
+  finalCompGain += (targetGain - finalCompGain) * gainCoeff;
+  if (finalCompGain > 1.0f) finalCompGain = 1.0f;
+
+  left *= finalCompGain;
+  right *= finalCompGain;
+  meterFinalCompressorReductionDb = finalCompGain < 0.999999f
+    ? static_cast<float>(-20.0 * log10(finalCompGain)) : 0.0f;
+}
+
 void processOutputGain(float &left, float &right) {
   const float preLimitPeak = absf(left) > absf(right) ? absf(left) : absf(right);
   if (preLimitPeak > meterInternalPeak) meterInternalPeak = preLimitPeak;
@@ -1485,13 +1541,15 @@ void processTransient(float &left, float &right) {
   );
 
   // Positive fast-vs-slow separation identifies onsets. Normalize by the program
-  // envelope so quiet passages do not receive absurd gain. Maximum boost is 2.2 dB.
-  const float floor = 0.025f;
+  // envelope so quiet passages do not receive absurd gain. R75 raises the user
+  // Impact/Punch ceiling to 4 dB so the simple button has an unmistakable A/B
+  // without turning the entire song up.
+  const float floor = 0.018f;
   const float separation = transientFastEnvelope - transientSlowEnvelope;
   const float normalized = separation > 0.0f
     ? clampf(separation / (transientSlowEnvelope + floor), 0.0f, 1.0f)
     : 0.0f;
-  const float boostDb = transientAmount * normalized * 2.2f;
+  const float boostDb = transientAmount * normalized * 4.0f;
   const float targetGain = static_cast<float>(dbToGain(boostDb));
   const float coeff = targetGain > transientGain ? transientGainAttackCoeff : transientGainReleaseCoeff;
   transientGain += (targetGain - transientGain) * coeff;
@@ -1694,6 +1752,10 @@ __attribute__((visibility("default"))) int mvp_init(float sr) {
   if (limiterLookahead < 1) limiterLookahead = 1;
   if (limiterLookahead >= kMaxLookahead) limiterLookahead = kMaxLookahead - 1;
   limiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
+  finalCompDetectorAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0030)));
+  finalCompDetectorReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
+  finalCompGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0040)));
+  finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.135)));
   // Envelope constants are intentionally conservative for mastered rock/pop material.
   transientFastAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0012)));
   transientFastReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.028)));
@@ -1918,6 +1980,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     processStereoFieldUser(left, right);
     processHeadphone(left, right);
     processLoudness(left, right);
+    processFinalCompressor(left, right);
     processHeadphoneOutputDrive(left, right);
     processOutputGain(left, right);
 
@@ -1967,6 +2030,7 @@ __attribute__((visibility("default"))) float mvp_meter_output_peak() { return me
 __attribute__((visibility("default"))) float mvp_meter_input_rms() { return meterInputRms; }
 __attribute__((visibility("default"))) float mvp_meter_output_rms() { return meterOutputRms; }
 __attribute__((visibility("default"))) float mvp_meter_gain_reduction_db() { return meterGainReductionDb; }
+__attribute__((visibility("default"))) float mvp_meter_final_compressor_reduction_db() { return meterFinalCompressorReductionDb; }
 __attribute__((visibility("default"))) float mvp_meter_limiter_gain() { return limiterGain; }
 __attribute__((visibility("default"))) float mvp_meter_true_peak_linear() { return meterTruePeakLinear; }
 __attribute__((visibility("default"))) float mvp_meter_true_peak_dbtp() {

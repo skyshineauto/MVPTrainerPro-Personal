@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
+import { clearBuiltMediaInvalid, isBuiltMediaInvalid, markBuiltMediaInvalid } from "../../lib/exerciseMatch";
 
 type UserMediaRow = {
   id: string;
@@ -283,155 +284,141 @@ function resolveBuiltMedia(ex: any): { gif?: string; video?: string; poster?: st
 
 function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
   const built = useMemo(() => resolveBuiltMedia(ex), [ex]);
-
-  const anyUserEnabled = useMemo(
-    () => userMedia.some((m) => m.use_user_upload),
-    [userMedia]
-  );
-
-  const resolved = useMemo(() => {
-    if (anyUserEnabled) {
-      const byKind = new Map<string, UserMediaRow>();
-      for (const m of userMedia) byKind.set(m.kind, m);
-
-      return {
-        source: "user_upload" as const,
-        gifPath: byKind.get("gif")?.storage_path,
-        videoPath: byKind.get("video")?.storage_path,
-        posterPath: byKind.get("poster")?.storage_path,
-      };
-    }
-
-    return { source: "built" as const, ...built };
-  }, [anyUserEnabled, userMedia, built]);
-
-  const [gifUrl, setGifUrl] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [posterUrl, setPosterUrl] = useState<string | null>(null);
-
-  const [err, setErr] = useState<string | null>(null);
-  const [loadFail, setLoadFail] = useState<string | null>(null);
-
-  const resolvedType = useMemo(() => {
-    if (resolved.source === "user_upload") {
-      if (resolved.videoPath) return "video";
-      if (resolved.gifPath) return "gif";
-      if (resolved.posterPath) return "poster";
-      return "none";
-    }
-    if ((resolved as any).video) return "video";
-    if ((resolved as any).gif) return "gif";
-    if ((resolved as any).poster) return "poster";
-    return "none";
-  }, [resolved]);
+  const anyUserEnabled = useMemo(() => userMedia.some((m) => m.use_user_upload), [userMedia]);
+  const [userUrls, setUserUrls] = useState<{ gif?: string; video?: string; poster?: string }>({});
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [fallbackCount, setFallbackCount] = useState(0);
+  const [exhausted, setExhausted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-
-    async function run() {
+    async function loadUserUrls() {
+      setUserUrls({});
+      setSignError(null);
+      if (!anyUserEnabled) return;
+      setSigning(true);
       try {
-        setErr(null);
-        setLoadFail(null);
-        setGifUrl(null);
-        setVideoUrl(null);
-        setPosterUrl(null);
-
-        if (resolved.source === "user_upload") {
-          if (resolved.videoPath) {
-            const url = await signedUrlFromPath(resolved.videoPath);
-            if (!cancelled) setVideoUrl(url);
-          }
-          if (resolved.gifPath) {
-            const url = await signedUrlFromPath(resolved.gifPath);
-            if (!cancelled) setGifUrl(url);
-          }
-          if (resolved.posterPath) {
-            const url = await signedUrlFromPath(resolved.posterPath);
-            if (!cancelled) setPosterUrl(url);
-          }
-
-          if (!resolved.videoPath && !resolved.gifPath && !resolved.posterPath) {
-            if (!cancelled) {
-              setLoadFail(
-                "Your upload is enabled, but no uploaded media files are present for this exercise."
-              );
-            }
-          }
-        } else {
-          if (!cancelled) {
-            setVideoUrl((resolved as any).video ?? null);
-            setGifUrl((resolved as any).gif ?? null);
-            setPosterUrl((resolved as any).poster ?? null);
-          }
+        const byKind = new Map<string, UserMediaRow>();
+        for (const row of userMedia) {
+          if (row.use_user_upload && row.storage_path && !byKind.has(row.kind)) byKind.set(row.kind, row);
         }
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message ?? String(e));
+        const next: { gif?: string; video?: string; poster?: string } = {};
+        const jobs = (["video", "gif", "poster"] as const).map(async (kind) => {
+          const path = byKind.get(kind)?.storage_path;
+          if (!path) return;
+          try {
+            next[kind] = await signedUrlFromPath(path);
+          } catch {
+            // A bad user asset must not block the built-in fallback chain.
+          }
+        });
+        await Promise.all(jobs);
+        if (!cancelled) setUserUrls(next);
+      } catch (error: any) {
+        if (!cancelled) setSignError(error?.message ?? String(error));
+      } finally {
+        if (!cancelled) setSigning(false);
       }
     }
+    void loadUserUrls();
+    return () => { cancelled = true; };
+  }, [anyUserEnabled, userMedia, ex?.id]);
 
-    void run();
-    return () => {
-      cancelled = true;
+  const candidates = useMemo(() => {
+    const list: Array<{ key: string; kind: "video" | "gif" | "poster"; source: "user" | "built"; url: string }> = [];
+    const add = (kind: "video" | "gif" | "poster", source: "user" | "built", url?: string | null) => {
+      const clean = typeof url === "string" ? url.trim() : "";
+      if (!clean) return;
+      if (list.some((item) => item.url === clean && item.kind === kind)) return;
+      list.push({ key: `${source}:${kind}:${clean}`, kind, source, url: clean });
     };
-  }, [resolved]);
+
+    if (anyUserEnabled) {
+      add("video", "user", userUrls.video);
+      add("gif", "user", userUrls.gif);
+      add("poster", "user", userUrls.poster);
+    }
+
+    // Built-in assets always remain available as automatic fallbacks. A broken
+    // video should quietly roll to GIF/poster instead of stopping the exercise page.
+    add("video", "built", built.video);
+    add("gif", "built", built.gif);
+    add("poster", "built", built.poster);
+    return list;
+  }, [anyUserEnabled, userUrls, built]);
+
+  const candidateKey = candidates.map((candidate) => candidate.key).join("|");
+  useEffect(() => {
+    setActiveIndex(0);
+    setFallbackCount(0);
+    setExhausted(false);
+  }, [candidateKey, ex?.id]);
+
+  const active = candidates[activeIndex] ?? null;
+  const builtCandidateCount = candidates.filter((candidate) => candidate.source === "built").length;
+
+  function reportSuccess() {
+    if (active?.source === "built") clearBuiltMediaInvalid(String(ex?.id ?? ""));
+  }
+
+  function advanceFallback() {
+    const nextIndex = activeIndex + 1;
+    if (nextIndex < candidates.length) {
+      setFallbackCount((count) => count + 1);
+      setActiveIndex(nextIndex);
+      return;
+    }
+    setExhausted(true);
+    if (builtCandidateCount > 0) markBuiltMediaInvalid(String(ex?.id ?? ""));
+  }
 
   const statusLine = useMemo(() => {
-    const src = resolved.source === "user_upload" ? "YOUR UPLOAD" : "BUILT-IN";
-    if (err) return { tone: "err", text: `MEDIA ERROR: ${err}` };
-    if (loadFail) return { tone: "err", text: loadFail };
-    if (resolvedType === "none") {
-      return { tone: "warn", text: "No media found for the currently selected source." };
+    if (signing && !active) return { tone: "warn", text: "Preparing exercise media…" };
+    if (exhausted || (!signing && !active)) {
+      return { tone: "warn", text: "Media unavailable. Upload your own GIF, video, or poster below." };
     }
-    return { tone: "ok", text: `Using ${src} • ${resolvedType.toUpperCase()}` };
-  }, [resolved.source, resolvedType, err, loadFail]);
-
-  const showSomething = !!(videoUrl || gifUrl || posterUrl);
+    const source = active.source === "user" ? "YOUR UPLOAD" : "BUILT-IN";
+    const fallback = fallbackCount > 0 ? " • FALLBACK" : "";
+    return { tone: "ok", text: `Using ${source} • ${active.kind.toUpperCase()}${fallback}` };
+  }, [active, exhausted, signing, fallbackCount]);
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div
         className="tr-rowbox"
         style={{
-          borderColor:
-            statusLine.tone === "ok"
-              ? "rgba(34,197,94,.30)"
-              : statusLine.tone === "warn"
-              ? "rgba(245,158,11,.30)"
-              : "rgba(255,80,80,.35)",
-          background:
-            statusLine.tone === "ok"
-              ? "rgba(34,197,94,.08)"
-              : statusLine.tone === "warn"
-              ? "rgba(245,158,11,.08)"
-              : "rgba(255,80,80,.10)",
+          borderColor: statusLine.tone === "ok" ? "rgba(34,197,94,.30)" : "rgba(245,158,11,.30)",
+          background: statusLine.tone === "ok" ? "rgba(34,197,94,.08)" : "rgba(245,158,11,.08)",
           fontWeight: 900,
         }}
       >
         {statusLine.text}
+        {signError ? <div className="tr-sub" style={{ marginTop: 4 }}>Uploaded media could not be signed; built-in fallback is being used.</div> : null}
       </div>
 
       <div className="tr-mediaFrame">
-        {!showSomething ? (
+        {!active || exhausted ? (
           <div style={{ padding: 18, textAlign: "center" }}>
-            <div style={{ fontWeight: 900 }}>No media yet</div>
+            <div style={{ fontWeight: 900 }}>Media unavailable</div>
             <div className="tr-sub" style={{ marginTop: 6 }}>
-              Upload a GIF/video/poster below, or switch to built-in media if available.
+              MVP tried every available exercise asset. Upload your own media below if you want a replacement.
             </div>
           </div>
-        ) : videoUrl ? (
+        ) : active.kind === "video" ? (
           <video
-            src={videoUrl}
+            key={active.key}
+            src={active.url}
             autoPlay
             loop
             muted
             playsInline
             controls={false}
             preload="metadata"
-            onError={() =>
-              setLoadFail(
-                "Video failed to load. The URL may be invalid or blocked. Try uploading your own file."
-              )
-            }
+            onLoadedData={reportSuccess}
+            onCanPlay={reportSuccess}
+            onError={advanceFallback}
             style={{
               width: "100%",
               height: "auto",
@@ -444,13 +431,11 @@ function MediaStage({ ex, userMedia }: { ex: any; userMedia: UserMediaRow[] }) {
           />
         ) : (
           <img
-            src={gifUrl || posterUrl || ""}
+            key={active.key}
+            src={active.url}
             alt={`${ex?.name ?? "Exercise"} demo`}
-            onError={() =>
-              setLoadFail(
-                "Image/GIF failed to load. The URL may be invalid or blocked. Try uploading your own file."
-              )
-            }
+            onLoad={reportSuccess}
+            onError={advanceFallback}
             style={{
               width: "100%",
               height: "auto",
@@ -521,13 +506,17 @@ export function ExerciseDetailPage({ params, navigate }: any) {
   const [err, setErr] = useState<string | null>(null);
 
   const [ex, setEx] = useState<any>(null);
+  const [editingExercise, setEditingExercise] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [userMedia, setUserMedia] = useState<UserMediaRow[]>([]);
   const [busyUpload, setBusyUpload] = useState<null | "gif" | "video" | "poster">(null);
   const [history, setHistory] = useState<ExerciseHistorySession[]>([]);
   const [expandedSessions, setExpandedSessions] = useState<Record<string, boolean>>({});
 
   const builtHasUsable = useMemo(
-    () => (ex ? isMediaUsable(ex.media) : false),
+    () => (ex ? isMediaUsable(ex.media) && !isBuiltMediaInvalid(String(ex.id ?? "")) : false),
     [ex]
   );
   const anyUserEnabled = useMemo(
@@ -610,6 +599,9 @@ export function ExerciseDetailPage({ params, navigate }: any) {
       const historyRows = await loadExerciseHistory(exerciseId, u.user.id);
 
       setEx(exData);
+      setNameDraft(String((exData as any)?.name ?? ""));
+      setEditingExercise(false);
+      setRenameError(null);
       setUserMedia((um ?? []) as UserMediaRow[]);
       setHistory(historyRows);
     } catch (e: any) {
@@ -622,6 +614,38 @@ export function ExerciseDetailPage({ params, navigate }: any) {
   useEffect(() => {
     void loadAll();
   }, [exerciseId]);
+
+  async function saveExerciseName() {
+    const clean = nameDraft.trim().replace(/\s+/g, " ");
+    if (clean.length < 2) {
+      setRenameError("Enter an exercise name.");
+      return;
+    }
+    if (clean === String(ex?.name ?? "").trim()) {
+      setEditingExercise(false);
+      setRenameError(null);
+      return;
+    }
+
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const { data, error } = await supabase
+        .from("exercises")
+        .update({ name: clean })
+        .eq("id", exerciseId)
+        .select("id,name")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("The database did not allow this exercise to be renamed.");
+      setEx((current: any) => current ? { ...current, name: clean } : current);
+      setEditingExercise(false);
+    } catch (error: any) {
+      setRenameError(error?.message ?? "Exercise could not be renamed.");
+    } finally {
+      setRenameBusy(false);
+    }
+  }
 
   async function toggleUseUserUpload(next: boolean) {
     const { data: u, error: uErr } = await supabase.auth.getUser();
@@ -711,9 +735,42 @@ export function ExerciseDetailPage({ params, navigate }: any) {
           </div>
         ) : ex ? (
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gap: 6 }}>
-              <div className="tr-kicker">EXERCISE</div>
-              <div style={{ fontWeight: 950, fontSize: 18 }}>{ex.name}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="tr-kicker">EXERCISE</div>
+                <button
+                  type="button"
+                  className="tr-btn tr-btn--blueOutline"
+                  onClick={() => { setNameDraft(String(ex.name ?? "")); setRenameError(null); setEditingExercise((value) => !value); }}
+                  disabled={renameBusy}
+                >
+                  {editingExercise ? "CANCEL EDIT" : "EDIT EXERCISE"}
+                </button>
+              </div>
+              {editingExercise ? (
+                <div className="tr-rowbox" style={{ display: "grid", gap: 8 }}>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span className="tr-kicker">EXERCISE NAME</span>
+                    <input
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      autoFocus
+                      style={{ height: 46, borderRadius: 10, border: "1px solid rgba(82,223,255,.35)", background: "rgba(2,10,16,.92)", color: "#fff", padding: "0 12px", fontWeight: 850 }}
+                    />
+                  </label>
+                  {renameError ? <div style={{ color: "#ff9b9b", fontWeight: 850 }}>{renameError}</div> : null}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="tr-btn tr-btn--primary" type="button" onClick={() => void saveExerciseName()} disabled={renameBusy}>
+                      {renameBusy ? "SAVING…" : "SAVE NAME"}
+                    </button>
+                    <button className="tr-btn" type="button" onClick={() => { setEditingExercise(false); setNameDraft(String(ex.name ?? "")); setRenameError(null); }} disabled={renameBusy}>
+                      CANCEL
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontWeight: 950, fontSize: 18 }}>{ex.name}</div>
+              )}
               <div className="tr-sub">
                 {(Array.isArray(ex.primary_muscles) && ex.primary_muscles.length
                   ? ex.primary_muscles.join(", ")

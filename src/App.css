@@ -1877,7 +1877,7 @@ html.tr-modal-open .tr-bottomNavWrap{
 
 .tr-plannedExerciseActions{
   display: grid;
-  grid-template-columns: repeat(2, minmax(70px, 1fr));
+  grid-template-columns: repeat(3, minmax(66px, 1fr));
   gap: 6px;
 }
 
@@ -11742,7 +11742,7 @@ body{
 
 .tr-editExerciseActions{
   display:grid;
-  grid-template-columns:82px 82px;
+  grid-template-columns:repeat(3, minmax(72px, 1fr));
   gap:7px;
 }
 

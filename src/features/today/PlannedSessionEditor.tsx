@@ -6,12 +6,12 @@ import { CreateExerciseModal, type CreatedExercise } from "../library/CreateExer
 import {
   getMuscleDetailOptions,
   matchFilters,
-  normalizeText,
   resolveRowIcon,
   type EquipKey,
   type MuscleDetailKey,
   type MuscleKey,
 } from "../../lib/exerciseMatch";
+import { rankExercises } from "../../lib/exerciseSearch";
 
 import icoDumbbell from "../../assets/dumbbell.png";
 import icoRunner from "../../assets/runner.png";
@@ -237,10 +237,12 @@ export function PlannedSessionEditor({
   sessionId,
   onClose,
   onSaved,
+  onEditExercise,
 }: {
   sessionId: string;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
+  onEditExercise?: (exerciseId: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -360,11 +362,10 @@ export function PlannedSessionEditor({
   const detailOptions = useMemo(() => getMuscleDetailOptions(muscle), [muscle]);
 
   const filteredCatalog = useMemo(() => {
-    const term = normalizeText(query);
-    return catalog.filter((exercise) => {
-      if (term && !normalizeText(exercise.name).includes(term)) return false;
-      return matchFilters(exercise, muscle, equip, muscleDetail);
-    });
+    const ranked = rankExercises(catalog, query);
+    return ranked.filter((exercise) =>
+      matchFilters(exercise, muscle, equip, muscleDetail)
+    );
   }, [catalog, query, muscle, equip, muscleDetail]);
 
   const visibleResults = useMemo(
@@ -710,6 +711,12 @@ export function PlannedSessionEditor({
                               }}
                             >
                               Swap
+                            </button>
+                            <button
+                              className="tr-seg tr-exerciseEditBtn"
+                              onClick={() => onEditExercise?.(item.exercise_id)}
+                            >
+                              Edit
                             </button>
                             <button className="tr-danger" onClick={() => deleteExercise(index)}>Delete</button>
                           </div>

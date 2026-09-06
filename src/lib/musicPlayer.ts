@@ -1695,9 +1695,11 @@ function applyVirtualAmpSettings(now: number) {
 
 function hdXpanderProfile(level: number) {
   const normalized = Math.max(0, Math.min(3, Math.round(Number(level) || 0)));
-  if (normalized === 1) return { level: 1, presenceDb: 0.35, clarityDb: 0.65, airDb: 0.85, exciterAmount: 0.025, transientAmount: 0.08 };
-  if (normalized === 2) return { level: 2, presenceDb: 0.70, clarityDb: 1.20, airDb: 1.55, exciterAmount: 0.045, transientAmount: 0.12 };
-  if (normalized === 3) return { level: 3, presenceDb: 1.05, clarityDb: 1.75, airDb: 2.25, exciterAmount: 0.070, transientAmount: 0.17 };
+  // R75: each level must be an unmistakable A/B change, not a decorative button.
+  // These remain parallel restoration boosts and never rewrite the 31-band EQ.
+  if (normalized === 1) return { level: 1, presenceDb: 0.75, clarityDb: 1.25, airDb: 1.60, exciterAmount: 0.040, transientAmount: 0.14 };
+  if (normalized === 2) return { level: 2, presenceDb: 1.25, clarityDb: 2.10, airDb: 2.85, exciterAmount: 0.072, transientAmount: 0.24 };
+  if (normalized === 3) return { level: 3, presenceDb: 1.85, clarityDb: 3.10, airDb: 4.10, exciterAmount: 0.110, transientAmount: 0.36 };
   return { level: 0, presenceDb: 0, clarityDb: 0, airDb: 0, exciterAmount: 0, transientAmount: 0 };
 }
 
@@ -1726,17 +1728,19 @@ function applyStudioProcessingSettings(now: number) {
     state.outputProfile === "headphones" &&
     state.headphoneMode !== "off" &&
     !hrtfImmersion;
-  // MVP_STUDIO_WASM_V2_TRANSIENT
-  // The same preset/source-aware transient amount used by the Compatibility engine
-  // now drives a stereo-linked shaper inside the WASM core. It never changes EQ
-  // headroom or preamp, so the V1.1 gain-staging fix remains intact.
+  // R75: simplified Headphones/Speaker presets are EQ ONLY. IMPACT/PUNCH now
+  // drive the actual stereo-linked transient shaper instead of the unrelated
+  // Dynamics Restore stage. Car/Hi-Fi keeps its preset personality behavior.
   const studioPersonality = currentStudioPersonality();
-  const studioTransientAmount = processed && state.eqEnabled
+  const userImpactAmount = cleanHdProfile && state.dynamicsRestoreEnabled
+    ? Math.max(0, Math.min(1, state.dynamicsRestoreAmount / 100))
+    : 0;
+  const presetTransientAmount = !cleanHdProfile && processed && state.eqEnabled
     ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale() * studioPersonality.transientScale))
     : 0;
-  // HD Xpander is an independent restoration layer. It adds detail/attack on
-  // top of the user's EQ without rewriting the EQ curve or requiring Clear/Analog.
-  const effectiveTransientAmount = Math.max(studioTransientAmount, xpander.transientAmount);
+  // Xpander and Impact are independent layers and therefore add rather than
+  // silently masking each other with Math.max().
+  const effectiveTransientAmount = Math.max(0, Math.min(1, presetTransientAmount + userImpactAmount + xpander.transientAmount));
   const effectivePresenceDb = Math.max(-6, Math.min(6, state.presenceDb + xpander.presenceDb));
   const effectiveClarityDb = Math.max(-6, Math.min(6, state.clarityDb + xpander.clarityDb));
   const effectiveAirDb = Math.max(-6, Math.min(6, state.airDb + xpander.airDb));
@@ -1817,8 +1821,8 @@ function applyStudioProcessingSettings(now: number) {
     stereoUserWidth: state.stereoUserWidth / 100,
     stereoCenterFocus: state.stereoCenterFocus / 100,
     bassMonoHz: state.bassMonoHz,
-    dynamicsRestoreEnabled: processed && state.dynamicsRestoreEnabled,
-    dynamicsRestoreAmount: state.dynamicsRestoreAmount / 100,
+    dynamicsRestoreEnabled: processed && !cleanHdProfile && state.dynamicsRestoreEnabled,
+    dynamicsRestoreAmount: !cleanHdProfile ? state.dynamicsRestoreAmount / 100 : 0,
     smartDspEnabled: processed && state.smartDspEnabled,
     smartDspAmount: state.smartDspAmount / 100,
     headphoneAdvancedEnabled: headphoneEnabled && state.headphoneAdvancedEnabled,
@@ -1956,9 +1960,10 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioHrtfReflectionGainA.connect(studioInputBus);
     studioHrtfReflectionGainB.connect(studioInputBus);
 
-    studioInputBus.connect(virtualAmpGainNode);
-    virtualAmpGainNode.connect(loudnessCompressorNode);
-    loudnessCompressorNode.connect(studioProcessorNode);
+    // R75: the flagship WASM now owns the final linked compressor AFTER EQ and
+    // effects. The browser compressor is not allowed to pre-compress the raw
+    // source and then let later EQ boosts create fresh peaks.
+    studioInputBus.connect(studioProcessorNode);
     studioProcessorNode.connect(standardRouteGain);
     standardRouteGain.connect(mixBus);
     mixBus.connect(analyserNode);
@@ -4100,9 +4105,9 @@ export function setMusicHeadphoneClear(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
-  next.presenceDb = enabled ? 1.4 : 0;
-  next.clarityDb = enabled ? 2.0 : 0;
-  next.airDb = enabled ? 2.4 : 0;
+  next.presenceDb = enabled ? 2.0 : 0;
+  next.clarityDb = enabled ? 3.0 : 0;
+  next.airDb = enabled ? 3.8 : 0;
   next.deharshAmount = 0;
   applyOutputProfileSnapshot("headphones", next);
 }
@@ -4125,9 +4130,9 @@ export function setMusicSpeakerClear(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
-  next.presenceDb = enabled ? 1.25 : 0;
-  next.clarityDb = enabled ? 1.8 : 0;
-  next.airDb = enabled ? 2.1 : 0;
+  next.presenceDb = enabled ? 1.8 : 0;
+  next.clarityDb = enabled ? 2.7 : 0;
+  next.airDb = enabled ? 3.3 : 0;
   next.deharshAmount = 0;
   applyOutputProfileSnapshot("speaker", next);
 }
@@ -4135,10 +4140,9 @@ export function setMusicSpeakerClear(enabled: boolean) {
 export function setMusicSpeakerPunch(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
-  // Punch is a transient/impact control. Neural Bass owns bass synthesis so the
-  // two buttons can be combined without overwriting each other.
+  // R75: this state is consumed by the Studio transient shaper on clean-HD profiles.
   next.dynamicsRestoreEnabled = enabled;
-  next.dynamicsRestoreAmount = enabled ? 72 : 0;
+  next.dynamicsRestoreAmount = enabled ? 92 : 0;
   applyOutputProfileSnapshot("speaker", next);
 }
 
@@ -4148,7 +4152,7 @@ export function setMusicSpeakerWide(enabled: boolean) {
   // Universal speaker WIDE is intentionally geometry-agnostic Mid/Side width,
   // not crosstalk cancellation. True CTC requires known driver/listener geometry.
   next.stereoFieldEnabled = enabled;
-  next.stereoUserWidth = enabled ? 128 : 100;
+  next.stereoUserWidth = enabled ? 138 : 100;
   next.stereoCenterFocus = 100;
   next.bassMonoHz = enabled ? 105 : 90;
   applyOutputProfileSnapshot("speaker", next);
@@ -4183,9 +4187,9 @@ export function setMusicHeadphoneNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
-  next.bassSubDb = enabled ? 2.6 : 0;
-  next.bassPunchDb = enabled ? 1.1 : 0;
-  next.bassBodyDb = enabled ? 0.5 : 0;
+  next.bassSubDb = enabled ? 3.8 : 0;
+  next.bassPunchDb = enabled ? 1.8 : 0;
+  next.bassBodyDb = enabled ? 0.8 : 0;
   next.bassTightness = enabled ? 76 : 55;
   applyOutputProfileSnapshot("headphones", next);
 }
@@ -4194,9 +4198,9 @@ export function setMusicSpeakerNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
-  next.bassSubDb = enabled ? 2.8 : 0;
-  next.bassPunchDb = enabled ? 1.3 : 0;
-  next.bassBodyDb = enabled ? 0.6 : 0;
+  next.bassSubDb = enabled ? 4.0 : 0;
+  next.bassPunchDb = enabled ? 2.0 : 0;
+  next.bassBodyDb = enabled ? 0.9 : 0;
   next.bassTightness = enabled ? 78 : 55;
   applyOutputProfileSnapshot("speaker", next);
 }
@@ -4205,7 +4209,7 @@ export function setMusicHeadphoneImpact(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.dynamicsRestoreEnabled = enabled;
-  next.dynamicsRestoreAmount = enabled ? 70 : 0;
+  next.dynamicsRestoreAmount = enabled ? 92 : 0;
   applyOutputProfileSnapshot("headphones", next);
 }
 
