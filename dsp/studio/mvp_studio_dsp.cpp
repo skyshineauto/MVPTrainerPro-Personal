@@ -384,6 +384,8 @@ float limiterDelayR[kMaxLookahead];
 int limiterWrite = 0;
 int limiterLookahead = 240;
 float limiterGain = 1.0f;
+float limiterRequiredGain = 1.0f;
+int profileTransitionSamplesRemaining = 0;
 
 // V3 Phase 4 true-peak detector. ITU-R BS.1770 Annex 2 provides a
 // 48th-order, 4-phase FIR interpolator for estimating inter-sample peaks.
@@ -521,6 +523,7 @@ Biquad smartHighDetector;
 // stage then fills that room and Peak Guard remains the final emergency catcher.
 float finalCompEnvelope = 0.0f;
 float finalCompGain = 1.0f;
+float finalCompRequiredGain = 1.0f;
 float finalCompDetectorAttackCoeff = 0.02f;
 float finalCompDetectorReleaseCoeff = 0.001f;
 float finalCompGainAttackCoeff = 0.02f;
@@ -685,7 +688,7 @@ void resetBuffers() {
     maxHdCompDelayL[i] = 0.0f; maxHdCompDelayR[i] = 0.0f;
   }
   for (int i = 0; i < kSpatialDelayMax; ++i) { spatialDelayL[i] = 0.0f; spatialDelayR[i] = 0.0f; }
-  limiterWrite = 0; maxHdCompWrite = 0; spatialWrite = 0; limiterGain = 1.0f;
+  limiterWrite = 0; maxHdCompWrite = 0; spatialWrite = 0; limiterGain = 1.0f; limiterRequiredGain = 1.0f; profileTransitionSamplesRemaining = 0;
   meterTruePeakLinear = 0.0f;
   for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
     truePeakHistoryL[tap] = 0.0f;
@@ -723,6 +726,7 @@ void resetBuffers() {
   meterOutputCorrectionReductionDb = 0.0f;
   finalCompEnvelope = 0.0f;
   finalCompGain = 1.0f;
+  finalCompRequiredGain = 1.0f;
   meterFinalCompressorReductionDb = 0.0f;
   outputGuard.reset();
   for (int band = 0; band < 4; ++band) {
@@ -1147,15 +1151,17 @@ void processFinalCompressor(float &left, float &right) {
   const bool simplifiedProfile = outputProfile == 1 || outputProfile == 2;
 
   if (!simplifiedProfile) {
+    finalCompEnvelope = 0.0f;
     finalCompGain = 1.0f;
+    finalCompRequiredGain = 1.0f;
     meterFinalCompressorReductionDb = 0.0f;
     return;
   }
 
-  // R77E: this is a crest SAFETY controller, not a hidden loudness limiter.
-  // Transparent pre-effect headroom does the normal work. This stage therefore
-  // stays unity on normal mastered material and only softens an unexpected
-  // internal overshoot above full scale before the clean-output stage.
+  // R77I SHARED CLEAN-HEADROOM MANAGER.
+  // This is a linked linear programme trim, not Peak Guard and not a loudness
+  // compressor. It measures the actual post-effect true peak for both Headphones
+  // and Bluetooth, then holds only enough clean room to keep the final guard idle.
   const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
   const float detector = tpL > tpR ? tpL : tpR;
@@ -1168,37 +1174,24 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
+  if (detector > finalCompEnvelope) finalCompEnvelope = detector;
+  else finalCompEnvelope += (detector - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
+  if (finalCompEnvelope < 0.0000001f) finalCompEnvelope = 0.0f;
+
+  const float cleanCeiling = static_cast<float>(dbToGain(-1.15f));
   float required = 1.0f;
-  // R77G: Bluetooth needs a transparent pre-guard safety envelope because
-  // lossy/hot masters can create >0 dBTP intersample peaks even with every
-  // creative effect off. Headphones already stay clean in the field, so their
-  // existing near-unity crest behavior is preserved.
-  const float crestCeiling = static_cast<float>(dbToGain(outputProfile == 2 ? -1.05f : 0.20f));
-  if (detector > crestCeiling && detector > 0.0000001f) {
-    if (outputProfile == 2) {
-      required = crestCeiling / detector;
-      required = clampf(required, static_cast<float>(dbToGain(-4.5f)), 1.0f);
-    } else {
-      const float overshootDb = static_cast<float>(20.0 * log10(detector / crestCeiling));
-      const float reductionDb = clampf(overshootDb * (2.0f / 3.0f), 0.0f, 1.5f);
-      required = static_cast<float>(dbToGain(-reductionDb));
-    }
+  if (finalCompEnvelope > cleanCeiling && finalCompEnvelope > 0.0000001f) {
+    required = cleanCeiling / finalCompEnvelope;
   }
+  required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
+  finalCompRequiredGain = required;
 
   if (required < finalCompGain) {
-    // The existing lookahead lets the gain ramp arrive before the transient.
-    // Use a fast but interpolated attack so there are no sample-step artifacts.
-    finalCompGain += (required - finalCompGain) * (outputProfile == 2 ? 0.035f : finalCompGainAttackCoeff);
-  } else {
-    // Bluetooth release is intentionally very slow. Once a hot master proves it
-    // needs safety trim, hold that trim as a stable programme gain instead of
-    // pumping between kicks and snares.
-    const float release = outputProfile == 2
-      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 1.60)))
-      : finalCompGainReleaseCoeff;
-    finalCompGain += (1.0f - finalCompGain) * release;
+    finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
+  } else if (profileTransitionSamplesRemaining <= 0) {
+    finalCompGain += (required - finalCompGain) * finalCompGainReleaseCoeff;
   }
-  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(outputProfile == 2 ? -4.5f : -1.5f)), 1.0f);
+  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-8.0f)), 1.0f);
 
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
@@ -1236,11 +1229,10 @@ void processOutputGain(float &left, float &right) {
     meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
       ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-    // R77F: Max/High Output is allowed to use only proven clean room. Keep a
-    // generous gap below Peak Guard so a kick/snare/intersample transient cannot
-    // turn optional loudness into normal limiter activity. Hot masters may receive
-    // little or zero extra gain; quiet material can still receive the full request.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-2.20f));
+    // R77I: recover only gain proven safe by the same oversampled detector used
+    // by Peak Guard. OFF may recover transparent source/EQ margin; High/Max adds
+    // only additional room that truly exists after the creative processing.
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.35f));
     float cleanCap = requestedDrive;
     if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
     cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
@@ -1295,10 +1287,14 @@ void configureOutputProfile() {
     // output path; it must never behave like a hidden EQ preset. Only the
     // sub-audible protection high-pass differs slightly by device family.
     if (outputProfile == 2) {
-      outputHp[ch].setHighpass(sampleRateHz, 25.0);
-      outputLow[ch].setLowShelf(sampleRateHz, 105.0, 0.0);
-      outputPresence[ch].setPeaking(sampleRateHz, 2800.0, 0.85, 0.0);
-      outputHigh[ch].setHighShelf(sampleRateHz, 8200.0, 0.0);
+      // R77H: the Bluetooth clean baseline uses the same near-transparent
+      // subsonic protection as Headphones. The old 25 Hz minimum-phase high-pass
+      // could reshape brickwalled/lossy waveforms and create fresh true peaks
+      // before Peak Guard even with every creative effect off.
+      outputHp[ch].setHighpass(sampleRateHz, 16.0);
+      outputLow[ch].setLowShelf(sampleRateHz, 90.0, 0.0);
+      outputPresence[ch].setPeaking(sampleRateHz, 3000.0, 0.9, 0.0);
+      outputHigh[ch].setHighShelf(sampleRateHz, 10000.0, 0.0);
     } else if (outputProfile == 1) {
       outputHp[ch].setHighpass(sampleRateHz, 16.0);
       outputLow[ch].setLowShelf(sampleRateHz, 90.0, 0.0);
@@ -1796,9 +1792,10 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
   if (limiterEnabled && detector > limiterDetectorCeilingGain && detector > 0.0000001f) {
     required = limiterDetectorCeilingGain / detector;
   }
+  limiterRequiredGain = required;
   if (required < limiterGain) limiterGain = required;
-  else limiterGain += (1.0f - limiterGain) * limiterReleaseCoeff;
-  if (!limiterEnabled) limiterGain += (1.0f - limiterGain) * 0.02f;
+  else if (profileTransitionSamplesRemaining <= 0) limiterGain += (1.0f - limiterGain) * limiterReleaseCoeff;
+  if (!limiterEnabled && profileTransitionSamplesRemaining <= 0) limiterGain += (1.0f - limiterGain) * 0.02f;
 
   outLeft = delayedL * limiterGain;
   outRight = delayedR * limiterGain;
@@ -1819,20 +1816,44 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
 }
 } // namespace
 
+namespace {
+void beginOutputProfileTransition() {
+  // Keep already-buffered audio protected while its few milliseconds drain, but
+  // clear detector/feedback memory from the profile we are leaving. This stops
+  // Peak Guard state from following Headphones into Bluetooth or vice versa.
+  profileTransitionSamplesRemaining = limiterLookahead > maxHdCompLookahead ? limiterLookahead : maxHdCompLookahead;
+  limiterRequiredGain = 1.0f;
+  finalCompRequiredGain = 1.0f;
+  finalCompEnvelope = 0.0f;
+  maxHdLimiterFeedbackDb = 0.0f;
+  meterGainReductionDb = 0.0f;
+  meterFinalCompressorReductionDb = 0.0f;
+  meterTruePeakLinear = 0.0f;
+  for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
+    truePeakHistoryL[tap] = 0.0f;
+    truePeakHistoryR[tap] = 0.0f;
+    truePeakOutputHistoryL[tap] = 0.0f;
+    truePeakOutputHistoryR[tap] = 0.0f;
+    maxHdCompTruePeakHistoryL[tap] = 0.0f;
+    maxHdCompTruePeakHistoryR[tap] = 0.0f;
+  }
+}
+} // namespace
+
 extern "C" {
 __attribute__((visibility("default"))) int mvp_init(float sr) {
   sampleRateHz = clampf(sr, 8000.0f, 192000.0f);
   limiterLookahead = static_cast<int>(sampleRateHz * 0.005f + 0.5f);
   if (limiterLookahead < 1) limiterLookahead = 1;
   if (limiterLookahead >= kMaxLookahead) limiterLookahead = kMaxLookahead - 1;
-  maxHdCompLookahead = static_cast<int>(sampleRateHz * 0.0025f + 0.5f);
+  maxHdCompLookahead = static_cast<int>(sampleRateHz * 0.0050f + 0.5f);
   if (maxHdCompLookahead < 1) maxHdCompLookahead = 1;
   if (maxHdCompLookahead >= kMaxLookahead) maxHdCompLookahead = kMaxLookahead - 1;
   limiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.095)));
-  finalCompDetectorAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0030)));
-  finalCompDetectorReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.090)));
-  finalCompGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.0045)));
-  finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.080)));
+  finalCompDetectorAttackCoeff = 1.0f;
+  finalCompDetectorReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 1.20)));
+  finalCompGainAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.00075)));
+  finalCompGainReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 1.35)));
   maxHdPeakReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.32)));
   maxHdGainRiseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.60)));
   maxHdGainFallCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.002)));
@@ -1941,7 +1962,9 @@ __attribute__((visibility("default"))) void mvp_set_limiter(int enabled, float c
   limiterDetectorCeilingGain = static_cast<float>(dbToGain(limiterCeilingDb - kTruePeakSafetyDb));
 }
 __attribute__((visibility("default"))) void mvp_set_output_profile(int profile) {
-  outputProfile = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
+  const int nextProfile = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
+  if (nextProfile != outputProfile) beginOutputProfileTransition();
+  outputProfile = nextProfile;
   configureOutputProfile();
 }
 __attribute__((visibility("default"))) void mvp_set_output_correction(int enabled, float amount) {
@@ -2074,6 +2097,14 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     float limitedR = 0.0f;
     processLimiter(left, right, limitedL, limitedR);
 
+    if (profileTransitionSamplesRemaining > 0) {
+      --profileTransitionSamplesRemaining;
+      if (profileTransitionSamplesRemaining == 0) {
+        finalCompGain = finalCompRequiredGain;
+        limiterGain = limiterRequiredGain;
+      }
+    }
+
     // V4.3 real-time hardening: Minimum/Linear topology changes are muted through
     // a very short fade-out / fade-in instead of jumping between paths with
     // different phase/latency behavior. Both paths stay warm, so the actual
@@ -2107,7 +2138,9 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
 
   meterInputRms = static_cast<float>(pow(inputEnergy / frames, 0.5));
   meterOutputRms = static_cast<float>(pow(outputEnergy / frames, 0.5));
-  meterGainReductionDb = limiterGain < 0.999999f ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f;
+  meterGainReductionDb = profileTransitionSamplesRemaining > 0
+    ? 0.0f
+    : (limiterGain < 0.999999f ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f);
   return 1;
 }
 

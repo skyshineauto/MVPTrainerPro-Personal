@@ -244,7 +244,9 @@ function currentStudioPersonality(): StudioPresetPersonality {
 const MUSIC_OUTPUT_TUNINGS: Record<Exclude<MusicOutputProfile, "reference">, OutputTuningDefinition> = {
   car_hifi: { highpassHz: 18, lowShelfHz: 80, lowShelfDb: 0.15, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0.15, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0.10, makeupDb: 0 },
   headphones: { highpassHz: 18, lowShelfHz: 90, lowShelfDb: 0, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0, makeupDb: 0 },
-  speaker: { highpassHz: 28, lowShelfHz: 90, lowShelfDb: 0, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3500, clarityDb: 0.20, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0.30, makeupDb: 0 },
+  // R77H fallback parity: Bluetooth baseline is technically neutral like Headphones.
+  // Clear/Neural Bass/Punch/Xpander own the audible enhancement when selected.
+  speaker: { highpassHz: 18, lowShelfHz: 90, lowShelfDb: 0, presenceHz: 320, presenceDb: 0, presenceQ: 0.82, clarityHz: 3000, clarityDb: 0, clarityQ: 0.9, highShelfHz: 12000, highShelfDb: 0, makeupDb: 0 },
 };
 
 export const MUSIC_HEADPHONE_MODES: Record<
@@ -1639,15 +1641,15 @@ function studioOutputProfileCode(): 0 | 1 | 2 {
 function cleanHdSafetyHeadroomDb() {
   if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return 0;
 
-  // R77E CLEAN SOURCE FIRST. Reserve transparent working headroom BEFORE the
-  // musical processors instead of flattening the finished song with a hidden
-  // limiter. The same amount becomes recoverable clean makeup after processing,
-  // so quiet material can regain level while hot material keeps the space it needs.
-  let required = 1.20; // true-peak / intersample margin for a flat, effects-off path
+  // R77I SHARED CLEAN-HD HEADROOM.
+  // Headphones and Bluetooth use the same source margin. Literal user EQ boosts
+  // reserve real headroom, while creative buttons rely on the measured post-effect
+  // controller so Clear/Bass/Punch/Xpander/Wide are not cancelled by 4-6 dB trims.
+  let required = 2.20;
 
   if (state.eqEnabled) {
     const maxEqBoost = Math.max(0, ...state.eqGains.map((value) => Number(value) || 0));
-    required += Math.min(7.2, maxEqBoost * 0.82);
+    required += Math.min(9.6, maxEqBoost * 0.80);
   }
 
   if (state.parametricEnabled) {
@@ -1657,42 +1659,25 @@ function cleanHdSafetyHeadroomDb() {
         .filter((band) => band.enabled)
         .map((band) => Number(band.gainDb) || 0),
     );
-    required += Math.min(3.2, maxParametricBoost * 0.55);
+    required += Math.min(5.2, maxParametricBoost * 0.68);
   }
 
-  if (state.bassEngineEnabled) {
-    const bassBoost = Math.max(0, state.bassSubDb, state.bassPunchDb, state.bassBodyDb);
-    required += Math.min(4.6, bassBoost * 1.02);
-  }
-
-  if (state.toneEngineEnabled) {
-    const toneBoost = Math.max(0, state.presenceDb, state.clarityDb, state.airDb);
-    required += Math.min(3.6, toneBoost * 0.76);
-  }
-
-  if (state.dynamicsRestoreEnabled) {
-    required += Math.min(4.0, Math.max(0, state.dynamicsRestoreAmount) / 100 * 4.0);
-  }
-
+  let creativeMargin = 0;
+  if (state.bassEngineEnabled) creativeMargin += 0.35;
+  if (state.toneEngineEnabled) creativeMargin += 0.30;
+  if (state.dynamicsRestoreEnabled) creativeMargin += 0.35;
   if (state.hdXpanderLevel > 0) {
-    const xpander = hdXpanderProfile(state.hdXpanderLevel);
-    const xpanderToneBoost = Math.max(0, xpander.presenceDb, xpander.clarityDb, xpander.airDb);
-    required += Math.min(5.2, xpanderToneBoost * 0.76 + xpander.transientAmount * 4.0 + xpander.exciterAmount * 1.2);
+    const level = Math.max(0, Math.min(3, Math.round(state.hdXpanderLevel)));
+    creativeMargin += [0, 0.25, 0.45, 0.65][level] ?? 0;
   }
-  if (state.exciterEnabled) required += Math.min(0.9, Math.max(0, state.exciterAmount) / 100 * 1.2);
-
-  if (state.stereoFieldEnabled && state.stereoUserWidth > 100) {
-    const widthRatio = Math.max(1, state.stereoUserWidth / 100);
-    required += Math.min(4.0, 20 * Math.log10(widthRatio));
-  }
-
+  if (state.exciterEnabled) creativeMargin += 0.15;
+  if (state.stereoFieldEnabled && state.stereoUserWidth > 100) creativeMargin += 0.20;
   if (state.outputProfile === "headphones" && state.headphoneMode !== "off") {
-    // Reserve for the strongest possible side-channel/HRTF summation. The clean
-    // output stage can recover unused room, so this does not become a fixed loss.
-    required += state.headphoneMode === "wide" ? 2.6 : state.headphoneMode === "spatial" ? 1.8 : state.headphoneMode === "deep" ? 2.3 : 2.9;
+    creativeMargin += state.headphoneMode === "wide" ? 0.20 : state.headphoneMode === "spatial" ? 0.30 : state.headphoneMode === "deep" ? 0.35 : 0.40;
   }
 
-  return Math.max(1.20, Math.min(18.0, required));
+  required += Math.min(1.60, creativeMargin);
+  return Math.max(2.20, Math.min(18.0, required));
 }
 
 function calculateStudioGain() {
@@ -1779,13 +1764,22 @@ function applyStudioProcessingSettings(now: number) {
   const presetTransientAmount = !cleanHdProfile && processed && state.eqEnabled
     ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale() * studioPersonality.transientScale))
     : 0;
-  // Xpander and Impact are independent layers and therefore add rather than
-  // silently masking each other with Math.max().
-  const effectiveTransientAmount = Math.max(0, Math.min(1, presetTransientAmount + userImpactAmount + xpander.transientAmount));
-  const effectivePresenceDb = Math.max(-6, Math.min(6, state.presenceDb + xpander.presenceDb));
-  const effectiveClarityDb = Math.max(-6, Math.min(6, state.clarityDb + xpander.clarityDb));
-  const effectiveAirDb = Math.max(-6, Math.min(6, state.airDb + xpander.airDb));
-  const effectiveExciterAmount = Math.max(state.exciterAmount / 100, xpander.exciterAmount);
+  // R77I EFFECT COMPATIBILITY MANAGER. Compatible effects may stay on together,
+  // but processors that target the same resource share one budget instead of
+  // blindly stacking into clipping. This policy is identical on both clean-HD paths.
+  const clearActive = cleanHdProfile && state.toneEngineEnabled;
+  const xpanderToneScale = clearActive && xpander.level >= 2 ? (xpander.level === 3 ? 0.78 : 0.88) : 1;
+  const xpanderTransientScale = userImpactAmount > 0.001 ? (xpander.level === 3 ? 0.58 : xpander.level === 2 ? 0.72 : 0.86) : 1;
+  const effectiveTransientAmount = Math.max(
+    0,
+    Math.min(0.96, presetTransientAmount + userImpactAmount + xpander.transientAmount * xpanderTransientScale),
+  );
+  const effectivePresenceDb = Math.max(-6, Math.min(5.4, state.presenceDb + xpander.presenceDb * xpanderToneScale));
+  const effectiveClarityDb = Math.max(-6, Math.min(5.8, state.clarityDb + xpander.clarityDb * xpanderToneScale));
+  const effectiveAirDb = Math.max(-6, Math.min(6.0, state.airDb + xpander.airDb * xpanderToneScale));
+  // Analog and Xpander both add harmonics, so the stronger request wins instead
+  // of summing into a second hidden gain stage.
+  const effectiveExciterAmount = Math.min(0.14, Math.max(state.exciterAmount / 100, xpander.exciterAmount));
   setMvpStudioState(studioProcessorNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
@@ -1839,11 +1833,10 @@ function applyStudioProcessingSettings(now: number) {
     headphoneCrossfeed: headphoneEnabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0,
     headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
     headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
-    // R77F: never automatically recover the baseline safety headroom. That margin
-    // is what keeps a hot mastered source out of Peak Guard with Max/High Output OFF.
-    // Max/High Output requests only EXTRA clean gain and the WASM controller may
-    // refuse any of it when the finished true peak has no safe room.
-    outputReserveDb: processed ? state.outputReserveDb : 0,
+    // R77I: the WASM sees the actual post-effect true peak before deciding what
+    // gain is safe. Recover transparent source/EQ headroom first, then High/Max
+    // Output on top. Unsafe gain is refused instead of being sent into Peak Guard.
+    outputReserveDb: processed ? Math.min(18, state.outputReserveDb + autoHeadroomDb) : 0,
     autoMakeupEnabled: processed && state.autoMakeupEnabled,
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),

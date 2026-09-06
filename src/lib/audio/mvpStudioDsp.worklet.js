@@ -109,7 +109,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v5.9-r77g-speaker-guard-level-continuity",
+        version: "studio-wasm-v6.1-r77i-shared-clean-headroom",
       });
     } catch (error) {
       this.failed = true;

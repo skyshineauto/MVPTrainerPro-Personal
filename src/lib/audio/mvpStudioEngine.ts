@@ -109,7 +109,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.9.0-r77g-speaker-guard-level-continuity";
+const MVP_STUDIO_ASSET_VERSION = "6.1.0-r77i-shared-clean-headroom";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
