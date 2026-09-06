@@ -12,8 +12,12 @@ export type MusicMetadataCandidate = {
   releaseYear: number | null;
   genre: string | null;
   artworkUrl: string | null;
+  artworkFallbackUrl?: string | null;
   durationSeconds: number | null;
   confidence: number;
+  recordingConfidence?: number;
+  releaseConfidence?: number;
+  releaseContext?: string | null;
   source: "itunes" | "musicbrainz";
   releaseQuality?: number;
 };
@@ -28,6 +32,9 @@ export type MusicEnrichmentResult = {
 
 type ItunesResult = {
   trackId?: number;
+  collectionId?: number;
+  wrapperType?: string;
+  collectionType?: string;
   trackName?: string;
   artistName?: string;
   collectionName?: string;
@@ -97,6 +104,10 @@ type LookupSignals = {
 };
 
 const LOOKUP_CACHE = new Map<
+  string,
+  Omit<MusicMetadataCandidate, "confidence">[]
+>();
+const ARTWORK_LOOKUP_CACHE = new Map<
   string,
   Omit<MusicMetadataCandidate, "confidence">[]
 >();
@@ -448,7 +459,57 @@ function artwork1200(url?: string) {
     .replace(/\/\d+x\d+bb-/, "/1200x1200bb-");
 }
 
-function releaseQualityFromAlbum(album: string | null | undefined) {
+type ReleaseVersionFlag =
+  | "unplugged"
+  | "acoustic"
+  | "live"
+  | "remix"
+  | "demo"
+  | "remaster"
+  | "deluxe"
+  | "anniversary"
+  | "expanded"
+  | "single";
+
+function releaseVersionFlags(value: string | null | undefined) {
+  const text = (value || "").toLowerCase();
+  const flags = new Set<ReleaseVersionFlag>();
+  if (/\bunplugged\b/.test(text)) flags.add("unplugged");
+  if (/\bacoustic\b/.test(text)) flags.add("acoustic");
+  if (/\b(live|concert)\b/.test(text)) flags.add("live");
+  if (/\b(remix|remixed|mix)\b/.test(text)) flags.add("remix");
+  if (/\bdemo\b/.test(text)) flags.add("demo");
+  if (/\bremaster(?:ed)?\b/.test(text)) flags.add("remaster");
+  if (/\bdeluxe\b/.test(text)) flags.add("deluxe");
+  if (/\banniversary\b/.test(text)) flags.add("anniversary");
+  if (/\bexpanded(?: edition)?\b/.test(text)) flags.add("expanded");
+  if (/\bsingle\b/.test(text)) flags.add("single");
+  return flags;
+}
+
+function releaseContextText(track: MusicTrack) {
+  return [track.album || "", track.title || "", track.original_name || ""].join(" • ");
+}
+
+function releaseContextLabel(track: MusicTrack) {
+  const flags = releaseVersionFlags(releaseContextText(track));
+  if (flags.has("unplugged")) return "UNPLUGGED";
+  if (flags.has("acoustic")) return "ACOUSTIC";
+  if (flags.has("live")) return "LIVE";
+  if (flags.has("remix")) return "REMIX";
+  if (flags.has("demo")) return "DEMO";
+  if (flags.has("remaster")) return "REMASTER";
+  if (flags.has("deluxe")) return "DELUXE";
+  if (flags.has("anniversary")) return "ANNIVERSARY";
+  if (flags.has("expanded")) return "EXPANDED";
+  if (flags.has("single")) return "SINGLE";
+  return null;
+}
+
+function releaseQualityFromAlbum(
+  album: string | null | undefined,
+  expectedFlags?: Set<ReleaseVersionFlag>
+) {
   const value = (album || "")
     .toLowerCase()
     .normalize("NFKD")
@@ -458,19 +519,89 @@ function releaseQualityFromAlbum(album: string | null | undefined) {
     .trim();
   if (!value) return 0.2;
 
-  if (/\b(karaoke|tribute|cover versions?|sound alike)\b/.test(value)) return 0.05;
-  if (/\b(various artists|compilation)\b/.test(value)) return 0.18;
-  if (/\b(greatest hits|best of|the best|essential|anthology|collection|ultimate hits|hits collection)\b/.test(value)) return 0.34;
-  if (/\b(remix|remixes|club mix)\b/.test(value)) return 0.42;
-  if (/\b(live|concert)\b/.test(value)) return 0.5;
-  if (/\b(soundtrack|motion picture|original score)\b/.test(value)) return 0.62;
-  if (/\b(single)\b/.test(value)) return 0.84;
-  if (/\b(deluxe|remaster|anniversary|expanded edition)\b/.test(value)) return 0.9;
+  const candidateFlags = releaseVersionFlags(value);
+  const versionExpected = Boolean(expectedFlags?.size);
+  const versionMatches = versionExpected
+    ? [...expectedFlags!].some((flag) => candidateFlags.has(flag))
+    : false;
+
+  if (/\b(karaoke|tribute|cover versions?|sound alike)\b/.test(value)) return 0.03;
+  if (/\b(various artists|compilation)\b/.test(value)) return 0.16;
+  if (/\b(greatest hits|best of|the best|essential|anthology|collection|ultimate hits|hits collection)\b/.test(value)) return 0.32;
+
+  // Version words are identity clues, not automatic quality penalties. A real
+  // Unplugged/Live/Remix release must rank HIGH when that is the version the
+  // uploaded song actually is.
+  if (versionMatches) return 0.98;
+  if (candidateFlags.has("remix")) return versionExpected ? 0.34 : 0.48;
+  if (candidateFlags.has("live") || candidateFlags.has("unplugged") || candidateFlags.has("acoustic")) {
+    return versionExpected ? 0.42 : 0.56;
+  }
+  if (/\b(soundtrack|motion picture|original score)\b/.test(value)) return 0.6;
+  if (candidateFlags.has("single")) return 0.84;
+  if (candidateFlags.has("deluxe") || candidateFlags.has("remaster") || candidateFlags.has("anniversary") || candidateFlags.has("expanded")) return 0.9;
   return 1;
 }
 
-function candidateReleaseQuality(candidate: Pick<MusicMetadataCandidate, "album" | "releaseQuality">) {
+function candidateReleaseQuality(
+  candidate: Pick<MusicMetadataCandidate, "album" | "releaseQuality">,
+  expectedFlags?: Set<ReleaseVersionFlag>
+) {
+  // A context-aware pass must recompute quality so legitimate Unplugged/Live/
+  // Remix releases are not penalized merely because the cached generic score
+  // was created before we knew which version the user actually owns.
+  if (expectedFlags?.size) return releaseQualityFromAlbum(candidate.album, expectedFlags);
   return candidate.releaseQuality ?? releaseQualityFromAlbum(candidate.album);
+}
+
+function looksLikeBootlegRelease(album: string | null | undefined) {
+  const value = (album || "").toLowerCase();
+  return (
+    /^\s*(19|20)\d{2}[-./]\d{1,2}[-./]\d{1,2}/.test(value) ||
+    /\b(bootleg|audience recording|fm broadcast|soundboard|rlr)\b/.test(value)
+  );
+}
+
+function releaseMatchScore(
+  track: MusicTrack,
+  candidate: Pick<MusicMetadataCandidate, "artist" | "album" | "releaseYear" | "artworkUrl" | "source" | "releaseQuality">
+) {
+  const expectedFlags = releaseVersionFlags(releaseContextText(track));
+  const candidateFlags = releaseVersionFlags(candidate.album);
+  const artist = track.artist ? artistTextScore(track.artist, candidate.artist) : 0.75;
+  const trackAlbumTrusted = Boolean(track.album?.trim()) && !looksLikeBootlegRelease(track.album);
+  const album = track.album ? textScore(track.album, candidate.album) : 0.62;
+  const hasVersionContext = expectedFlags.size > 0;
+  const versionMatches = hasVersionContext
+    ? [...expectedFlags].filter((flag) => candidateFlags.has(flag)).length
+    : 0;
+  const versionMismatch = hasVersionContext && versionMatches === 0;
+  const yearDistance = track.release_year && candidate.releaseYear
+    ? Math.abs(track.release_year - candidate.releaseYear)
+    : null;
+  const year = yearDistance == null ? 0.7 : yearDistance <= 1 ? 1 : yearDistance <= 3 ? 0.82 : yearDistance <= 8 ? 0.55 : 0.35;
+  const sourceOfficialBias = candidate.source === "itunes" ? 1 : 0.82;
+  const quality = releaseQualityFromAlbum(candidate.album, expectedFlags);
+  const artwork = candidate.artworkUrl ? 1 : 0;
+
+  let score =
+    artist * 0.18 +
+    album * (trackAlbumTrusted ? 0.27 : track.album ? 0.08 : 0.12) +
+    year * 0.08 +
+    quality * 0.16 +
+    sourceOfficialBias * 0.12 +
+    artwork * 0.09;
+
+  if (hasVersionContext) {
+    score += versionMatches ? Math.min(0.28, 0.2 + versionMatches * 0.04) : -0.24;
+  } else {
+    score += 0.1;
+  }
+
+  if (versionMismatch && looksLikeBootlegRelease(candidate.album)) score -= 0.12;
+  if (looksLikeBootlegRelease(candidate.album) && candidate.source !== "itunes") score -= 0.08;
+
+  return Math.max(0, Math.min(1, score));
 }
 
 function yearFromDate(value?: string) {
@@ -661,6 +792,7 @@ async function searchItunes(
           releaseYear: yearFromDate(item.releaseDate),
           genre: item.primaryGenreName || null,
           artworkUrl: artwork1200(item.artworkUrl100),
+          artworkFallbackUrl: item.artworkUrl100 || null,
           durationSeconds: item.trackTimeMillis
             ? Math.round(item.trackTimeMillis / 1000)
             : null,
@@ -698,6 +830,71 @@ async function searchItunes(
       ? `Music lookup service could not complete the request (${lastStatus}).`
       : "Music lookup service could not complete the request."
   );
+}
+
+async function searchItunesAlbums(
+  track: MusicTrack,
+  term: string,
+  limit = 30,
+  options?: LookupOptions
+): Promise<Omit<MusicMetadataCandidate, "confidence">[]> {
+  const cleanTerm = term.replace(/\s+/g, " ").trim();
+  if (!cleanTerm) return [];
+  const cacheKey = `album:${normalize(cleanTerm)}:${normalize(track.title)}:${limit}`;
+  const cached = ARTWORK_LOOKUP_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const params = new URLSearchParams({
+    entity: "album",
+    limit: String(limit),
+    term: cleanTerm,
+  });
+
+  for (let attempt = 0; attempt <= LOOKUP_RETRY_DELAYS_MS.length; attempt += 1) {
+    await enterLookupGate();
+    try {
+      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+        mode: "cors",
+        cache: "no-store",
+      });
+      if (response.ok) {
+        const payload = (await response.json()) as ItunesResponse;
+        const rows = (payload.results || [])
+          .filter((item) => item.collectionName && item.artistName && item.artworkUrl100)
+          .map((item) => ({
+            sourceId: `itunes-album:${item.collectionId || `${item.artistName}-${item.collectionName}`}`,
+            title: track.title,
+            artist: item.artistName || track.artist || "",
+            album: item.collectionName || "",
+            releaseYear: yearFromDate(item.releaseDate),
+            genre: item.primaryGenreName || null,
+            artworkUrl: artwork1200(item.artworkUrl100),
+            artworkFallbackUrl: item.artworkUrl100 || null,
+            durationSeconds: track.duration_seconds,
+            source: "itunes" as const,
+            releaseQuality: releaseQualityFromAlbum(
+              item.collectionName || "",
+              releaseVersionFlags(releaseContextText(track))
+            ),
+          }));
+        ARTWORK_LOOKUP_CACHE.set(cacheKey, rows);
+        return rows;
+      }
+
+      const retryable = response.status === 403 || response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt >= LOOKUP_RETRY_DELAYS_MS.length) return [];
+      const delayMs = LOOKUP_RETRY_DELAYS_MS[attempt];
+      options?.onRetry?.({ status: response.status, attempt: attempt + 1, delayMs });
+      await wait(delayMs);
+    } catch {
+      if (attempt >= LOOKUP_RETRY_DELAYS_MS.length) return [];
+      const delayMs = LOOKUP_RETRY_DELAYS_MS[attempt];
+      options?.onRetry?.({ status: 0, attempt: attempt + 1, delayMs });
+      await wait(delayMs);
+    }
+  }
+
+  return [];
 }
 
 function musicBrainzArtist(credit?: MusicBrainzArtistCredit[]) {
@@ -784,6 +981,9 @@ async function searchMusicBrainz(
             artworkUrl: releaseId
               ? `https://coverartarchive.org/release/${releaseId}/front-1200`
               : null,
+            artworkFallbackUrl: releaseId
+              ? `https://coverartarchive.org/release/${releaseId}/front-500`
+              : null,
             durationSeconds: recording.length
               ? Math.round(recording.length / 1000)
               : null,
@@ -852,6 +1052,15 @@ export async function findMusicMetadataCandidates(
   addSearch(primaryTitle, "songTerm", 50);
   addSearch(primaryTitle, null, 50);
 
+  const releaseLabel = releaseContextLabel(track);
+  if (bestArtist && releaseLabel) {
+    addSearch(`${bestArtist} ${primaryTitle} ${releaseLabel}`, null, 40);
+    addSearch(`${bestArtist} ${releaseLabel} ${primaryTitle}`, null, 40);
+  }
+  if (bestArtist && track.album?.trim()) {
+    addSearch(`${bestArtist} ${track.album.trim()} ${primaryTitle}`, null, 40);
+  }
+
   for (const title of secondaryTitles) {
     if (bestArtist) addSearch(`${bestArtist} ${title}`, null, 30);
     addSearch(title, "songTerm", 30);
@@ -876,9 +1085,14 @@ export async function findMusicMetadataCandidates(
 
   const addRows = (rows: Omit<MusicMetadataCandidate, "confidence">[]) => {
     for (const row of rows) {
+      const recordingConfidence = scoreCandidate(track, signals, row);
+      const releaseConfidence = releaseMatchScore(track, row);
       const scored: MusicMetadataCandidate = {
         ...row,
-        confidence: scoreCandidate(track, signals, row),
+        confidence: recordingConfidence,
+        recordingConfidence,
+        releaseConfidence,
+        releaseContext: releaseContextLabel(track),
       };
 
       const key = canonicalKey(row);
@@ -900,8 +1114,18 @@ export async function findMusicMetadataCandidates(
         releaseYear: winner.releaseYear ?? fallback.releaseYear,
         genre: winner.genre || fallback.genre,
         artworkUrl: winner.artworkUrl || fallback.artworkUrl,
+        artworkFallbackUrl: winner.artworkFallbackUrl || fallback.artworkFallbackUrl || null,
         durationSeconds:
           winner.durationSeconds ?? fallback.durationSeconds,
+        recordingConfidence: Math.max(
+          winner.recordingConfidence ?? winner.confidence,
+          fallback.recordingConfidence ?? fallback.confidence
+        ),
+        releaseConfidence: Math.max(
+          winner.releaseConfidence ?? 0,
+          fallback.releaseConfidence ?? 0
+        ),
+        releaseContext: winner.releaseContext || fallback.releaseContext || null,
         releaseQuality: Math.max(
           candidateReleaseQuality(winner),
           candidateReleaseQuality(fallback)
@@ -910,13 +1134,15 @@ export async function findMusicMetadataCandidates(
     }
   };
 
+  const hasReleaseContext = Boolean(track.album?.trim()) || releaseVersionFlags(releaseContextText(track)).size > 0;
   const hasAuthoritativeMatch = () =>
     [...combined.values()].some((candidate) => {
       const titleExact = exactAgainst(signals.titleVariants, candidate.title);
       const artistOkay = signals.artistVariants.length
         ? bestArtistScore(signals.artistVariants, candidate.artist) >= 0.94
         : true;
-      return titleExact && artistOkay && candidate.confidence >= 0.985;
+      const releaseOkay = !hasReleaseContext || (candidate.releaseConfidence ?? 0) >= 0.86;
+      return titleExact && artistOkay && releaseOkay && candidate.confidence >= 0.985;
     });
 
   // First four are the fast/precise pass.
@@ -1058,12 +1284,19 @@ export async function findMusicMetadataCandidates(
       if (leftPerfect !== rightPerfect) return leftPerfect ? -1 : 1;
       if (leftTitleExact !== rightTitleExact) return leftTitleExact ? -1 : 1;
 
-      // Once BOTH candidates agree on exact recording identity, prefer an
-      // original-looking studio album over compilations, tribute/karaoke
-      // releases, live albums and random soundtrack appearances. Album/artwork
-      // preference is never allowed to rescue a weaker song identity.
+      // Once recording identity is settled, release/version identity decides
+      // which album wins. This is what keeps an Unplugged/Live/Remix upload on
+      // the correct official release instead of a random performance with the
+      // same artist/title.
+      const releaseContextDifference =
+        (right.releaseConfidence ?? 0) - (left.releaseConfidence ?? 0);
+      if (leftPerfect && rightPerfect && Math.abs(releaseContextDifference) > 0.035) {
+        return releaseContextDifference;
+      }
+
+      const expectedFlags = releaseVersionFlags(releaseContextText(track));
       const releaseDifference =
-        candidateReleaseQuality(right) - candidateReleaseQuality(left);
+        candidateReleaseQuality(right, expectedFlags) - candidateReleaseQuality(left, expectedFlags);
       if (leftPerfect && rightPerfect && Math.abs(releaseDifference) > 0.08) {
         return releaseDifference;
       }
@@ -1081,7 +1314,7 @@ export async function findMusicMetadataCandidates(
       );
       if (leftDifference !== rightDifference) return leftDifference - rightDifference;
 
-      return candidateReleaseQuality(right) - candidateReleaseQuality(left);
+      return candidateReleaseQuality(right, expectedFlags) - candidateReleaseQuality(left, expectedFlags);
     });
 
   const accepted = sortCandidates(filtered).slice(0, 12);
@@ -1113,6 +1346,100 @@ export async function findMusicMetadataCandidates(
   return returned;
 }
 
+export async function findMusicArtworkCandidates(
+  track: MusicTrack,
+  options?: LookupOptions
+): Promise<MusicMetadataCandidate[]> {
+  const signals = buildLookupSignals(track);
+  const bestArtist = signals.knownArtist || signals.artistVariants[0] || track.artist || null;
+  const releaseLabel = releaseContextLabel(track);
+  const combined = new Map<string, MusicMetadataCandidate>();
+
+  const add = (rows: Array<Omit<MusicMetadataCandidate, "confidence"> | MusicMetadataCandidate>, recordingWeight = false) => {
+    for (const row of rows) {
+      if (!row.artworkUrl) continue;
+      const artistConfidence = bestArtist ? artistTextScore(bestArtist, row.artist) : 0.75;
+      if (bestArtist && artistConfidence < 0.7) continue;
+      const recordingConfidence = "confidence" in row
+        ? row.confidence
+        : recordingWeight
+          ? scoreCandidate(track, signals, row)
+          : 0.8;
+      const releaseConfidence = releaseMatchScore(track, row);
+      // Artwork confidence is deliberately release-first. Recording confidence
+      // only corroborates the release; it does not let a random venue recording
+      // become a 99% artwork match merely because title + artist are exact.
+      const artworkConfidence = Math.max(
+        0,
+        Math.min(1, releaseConfidence * 0.78 + recordingConfidence * 0.17 + (row.artworkUrl ? 0.05 : 0))
+      );
+      const candidate: MusicMetadataCandidate = {
+        ...row,
+        confidence: artworkConfidence,
+        recordingConfidence,
+        releaseConfidence,
+        releaseContext: releaseLabel,
+      };
+      const key = `${compactArtistIdentity(candidate.artist)}|${normalize(candidate.album)}|${candidate.releaseYear || 0}`;
+      const previous = combined.get(key);
+      if (!previous || candidate.confidence > previous.confidence) combined.set(key, candidate);
+    }
+  };
+
+  // 1) Recording candidates contribute exact song identity and duration.
+  const recordingCandidates = await findMusicMetadataCandidates(track, {
+    ...options,
+    includeLowConfidence: true,
+    onDiagnostics: undefined,
+  });
+  add(recordingCandidates, true);
+
+  // 2) Album/release-first Apple searches are the authoritative artwork pass.
+  // Current album is searched first; version identity (Unplugged/Live/Remix…)
+  // is searched explicitly even when the existing album tag is messy.
+  const albumTerms = uniqueUseful([
+    bestArtist && track.album ? `${bestArtist} ${track.album}` : null,
+    bestArtist && releaseLabel ? `${bestArtist} ${releaseLabel}` : null,
+    bestArtist && releaseLabel ? `${bestArtist} ${signals.primaryTitle} ${releaseLabel}` : null,
+    bestArtist ? `${bestArtist} ${signals.primaryTitle}` : null,
+  ]).slice(0, 4);
+
+  for (const term of albumTerms) {
+    try {
+      add(await searchItunesAlbums(track, term, 35, options), false);
+      if ([...combined.values()].some((candidate) =>
+        candidate.source === "itunes" &&
+        (candidate.releaseConfidence ?? 0) >= 0.86
+      )) break;
+    } catch {
+      // Song-recording candidates remain available if the album endpoint is busy.
+    }
+  }
+
+  const rows = [...combined.values()]
+    .sort((left, right) => {
+      const releaseDifference = (right.releaseConfidence ?? 0) - (left.releaseConfidence ?? 0);
+      if (Math.abs(releaseDifference) > 0.02) return releaseDifference;
+      if (right.confidence !== left.confidence) return right.confidence - left.confidence;
+      if (left.source !== right.source) return left.source === "itunes" ? -1 : 1;
+      return (right.releaseYear || 0) - (left.releaseYear || 0);
+    })
+    .slice(0, 12);
+
+  options?.onDiagnostics?.({
+    rawCandidates: combined.size,
+    acceptedCandidates: rows.filter((row) => row.confidence >= 0.72).length,
+    returnedCandidates: rows.length,
+    reason: rows.some((row) => row.confidence >= 0.72)
+      ? "matches"
+      : rows.length
+        ? "low_confidence"
+        : "no_catalog_results",
+  });
+
+  return rows;
+}
+
 export function musicMatchTier(confidence: number) {
   if (confidence >= 0.95) return "EXACT MATCH";
   if (confidence >= 0.87) return "STRONG MATCH";
@@ -1130,6 +1457,20 @@ export function needsMusicMetadata(track: MusicTrack) {
 
 export function needsMusicArtwork(track: MusicTrack) {
   return !track.artwork_path && !track.external_artwork_url;
+}
+
+export async function applyMusicArtworkCandidate(
+  track: MusicTrack,
+  candidate: MusicMetadataCandidate
+) {
+  if (!candidate.artworkUrl) return track;
+  try {
+    return await uploadRemoteMusicArtwork(track, candidate.artworkUrl);
+  } catch (primaryError) {
+    const fallback = candidate.artworkFallbackUrl;
+    if (!fallback || fallback === candidate.artworkUrl) throw primaryError;
+    return await uploadRemoteMusicArtwork(track, fallback);
+  }
 }
 
 export async function applyMusicMetadataCandidate(
@@ -1151,10 +1492,7 @@ export async function applyMusicMetadataCandidate(
   });
 
   if (candidate.artworkUrl && needsMusicArtwork(updated)) {
-    updated = await uploadRemoteMusicArtwork(
-      updated,
-      candidate.artworkUrl
-    );
+    updated = await applyMusicArtworkCandidate(updated, candidate);
   }
 
   return updated;
@@ -1180,11 +1518,11 @@ export async function enrichMusicTrack(
     };
   }
 
-  const candidates = await findMusicMetadataCandidates(track, {
-    onRetry: options?.onLookupRetry,
-  });
+  const candidates = options?.artworkOnly
+    ? await findMusicArtworkCandidates(track, { onRetry: options?.onLookupRetry })
+    : await findMusicMetadataCandidates(track, { onRetry: options?.onLookupRetry });
   const candidate = candidates[0] || null;
-  const threshold = options?.autoApplyThreshold ?? 0.985;
+  const threshold = options?.autoApplyThreshold ?? (options?.artworkOnly ? 0.89 : 0.985);
 
   if (!candidate) {
     return {
@@ -1202,10 +1540,7 @@ export async function enrichMusicTrack(
       candidate.artworkUrl &&
       candidate.confidence >= threshold
     ) {
-      const updated = await uploadRemoteMusicArtwork(
-        track,
-        candidate.artworkUrl
-      );
+      const updated = await applyMusicArtworkCandidate(track, candidate);
 
       return {
         track: updated,
@@ -1231,7 +1566,10 @@ export async function enrichMusicTrack(
     };
   }
 
-  if (candidate.confidence >= threshold) {
+  const hasReleaseContext = Boolean(track.album?.trim()) || releaseVersionFlags(releaseContextText(track)).size > 0;
+  const releaseSafe = !hasReleaseContext || (candidate.releaseConfidence ?? 0.7) >= 0.68;
+
+  if (candidate.confidence >= threshold && releaseSafe) {
     const updated = await applyMusicMetadataCandidate(
       track,
       candidate,

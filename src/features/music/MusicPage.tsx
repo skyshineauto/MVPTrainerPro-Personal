@@ -17,14 +17,15 @@ import {
   updateMusicTrack,
   uploadMusicArtwork,
   uploadMusicTrack,
-  uploadRemoteMusicArtwork,
   type MusicEnergyLevel,
   type MusicTrack,
 } from "../../lib/musicStorage";
 import {
+  applyMusicArtworkCandidate,
   applyMusicMetadataCandidate,
   delayMusicLookup,
   enrichMusicTrack,
+  findMusicArtworkCandidates,
   findMusicMetadataCandidates,
   musicMatchTier,
   needsMusicArtwork,
@@ -704,6 +705,35 @@ function R56TrashGlyph() {
 }
 
 
+function artworkReleaseTier(confidence: number) {
+  if (confidence >= 0.95) return "EXACT RELEASE";
+  if (confidence >= 0.86) return "STRONG RELEASE";
+  if (confidence >= 0.72) return "POSSIBLE RELEASE";
+  return "WEAK RELEASE";
+}
+
+function CandidateArtworkThumb({ candidate }: { candidate: MusicMetadataCandidate }) {
+  const [src, setSrc] = useState<string | null>(candidate.artworkUrl);
+
+  useEffect(() => {
+    setSrc(candidate.artworkUrl);
+  }, [candidate.sourceId, candidate.artworkUrl]);
+
+  if (!src) return <span className="tr10-candidateArt">♫</span>;
+
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => {
+        const fallback = candidate.artworkFallbackUrl || null;
+        if (fallback && fallback !== src) setSrc(fallback);
+        else setSrc(null);
+      }}
+    />
+  );
+}
+
 /* MVP_TRAINER_R41_OCCURRENCE_SKIP_AND_MOBILE_SONG_ROOT_FIX */
 export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -1214,10 +1244,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         }) : current);
 
         try {
-          if (needsMusicMetadata(uploaded) || needsMusicArtwork(uploaded)) {
-            const result = await enrichMusicTrack(uploaded, { autoApplyThreshold: 0.98 });
-            uploaded = result.track;
-          }
+          // Every new upload runs through the same release/version-aware matcher
+          // used by Find Song Info and Find Artwork. Embedded artwork remains
+          // protected, but metadata can be normalized to the correct official
+          // Studio / Unplugged / Live / Remix / Deluxe release when confidence
+          // is high enough. Uncertain release identity goes to Review instead.
+          const result = await enrichMusicTrack(uploaded, { autoApplyThreshold: 0.98 });
+          uploaded = result.track;
 
           setUploadProgress((current) => current ? ({
             ...current,
@@ -1291,6 +1324,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         metadata_source: "audition",
         metadata_updated_at: new Date().toISOString(),
       });
+      // Audition imports use the same release/version-aware identification as
+      // normal uploads. Existing audition artwork remains protected.
+      try {
+        const releaseResult = await enrichMusicTrack(uploaded, { autoApplyThreshold: 0.98 });
+        uploaded = releaseResult.track;
+      } catch (releaseError) {
+        console.warn("Audition release matching will retry from Enrich Library:", releaseError);
+      }
       markMusicAuditionSongInLibrary(auditionSong.id, uploaded.id);
       try {
         setMessage(`Analyzing ${auditionSong.title} intelligence…`);
@@ -1566,7 +1607,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       let updated = await updateMusicTrack(track.id, { title: draft.title, artist: draft.artist, album: draft.album, release_year: draft.releaseYear ? Number(draft.releaseYear) : null, genre: draft.genre, metadata_status: "manual", metadata_confidence: 1, metadata_source: detailPendingCandidate?.source || "manual", metadata_updated_at: new Date().toISOString() });
       // Song Info is a complete identification workflow: metadata and the matched album artwork travel together.
       // A confident provider match is authoritative for this edit, so its artwork may replace stale/incorrect art.
-      if (detailPendingCandidate?.artworkUrl) updated = await uploadRemoteMusicArtwork(updated, detailPendingCandidate.artworkUrl);
+      if (detailPendingCandidate?.artworkUrl) updated = await applyMusicArtworkCandidate(updated, detailPendingCandidate);
       replaceTrackLocally(updated); setDetailPendingCandidate(null); setDetailSaveState("changed"); setDetailStatusText("SAVED ✓ • SONG INFO + ARTWORK UPDATED");
       showTemporaryMessage("Song info saved ✓");
       await markMusicTrackIntelligenceStale(updated.id).catch(() => undefined);
@@ -1632,16 +1673,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     setDetailSelectedCandidateId(null);
 
     try {
-      const candidates = await findMusicMetadataCandidates(lookupTrack, {
+      const lookupOptions = {
         includeLowConfidence: true,
-        onDiagnostics: (info) => { diagnostics = info; },
-        onRetry: ({ status, delayMs }) => {
+        onDiagnostics: (info: MusicLookupDiagnostics) => { diagnostics = info; },
+        onRetry: ({ status, delayMs }: { status: number; delayMs: number }) => {
           if (!isCurrent()) return;
           setDetailStatusText(
             `Lookup service busy${status ? ` (${status})` : ""} • retrying automatically in ${Math.max(1, Math.ceil(delayMs / 1000))}s…`
           );
         },
-      });
+      };
+
+      const candidates = mode === "artwork_results"
+        ? await findMusicArtworkCandidates(lookupTrack, lookupOptions)
+        : await findMusicMetadataCandidates(lookupTrack, lookupOptions);
+
 
       if (!isCurrent()) return;
 
@@ -1681,7 +1727,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           );
         } else {
           setDetailStatusText(
-            `${candidates.length} match${candidates.length === 1 ? "" : "es"} found • Best ${Math.round(candidates[0].confidence * 100)}%`
+            mode === "artwork_results"
+            ? `${candidates.length} release cover${candidates.length === 1 ? "" : "s"} found • Best release ${Math.round((candidates[0].releaseConfidence ?? candidates[0].confidence) * 100)}%`
+            : `${candidates.length} match${candidates.length === 1 ? "" : "es"} found • Best ${Math.round(candidates[0].confidence * 100)}%`
           );
         }
       } else if (diagnostics.reason === "low_confidence") {
@@ -3036,7 +3084,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <footer className="tr44-songFooter"><button onClick={() => openPlaylistModal([detailTrack.id])}><PlaylistPremiumIcon /> PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => void deleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : "SAVE CHANGES"}</button></footer>
         </> : <>
           <div className="tr10-detailLookup"><div className="tr10-detailLookupHead"><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>← BACK TO SONG</button><div><span>{detailMode === "artwork_results" ? "ARTWORK RESULTS" : "SONG MATCH RESULTS"}</span><h3>{detailMode === "artwork_results" ? "Choose the correct cover" : "Choose the correct recording"}</h3><p>{detailStatusText}</p></div></div>
-          <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const tier = musicMatchTier(candidate.confidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No matching catalog results to show.</div> : null}</div></div>
+          <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const displayConfidence = detailMode === "artwork_results" ? (candidate.releaseConfidence ?? candidate.confidence) : candidate.confidence; const tier = detailMode === "artwork_results" ? artworkReleaseTier(displayConfidence) : musicMatchTier(displayConfidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}><CandidateArtworkThumb candidate={candidate} /><div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(displayConfidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No matching catalog results to show.</div> : null}</div></div>
           <div className="tr10-detailLookupFooter"><div><strong>{detailSelectedCandidate ? `${detailSelectedCandidate.title} • ${detailSelectedCandidate.artist}` : "Select a result"}</strong><small>Nothing changes until you apply the selection.</small></div><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>CANCEL</button><button className="is-primary" disabled={!detailSelectedCandidate || detailSaveState === "saving"} onClick={() => { if (!detailSelectedCandidate) return; if (detailMode === "artwork_results") void applyDetailArtworkCandidate(detailSelectedCandidate); else applyDetailInfoCandidate(detailSelectedCandidate); }}>{detailMode === "artwork_results" ? "USE ARTWORK" : "APPLY MATCH"}</button></div>
         </>}
       </motion.section></div>, document.body) : null}
@@ -3045,7 +3093,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <header className="tr10-reviewHeader"><div><span>LIBRARY MATCH REVIEW</span><h2>{reviewTrack.title}</h2><p>{artistLabel(reviewTrack)} • {reviewTrack.original_name}</p></div><button onClick={() => setReviewTrackId(null)}>×</button></header>
         <div className="tr10-reviewProgress"><div><strong>REVIEWING {Math.max(1,reviewIndex+1)} OF {reviewItems.length}</strong><span>{reviewSavedIds.size} saved • {reviewSkippedIds.size} skipped • {reviewRemainingCount} remaining</span></div><i style={{ transform: `scaleX(${reviewItems.length ? Math.max(0,reviewIndex+1)/reviewItems.length : 0})` }} /></div>
         <div className="tr10-reviewInstruction"><span>SELECT THE CORRECT RECORDING</span><p>Exact title and artist matches rank first. Existing artwork is protected. Nothing changes until you press Save.</p></div>
-        <div className="tr10-candidates">{reviewCandidates.map((candidate) => { const selected = reviewSelectedCandidateId === candidate.sourceId; const tier=musicMatchTier(candidate.confidence); return <button type="button" className={selected ? "is-selected" : ""} key={candidate.sourceId} onClick={() => setReviewSelectedCandidateId(candidate.sourceId)}>{candidate.artworkUrl ? <img src={candidate.artworkUrl} alt="" /> : <span className="tr10-candidateArt">♫</span>}<div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}</div>
+        <div className="tr10-candidates">{reviewCandidates.map((candidate) => { const selected = reviewSelectedCandidateId === candidate.sourceId; const tier=musicMatchTier(candidate.confidence); return <button type="button" className={selected ? "is-selected" : ""} key={candidate.sourceId} onClick={() => setReviewSelectedCandidateId(candidate.sourceId)}><CandidateArtworkThumb candidate={candidate} /><div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(candidate.confidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}</div>
         <footer><button onClick={skipReview}>SKIP</button><button disabled={!reviewSelectedCandidate || busyId === `match-${reviewTrack.id}`} onClick={() => void saveReviewCandidate(false)}>SAVE</button><button className="is-primary" disabled={!reviewSelectedCandidate || busyId === `match-${reviewTrack.id}`} onClick={() => void saveReviewCandidate(true)}>SAVE & NEXT</button></footer>
       </section></div> : null}
 
