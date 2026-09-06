@@ -1109,23 +1109,37 @@ void processOutputGain(float &left, float &right) {
 
   const float requestedDrive = static_cast<float>(dbToGain(outputReserveDb));
   if (outputProfile == 1 || outputProfile == 2) {
-    // R70 CLEAN DRIVE
-    // "High/Max Output" is a requested reserve, not a command to ram every
-    // mastered track into the limiter. Fill available digital headroom first,
-    // then allow only about 1 dB of peak-limiter work on already-hot material.
-    // This keeps the output at full scale without the crushed/distorted sound
-    // caused by a fixed +6 dB drive on every song.
-    const float desiredPeak = limiterDetectorCeilingGain * 1.08392691f; // ~+0.7 dB over detector ceiling.
+    // R74 SINGLE MAX-HD MAKEUP STAGE
+    // Output Reserve is now only the *maximum allowed adaptive makeup*. There is
+    // no fixed pre-compressor boost and no automatic second LUFS gain stage. Fill
+    // real peak headroom, stay just below the true-peak detector ceiling, and use
+    // previous limiter activity as feedback so Peak Guard does not sit at 3-5 dB.
+    const float desiredPeak = limiterDetectorCeilingGain * 0.965f;
     float cleanCap = requestedDrive;
     if (preLimitPeak > 0.000001f) cleanCap = desiredPeak / preLimitPeak;
-    if (cleanCap < 1.0f) cleanCap = 1.0f;
-    const float driveTarget = requestedDrive < cleanCap ? requestedDrive : cleanCap;
+    if (cleanCap < 1.0f) cleanCap = 1.0f; // never blanket-attenuate the dry source
 
-    // Fast release of excess drive, slower increase into newly available room.
+    float driveTarget = requestedDrive < cleanCap ? requestedDrive : cleanCap;
+
+    // Feedback acts ONLY on added Max-HD makeup. If the previous limiter sample
+    // needed meaningful gain reduction, give that extra drive back immediately.
+    // The floor stays unity, so user EQ/source are never reduced by this stage.
+    const float limiterReductionDb = limiterGain < 0.999999f
+      ? static_cast<float>(-20.0 * log10(limiterGain))
+      : 0.0f;
+    if (limiterReductionDb > 0.35f && driveTarget > 1.0f) {
+      const float feedbackDb = clampf((limiterReductionDb - 0.35f) * 0.90f, 0.0f, 6.0f);
+      driveTarget *= static_cast<float>(dbToGain(-feedbackDb));
+      if (driveTarget < 1.0f) driveTarget = 1.0f;
+    }
+
+    // Back off excess gain very quickly; increase into newly available room more
+    // slowly to avoid audible pumping from the makeup controller.
     const float coeff = driveTarget < cleanOutputDriveGain
-      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.010)))
-      : static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.220)));
+      ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.006)))
+      : static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.280)));
     cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
+    if (cleanOutputDriveGain < 1.0f) cleanOutputDriveGain = 1.0f;
     outputReserveGain = cleanOutputDriveGain;
   } else {
     // Car / Hi-Fi remains an explicit advanced gain stage.

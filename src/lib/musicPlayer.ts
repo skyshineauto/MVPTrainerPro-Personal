@@ -835,9 +835,10 @@ let studioHrtfReflectionGainA: GainNode | null = null;
 let studioHrtfReflectionGainB: GainNode | null = null;
 let studioHrtfInputGain: GainNode | null = null;
 let studioInputBus: GainNode | null = null;
-// R71 premium loudness stage. The native compressor is deliberately before the
-// WASM EQ/true-peak limiter: it reduces crest factor without flattening the
-// user EQ curve, then the WASM clean-drive stage fills the newly available room.
+// R74 Max-HD loudness stage. Headphones/Bluetooth use ONE coordinated loudness
+// system: the native compressor gently creates crest-factor room at unity input,
+// then the WASM adaptive makeup stage fills only the clean room that actually
+// exists before the true-peak limiter. There is no fixed pre-compressor boost.
 let virtualAmpGainNode: GainNode | null = null;
 let loudnessCompressorNode: DynamicsCompressorNode | null = null;
 let headphoneProcessorNode: AudioWorkletNode | null = null;
@@ -1667,18 +1668,22 @@ function cleanHdHighOutputActive() {
 function applyVirtualAmpSettings(now: number) {
   if (!virtualAmpGainNode || !loudnessCompressorNode) return;
   const active = !state.dspBypass && cleanHdHighOutputActive();
-  // Drive the native compressor instead of throwing a fixed gain directly at
-  // the limiter. This raises average level while preserving the musical EQ that
-  // follows inside WASM. Defaults on DynamicsCompressorNode are far too strong,
-  // so MVP uses a moderate soft-knee music curve.
-  const driveDb = active ? 6.5 : 0;
-  setAudioParam(virtualAmpGainNode.gain, dbToGain(driveDb), now, 0.035);
+
+  // R74: NEVER pre-drive the compressor. R71's fixed +6.5 dB boost was the main
+  // reason Peak Guard could show several dB of reduction even with Flat EQ and
+  // low listener volume. Unity enters the compressor; adaptive makeup happens
+  // later inside WASM after the user's EQ/effects are known.
+  setAudioParam(virtualAmpGainNode.gain, 1, now, 0.025);
+
   if (active) {
-    setAudioParam(loudnessCompressorNode.threshold, -10.5, now, 0.05);
-    setAudioParam(loudnessCompressorNode.knee, 12, now, 0.05);
-    setAudioParam(loudnessCompressorNode.ratio, 2.6, now, 0.05);
-    setAudioParam(loudnessCompressorNode.attack, 0.004, now, 0.05);
-    setAudioParam(loudnessCompressorNode.release, 0.115, now, 0.05);
+    // Gentle crest-factor control, not mastering-by-crushing. A soft knee and
+    // modest ratio shave only hot peaks so the downstream adaptive Max-HD stage
+    // can recover useful level without forcing the limiter to work continuously.
+    setAudioParam(loudnessCompressorNode.threshold, -7.0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.knee, 7.0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.ratio, 1.7, now, 0.05);
+    setAudioParam(loudnessCompressorNode.attack, 0.006, now, 0.05);
+    setAudioParam(loudnessCompressorNode.release, 0.14, now, 0.05);
   } else {
     setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
     setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);
@@ -1773,11 +1778,11 @@ function applyStudioProcessingSettings(now: number) {
         (state.outputProfile === "speaker" && state.smartDspEnabled)),
     stereoIntegrityAmount: studioPersonality.stereoIntegrityAmount,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
-    // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
-    // Clean-HD Max/High Output automatically uses upward-only loudness
-    // equalization in WASM. User Volume Match remains optional elsewhere.
-    normalizationEnabled: processed && (state.normalizationEnabled || cleanHdHighOutputActive()),
-    normalizationTargetLufs: cleanHdHighOutputActive() ? -9 : -10,
+    // R74: High/Max Output no longer enables a second automatic LUFS gain stage.
+    // The single Max-HD controller is compressor + adaptive makeup + true-peak
+    // guard. Optional user loudness matching remains available independently.
+    normalizationEnabled: processed && state.normalizationEnabled,
+    normalizationTargetLufs: -11,
     // MVP_STUDIO_WASM_V3_PHASE4_TRUE_PEAK_LIMITER
     // BS.1770-style 4x FIR true-peak detection drives the Studio limiter.
     limiterEnabled: processed && state.limiterEnabled,
@@ -3972,6 +3977,38 @@ function migrateMaxHdR71() {
 
 migrateMaxHdR71();
 
+const MAX_HD_R74_KEY = "mvp_music_max_hd_r74_single_gain_v1";
+
+function migrateMaxHdR74() {
+  if (readStored(MAX_HD_R74_KEY) === "1") return;
+
+  // Remove the old automatic LUFS booster from simplified outputs. Preserve the
+  // user's EQ, effects, immersion and High/Max Output choice. Output Reserve now
+  // represents ONLY the maximum adaptive makeup allowance, never a fixed gain.
+  (["headphones", "speaker"] as const).forEach((profile) => {
+    const stored = readOutputProfileSnapshot(profile);
+    const source = state.outputProfile === profile ? currentOutputProfileSnapshot() : stored;
+    if (!source) return;
+    const next: OutputProfileSnapshot = {
+      ...source,
+      normalizationEnabled: false,
+      autoMakeupEnabled: false,
+    };
+    writeOutputProfileSnapshot(profile, next);
+    if (state.outputProfile === profile) {
+      persistSnapshotToActiveStorage(next);
+      state = {
+        ...state,
+        ...next,
+        eqGains: [...next.eqGains],
+        parametricBands: next.parametricBands.map((band) => ({ ...band })),
+      };
+    }
+  });
+
+  savePlayerSetting(MAX_HD_R74_KEY, "1");
+}
+
 function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(snapshot.eqEnabled));
   savePlayerSetting(STORAGE_KEYS.eqPreset, snapshot.eqPreset);
@@ -4038,6 +4075,8 @@ function applyOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: Outpu
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
+
+migrateMaxHdR74();
 
 export function applyMusicHeadphoneStudioHd() {
   const snapshot = cleanOutputProfileSnapshot("headphones");
