@@ -14,6 +14,7 @@ import {
 } from "../../lib/exerciseMatch";
 import { AlertIcon, CheckIcon } from "../../lib/exerciseIcons";
 import { rankExercises } from "../../lib/exerciseSearch";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { CreateExerciseModal } from "./CreateExerciseModal";
 
 /** Icons for filter pills */
@@ -234,7 +235,7 @@ export function LibraryPage({ navigate }: { navigate: (to: string) => void }) {
     const { data: exs, error: exErr } = await query;
     if (exErr) throw exErr;
 
-    const list = (exs ?? []) as ExRow[];
+    const list = await applyExerciseNameOverrides((exs ?? []) as ExRow[]);
 
     const { data: u, error: uErr } = await supabase.auth.getUser();
     if (uErr) throw uErr;

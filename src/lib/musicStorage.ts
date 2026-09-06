@@ -843,17 +843,235 @@ export async function listMusicTracks(): Promise<MusicTrack[]> {
   return ((data ?? []) as MusicTrack[]).map(normalizeTrack);
 }
 
+function normalizedRecordingText(value: string | null | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’'`]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/\b(feat|featuring|ft)\.?\b.*$/i, "")
+    .replace(/\b(remaster(?:ed)?|deluxe|explicit|clean|album version|single version|version)\b/gi, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function recordingVersionIdentity(...values: Array<string | null | undefined>) {
+  const value = values.filter(Boolean).join(" ").toLowerCase();
+  if (/\bunplugged\b/.test(value)) return "unplugged";
+  if (/\bacoustic\b/.test(value)) return "acoustic";
+  if (/\bremix\b/.test(value)) return "remix";
+  if (/\bdemo\b/.test(value)) return "demo";
+  if (/\bradio\s+edit\b/.test(value)) return "radio-edit";
+  if (/\blive\b/.test(value)) return "live";
+  return "studio";
+}
+
+function artistTitleFromFileName(fileName: string) {
+  const stem = fileName.replace(/\.[^.]+$/, "").replace(/_/g, " ").trim();
+  const match = stem.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  return match ? { artist: match[1].trim(), title: match[2].trim() } : null;
+}
+
+async function fileSha256(file: File) {
+  try {
+    if (!globalThis.crypto?.subtle) return null;
+    const buffer = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(hash))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return null;
+  }
+}
+
+function sameRecordingIdentity(
+  existing: MusicTrack,
+  title: string,
+  artist: string | null,
+  duration: number | null,
+  version: string
+) {
+  if (!artist) return false;
+  if (normalizedRecordingText(existing.title) !== normalizedRecordingText(title)) return false;
+  if (normalizedRecordingText(existing.artist) !== normalizedRecordingText(artist)) return false;
+  if (recordingVersionIdentity(existing.title, existing.original_name) !== version) return false;
+  if (duration && existing.duration_seconds && Math.abs(duration - existing.duration_seconds) > 7) return false;
+  return true;
+}
+
+async function replaceExistingTrackAudio(
+  existing: MusicTrack,
+  file: File,
+  extension: string,
+  durationSeconds: number | null,
+  embeddedArtwork: EmbeddedArtwork | null,
+  embeddedTags: EmbeddedMusicTags,
+  audioHash: string | null
+) {
+  const userId = await requireUserId();
+  const fileStem = safeFileName(file.name.replace(/\.[^.]+$/, ""));
+  const storagePath = `${userId}/${Date.now()}-${crypto.randomUUID()}-${fileStem}.${extension}`;
+  const mimeType = contentTypeFor(extension, file.type);
+
+  await uploadWorkerObject(storagePath, file, mimeType);
+
+  const update: Record<string, string | number | null> = {
+    storage_path: storagePath,
+    original_name: file.name,
+    mime_type: mimeType,
+    file_size_bytes: file.size,
+    duration_seconds: durationSeconds,
+    updated_at: new Date().toISOString(),
+  };
+  if (audioHash) update.audio_hash = audioHash;
+  if ((!existing.artist || /unknown artist/i.test(existing.artist)) && embeddedTags.artist?.trim()) update.artist = embeddedTags.artist.trim();
+  if ((!existing.title || /^(track|song|untitled)/i.test(existing.title)) && embeddedTags.title?.trim()) update.title = embeddedTags.title.trim();
+  if (!existing.album && embeddedTags.album?.trim()) update.album = embeddedTags.album.trim();
+  if (!existing.release_year && embeddedTags.releaseYear) update.release_year = embeddedTags.releaseYear;
+  if (!existing.genre && embeddedTags.genre?.trim()) update.genre = embeddedTags.genre.trim();
+
+  let result = await supabase
+    .from(MUSIC_TABLE)
+    .update(update)
+    .eq("id", existing.id)
+    .eq("user_id", userId)
+    .select(TRACK_SELECT)
+    .single();
+
+  if (result.error && audioHash && /audio_hash/i.test(result.error.message || "")) {
+    delete update.audio_hash;
+    result = await supabase
+      .from(MUSIC_TABLE)
+      .update(update)
+      .eq("id", existing.id)
+      .eq("user_id", userId)
+      .select(TRACK_SELECT)
+      .single();
+  }
+
+  if (result.error) {
+    await deleteWorkerObject(storagePath).catch(() => undefined);
+    throw result.error;
+  }
+
+  if (existing.storage_path && existing.storage_path !== storagePath) {
+    await deleteWorkerObject(existing.storage_path).catch(() => undefined);
+  }
+
+  clearMusicUrlCache(existing.id);
+  let track = normalizeTrack(result.data as MusicTrack);
+
+  if (embeddedArtwork && !existing.artwork_path && !existing.external_artwork_url) {
+    try {
+      track = await uploadArtworkBlob(
+        track,
+        embeddedArtwork.blob,
+        embeddedArtwork.extension,
+        embeddedArtwork.mimeType
+      );
+    } catch {
+      // Audio replacement remains valid if embedded artwork cannot be written.
+    }
+  }
+
+  return track;
+}
+
+export async function reconcileMusicDuplicatesR77() {
+  const rows = await listMusicTracks();
+  const groups = new Map<string, MusicTrack[]>();
+
+  for (const track of rows) {
+    const artist = normalizedRecordingText(track.artist);
+    const title = normalizedRecordingText(track.title);
+    if (!artist || !title) continue;
+
+    const version = recordingVersionIdentity(track.title, track.original_name);
+    const durationBucket = track.duration_seconds ? Math.round(track.duration_seconds / 5) : 0;
+    const key = `${artist}::${title}::${version}::${durationBucket}`;
+    const group = groups.get(key) || [];
+    group.push(track);
+    groups.set(key, group);
+  }
+
+  let merged = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+
+    group.sort((a, b) => {
+      const score = (track: MusicTrack) =>
+        (track.artwork_path || track.external_artwork_url ? 500 : 0) +
+        (track.metadata_confidence || 0) * 200 +
+        Math.min(300, (track.file_size_bytes || 0) / 100000);
+      return score(b) - score(a);
+    });
+
+    const keep = group[0];
+    for (const duplicate of group.slice(1)) {
+      const { error } = await supabase.rpc("rpc_music_merge_duplicate_r77", {
+        p_keep_id: keep.id,
+        p_duplicate_id: duplicate.id,
+      });
+      if (error) {
+        if (/does not exist|function/i.test(error.message || "")) return merged;
+        throw error;
+      }
+
+      if (duplicate.storage_path && duplicate.storage_path !== keep.storage_path) {
+        await deleteWorkerObject(duplicate.storage_path).catch(() => undefined);
+      }
+      // Artwork may have been adopted by the canonical row inside the merge RPC.
+      // Do not delete the duplicate artwork object here. A later orphan-storage
+      // cleanup can safely remove unreferenced artwork after database state is known.
+      clearMusicUrlCache(duplicate.id);
+      merged += 1;
+    }
+  }
+
+  return merged;
+}
+
 export async function uploadMusicTrack(
   file: File,
   sortOrder: number
 ): Promise<MusicTrack> {
   const extension = validateMusicFile(file);
   const userId = await requireUserId();
-  const [durationSeconds, embeddedArtwork, embeddedTags] = await Promise.all([
+  const [durationSeconds, embeddedArtwork, embeddedTags, audioHash] = await Promise.all([
     readMusicDuration(file),
     readEmbeddedMusicArtwork(file),
     readEmbeddedMusicTags(file),
+    fileSha256(file),
   ]);
+
+  const fileIdentity = artistTitleFromFileName(file.name);
+  const identityTitle = embeddedTags.title?.trim() || fileIdentity?.title || titleFromFileName(file.name);
+  const identityArtist = embeddedTags.artist?.trim() || fileIdentity?.artist || null;
+  const identityVersion = recordingVersionIdentity(embeddedTags.title, file.name);
+
+  let duplicate: MusicTrack | null = null;
+  if (audioHash) {
+    const hashLookup = await supabase
+      .from(MUSIC_TABLE)
+      .select(TRACK_SELECT)
+      .eq("user_id", userId)
+      .eq("audio_hash", audioHash)
+      .limit(1)
+      .maybeSingle();
+    if (!hashLookup.error && hashLookup.data) duplicate = normalizeTrack(hashLookup.data as MusicTrack);
+  }
+  if (!duplicate && identityArtist) {
+    const existingTracks = await listMusicTracks();
+    duplicate = existingTracks.find((track) =>
+      sameRecordingIdentity(track, identityTitle, identityArtist, durationSeconds, identityVersion)
+    ) || null;
+  }
+  if (duplicate) {
+    return replaceExistingTrackAudio(duplicate, file, extension, durationSeconds, embeddedArtwork, embeddedTags, audioHash);
+  }
 
   const fileStem = safeFileName(file.name.replace(/\.[^.]+$/, ""));
   const storagePath =
@@ -868,6 +1086,7 @@ export async function uploadMusicTrack(
 
   const row = {
     user_id: userId,
+    ...(audioHash ? { audio_hash: audioHash } : {}),
     storage_path: storagePath,
     title: embeddedTags.title?.trim() || titleFromFileName(file.name),
     artist: embeddedTags.artist?.trim() || null,

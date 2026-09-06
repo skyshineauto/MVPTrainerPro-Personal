@@ -17,6 +17,7 @@ import {
   updateMusicTrack,
   uploadMusicArtwork,
   uploadMusicTrack,
+  reconcileMusicDuplicatesR77,
   type MusicEnergyLevel,
   type MusicTrack,
 } from "../../lib/musicStorage";
@@ -808,6 +809,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [previewingRecommendationId, setPreviewingRecommendationId] = useState<string | null>(null);
   const [previewErrorRecommendationId, setPreviewErrorRecommendationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const duplicateReconcileStartedRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const uploadHideTimerRef = useRef<number | null>(null);
@@ -1144,6 +1146,21 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       if (!isTransientLibraryError(caught)) setError(caught instanceof Error ? caught.message : "Could not load your music library.");
     }).finally(() => setLoading(false));
   }, []);
+  useEffect(() => {
+    if (loading || tracks.length < 2 || duplicateReconcileStartedRef.current) return;
+    duplicateReconcileStartedRef.current = true;
+    void reconcileMusicDuplicatesR77()
+      .then(async (merged) => {
+        if (!merged) return;
+        await refreshTracks();
+        await refreshPlaylists();
+        await loadMusicLibrary(true);
+      })
+      .catch((error) => {
+        duplicateReconcileStartedRef.current = false;
+        console.warn("Duplicate reconciliation will retry later:", error);
+      });
+  }, [loading, tracks.length]);
   useEffect(() => {
     const refreshDiscovery = () => {
       setDiscoverySeeds(listMusicDiscoverySeeds());

@@ -12,6 +12,7 @@ import {
   type MuscleKey,
 } from "../../lib/exerciseMatch";
 import { rankExercises } from "../../lib/exerciseSearch";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 
 import icoDumbbell from "../../assets/dumbbell.png";
 import icoRunner from "../../assets/runner.png";
@@ -312,7 +313,7 @@ export function PlannedSessionEditor({
             .select("id,name,source,primary_muscles,secondary_muscles,equipment,media,template_params")
             .in("id", exerciseIds);
           if (exerciseError) throw exerciseError;
-          exerciseRows = (data ?? []) as ExerciseRow[];
+          exerciseRows = await applyExerciseNameOverrides((data ?? []) as ExerciseRow[]);
         }
 
         const exerciseMap = new Map(exerciseRows.map((exercise) => [exercise.id, exercise]));
@@ -345,7 +346,7 @@ export function PlannedSessionEditor({
         setSession(sessionData as SessionRow);
         setTemplate(templateData as TemplateRow);
         setDraft(nextDraft);
-        setCatalog((allExercises ?? []) as ExerciseRow[]);
+        setCatalog(await applyExerciseNameOverrides((allExercises ?? []) as ExerciseRow[]));
       } catch (e: any) {
         if (!cancelled) setError(e?.message ?? String(e));
       } finally {
@@ -552,11 +553,6 @@ export function PlannedSessionEditor({
 
   async function saveAllFuture() {
     if (!session) return;
-    if (!session.program_block_id) {
-      setError("This session is not attached to a program block.");
-      return;
-    }
-
     setSaving(true);
     setError(null);
 
@@ -565,13 +561,29 @@ export function PlannedSessionEditor({
         `${session.session_type} • future`
       );
 
+      const { data: futureRows, error: futureError } = await supabase
+        .from("scheduled_sessions")
+        .select("id,status")
+        .eq("user_id", userId)
+        .eq("session_type", session.session_type)
+        .gte("date", session.date);
+      if (futureError) throw futureError;
+
+      const futureIds = (futureRows ?? [])
+        .filter((row: any) => !["completed", "skipped", "canceled", "cancelled"].includes(String(row.status ?? "scheduled").toLowerCase()))
+        .map((row: any) => String(row.id))
+        .filter(Boolean);
+
+      if (!futureIds.length) {
+        await supabase.from("workout_templates").delete().eq("id", newTemplateId);
+        throw new Error("No matching future sessions were updated.");
+      }
+
       const { data: updatedRows, error: updateError } = await supabase
         .from("scheduled_sessions")
         .update({ template_id: newTemplateId })
         .eq("user_id", userId)
-        .eq("program_block_id", session.program_block_id)
-        .eq("session_type", session.session_type)
-        .gte("date", session.date)
+        .in("id", futureIds)
         .select("id");
       if (updateError || !updatedRows?.length) {
         await supabase.from("workout_templates").delete().eq("id", newTemplateId);

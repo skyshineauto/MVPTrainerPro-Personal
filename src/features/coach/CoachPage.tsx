@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
 import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { analyzeProgression } from "../../lib/trainingIntelligence";
 import {
   COACH_TIPS,
@@ -689,7 +690,8 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
           .select("id,name,primary_muscles,secondary_muscles,equipment,patterns")
           .in("id", exerciseIds);
         if (error) throw error;
-        for (const row of (data ?? []) as ExerciseMeta[]) nextExerciseMap.set(row.id, row);
+        const namedExerciseData = await applyExerciseNameOverrides((data ?? []) as ExerciseMeta[]);
+        for (const row of namedExerciseData) nextExerciseMap.set(row.id, row);
       }
       setExerciseMap(nextExerciseMap);
     } catch (error: any) {

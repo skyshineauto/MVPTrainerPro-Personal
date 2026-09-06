@@ -3,6 +3,7 @@ import { normalizeText } from "./exerciseMatch";
 export type SearchableExercise = {
   id: string;
   name?: string | null;
+  canonical_name?: string | null;
   source?: string | null;
   primary_muscles?: string[] | null;
   secondary_muscles?: string[] | null;
@@ -142,7 +143,11 @@ export function rankExercises<T extends SearchableExercise>(rows: T[], rawQuery:
   if (!query) return rows.slice().sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
 
   return rows
-    .map((row, index) => ({ row, index, score: scoreExerciseName(String(row.name ?? ""), rawQuery) }))
+    .map((row, index) => {
+      const names = [String(row.name ?? ""), String(row.canonical_name ?? "")].filter(Boolean);
+      const score = names.length ? Math.max(...names.map((name) => scoreExerciseName(name, rawQuery))) : 0;
+      return { row, index, score };
+    })
     .filter((entry) => entry.score >= 620)
     .sort((a, b) => b.score - a.score || String(a.row.name ?? "").localeCompare(String(b.row.name ?? "")) || a.index - b.index)
     .map((entry) => entry.row);

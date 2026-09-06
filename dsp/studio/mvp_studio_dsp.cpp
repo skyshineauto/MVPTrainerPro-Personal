@@ -1145,7 +1145,6 @@ inline float updateTruePeakDetector(float *history, float sample);
 
 void processFinalCompressor(float &left, float &right) {
   const bool simplifiedProfile = outputProfile == 1 || outputProfile == 2;
-  const bool simplifiedMaxHd = simplifiedProfile && outputReserveDb > 0.01f;
 
   if (!simplifiedProfile) {
     finalCompGain = 1.0f;
@@ -1169,13 +1168,16 @@ void processFinalCompressor(float &left, float &right) {
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
   float required = 1.0f;
-  if (simplifiedMaxHd && detector > 0.0000001f) {
-    // The hidden loudness limiter controls normal programme peaks around -4 dBTP.
-    // The following adaptive makeup stage then raises the denser signal toward the
-    // final -1.3 dBTP target. This is the same separation used in commercial
-    // loudness playback: loudness control first, safety limiter last.
-    const float loudnessCeiling = static_cast<float>(dbToGain(-4.0f));
-    if (detector > loudnessCeiling) required = loudnessCeiling / detector;
+  if (detector > 0.0000001f) {
+    // R77: the final crest controller is always active for Headphones/Bluetooth.
+    // High/Max Output only controls the later clean makeup stage. This stage is
+    // intentionally gentle so Peak Guard remains emergency true-peak protection.
+    const float crestCeiling = static_cast<float>(dbToGain(-2.8f));
+    const float maxReductionGain = static_cast<float>(dbToGain(-2.4f));
+    if (detector > crestCeiling) {
+      required = crestCeiling / detector;
+      if (required < maxReductionGain) required = maxReductionGain;
+    }
   }
 
   if (required < finalCompGain) {
@@ -1185,12 +1187,11 @@ void processFinalCompressor(float &left, float &right) {
     // ~80 ms recovery keeps drums punchy without audible pumping.
     finalCompGain += (1.0f - finalCompGain) * finalCompGainReleaseCoeff;
   }
-  if (!simplifiedMaxHd) finalCompGain += (1.0f - finalCompGain) * 0.08f;
   finalCompGain = clampf(finalCompGain, 0.25f, 1.0f);
 
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
-  meterFinalCompressorReductionDb = simplifiedMaxHd && finalCompGain < 0.999999f
+  meterFinalCompressorReductionDb = finalCompGain < 0.999999f
     ? static_cast<float>(-20.0 * log10(finalCompGain)) : 0.0f;
 }
 

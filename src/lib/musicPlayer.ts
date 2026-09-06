@@ -1667,19 +1667,19 @@ function cleanHdHighOutputActive() {
 
 function applyVirtualAmpSettings(now: number) {
   if (!virtualAmpGainNode || !loudnessCompressorNode) return;
-  const active = !state.dspBypass && cleanHdHighOutputActive();
+  const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const active = !state.dspBypass && simplifiedProfile;
 
-  // R76: no fixed pre-drive. On the compatibility graph this compressor now sits
-  // AFTER EQ/effects, matching Studio WASM. It creates modest crest-factor room;
-  // a small post-compressor makeup stage provides the fallback High/Max Output.
+  // R77 fallback parity: crest management stays active with High/Max Output
+  // both ON and OFF. High/Max Output only controls clean post-crest makeup.
   setAudioParam(virtualAmpGainNode.gain, 1, now, 0.025);
 
   if (active) {
-    setAudioParam(loudnessCompressorNode.threshold, -10.0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.knee, 8.0, now, 0.05);
-    setAudioParam(loudnessCompressorNode.ratio, 2.2, now, 0.05);
-    setAudioParam(loudnessCompressorNode.attack, 0.004, now, 0.05);
-    setAudioParam(loudnessCompressorNode.release, 0.10, now, 0.05);
+    setAudioParam(loudnessCompressorNode.threshold, -4.8, now, 0.05);
+    setAudioParam(loudnessCompressorNode.knee, 5.5, now, 0.05);
+    setAudioParam(loudnessCompressorNode.ratio, 1.55, now, 0.05);
+    setAudioParam(loudnessCompressorNode.attack, 0.0045, now, 0.05);
+    setAudioParam(loudnessCompressorNode.release, 0.12, now, 0.05);
   } else {
     setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
     setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);

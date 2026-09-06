@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { inferSymptomKey, isSymptomMode, type SymptomKey } from "../../lib/sessionLabel";
 import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
 import { isMusicPlaying, pauseMusic, playMusic } from "../../lib/musicPlayer";
@@ -3902,7 +3903,10 @@ export function AppShell({
       const exId = (te?.[0] as any)?.exercise_id as string | undefined;
       if (exId) {
         const { data: ex } = await supabase.from("exercises").select("id,name").eq("id", exId).maybeSingle();
-        if ((ex as any)?.name) nextFirstExercise = (ex as any).name;
+        if ((ex as any)?.name) {
+          const [named] = await applyExerciseNameOverrides([ex as any]);
+          nextFirstExercise = String((named as any)?.name || (ex as any).name);
+        }
       }
     }
 

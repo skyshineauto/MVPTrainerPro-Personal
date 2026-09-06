@@ -109,7 +109,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.4.0-r76-stable-maxhd-audition-art";
+const MVP_STUDIO_ASSET_VERSION = "5.5.0-r77-locked-fixes";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {

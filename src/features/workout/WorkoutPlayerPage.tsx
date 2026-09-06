@@ -20,6 +20,7 @@ import {
   type UserMediaLite,
 } from "../../lib/exerciseMatch";
 import { rankExercises } from "../../lib/exerciseSearch";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { AlertIcon, CheckIcon } from "../../lib/exerciseIcons";
 import {
   formatSessionLabel,
@@ -565,8 +566,9 @@ async function loadWorkoutExercisesWithExercises(workoutId: string): Promise<Wor
 
   if (exErr) throw exErr;
 
+  const namedExercises = await applyExerciseNameOverrides((exs ?? []) as any[]);
   const exMap = new Map<string, any>();
-  for (const ex of exs ?? []) exMap.set((ex as any).id, ex);
+  for (const ex of namedExercises) exMap.set((ex as any).id, ex);
 
   return rows.map((r) => ({ ...r, exercise: exMap.get(r.exercise_id) || null }));
 }
@@ -4084,7 +4086,8 @@ export function WorkoutPlayerPage({ params }: any) {
 
       if (error) throw error;
 
-      const ranked = rankExercises((data ?? []) as SearchExerciseRow[], termRaw);
+      const namedSearchRows = await applyExerciseNameOverrides((data ?? []) as SearchExerciseRow[]);
+      const ranked = rankExercises(namedSearchRows, termRaw);
       const local = ranked.filter((row) =>
         matchFilters(
           row,

@@ -527,7 +527,7 @@ function releaseQualityFromAlbum(
 
   if (/\b(karaoke|tribute|cover versions?|sound alike)\b/.test(value)) return 0.03;
   if (/\b(various artists|compilation)\b/.test(value)) return 0.16;
-  if (/\b(greatest hits|best of|the best|essential|anthology|collection|ultimate hits|hits collection)\b/.test(value)) return 0.32;
+  if (/\b(greatest hits|best of|the best|essential|anthology|collection|ultimate hits|hits collection|a sides|b sides|singles collection|rarities|biggest hits|hits live|live usa)\b/.test(value)) return 0.20;
 
   // Version words are identity clues, not automatic quality penalties. A real
   // Unplugged/Live/Remix release must rank HIGH when that is the version the
@@ -535,7 +535,7 @@ function releaseQualityFromAlbum(
   if (versionMatches) return 0.98;
   if (candidateFlags.has("remix")) return versionExpected ? 0.34 : 0.48;
   if (candidateFlags.has("live") || candidateFlags.has("unplugged") || candidateFlags.has("acoustic")) {
-    return versionExpected ? 0.42 : 0.56;
+    return versionExpected ? 0.42 : 0.38;
   }
   if (/\b(soundtrack|motion picture|original score)\b/.test(value)) return 0.6;
   if (candidateFlags.has("single")) return 0.84;
@@ -570,6 +570,7 @@ function releaseMatchScore(
   const candidateFlags = releaseVersionFlags(candidate.album);
   const artist = track.artist ? artistTextScore(track.artist, candidate.artist) : 0.75;
   const trackAlbumTrusted = Boolean(track.album?.trim()) && !looksLikeBootlegRelease(track.album);
+  const manualAlbumConstraint = track.metadata_status === "manual" && Boolean(track.album?.trim());
   const album = track.album ? textScore(track.album, candidate.album) : 0.62;
   const hasVersionContext = expectedFlags.size > 0;
   const versionMatches = hasVersionContext
@@ -586,7 +587,7 @@ function releaseMatchScore(
 
   let score =
     artist * 0.18 +
-    album * (trackAlbumTrusted ? 0.27 : track.album ? 0.08 : 0.12) +
+    album * (manualAlbumConstraint ? 0.42 : trackAlbumTrusted ? 0.27 : track.album ? 0.08 : 0.12) +
     year * 0.08 +
     quality * 0.16 +
     sourceOfficialBias * 0.12 +
@@ -596,6 +597,11 @@ function releaseMatchScore(
     score += versionMatches ? Math.min(0.28, 0.2 + versionMatches * 0.04) : -0.24;
   } else {
     score += 0.1;
+  }
+
+  if (manualAlbumConstraint) {
+    if (album >= 0.90) score += 0.16;
+    else if (album < 0.70) score -= 0.30;
   }
 
   if (versionMismatch && looksLikeBootlegRelease(candidate.album)) score -= 0.12;

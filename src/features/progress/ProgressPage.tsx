@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
 import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
+import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 
 type Range = 30 | 90 | 180 | 365 | "all";
 type WeightTrendRange = "7d" | "30d" | "90d" | "program" | "all";
@@ -610,7 +611,8 @@ export function ProgressPage() {
           .select("id,name,primary_muscles,secondary_muscles,equipment")
           .in("id", exerciseIds);
         if (exerciseError) throw exerciseError;
-        for (const row of (exerciseData ?? []) as ExerciseRow[]) exerciseMap.set(row.id, row);
+        const namedExerciseData = await applyExerciseNameOverrides((exerciseData ?? []) as ExerciseRow[]);
+        for (const row of namedExerciseData) exerciseMap.set(row.id, row);
       }
 
       const setsByExercise = new Map<string, WorkoutSetRow[]>();

@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
 import { clearBuiltMediaInvalid, isBuiltMediaInvalid, markBuiltMediaInvalid } from "../../lib/exerciseMatch";
+import { applyExerciseNameOverrides, isUserCreatedExercise, saveExerciseNameOverride } from "../../lib/exerciseNames";
 
 type UserMediaRow = {
   id: string;
@@ -598,8 +599,9 @@ export function ExerciseDetailPage({ params, navigate }: any) {
 
       const historyRows = await loadExerciseHistory(exerciseId, u.user.id);
 
-      setEx(exData);
-      setNameDraft(String((exData as any)?.name ?? ""));
+      const [namedExercise] = await applyExerciseNameOverrides([exData as any]);
+      setEx(namedExercise);
+      setNameDraft(String((namedExercise as any)?.name ?? ""));
       setEditingExercise(false);
       setRenameError(null);
       setUserMedia((um ?? []) as UserMediaRow[]);
@@ -630,14 +632,18 @@ export function ExerciseDetailPage({ params, navigate }: any) {
     setRenameBusy(true);
     setRenameError(null);
     try {
-      const { data, error } = await supabase
-        .from("exercises")
-        .update({ name: clean })
-        .eq("id", exerciseId)
-        .select("id,name")
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error("The database did not allow this exercise to be renamed.");
+      if (isUserCreatedExercise(ex as any)) {
+        const { data, error } = await supabase
+          .from("exercises")
+          .update({ name: clean })
+          .eq("id", exerciseId)
+          .select("id,name")
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error("Exercise could not be renamed.");
+      } else {
+        await saveExerciseNameOverride(exerciseId, clean);
+      }
       setEx((current: any) => current ? { ...current, name: clean } : current);
       setEditingExercise(false);
     } catch (error: any) {
