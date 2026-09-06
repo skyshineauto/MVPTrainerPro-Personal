@@ -18,14 +18,10 @@ export async function applyExerciseNameOverrides<T extends ExerciseNameRow>(rows
   const { data: auth, error: authError } = await supabase.auth.getUser();
   if (authError || !auth.user) return rows;
 
-  const ids = Array.from(new Set(rows.map((row) => row.id).filter(Boolean)));
-  if (!ids.length) return rows;
-
   const { data, error } = await supabase
     .from("exercise_name_overrides")
     .select("exercise_id,display_name")
-    .eq("user_id", auth.user.id)
-    .in("exercise_id", ids);
+    .eq("user_id", auth.user.id);
 
   if (error) {
     // Keep the app usable before the r77 migration is installed.

@@ -1169,14 +1169,12 @@ void processFinalCompressor(float &left, float &right) {
 
   float required = 1.0f;
   if (detector > 0.0000001f) {
-    // R77: the final crest controller is always active for Headphones/Bluetooth.
-    // High/Max Output only controls the later clean makeup stage. This stage is
-    // intentionally gentle so Peak Guard remains emergency true-peak protection.
-    const float crestCeiling = static_cast<float>(dbToGain(-2.8f));
-    const float maxReductionGain = static_cast<float>(dbToGain(-2.4f));
+    // R77D: Peak Guard is emergency-only. The final crest controller owns normal
+    // post-EQ/effects peak management on Headphones/Bluetooth with Max Output
+    // both OFF and ON. Keep a real true-peak margin below the limiter detector.
+    const float crestCeiling = static_cast<float>(dbToGain(-1.80f));
     if (detector > crestCeiling) {
       required = crestCeiling / detector;
-      if (required < maxReductionGain) required = maxReductionGain;
     }
   }
 
@@ -1248,12 +1246,14 @@ void processOutputGain(float &left, float &right) {
       if (driveTarget < 1.0f) driveTarget = 1.0f;
     }
 
-    // Downward response is fast enough to stay clean; upward recovery is deliberately
-    // slow and programme-like. This is a mastering envelope, not an AGC riding every beat.
-    const float coeff = driveTarget < cleanOutputDriveGain
-      ? maxHdGainFallCoeff
-      : maxHdGainRiseCoeff;
-    cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
+    // R77D: optional Max/High Output may rise slowly, but it must surrender extra
+    // makeup immediately when the finished true peak demands it. This prevents
+    // the optional loudness stage from feeding normal transients into Peak Guard.
+    if (driveTarget < cleanOutputDriveGain) {
+      cleanOutputDriveGain = driveTarget;
+    } else {
+      cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * maxHdGainRiseCoeff;
+    }
     cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {
