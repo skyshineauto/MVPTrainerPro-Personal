@@ -263,8 +263,10 @@ export const MUSIC_HEADPHONE_MODES: Record<
   spatial: { label: "Spatial", width: 76, depth: 56, crossfeed: 0, center: 50, bass: 0 },
   deep: { label: "Deep", width: 86, depth: 100, crossfeed: 0, center: 50, bass: 0 },
 
-  // Legacy saved values remain readable. "stage" maps to the new Deep HRTF mode.
-  stage: { label: "Deep", width: 86, depth: 100, crossfeed: 0, center: 50, bass: 0 },
+  // Legacy "stage" storage is reused as the premium 3D mode so existing saved
+  // values remain readable without another migration key. 3D keeps the clean
+  // direct feed and adds the strongest parallel HRTF height/depth layer.
+  stage: { label: "3D Sound", width: 100, depth: 100, crossfeed: 0, center: 50, bass: 0 },
   focus: { label: "Off", width: 0, depth: 0, crossfeed: 0, center: 50, bass: 0 },
   bass_impact: { label: "Wide", width: 100, depth: 0, crossfeed: 0, center: 50, bass: 0 },
 };
@@ -814,6 +816,12 @@ let standardRouteGain: GainNode | null = null;
 // Studio headphone virtualization uses two browser HRTF virtual loudspeakers before the WASM mastering/limiter path.
 let studioDirectInputGain: GainNode | null = null;
 let studioHrtfSplitter: ChannelSplitterNode | null = null;
+let studioHrtfLeftBus: GainNode | null = null;
+let studioHrtfRightBus: GainNode | null = null;
+let studioHrtfLeftToLeft: GainNode | null = null;
+let studioHrtfRightToLeft: GainNode | null = null;
+let studioHrtfRightToRight: GainNode | null = null;
+let studioHrtfLeftToRight: GainNode | null = null;
 let studioHrtfLeftPanner: PannerNode | null = null;
 let studioHrtfRightPanner: PannerNode | null = null;
 let studioHrtfSum: GainNode | null = null;
@@ -824,6 +832,11 @@ let studioHrtfReflectionGainA: GainNode | null = null;
 let studioHrtfReflectionGainB: GainNode | null = null;
 let studioHrtfInputGain: GainNode | null = null;
 let studioInputBus: GainNode | null = null;
+// R71 premium loudness stage. The native compressor is deliberately before the
+// WASM EQ/true-peak limiter: it reduces crest factor without flattening the
+// user EQ curve, then the WASM clean-drive stage fills the newly available room.
+let virtualAmpGainNode: GainNode | null = null;
+let loudnessCompressorNode: DynamicsCompressorNode | null = null;
 let headphoneProcessorNode: AudioWorkletNode | null = null;
 let nativeHeadphoneBassShelf: BiquadFilterNode | null = null;
 let nativeHeadphoneSplitter: ChannelSplitterNode | null = null;
@@ -1199,10 +1212,11 @@ function applyNativeHeadphoneSettings(now: number, enabled: boolean) {
   const center = enabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5;
   const bass = enabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0;
 
-  const widthScale = enabled ? (proof ? 2.65 : 1 + width * 1.35) : 1;
-  const compensation = 1 / Math.max(1, 1 + Math.max(0, widthScale - 1) * 0.28 + depth * 0.16);
-  const direct = ((1 + widthScale) / 2) * compensation;
-  const widthCross = ((1 - widthScale) / 2) * compensation;
+  const widthScale = enabled ? (proof ? 1.85 : 1 + width * 0.42) : 1;
+  // Never turn the clean fallback signal down just because immersion is on.
+  // The final limiter owns exceptional peaks; width is an enhancement, not a trim.
+  const direct = (1 + widthScale) / 2;
+  const widthCross = (1 - widthScale) / 2;
   const crossMix = enabled ? (proof ? 0.62 : crossfeed * 0.50) : 0;
   const crossDelay = enabled ? (proof ? 0.0014 : 0.00028 + crossfeed * 0.00095) : 0.00022;
   const depthMix = enabled ? (proof ? 0.58 : depth * 0.42) : 0;
@@ -1256,8 +1270,17 @@ function studioHrtfRequested() {
 function configureStudioHrtf(now: number) {
   if (!audioContext || !studioDirectInputGain || !studioHrtfInputGain) return;
   const active = studioHrtfRequested() && Boolean(studioHrtfLeftPanner && studioHrtfRightPanner && studioHrtfBassShelf);
-  setAudioParam(studioDirectInputGain.gain, active ? 0 : 1, now, 0.018);
-  setAudioParam(studioHrtfInputGain.gain, active ? 1 : 0, now, 0.018);
+  // R71 PARALLEL IMMERSION: Studio HD never disappears. Earlier builds switched
+  // the dry feed OFF and replaced the song with HRTF, which is exactly why
+  // Spatial/Deep could sound weak and muddy. Keep the dry path at full unity and
+  // blend only a controlled, bass-light spatial cue layer on top.
+  setAudioParam(studioDirectInputGain.gain, 1, now, 0.018);
+  const mode = state.headphoneMode;
+  const threeDMode = mode === "stage";
+  const deepMode = mode === "deep";
+  const spatialMode = mode === "spatial";
+  const wetMix = active ? (threeDMode ? 0.34 : deepMode ? 0.27 : 0.20) : 0;
+  setAudioParam(studioHrtfInputGain.gain, wetMix, now, 0.018);
   if (!active || !studioHrtfLeftPanner || !studioHrtfRightPanner || !studioHrtfBassShelf) {
     if (studioHrtfReflectionGainA) setAudioParam(studioHrtfReflectionGainA.gain, 0, now, 0.025);
     if (studioHrtfReflectionGainB) setAudioParam(studioHrtfReflectionGainB.gain, 0, now, 0.025);
@@ -1270,35 +1293,43 @@ function configureStudioHrtf(now: number) {
   const center = proof ? 0.5 : Math.max(0, Math.min(1, state.headphoneCenter / 100));
   const bass = proof ? 0 : Math.max(0, Math.min(1, state.headphoneBassImpact / 100));
 
-  const mode = state.headphoneMode;
-  const deepMode = mode === "deep" || mode === "stage";
-  const spatialMode = mode === "spatial";
+  // mode flags are declared above because they also determine the parallel wet mix.
 
   // HRTF geometry: Spatial is a natural pair of front speakers; Deep moves the
   // same pair farther forward and slightly inward to add front/back separation.
   // rolloffFactor is zero, so perceived distance never becomes a hidden volume cut.
-  const baseAngle = deepMode ? 29 : 35;
-  const widthSpan = deepMode ? 16 : 20;
+  const baseAngle = threeDMode ? 42 : deepMode ? 31 : 36;
+  const widthSpan = threeDMode ? 18 : deepMode ? 14 : 18;
   const centerPull = Math.max(0, center - 0.5) * 8;
-  const angleDeg = Math.max(18, Math.min(58, baseAngle + width * widthSpan - centerPull));
+  const angleDeg = Math.max(18, Math.min(62, baseAngle + width * widthSpan - centerPull));
   const angle = angleDeg * Math.PI / 180;
-  const distance = deepMode ? (1.85 + depth * 1.15) : (1.15 + depth * 0.45);
+  const distance = threeDMode ? (2.15 + depth * 1.20) : deepMode ? (1.75 + depth * 0.95) : (1.15 + depth * 0.40);
   const x = Math.sin(angle) * distance;
   const z = -Math.cos(angle) * distance;
+  const y = threeDMode ? 0.32 + depth * 0.18 : 0;
 
   setAudioParam(studioHrtfLeftPanner.positionX, -x, now, 0.045);
-  setAudioParam(studioHrtfLeftPanner.positionY, 0, now, 0.045);
+  setAudioParam(studioHrtfLeftPanner.positionY, y, now, 0.045);
   setAudioParam(studioHrtfLeftPanner.positionZ, z, now, 0.045);
   setAudioParam(studioHrtfRightPanner.positionX, x, now, 0.045);
-  setAudioParam(studioHrtfRightPanner.positionY, 0, now, 0.045);
+  setAudioParam(studioHrtfRightPanner.positionY, y, now, 0.045);
   setAudioParam(studioHrtfRightPanner.positionZ, z, now, 0.045);
-  setAudioParam(studioHrtfBassShelf.gain, bass * 2.0, now, 0.05);
+  // This node is a high-pass in R71. Keep bass/kick entirely on the dry Studio
+  // HD path so spatial cues can never hollow or smear the low end.
+  setAudioParam(studioHrtfBassShelf.frequency, threeDMode ? 175 : deepMode ? 155 : 135, now, 0.05);
+  void bass;
 
   // HRTF already supplies the localization cues. Reflections are deliberately
   // tiny and only add a hint of depth, never an audible reverb tail.
-  const reflectionAmount = deepMode ? Math.min(0.035, depth * 0.035) : spatialMode ? Math.min(0.012, depth * 0.012) : 0;
-  if (studioHrtfReflectionDelayA) setAudioParam(studioHrtfReflectionDelayA.delayTime, deepMode ? 0.013 : 0.009, now, 0.05);
-  if (studioHrtfReflectionDelayB) setAudioParam(studioHrtfReflectionDelayB.delayTime, deepMode ? 0.021 : 0.014, now, 0.05);
+  const reflectionAmount = threeDMode
+    ? Math.min(0.030, depth * 0.030)
+    : deepMode
+      ? Math.min(0.022, depth * 0.022)
+      : spatialMode
+        ? Math.min(0.008, depth * 0.008)
+        : 0;
+  if (studioHrtfReflectionDelayA) setAudioParam(studioHrtfReflectionDelayA.delayTime, threeDMode ? 0.017 : deepMode ? 0.013 : 0.009, now, 0.05);
+  if (studioHrtfReflectionDelayB) setAudioParam(studioHrtfReflectionDelayB.delayTime, threeDMode ? 0.027 : deepMode ? 0.021 : 0.014, now, 0.05);
   if (studioHrtfReflectionGainA) setAudioParam(studioHrtfReflectionGainA.gain, reflectionAmount, now, 0.05);
   if (studioHrtfReflectionGainB) setAudioParam(studioHrtfReflectionGainB.gain, reflectionAmount * 0.55, now, 0.05);
 }
@@ -1400,6 +1431,7 @@ function applyProcessingSettings() {
   // Keep the DSP input at unity. User volume lives after the limiter so raising
   // volume cannot change how hard the signal drives EQ, DSP, or limiting.
   if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
+  applyVirtualAmpSettings(now);
   if (postLimiterVolumeGain) setAudioParam(postLimiterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
   if (referenceRouteGain) {
     const referenceGain = pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0;
@@ -1456,6 +1488,12 @@ function releaseGraph() {
     standardRouteGain,
     studioDirectInputGain,
     studioHrtfSplitter,
+    studioHrtfLeftBus,
+    studioHrtfRightBus,
+    studioHrtfLeftToLeft,
+    studioHrtfRightToLeft,
+    studioHrtfRightToRight,
+    studioHrtfLeftToRight,
     studioHrtfLeftPanner,
     studioHrtfRightPanner,
     studioHrtfSum,
@@ -1466,6 +1504,8 @@ function releaseGraph() {
     studioHrtfReflectionGainB,
     studioHrtfInputGain,
     studioInputBus,
+    virtualAmpGainNode,
+    loudnessCompressorNode,
     headphoneProcessorNode,
     nativeHeadphoneBassShelf,
     nativeHeadphoneSplitter,
@@ -1524,6 +1564,12 @@ function releaseGraph() {
   standardRouteGain = null;
   studioDirectInputGain = null;
   studioHrtfSplitter = null;
+  studioHrtfLeftBus = null;
+  studioHrtfRightBus = null;
+  studioHrtfLeftToLeft = null;
+  studioHrtfRightToLeft = null;
+  studioHrtfRightToRight = null;
+  studioHrtfLeftToRight = null;
   studioHrtfLeftPanner = null;
   studioHrtfRightPanner = null;
   studioHrtfSum = null;
@@ -1534,6 +1580,8 @@ function releaseGraph() {
   studioHrtfReflectionGainB = null;
   studioHrtfInputGain = null;
   studioInputBus = null;
+  virtualAmpGainNode = null;
+  loudnessCompressorNode = null;
   headphoneProcessorNode = null;
   nativeHeadphoneBassShelf = null;
   nativeHeadphoneSplitter = null;
@@ -1609,6 +1657,34 @@ function calculateStudioGain() {
   return { effectivePreampDb, autoHeadroomDb, referenceMatchDb: measuredMatch };
 }
 
+function cleanHdHighOutputActive() {
+  return (state.outputProfile === "headphones" || state.outputProfile === "speaker") && state.outputReserveDb >= 5.5;
+}
+
+function applyVirtualAmpSettings(now: number) {
+  if (!virtualAmpGainNode || !loudnessCompressorNode) return;
+  const active = !state.dspBypass && cleanHdHighOutputActive();
+  // Drive the native compressor instead of throwing a fixed gain directly at
+  // the limiter. This raises average level while preserving the musical EQ that
+  // follows inside WASM. Defaults on DynamicsCompressorNode are far too strong,
+  // so MVP uses a moderate soft-knee music curve.
+  const driveDb = active ? 6.5 : 0;
+  setAudioParam(virtualAmpGainNode.gain, dbToGain(driveDb), now, 0.035);
+  if (active) {
+    setAudioParam(loudnessCompressorNode.threshold, -10.5, now, 0.05);
+    setAudioParam(loudnessCompressorNode.knee, 12, now, 0.05);
+    setAudioParam(loudnessCompressorNode.ratio, 2.6, now, 0.05);
+    setAudioParam(loudnessCompressorNode.attack, 0.004, now, 0.05);
+    setAudioParam(loudnessCompressorNode.release, 0.115, now, 0.05);
+  } else {
+    setAudioParam(loudnessCompressorNode.threshold, 0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.knee, 0, now, 0.05);
+    setAudioParam(loudnessCompressorNode.ratio, 1, now, 0.05);
+    setAudioParam(loudnessCompressorNode.attack, 0.003, now, 0.05);
+    setAudioParam(loudnessCompressorNode.release, 0.12, now, 0.05);
+  }
+}
+
 function applyStudioProcessingSettings(now: number) {
   if (!audioContext || !studioProcessorNode) return;
   const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
@@ -1618,6 +1694,7 @@ function applyStudioProcessingSettings(now: number) {
   // Studio path also runs at unity into WASM. Listener volume is applied after
   // the WASM limiter, preventing volume-dependent distortion.
   if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
+  applyVirtualAmpSettings(now);
   if (postLimiterVolumeGain) setAudioParam(postLimiterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
   if (referenceRouteGain) {
     setAudioParam(referenceRouteGain.gain, pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0, now, 0.008);
@@ -1677,8 +1754,10 @@ function applyStudioProcessingSettings(now: number) {
     stereoIntegrityAmount: studioPersonality.stereoIntegrityAmount,
     // MVP_STUDIO_WASM_V2_PHASE3_LOUDNESS
     // MVP_STUDIO_WASM_V2_PHASE3_1_VOLUME_MATCH
-    normalizationEnabled: processed && state.normalizationEnabled,
-    normalizationTargetLufs: -10,
+    // Clean-HD Max/High Output automatically uses upward-only loudness
+    // equalization in WASM. User Volume Match remains optional elsewhere.
+    normalizationEnabled: processed && (state.normalizationEnabled || cleanHdHighOutputActive()),
+    normalizationTargetLufs: cleanHdHighOutputActive() ? -9 : -10,
     // MVP_STUDIO_WASM_V3_PHASE4_TRUE_PEAK_LIMITER
     // BS.1770-style 4x FIR true-peak detection drives the Studio limiter.
     limiterEnabled: processed && state.limiterEnabled,
@@ -1757,6 +1836,19 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioHrtfInputGain = context.createGain();
     studioHrtfInputGain.gain.value = 0;
     studioHrtfSplitter = context.createChannelSplitter(2);
+    // Spatial receives SIDE information only. Mono/center material (lead vocal,
+    // kick, snare, bass) therefore remains 100% on the dry Studio HD path and
+    // cannot be hollowed out by HRTF phase interaction.
+    studioHrtfLeftBus = context.createGain();
+    studioHrtfRightBus = context.createGain();
+    studioHrtfLeftToLeft = context.createGain();
+    studioHrtfRightToLeft = context.createGain();
+    studioHrtfRightToRight = context.createGain();
+    studioHrtfLeftToRight = context.createGain();
+    studioHrtfLeftToLeft.gain.value = 0.5;
+    studioHrtfRightToLeft.gain.value = -0.5;
+    studioHrtfRightToRight.gain.value = 0.5;
+    studioHrtfLeftToRight.gain.value = -0.5;
     studioHrtfLeftPanner = context.createPanner();
     studioHrtfRightPanner = context.createPanner();
     for (const panner of [studioHrtfLeftPanner, studioHrtfRightPanner]) {
@@ -1769,15 +1861,25 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioHrtfSum = context.createGain();
     studioHrtfSum.gain.value = 1;
     studioHrtfBassShelf = context.createBiquadFilter();
-    studioHrtfBassShelf.type = "lowshelf";
-    studioHrtfBassShelf.frequency.value = 92;
-    studioHrtfBassShelf.gain.value = 0;
+    // Bass remains 100% on the dry Studio HD path. HRTF carries spatial cues,
+    // not low-frequency energy that can smear or weaken punch.
+    studioHrtfBassShelf.type = "highpass";
+    studioHrtfBassShelf.frequency.value = 135;
+    studioHrtfBassShelf.Q.value = 0.60;
     studioHrtfReflectionDelayA = context.createDelay(0.06);
     studioHrtfReflectionDelayB = context.createDelay(0.06);
     studioHrtfReflectionGainA = context.createGain();
     studioHrtfReflectionGainB = context.createGain();
     studioHrtfReflectionGainA.gain.value = 0;
     studioHrtfReflectionGainB.gain.value = 0;
+    virtualAmpGainNode = context.createGain();
+    virtualAmpGainNode.gain.value = 1;
+    loudnessCompressorNode = context.createDynamicsCompressor();
+    loudnessCompressorNode.threshold.value = 0;
+    loudnessCompressorNode.knee.value = 0;
+    loudnessCompressorNode.ratio.value = 1;
+    loudnessCompressorNode.attack.value = 0.003;
+    loudnessCompressorNode.release.value = 0.12;
     mixBus = context.createGain();
     analyserNode = context.createAnalyser();
     analyserNode.fftSize = 4096;
@@ -1807,8 +1909,16 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     // let the browser HRTF renderer convolve each source with measured head-related
     // impulse responses. The resulting binaural stereo is then mastered/limited by WASM.
     masterVolumeGain.connect(studioHrtfSplitter);
-    studioHrtfSplitter.connect(studioHrtfLeftPanner, 0);
-    studioHrtfSplitter.connect(studioHrtfRightPanner, 1);
+    studioHrtfSplitter.connect(studioHrtfLeftToLeft, 0);
+    studioHrtfSplitter.connect(studioHrtfLeftToRight, 0);
+    studioHrtfSplitter.connect(studioHrtfRightToRight, 1);
+    studioHrtfSplitter.connect(studioHrtfRightToLeft, 1);
+    studioHrtfLeftToLeft.connect(studioHrtfLeftBus);
+    studioHrtfRightToLeft.connect(studioHrtfLeftBus);
+    studioHrtfRightToRight.connect(studioHrtfRightBus);
+    studioHrtfLeftToRight.connect(studioHrtfRightBus);
+    studioHrtfLeftBus.connect(studioHrtfLeftPanner);
+    studioHrtfRightBus.connect(studioHrtfRightPanner);
     studioHrtfLeftPanner.connect(studioHrtfSum);
     studioHrtfRightPanner.connect(studioHrtfSum);
     studioHrtfSum.connect(studioHrtfBassShelf);
@@ -1821,7 +1931,9 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioHrtfReflectionGainA.connect(studioInputBus);
     studioHrtfReflectionGainB.connect(studioInputBus);
 
-    studioInputBus.connect(studioProcessorNode);
+    studioInputBus.connect(virtualAmpGainNode);
+    virtualAmpGainNode.connect(loudnessCompressorNode);
+    loudnessCompressorNode.connect(studioProcessorNode);
     studioProcessorNode.connect(standardRouteGain);
     standardRouteGain.connect(mixBus);
     mixBus.connect(analyserNode);
@@ -2020,6 +2132,14 @@ async function connectMusicGraph() {
       standardRouteGain.gain.value = 0;
       headphoneRouteGain = context.createGain();
       headphoneRouteGain.gain.value = 0;
+      virtualAmpGainNode = context.createGain();
+      virtualAmpGainNode.gain.value = 1;
+      loudnessCompressorNode = context.createDynamicsCompressor();
+      loudnessCompressorNode.threshold.value = 0;
+      loudnessCompressorNode.knee.value = 0;
+      loudnessCompressorNode.ratio.value = 1;
+      loudnessCompressorNode.attack.value = 0.003;
+      loudnessCompressorNode.release.value = 0.12;
       mixBus = context.createGain();
       makeupGain = context.createGain();
       analyserNode = context.createAnalyser();
@@ -2102,12 +2222,14 @@ async function connectMusicGraph() {
       masterVolumeGain.connect(referenceRouteGain);
       referenceRouteGain.connect(mixBus);
 
+      masterVolumeGain.connect(virtualAmpGainNode);
+      virtualAmpGainNode.connect(loudnessCompressorNode);
       if (loudnessNormalizerNode) {
-        masterVolumeGain.connect(loudnessNormalizerNode, 0, 0);
+        loudnessCompressorNode.connect(loudnessNormalizerNode, 0, 0);
         mediaSource.connect(loudnessNormalizerNode, 0, 1);
         loudnessNormalizerNode.connect(preampGain);
       } else {
-        masterVolumeGain.connect(preampGain);
+        loudnessCompressorNode.connect(preampGain);
       }
       let processedTail: AudioNode = preampGain;
       if (transientProcessorNode) {
@@ -2216,6 +2338,25 @@ function startLevelMeter() {
       const pureReference = state.outputProfile === "reference";
       const abBypass = !pureReference && state.dspBypass;
       const stateVerified = runtime.ready && runtime.requestedRevision <= runtime.appliedRevision;
+      // If a control change (EQ/preset/effect) has been requested but the AudioWorklet
+      // has not acknowledged it after a real settling window, rebuild the graph instead
+      // of leaving a button/slider that only *looks* active. Normal revisions settle in
+      // milliseconds; this watchdog only trips on a genuinely stale processor.
+      const revisionStale =
+        runtime.ready &&
+        !stateVerified &&
+        runtime.lastRequestedAt > 0 &&
+        Date.now() - runtime.lastRequestedAt > 1600;
+      if (revisionStale) {
+        const now = Date.now();
+        if (!studioRecoveryInFlight && now - lastStudioRecoveryAt > 4000) {
+          studioRecoveryInFlight = true;
+          lastStudioRecoveryAt = now;
+          void rebuildMusicAudioEngine()
+            .catch(() => emit({ dspStatus: "unavailable" }))
+            .finally(() => { studioRecoveryInFlight = false; });
+        }
+      }
       const verifiedStatus: MusicDspStatus = pureReference || abBypass
         ? "bypassed"
         : stateVerified
@@ -2223,7 +2364,10 @@ function startLevelMeter() {
           : "recovering";
       setDspTelemetry(verifiedStatus, state.effectivePreampDb, state.autoHeadroomDb);
       const telemetry = getMvpStudioTelemetry();
-      const loudnessActive = state.normalizationEnabled && state.outputProfile !== "reference" && !state.dspBypass;
+      const loudnessActive =
+        (state.normalizationEnabled || cleanHdHighOutputActive()) &&
+        state.outputProfile !== "reference" &&
+        !state.dspBypass;
       const gainDb = loudnessActive && Number.isFinite(telemetry.loudnessGainDb)
         ? Math.round(telemetry.loudnessGainDb * 10) / 10
         : 0;
@@ -3270,6 +3414,10 @@ export function setMusicEqBand(index: number, gainDb: number) {
   savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
   emit({ eqGains: gains, eqPreset: "custom", dspVerificationMode: "off" });
   applyProcessingSettings();
+  // R71 reliability: re-apply once after the live Worklet state settles. This is
+  // cheap, and prevents a rapid mobile slider gesture from leaving the UI one
+  // revision ahead of the actual WASM state.
+  scheduleProcessingSettle();
 }
 
 export function setMusicPreamp(preampDb: number) {
@@ -3767,6 +3915,40 @@ function migrateCleanHdR70() {
 // R70 migration runs only after all state/profile helpers exist.
 migrateCleanHdR70();
 
+const MAX_HD_R71_KEY = "mvp_music_max_hd_r71_v1";
+
+function migrateMaxHdR71() {
+  if (readStored(MAX_HD_R71_KEY) === "1") return;
+
+  // One-time clean start for the simplified profiles. Preserve the user's music
+  // EQ/preset and headphone immersion choice, remove stale hidden processors,
+  // and make High/Max Output the default as requested. No blanket negative trim.
+  (["headphones", "speaker"] as const).forEach((profile) => {
+    const stored = readOutputProfileSnapshot(profile);
+    const source = state.outputProfile === profile ? currentOutputProfileSnapshot() : stored;
+    if (!source) return;
+    const clean = cleanR70SnapshotPreservingMusic(profile, source);
+    clean.outputReserveDb = 8.0;
+    clean.autoMakeupEnabled = false;
+    clean.normalizationEnabled = false; // High Output enables upward-only matching internally.
+    clean.limiterEnabled = true;
+    writeOutputProfileSnapshot(profile, clean);
+    if (state.outputProfile === profile) {
+      persistSnapshotToActiveStorage(clean);
+      state = {
+        ...state,
+        ...clean,
+        eqGains: [...clean.eqGains],
+        parametricBands: clean.parametricBands.map((band) => ({ ...band })),
+      };
+    }
+  });
+
+  savePlayerSetting(MAX_HD_R71_KEY, "1");
+}
+
+migrateMaxHdR71();
+
 function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.eqEnabled, String(snapshot.eqEnabled));
   savePlayerSetting(STORAGE_KEYS.eqPreset, snapshot.eqPreset);
@@ -3845,7 +4027,7 @@ export function setMusicHeadphoneHighOutput(enabled: boolean) {
   // Requested drive is handled by the clean-drive stage immediately before the
   // true-peak limiter. The DSP may use less on already-hot masters rather than
   // turning extra gain into distortion.
-  next.outputReserveDb = enabled ? 6.0 : 0;
+  next.outputReserveDb = enabled ? 8.0 : 0;
   next.autoMakeupEnabled = false;
   next.limiterEnabled = true;
   applyOutputProfileSnapshot("headphones", next);
@@ -3870,7 +4052,7 @@ export function applyMusicSpeakerHdSound() {
 export function setMusicSpeakerMaxOutput(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
-  next.outputReserveDb = enabled ? 6.0 : 0;
+  next.outputReserveDb = enabled ? 8.0 : 0;
   next.autoMakeupEnabled = false;
   next.limiterEnabled = true;
   applyOutputProfileSnapshot("speaker", next);
@@ -3890,11 +4072,91 @@ export function setMusicSpeakerClear(enabled: boolean) {
 export function setMusicSpeakerPunch(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
+  // Punch is a transient/impact control. Neural Bass owns bass synthesis so the
+  // two buttons can be combined without overwriting each other.
+  next.dynamicsRestoreEnabled = enabled;
+  next.dynamicsRestoreAmount = enabled ? 72 : 0;
+  applyOutputProfileSnapshot("speaker", next);
+}
+
+export function setMusicSpeakerWide(enabled: boolean) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  // Universal speaker WIDE is intentionally geometry-agnostic Mid/Side width,
+  // not crosstalk cancellation. True CTC requires known driver/listener geometry.
+  next.stereoFieldEnabled = enabled;
+  next.stereoUserWidth = enabled ? 128 : 100;
+  next.stereoCenterFocus = 100;
+  next.bassMonoHz = enabled ? 105 : 90;
+  applyOutputProfileSnapshot("speaker", next);
+}
+
+export type MusicAnalogMode = "off" | "studio" | "warm";
+
+function applyAnalogModeToSnapshot(next: OutputProfileSnapshot, mode: MusicAnalogMode) {
+  if (mode === "off") {
+    next.exciterEnabled = false;
+    next.exciterAmount = 0;
+    next.saturationLow = 0;
+    next.saturationMid = 0;
+    next.saturationHigh = 0;
+    return;
+  }
+  next.exciterEnabled = true;
+  if (mode === "studio") {
+    next.exciterAmount = 8;
+    next.saturationLow = 2;
+    next.saturationMid = 4;
+    next.saturationHigh = 3;
+  } else {
+    next.exciterAmount = 12;
+    next.saturationLow = 5;
+    next.saturationMid = 8;
+    next.saturationHigh = 5;
+  }
+}
+
+export function setMusicHeadphoneNeuralBass(enabled: boolean) {
+  if (state.outputProfile !== "headphones") return;
+  const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
-  next.bassSubDb = enabled ? 1.25 : 0;
-  next.bassPunchDb = enabled ? 2.6 : 0;
-  next.bassBodyDb = enabled ? 1.1 : 0;
-  next.bassTightness = 72;
+  next.bassSubDb = enabled ? 2.6 : 0;
+  next.bassPunchDb = enabled ? 1.1 : 0;
+  next.bassBodyDb = enabled ? 0.5 : 0;
+  next.bassTightness = enabled ? 76 : 55;
+  applyOutputProfileSnapshot("headphones", next);
+}
+
+export function setMusicSpeakerNeuralBass(enabled: boolean) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  next.bassEngineEnabled = enabled;
+  next.bassSubDb = enabled ? 2.8 : 0;
+  next.bassPunchDb = enabled ? 1.3 : 0;
+  next.bassBodyDb = enabled ? 0.6 : 0;
+  next.bassTightness = enabled ? 78 : 55;
+  applyOutputProfileSnapshot("speaker", next);
+}
+
+export function setMusicHeadphoneImpact(enabled: boolean) {
+  if (state.outputProfile !== "headphones") return;
+  const next = currentOutputProfileSnapshot();
+  next.dynamicsRestoreEnabled = enabled;
+  next.dynamicsRestoreAmount = enabled ? 70 : 0;
+  applyOutputProfileSnapshot("headphones", next);
+}
+
+export function setMusicHeadphoneAnalog(mode: MusicAnalogMode) {
+  if (state.outputProfile !== "headphones") return;
+  const next = currentOutputProfileSnapshot();
+  applyAnalogModeToSnapshot(next, mode);
+  applyOutputProfileSnapshot("headphones", next);
+}
+
+export function setMusicSpeakerAnalog(mode: MusicAnalogMode) {
+  if (state.outputProfile !== "speaker") return;
+  const next = currentOutputProfileSnapshot();
+  applyAnalogModeToSnapshot(next, mode);
   applyOutputProfileSnapshot("speaker", next);
 }
 

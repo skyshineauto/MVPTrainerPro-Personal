@@ -55,6 +55,12 @@ import {
   setMusicSpeakerMaxOutput,
   setMusicSpeakerClear,
   setMusicSpeakerPunch,
+  setMusicSpeakerWide,
+  setMusicHeadphoneNeuralBass,
+  setMusicSpeakerNeuralBass,
+  setMusicHeadphoneImpact,
+  setMusicHeadphoneAnalog,
+  setMusicSpeakerAnalog,
   setMusicHeadphoneWidth,
   setMusicOutputReserve,
   setMusicAutoMakeupEnabled,
@@ -108,6 +114,7 @@ import {
   type MusicOutputProfile,
   type MusicDspEngineMode,
   type MusicTransitionMode,
+  type MusicAnalogMode,
 } from "../../lib/musicPlayer";
 import { discoverMoreFromTrack, requestMusicRediscoverFocus } from "../../lib/musicDiscovery";
 import {
@@ -1954,6 +1961,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     player.toneEngineEnabled &&
     player.clarityDb >= 1.5 &&
     player.airDb >= 2;
+  const headphoneNeuralBassActive =
+    player.outputProfile === "headphones" && player.bassEngineEnabled;
+  const headphoneImpactActive =
+    player.outputProfile === "headphones" &&
+    player.dynamicsRestoreEnabled &&
+    player.dynamicsRestoreAmount >= 50;
+  const headphoneAnalogMode: MusicAnalogMode =
+    player.outputProfile === "headphones" && player.exciterEnabled
+      ? player.saturationMid >= 7 ? "warm" : "studio"
+      : "off";
 
   const speakerHdActive = player.outputProfile === "speaker";
   const speakerMaxOutputActive =
@@ -1965,8 +1982,18 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     player.airDb >= 1.7;
   const speakerPunchActive =
     player.outputProfile === "speaker" &&
-    player.bassEngineEnabled &&
-    player.bassPunchDb >= 2;
+    player.dynamicsRestoreEnabled &&
+    player.dynamicsRestoreAmount >= 50;
+  const speakerNeuralBassActive =
+    player.outputProfile === "speaker" && player.bassEngineEnabled;
+  const speakerWideActive =
+    player.outputProfile === "speaker" &&
+    player.stereoFieldEnabled &&
+    player.stereoUserWidth >= 115;
+  const speakerAnalogMode: MusicAnalogMode =
+    player.outputProfile === "speaker" && player.exciterEnabled
+      ? player.saturationMid >= 7 ? "warm" : "studio"
+      : "off";
 
 
   return (
@@ -2222,7 +2249,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 { key: "space", label: "Space", hint: "Width • Depth", icon: "headphones" },
                 { key: "smart", label: "Smart", hint: "Adaptive • Auto", icon: "discover" },
                 { key: "meter", label: "Meter", hint: "Live Telemetry", icon: "match" },
-              ] as const).map((tab) => (
+              ] as const)
+                .filter((tab) =>
+                  player.outputProfile === "headphones" || player.outputProfile === "speaker"
+                    ? tab.key === "output" || tab.key === "eq"
+                    : true,
+                )
+                .map((tab) => (
                 <button
                   key={tab.key}
                   type="button"
@@ -2336,6 +2369,56 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
                 <button
                   type="button"
+                  data-control="bass"
+                  className={headphoneNeuralBassActive ? "is-active" : ""}
+                  aria-pressed={headphoneNeuralBassActive}
+                  onClick={() => void runDspMutation(() => setMusicHeadphoneNeuralBass(!headphoneNeuralBassActive))}
+                >
+                  <i><PlayerIcon name="harder" /></i>
+                  <b>NEURAL BASS</b>
+                  <small>Deep perceived bass • controlled harmonics</small>
+                  <em>{headphoneNeuralBassActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="impact"
+                  className={headphoneImpactActive ? "is-active" : ""}
+                  aria-pressed={headphoneImpactActive}
+                  onClick={() => void runDspMutation(() => setMusicHeadphoneImpact(!headphoneImpactActive))}
+                >
+                  <i><PlayerIcon name="faster" /></i>
+                  <b>IMPACT</b>
+                  <small>Kick • snare • attack transients</small>
+                  <em>{headphoneImpactActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="analog"
+                  className={headphoneAnalogMode !== "off" ? "is-active" : ""}
+                  aria-pressed={headphoneAnalogMode !== "off"}
+                  onClick={() => void runDspMutation(() => setMusicHeadphoneAnalog(headphoneAnalogMode === "off" ? "studio" : headphoneAnalogMode === "studio" ? "warm" : "off"))}
+                >
+                  <i><PlayerIcon name="melodic" /></i>
+                  <b>ANALOG</b>
+                  <small>Off • Studio • Warm harmonic character</small>
+                  <em>{headphoneAnalogMode.toUpperCase()}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="eq"
+                  onClick={() => setDspTab("eq")}
+                >
+                  <i><PlayerIcon name="equalizer" /></i>
+                  <b>31-BAND EQ</b>
+                  <small>Manual boost/cut • ±12 dB per band</small>
+                  <em>OPEN</em>
+                </button>
+
+                <button
+                  type="button"
                   data-control="reset"
                   className="tr-headphoneResetButton"
                   onClick={() => void runDspMutation(() => applyMusicHeadphoneStudioHd())}
@@ -2368,6 +2451,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                     ["wide", "WIDE"],
                     ["spatial", "SPATIAL"],
                     ["deep", "DEEP"],
+                    ["stage", "3D"],
                   ] as Array<[MusicHeadphoneMode, string]>).map(([value, label]) => (
                     <button
                       key={value}
@@ -2446,6 +2530,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
                 <button
                   type="button"
+                  data-control="bass"
+                  className={speakerNeuralBassActive ? "is-active" : ""}
+                  aria-pressed={speakerNeuralBassActive}
+                  onClick={() => void runDspMutation(() => setMusicSpeakerNeuralBass(!speakerNeuralBassActive))}
+                >
+                  <i><PlayerIcon name="harder" /></i>
+                  <b>NEURAL BASS</b>
+                  <small>Perceived low-end depth without blanket gain</small>
+                  <em>{speakerNeuralBassActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
                   data-control="punch"
                   className={speakerPunchActive ? "is-active" : ""}
                   aria-pressed={speakerPunchActive}
@@ -2455,6 +2552,43 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   <b>PUNCH</b>
                   <small>Tight bass • kick impact</small>
                   <em>{speakerPunchActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="wide"
+                  className={speakerWideActive ? "is-active" : ""}
+                  aria-pressed={speakerWideActive}
+                  onClick={() => void runDspMutation(() => setMusicSpeakerWide(!speakerWideActive))}
+                >
+                  <i><PlayerIcon name="speaker" /></i>
+                  <b>WIDE</b>
+                  <small>Safe stereo expansion • bass stays centered</small>
+                  <em>{speakerWideActive ? "ON" : "OFF"}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="analog"
+                  className={speakerAnalogMode !== "off" ? "is-active" : ""}
+                  aria-pressed={speakerAnalogMode !== "off"}
+                  onClick={() => void runDspMutation(() => setMusicSpeakerAnalog(speakerAnalogMode === "off" ? "studio" : speakerAnalogMode === "studio" ? "warm" : "off"))}
+                >
+                  <i><PlayerIcon name="melodic" /></i>
+                  <b>ANALOG</b>
+                  <small>Off • Studio • Warm harmonic character</small>
+                  <em>{speakerAnalogMode.toUpperCase()}</em>
+                </button>
+
+                <button
+                  type="button"
+                  data-control="eq"
+                  onClick={() => setDspTab("eq")}
+                >
+                  <i><PlayerIcon name="equalizer" /></i>
+                  <b>31-BAND EQ</b>
+                  <small>Manual boost/cut • ±12 dB per band</small>
+                  <em>OPEN</em>
                 </button>
 
                 <button
@@ -12536,6 +12670,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphoneQuickGrid [data-control="clear"] i{color:#53ead5}
         .tr-headphoneQuickGrid [data-control="reset"] i{color:#edf7fb}
         .tr-headphoneQuickGrid [data-control="punch"] i{color:#8ef08e}
+        .tr-headphoneQuickGrid [data-control="bass"] i{color:#8ee8ff}
+        .tr-headphoneQuickGrid [data-control="impact"] i{color:#ffbf62}
+        .tr-headphoneQuickGrid [data-control="analog"] i{color:#d89cff}
+        .tr-headphoneQuickGrid [data-control="wide"] i{color:#a986ff}
+        .tr-headphoneQuickGrid [data-control="eq"] i{color:#43dcff}
         .tr-headphoneQuickGrid>button.is-active{
           border-color:rgba(76,218,253,.62);
           background:linear-gradient(180deg,rgba(17,91,112,.96),rgba(5,43,56,.98));
@@ -12545,6 +12684,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphoneQuickGrid>button[data-control="output"].is-active{border-color:rgba(255,174,61,.70);box-shadow:0 0 20px rgba(255,162,42,.18),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="clear"].is-active{border-color:rgba(83,234,213,.68);box-shadow:0 0 20px rgba(83,234,213,.16),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphoneQuickGrid>button[data-control="punch"].is-active{border-color:rgba(113,232,136,.68);box-shadow:0 0 20px rgba(92,221,119,.15),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="bass"].is-active{border-color:rgba(92,220,255,.68);box-shadow:0 0 20px rgba(72,210,255,.15),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="impact"].is-active{border-color:rgba(255,190,98,.72);box-shadow:0 0 20px rgba(255,174,65,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="analog"].is-active{border-color:rgba(216,156,255,.72);box-shadow:0 0 20px rgba(190,120,255,.16),inset 0 1px rgba(255,255,255,.10)}
+        .tr-headphoneQuickGrid>button[data-control="wide"].is-active{border-color:rgba(169,134,255,.72);box-shadow:0 0 20px rgba(147,105,255,.16),inset 0 1px rgba(255,255,255,.10)}
         .tr-headphonePresetSimple{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(180px,240px);align-items:center;gap:12px;padding:12px 13px;border:1px solid rgba(111,198,224,.30);border-radius:12px;background:linear-gradient(180deg,rgba(24,51,61,.88),rgba(7,24,31,.94))}
         .tr-headphonePresetSimple>span{font-size:8px;font-weight:1000;letter-spacing:.11em;color:#79ddf7}
         .tr-headphonePresetSimple>div{display:grid;gap:2px;min-width:0}
@@ -12554,23 +12697,23 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-headphonePresetSimple select:focus{border-color:#55dcff;box-shadow:0 0 0 2px rgba(85,220,255,.12)}
         .tr-headphoneImmersionSimple{display:grid;grid-template-columns:auto minmax(250px,1fr) auto;align-items:center;gap:10px;padding-top:11px;border-top:1px solid rgba(127,194,215,.20)}
         .tr-headphoneImmersionSimple>span{font-size:8px;font-weight:1000;letter-spacing:.10em;color:#d0e1e7}
-        .tr-headphoneImmersionSimple>div{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+        .tr-headphoneImmersionSimple>div{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
         .tr-headphoneImmersionSimple button{height:38px;border:1px solid rgba(136,210,234,.30);border-radius:9px;background:rgba(8,28,36,.94);color:#c1d4db;font-size:8px;font-weight:1000;letter-spacing:.08em;cursor:pointer}
         .tr-headphoneImmersionSimple button.is-active{border-color:rgba(184,140,255,.72);background:linear-gradient(180deg,rgba(73,44,108,.92),rgba(31,18,51,.96));color:#f0e4ff;box-shadow:0 0 18px rgba(184,140,255,.18)}
         .tr-headphoneImmersionSimple>small{font-size:7px;font-weight:900;letter-spacing:.06em;color:#a9bdc5;text-align:right}
 
-        /* Headphones and Bluetooth Speaker intentionally expose only their
-           simple premium controls. Car / Hi-Fi retains the full advanced workspace. */
-        .tr-dspControlCenter[data-output-profile="headphones"] .tr-mobileDspWorkspace .tr-dspTabs,
-        .tr-dspControlCenter[data-output-profile="speaker"] .tr-mobileDspWorkspace .tr-dspTabs,
+        /* Headphones and Bluetooth Speaker keep the easy controls but also expose
+           the real 31-band EQ. Advanced engineering pages remain Car / Hi-Fi only. */
+        .tr-dspControlCenter[data-output-profile="headphones"] .tr-dspTabs,
+        .tr-dspControlCenter[data-output-profile="speaker"] .tr-dspTabs{
+          grid-template-columns:repeat(2,minmax(0,1fr))!important;
+        }
         .tr-dspControlCenter[data-output-profile="headphones"] .tr-preampTrim,
         .tr-dspControlCenter[data-output-profile="speaker"] .tr-preampTrim,
         .tr-dspControlCenter[data-output-profile="headphones"] .tr-v10OutputReserve,
         .tr-dspControlCenter[data-output-profile="speaker"] .tr-v10OutputReserve,
         .tr-dspControlCenter[data-output-profile="headphones"] .tr-dspProofPanel,
         .tr-dspControlCenter[data-output-profile="speaker"] .tr-dspProofPanel,
-        .tr-dspControlCenter[data-output-profile="headphones"] [data-mobile-dsp-section="eq"],
-        .tr-dspControlCenter[data-output-profile="speaker"] [data-mobile-dsp-section="eq"],
         .tr-dspControlCenter[data-output-profile="headphones"] [data-mobile-dsp-section="tone"],
         .tr-dspControlCenter[data-output-profile="speaker"] [data-mobile-dsp-section="tone"],
         .tr-dspControlCenter[data-output-profile="headphones"] [data-mobile-dsp-section="dynamics"],

@@ -408,6 +408,8 @@ const float kTruePeakCoeffs[kTruePeakTapsPerPhase][kTruePeakPhases] = {
 };
 float truePeakHistoryL[kTruePeakTapsPerPhase] = {};
 float truePeakHistoryR[kTruePeakTapsPerPhase] = {};
+float truePeakOutputHistoryL[kTruePeakTapsPerPhase] = {};
+float truePeakOutputHistoryR[kTruePeakTapsPerPhase] = {};
 float meterTruePeakLinear = 0.0f;
 
 float spatialDelayL[kSpatialDelayMax];
@@ -457,6 +459,12 @@ Biquad bassSubFilter[2];
 Biquad bassPunchFilter[2];
 Biquad bassBodyFilter[2];
 Biquad bassTightFilter[2];
+// R71 psychoacoustic bass: derive audible upper harmonics from low bass rather
+// than forcing smaller drivers to reproduce an even lower octave. The dry bass
+// remains untouched; this band-limited harmonic layer only adds perceived depth.
+Biquad neuralBassLowpass[2];
+Biquad neuralBassHarmonicHighpass[2];
+Biquad neuralBassHarmonicLowpass[2];
 
 int toneEngineEnabled = 0;
 float presenceDb = 0.0f;
@@ -645,6 +653,8 @@ void resetBuffers() {
   for (int tap = 0; tap < kTruePeakTapsPerPhase; ++tap) {
     truePeakHistoryL[tap] = 0.0f;
     truePeakHistoryR[tap] = 0.0f;
+    truePeakOutputHistoryL[tap] = 0.0f;
+    truePeakOutputHistoryR[tap] = 0.0f;
   }
   crossfeedStateL = crossfeedStateR = 0.0;
   headphoneOutputDriveGain = 1.0f;
@@ -927,6 +937,9 @@ void configureAdvancedTone() {
     bassBodyFilter[ch].setPeaking(sampleRateHz, 145.0, 0.72, bassEngineEnabled ? bassBodyDb : 0.0f);
     const float tightHz = 18.0f + clampf(bassTightness, 0.0f, 1.0f) * 18.0f;
     bassTightFilter[ch].setHighpass(sampleRateHz, tightHz, 0.72);
+    neuralBassLowpass[ch].setLowpass(sampleRateHz, 118.0, 0.72);
+    neuralBassHarmonicHighpass[ch].setHighpass(sampleRateHz, 92.0, 0.72);
+    neuralBassHarmonicLowpass[ch].setLowpass(sampleRateHz, 360.0, 0.72);
     presenceFilter[ch].setPeaking(sampleRateHz, 3200.0, 0.78, toneEngineEnabled ? presenceDb : 0.0f);
     clarityFilter[ch].setPeaking(sampleRateHz, 6800.0, 0.72, toneEngineEnabled ? clarityDb : 0.0f);
     airFilter[ch].setHighShelf(sampleRateHz, 11500.0, toneEngineEnabled ? airDb : 0.0f);
@@ -963,6 +976,8 @@ void processParametric(float &left, float &right) {
 
 void processBassEngine(float &left, float &right) {
   if (!bassEngineEnabled) { meterBassActivityDb = 0.0f; return; }
+
+  // Keep the real low-frequency content and the user's chosen bass curve.
   left = bassSubFilter[0].process(left);
   right = bassSubFilter[1].process(right);
   left = bassPunchFilter[0].process(left);
@@ -971,6 +986,30 @@ void processBassEngine(float &left, float &right) {
   right = bassBodyFilter[1].process(right);
   left = bassTightFilter[0].process(left);
   right = bassTightFilter[1].process(right);
+
+  // R71 Neural Bass for the simplified Headphones / Bluetooth Speaker paths.
+  // A missing-fundamental style harmonic layer is safer and more audible on
+  // small drivers than synthesizing an octave *below* the existing bass. It is
+  // deliberately modest, stereo-linked in amount, and band-limited to keep the
+  // midrange clean. Car / Hi-Fi keeps its existing bass-engine behavior.
+  if (outputProfile == 1 || outputProfile == 2) {
+    const float strength = clampf((bassSubDb + 0.55f * bassPunchDb) / 6.0f, 0.0f, 1.0f);
+    if (strength > 0.001f) {
+      const float lowL = neuralBassLowpass[0].process(left);
+      const float lowR = neuralBassLowpass[1].process(right);
+      const float drive = 0.22f + strength * 0.34f;
+      float harmonicL = softSaturate(lowL, drive) - lowL;
+      float harmonicR = softSaturate(lowR, drive) - lowR;
+      harmonicL = neuralBassHarmonicHighpass[0].process(harmonicL);
+      harmonicR = neuralBassHarmonicHighpass[1].process(harmonicR);
+      harmonicL = neuralBassHarmonicLowpass[0].process(harmonicL);
+      harmonicR = neuralBassHarmonicLowpass[1].process(harmonicR);
+      const float mix = 0.32f * strength;
+      left += harmonicL * mix;
+      right += harmonicR * mix;
+    }
+  }
+
   meterBassActivityDb = (absf(bassSubDb) + absf(bassPunchDb) + absf(bassBodyDb)) / 3.0f;
 }
 
@@ -1394,9 +1433,12 @@ void processHeadphone(float &left, float &right) {
   const float compensation = 1.0f;
   widenedL *= compensation;
   widenedR *= compensation;
-  const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 1.0f;
-  left = dryL * (1.0f - wet) + widenedL * wet;
-  right = dryR * (1.0f - wet) + widenedR * wet;
+  // R71 WIDE never replaces the clean Studio HD foundation. In the normal
+  // headphone path blend the frequency-dependent widener in parallel so bass,
+  // center image, transients and overall tonal balance remain anchored to dry.
+  const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 0.62f;
+  left = dryL + (widenedL - dryL) * wet;
+  right = dryR + (widenedR - dryR) * wet;
 }
 
 void processHeadphoneOutputDrive(float &left, float &right) {
@@ -1523,15 +1565,14 @@ void updateLoudnessTargetFromBlock() {
     loudnessProgramLufs = energyToLufs(loudnessProgramEnergySum / loudnessProgramBlockCount);
   }
 
-  // Volume Match is an optional utility, not an always-on mastering stage.
-  // Wait for about two seconds of accepted program so quiet intros do not cause
-  // a sudden correction. Tracks already within +/-1 LU of the target are left
-  // completely untouched, and total correction is capped to +/-3 dB.
+  // R71 Clean-HD loudness equalization is upward-biased. Quiet masters can be
+  // lifted, while already-loud masters are never blanket-attenuated. Peak safety
+  // remains the responsibility of the downstream output-drive + true-peak limiter.
   float desiredDb = 0.0f;
   if (loudnessEnabled && loudnessProgramBlockCount >= 20 && loudnessProgramLufs > -60.0f) {
     const float differenceDb = loudnessTargetLufs - loudnessProgramLufs;
-    if (absf(differenceDb) > 1.0f) {
-      desiredDb = clampf(differenceDb, -3.0f, 3.0f);
+    if (differenceDb > 0.6f) {
+      desiredDb = clampf(differenceDb, 0.0f, 4.5f);
     }
   }
   loudnessTargetGain = static_cast<float>(dbToGain(desiredDb));
@@ -1596,7 +1637,6 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
   const float peakL = updateTruePeakDetector(truePeakHistoryL, inLeft);
   const float peakR = updateTruePeakDetector(truePeakHistoryR, inRight);
   const float detector = peakL > peakR ? peakL : peakR;
-  if (detector > meterTruePeakLinear) meterTruePeakLinear = detector;
 
   limiterDelayL[limiterWrite] = inLeft;
   limiterDelayR[limiterWrite] = inRight;
@@ -1622,6 +1662,14 @@ void processLimiter(float inLeft, float inRight, float &outLeft, float &outRight
     outLeft = clampf(outLeft, -limiterCeilingGain, limiterCeilingGain);
     outRight = clampf(outRight, -limiterCeilingGain, limiterCeilingGain);
   }
+
+  // Meter the FINAL limited signal, not the signal entering the limiter. Earlier
+  // builds labeled the pre-limiter detector as dBTP, which made healthy limiting
+  // look like clipped output in the UI and hid whether the final device feed was safe.
+  const float outPeakL = updateTruePeakDetector(truePeakOutputHistoryL, outLeft);
+  const float outPeakR = updateTruePeakDetector(truePeakOutputHistoryR, outRight);
+  const float outDetector = outPeakL > outPeakR ? outPeakL : outPeakR;
+  if (outDetector > meterTruePeakLinear) meterTruePeakLinear = outDetector;
 }
 } // namespace
 

@@ -107,7 +107,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.0.0-r70-clean-hd";
+const MVP_STUDIO_ASSET_VERSION = "5.1.0-r71-max-hd";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
