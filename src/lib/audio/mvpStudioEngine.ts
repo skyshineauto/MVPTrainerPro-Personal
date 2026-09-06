@@ -109,7 +109,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "5.7.0-r77e-clean-source-headroom";
+const MVP_STUDIO_ASSET_VERSION = "5.8.0-r77f-max-output-headroom-lock";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {

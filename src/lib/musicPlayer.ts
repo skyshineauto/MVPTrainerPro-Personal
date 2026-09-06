@@ -1839,9 +1839,11 @@ function applyStudioProcessingSettings(now: number) {
     headphoneCrossfeed: headphoneEnabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0,
     headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
     headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
-    // Recover only the transparent safety headroom first. High/Max Output adds
-    // extra allowance on top, but the WASM true-peak controller may use less.
-    outputReserveDb: processed ? state.outputReserveDb + autoHeadroomDb : 0,
+    // R77F: never automatically recover the baseline safety headroom. That margin
+    // is what keeps a hot mastered source out of Peak Guard with Max/High Output OFF.
+    // Max/High Output requests only EXTRA clean gain and the WASM controller may
+    // refuse any of it when the finished true peak has no safe room.
+    outputReserveDb: processed ? state.outputReserveDb : 0,
     autoMakeupEnabled: processed && state.autoMakeupEnabled,
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),

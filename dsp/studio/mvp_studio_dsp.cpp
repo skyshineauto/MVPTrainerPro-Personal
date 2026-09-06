@@ -1221,12 +1221,11 @@ void processOutputGain(float &left, float &right) {
     meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
       ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-    // Leave a real margin between the clean-output target and the simplified-profile
-    // Peak Guard detector. Both use the same oversampled detector family.
-    // R77E: run the adaptive clean-output stage close to full scale without
-    // touching Peak Guard. The remaining 1.00 dB is reserved for detector error
-    // and unexpected intersample movement.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.40f));
+    // R77F: Max/High Output is allowed to use only proven clean room. Keep a
+    // generous gap below Peak Guard so a kick/snare/intersample transient cannot
+    // turn optional loudness into normal limiter activity. Hot masters may receive
+    // little or zero extra gain; quiet material can still receive the full request.
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-2.20f));
     float cleanCap = requestedDrive;
     if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
     cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
@@ -1246,13 +1245,12 @@ void processOutputGain(float &left, float &right) {
       if (driveTarget < 1.0f) driveTarget = 1.0f;
     }
 
-    // R77E: never step gain sample-to-sample. A 2 ms downward envelope is fast
-    // enough to relinquish optional makeup while avoiding the zipper/crunch that
-    // the instantaneous R77D drop could create. Upward recovery remains slow.
-    const float coeff = driveTarget < cleanOutputDriveGain
-      ? maxHdGainFallCoeff
-      : maxHdGainRiseCoeff;
-    cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * coeff;
+    // R77F: optional gain may rise slowly, but it must surrender immediately when
+    // a new true peak proves that the extra gain is no longer safe. This never
+    // attenuates the source below unity; it only removes optional Max/High makeup.
+    // With Max/High OFF requestedDrive is unity, so this stage is exactly neutral.
+    if (driveTarget < cleanOutputDriveGain) cleanOutputDriveGain = driveTarget;
+    else cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * maxHdGainRiseCoeff;
     cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {
