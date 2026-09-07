@@ -1,6 +1,9 @@
 import type { MusicMasterPrepProfile } from "./musicAudioIntelligence";
 
 export type MusicMasterPrepSink = (profile: MusicMasterPrepProfile | null) => void;
+export type MusicVenueDspSink = (profile: {
+  enabled: boolean; widthScale: number; reflectionMix: number; delayMsA: number; delayMsB: number; damping: number;
+} | null) => void;
 
 type VenueMode = "off" | "studio" | "small_club" | "concert_hall" | "arena" | "live_stage";
 type ProfileName = "headphones" | "speaker";
@@ -25,6 +28,7 @@ const DEFAULT_STATE: RuntimeState = {
 
 let installed = false;
 let sink: MusicMasterPrepSink | null = null;
+let venueSink: MusicVenueDspSink | null = null;
 let runtimeState = readState();
 let lastTrackId = "";
 let lastProfile = "";
@@ -289,7 +293,9 @@ async function applyAutoSound(player: any, intelligence: any) {
     if (allow("impactOrPunch")) music.setMusicHeadphoneImpact(Boolean(recommendation.impactOrPunch));
     if (allow("hdXpanderLevel")) music.setMusicHeadphoneHdXpander(Math.max(0, Math.min(3, Number(recommendation.hdXpanderLevel) || 0)));
     if (allow("analog")) music.setMusicHeadphoneAnalog(recommendation.analog || "off");
-    if (allow("highOutput")) music.setMusicHeadphoneHighOutput(Boolean(recommendation.highOutput));
+    // R78f maximum clean output: always request High Output. The unchanged r77i
+    // controller grants only real post-effect headroom. A manual OFF remains an override.
+    if (allow("highOutput")) music.setMusicHeadphoneHighOutput(true);
     if (runtimeState.venue === "off" && allow("wide")) music.setMusicHeadphoneMode(recommendation.wide ? "wide" : "off");
   } else {
     if (allow("clear")) music.setMusicSpeakerClear(Boolean(recommendation.clear));
@@ -297,11 +303,12 @@ async function applyAutoSound(player: any, intelligence: any) {
     if (allow("impactOrPunch")) music.setMusicSpeakerPunch(Boolean(recommendation.impactOrPunch));
     if (allow("hdXpanderLevel")) music.setMusicSpeakerHdXpander(Math.max(0, Math.min(3, Number(recommendation.hdXpanderLevel) || 0)));
     if (allow("analog")) music.setMusicSpeakerAnalog(recommendation.analog || "off");
-    if (allow("highOutput")) music.setMusicSpeakerMaxOutput(Boolean(recommendation.highOutput));
+    // R78f maximum clean output: always request Max Output. r77i refuses unsafe gain.
+    if (allow("highOutput")) music.setMusicSpeakerMaxOutput(true);
     if (runtimeState.venue === "off" && allow("wide")) music.setMusicSpeakerWide(Boolean(recommendation.wide));
   }
 
-  expected = { ...recommendation };
+  expected = { ...recommendation, highOutput: true };
   delete (expected as any).compatibilityNotes;
   if (runtimeState.venue !== "off") delete (expected as any).wide;
   graceUntil = Date.now() + 1800;
@@ -314,6 +321,7 @@ async function applyVenue(player: any) {
 
   if (runtimeState.venue === "off") {
     await restoreVenueBaseline(player, profile);
+    venueSink?.(null);
     venueExpected = null;
     return true;
   }
@@ -326,6 +334,22 @@ async function applyVenue(player: any) {
 
   const music: any = await import("./musicPlayer");
   const mode = runtimeState.venue;
+  const venueDsp = profile === "headphones"
+    ? {
+        studio:       { enabled: true, widthScale: 1.03, reflectionMix: 0.018, delayMsA: 6,  delayMsB: 11, damping: 0.56 },
+        small_club:   { enabled: true, widthScale: 1.07, reflectionMix: 0.050, delayMsA: 11, delayMsB: 18, damping: 0.50 },
+        concert_hall: { enabled: true, widthScale: 1.10, reflectionMix: 0.078, delayMsA: 21, delayMsB: 34, damping: 0.42 },
+        arena:        { enabled: true, widthScale: 1.13, reflectionMix: 0.105, delayMsA: 31, delayMsB: 49, damping: 0.36 },
+        live_stage:   { enabled: true, widthScale: 1.11, reflectionMix: 0.068, delayMsA: 15, delayMsB: 27, damping: 0.46 },
+      }
+    : {
+        studio:       { enabled: true, widthScale: 1.04, reflectionMix: 0.024, delayMsA: 6,  delayMsB: 11, damping: 0.58 },
+        small_club:   { enabled: true, widthScale: 1.09, reflectionMix: 0.068, delayMsA: 11, delayMsB: 18, damping: 0.52 },
+        concert_hall: { enabled: true, widthScale: 1.14, reflectionMix: 0.105, delayMsA: 21, delayMsB: 34, damping: 0.44 },
+        arena:        { enabled: true, widthScale: 1.19, reflectionMix: 0.145, delayMsA: 31, delayMsB: 49, damping: 0.38 },
+        live_stage:   { enabled: true, widthScale: 1.16, reflectionMix: 0.092, delayMsA: 15, delayMsB: 27, damping: 0.48 },
+      };
+  venueSink?.(venueDsp[mode as Exclude<VenueMode, "off">]);
   if (profile === "headphones") {
     const values: Record<Exclude<VenueMode, "off">, {
       headphoneMode: string;
@@ -359,11 +383,11 @@ async function applyVenue(player: any) {
     venueExpected = { headphoneMode: value.headphoneMode };
   } else {
     const values: Record<Exclude<VenueMode, "off">, { width: number; center: number; bassMonoHz: number }> = {
-      studio:       { width: 112, center: 102, bassMonoHz: 90 },
-      small_club:   { width: 120, center: 101, bassMonoHz: 100 },
-      concert_hall: { width: 132, center: 100, bassMonoHz: 105 },
-      arena:        { width: 148, center: 100, bassMonoHz: 110 },
-      live_stage:   { width: 138, center: 100, bassMonoHz: 105 },
+      studio:       { width: 110, center: 104, bassMonoHz: 90 },
+      small_club:   { width: 126, center: 102, bassMonoHz: 100 },
+      concert_hall: { width: 144, center: 99, bassMonoHz: 108 },
+      arena:        { width: 160, center: 96, bassMonoHz: 115 },
+      live_stage:   { width: 150, center: 98, bassMonoHz: 110 },
     };
     const value = values[mode as Exclude<VenueMode, "off">];
     music.setMusicStereoFieldEnabled(true);
@@ -603,8 +627,9 @@ function createUi() {
   });
 }
 
-export function installMusicAiAudioRuntime(masterPrepSink: MusicMasterPrepSink) {
+export function installMusicAiAudioRuntime(masterPrepSink: MusicMasterPrepSink, soundstageSink?: MusicVenueDspSink) {
   sink = masterPrepSink;
+  venueSink = soundstageSink || null;
   runtimeState = readState();
   if (installed || typeof window === "undefined" || typeof document === "undefined") return;
   installed = true;

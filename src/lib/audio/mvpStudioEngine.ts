@@ -100,6 +100,15 @@ export type MvpStudioState = {
   headphoneWet: number;
 };
 
+export type MvpStudioVenueProfile = {
+  enabled: boolean;
+  widthScale: number;
+  reflectionMix: number;
+  delayMsA: number;
+  delayMsB: number;
+  damping: number;
+};
+
 export type MvpStudioRuntimeInfo = {
   assetVersion: string;
   processorVersion: string;
@@ -112,7 +121,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.3.0-r78d-ai-audio-wasm-mount-fix";
+const MVP_STUDIO_ASSET_VERSION = "6.4.0-r78f-final-audio";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -154,6 +163,7 @@ let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
 let nextStateRevision = 0;
 let activeStudioNode: AudioWorkletNode | null = null;
 let activeMasterPrep: MusicMasterPrepProfile | null = null;
+let activeVenue: MvpStudioVenueProfile | null = null;
 let runtimeInstalled = false;
 let runtimeInfo: MvpStudioRuntimeInfo = {
   assetVersion: MVP_STUDIO_ASSET_VERSION,
@@ -238,10 +248,19 @@ export function setMvpStudioMasterPrep(profile: MusicMasterPrepProfile | null) {
   postMasterPrep(activeStudioNode);
 }
 
+function postVenue(node: AudioWorkletNode | null) {
+  node?.port.postMessage({ type: "venue", profile: activeVenue });
+}
+
+export function setMvpStudioVenue(profile: MvpStudioVenueProfile | null) {
+  activeVenue = profile && profile.enabled ? { ...profile } : null;
+  postVenue(activeStudioNode);
+}
+
 function ensureMusicAiAudioRuntime() {
   if (runtimeInstalled || typeof window === "undefined") return;
   runtimeInstalled = true;
-  installMusicAiAudioRuntime(setMvpStudioMasterPrep);
+  installMusicAiAudioRuntime(setMvpStudioMasterPrep, setMvpStudioVenue);
 }
 
 // R78d: mount AI AUDIO from the normal browser module lifecycle, not from
@@ -307,6 +326,7 @@ export async function createMvpStudioNode(context: AudioContext) {
       if (data.type === "ready") {
         runtimeInfo = { ...runtimeInfo, processorVersion: String(data.version || "studio-wasm"), ready: true, faulted: false, lastError: null };
         postMasterPrep(node);
+        postVenue(node);
         if (!settled) {
           settled = true;
           window.clearTimeout(timeout);
@@ -357,6 +377,7 @@ export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
 export function resetMvpStudio(node: AudioWorkletNode | null) {
   node?.port.postMessage({ type: "reset" });
   postMasterPrep(node);
+  postVenue(node);
 }
 
 export function getMvpStudioTelemetry(): MvpStudioTelemetry {

@@ -1,4 +1,5 @@
-// MVP Trainer Pro R78 Master Prep DSP.
+// MVP Trainer Pro R78f Master Prep DSP.
+// Source gain is recovery-only. The r77i core owns all attenuation/headroom/protection.
 // Technical source correction only. No limiter, compressor, spatializer or creative effect lives here.
 
 function clamp(value, min, max) {
@@ -111,7 +112,7 @@ export class MvpMasterPrepProcessor {
     const next = profile && typeof profile === "object" ? profile : MVP_MASTER_PREP_NEUTRAL;
     this.profile = {
       enabled: Boolean(next.enabled),
-      sourceGainDb: clamp(next.sourceGainDb, -3, 1.5),
+      sourceGainDb: clamp(next.sourceGainDb, 0, 1.5),
       highpassHz: clamp(next.highpassHz, 16, 32),
       lowMidDb: clamp(next.lowMidDb, -1.5, 0.6),
       presenceDb: clamp(next.presenceDb, -0.7, 0.7),

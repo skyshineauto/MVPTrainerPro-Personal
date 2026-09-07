@@ -369,7 +369,10 @@ function buildTechnical(
 
 function buildMasterPrep(technical: MusicAudioTechnicalAnalysis): MusicMasterPrepProfile {
   const reasons: string[] = [];
-  const sourceGainDb = clamp(-1.3 - technical.truePeakDbtp, -2.5, 1.5);
+  // R78f: Master Prep never turns down the song. The proven r77i shared clean-headroom
+  // controller already owns attenuation and true-peak safety. Master Prep may only
+  // recover clean level from quieter masters.
+  const sourceGainDb = clamp(-1.3 - technical.truePeakDbtp, 0, 1.5);
   const highpassHz = technical.rumble > 72 ? 26 : technical.rumble > 55 || technical.dcOffset > 0.002 ? 22 : 18;
   const lowMidDb = -clamp((technical.lowMidBuildup - 56) * 0.035, 0, 1.5);
   const presenceDb = technical.presenceBalance < 34 ? 0.55 : technical.presenceBalance > 78 ? -0.45 : 0;
@@ -419,7 +422,10 @@ function buildAutoSound(technical: MusicAudioTechnicalAnalysis, meta: MusicAudio
     compatibilityNotes.push("Analog + Xpander share the harmonic budget");
   }
   const safeWide = technical.correlation > 0.28 && !technical.phaseRisk && technical.stereoWidthPercent < 125;
-  const cleanOutput = technical.truePeakDbtp <= -1.2 && technical.crestFactorDb >= 5;
+  // R78f: always request High/Max Output from the r77i clean-output controller.
+  // That controller measures the real post-effect true peak and grants only the
+  // clean gain that actually exists, so AI must not make hot masters artificially quiet.
+  const cleanOutput = true;
 
   return {
     headphones: {

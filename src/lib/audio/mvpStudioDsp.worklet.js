@@ -111,7 +111,7 @@ class MvpMasterPrepProcessor {
     const next = profile && typeof profile === "object" ? profile : MVP_MASTER_PREP_NEUTRAL;
     this.profile = {
       enabled: Boolean(next.enabled),
-      sourceGainDb: clamp(next.sourceGainDb, -3, 1.5),
+      sourceGainDb: clamp(next.sourceGainDb, 0, 1.5),
       highpassHz: clamp(next.highpassHz, 16, 32),
       lowMidDb: clamp(next.lowMidDb, -1.5, 0.6),
       presenceDb: clamp(next.presenceDb, -0.7, 0.7),
@@ -174,7 +174,81 @@ class MvpMasterPrepProcessor {
   }
 }
 
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V6.3 R78d Audio Intelligence
+// R78f real Soundstage/Venue stage. It adds only short, bounded early reflections
+// and stereo stage cues. There is no compressor/limiter here. The unchanged r77i
+// core follows it and still owns final clean headroom and emergency Peak Guard.
+class MvpVenueProcessor {
+  constructor(sampleRateValue) {
+    this.sampleRate = Math.max(8000, Number(sampleRateValue) || 48000);
+    this.maxDelay = Math.max(2048, Math.ceil(this.sampleRate * 0.09));
+    this.delayL = new Float32Array(this.maxDelay);
+    this.delayR = new Float32Array(this.maxDelay);
+    this.writeIndex = 0;
+    this.lpL = 0;
+    this.lpR = 0;
+    this.update(null);
+  }
+
+  update(profile) {
+    const value = profile && typeof profile === "object" ? profile : {};
+    this.enabled = Boolean(value.enabled);
+    this.width = clamp(value.widthScale, 1, 1.22);
+    this.mix = clamp(value.reflectionMix, 0, 0.16);
+    this.delayA = Math.max(1, Math.min(this.maxDelay - 2, Math.round(this.sampleRate * clamp(value.delayMsA, 4, 55) / 1000)));
+    this.delayB = Math.max(1, Math.min(this.maxDelay - 2, Math.round(this.sampleRate * clamp(value.delayMsB, 7, 75) / 1000)));
+    this.damping = clamp(value.damping, 0.16, 0.62);
+  }
+
+  reset() {
+    this.delayL.fill(0);
+    this.delayR.fill(0);
+    this.writeIndex = 0;
+    this.lpL = 0;
+    this.lpR = 0;
+  }
+
+  processInto(inputL, inputR, outputL, outputR, frames) {
+    const right = inputR || inputL;
+    if (!this.enabled || this.mix <= 0.0001) {
+      outputL.set(inputL.subarray(0, frames), 0);
+      outputR.set(right.subarray(0, frames), 0);
+      return;
+    }
+    let write = this.writeIndex;
+    let lpL = this.lpL;
+    let lpR = this.lpR;
+    const size = this.maxDelay;
+    const width = this.width;
+    const wet = this.mix;
+    const damping = this.damping;
+    for (let i = 0; i < frames; i += 1) {
+      const l0 = Number.isFinite(inputL[i]) ? inputL[i] : 0;
+      const r0 = Number.isFinite(right[i]) ? right[i] : 0;
+      const mid = (l0 + r0) * 0.5;
+      const side = (l0 - r0) * 0.5 * width;
+      const l = mid + side;
+      const r = mid - side;
+      const a = (write - this.delayA + size) % size;
+      const b = (write - this.delayB + size) % size;
+      const reflectedL = this.delayL[a] * 0.72 + this.delayR[b] * 0.28;
+      const reflectedR = this.delayR[a] * 0.72 + this.delayL[b] * 0.28;
+      lpL += damping * (reflectedL - lpL);
+      lpR += damping * (reflectedR - lpR);
+      outputL[i] = l + lpL * wet;
+      outputR[i] = r + lpR * wet;
+      this.delayL[write] = l;
+      this.delayR[write] = r;
+      write += 1;
+      if (write >= size) write = 0;
+    }
+    this.writeIndex = write;
+    this.lpL = lpL;
+    this.lpR = lpR;
+  }
+}
+
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V6.4 R78f Final Audio
+
 // Master Prep runs before the unchanged r77i C++ core. The r77i core still owns
 // EQ/effects, shared clean headroom, output gain and emergency-only Peak Guard.
 
@@ -203,6 +277,9 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
     this.u8Cache = null;
     this.u8CacheBuffer = null;
     this.masterPrep = new MvpMasterPrepProcessor(sampleRate);
+    this.venue = new MvpVenueProcessor(sampleRate);
+    this.prepL = null;
+    this.prepR = null;
 
     this.port.onmessage = (event) => {
       const data = event.data;
@@ -223,9 +300,14 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         this.masterPrep.update(data.profile || null);
         return;
       }
+      if (data.type === "venue") {
+        this.venue.update(data.profile || null);
+        return;
+      }
       if (data.type === "reset" && this.ready && this.exports?.mvp_reset) {
         this.exports.mvp_reset();
         this.masterPrep.reset();
+        this.venue.reset();
         return;
       }
       if (data.type === "reset-loudness" && this.ready && this.exports?.mvp_reset_loudness) {
@@ -284,12 +366,14 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       if (!initialized) throw new Error("MVP Studio WASM initialization failed.");
       this.maxFrames = api.mvp_max_frames();
       this.refreshViews();
+      this.prepL = new Float32Array(this.maxFrames);
+      this.prepR = new Float32Array(this.maxFrames);
       this.ready = true;
       this.port.postMessage({
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v6.3-r78d-inline-master-prep-r77i-core",
+        version: "studio-wasm-v6.4-r78f-final-audio-r77i-core",
       });
     } catch (error) {
       this.failed = true;
@@ -507,8 +591,14 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
 
     if (this.inputL.buffer !== this.memory.buffer) this.refreshViews();
 
-    // Locked R78 order: source -> Master Prep -> unchanged r77i WASM EQ/effects/protection.
-    this.masterPrep.processInto(inL, inR || inL, this.inputL, this.inputR, frames);
+    // R78f: source -> Master Prep (recovery-only) -> Venue early reflections/stage ->
+    // unchanged r77i WASM EQ/effects/shared clean output/emergency Peak Guard.
+    if (!this.prepL || !this.prepR) {
+      this.copyBypass(input, output);
+      return true;
+    }
+    this.masterPrep.processInto(inL, inR || inL, this.prepL, this.prepR, frames);
+    this.venue.processInto(this.prepL, this.prepR, this.inputL, this.inputR, frames);
 
     const processed = this.exports.mvp_process(frames);
     if (!processed) {
