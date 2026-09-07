@@ -259,7 +259,7 @@ function createUi() {
       <div class="mvp-ai-actions"><button data-reset type="button">RESET MANUAL OVERRIDES</button></div>
     </section>
     <style>
-      #mvp-ai-audio-runtime{position:fixed;right:14px;bottom:86px;z-index:2147482000;font-family:Inter,system-ui,sans-serif;color:#eefaff}
+      #mvp-ai-audio-runtime{position:fixed;right:14px;bottom:86px;z-index:2147483647;font-family:Inter,system-ui,sans-serif;color:#eefaff}
       .mvp-ai-audio-trigger{width:58px;height:58px;border:1px solid rgba(74,210,255,.46);border-radius:17px;background:linear-gradient(155deg,#0a2631,#071218 65%,#2a1506);box-shadow:0 12px 34px rgba(0,0,0,.42),inset 0 1px rgba(255,255,255,.08);color:#fff;display:grid;place-content:center;cursor:pointer}
       .mvp-ai-audio-trigger[data-active="true"]{border-color:#ff9c35;box-shadow:0 0 0 1px rgba(255,145,41,.2),0 0 24px rgba(255,130,30,.22),0 12px 34px rgba(0,0,0,.45)}
       .mvp-ai-audio-trigger span{font-size:15px;font-weight:1000;color:#60dfff;line-height:1}.mvp-ai-audio-trigger b{font-size:8px;letter-spacing:.12em;line-height:1.4}
