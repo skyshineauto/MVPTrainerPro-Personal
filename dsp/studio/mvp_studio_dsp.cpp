@@ -1149,6 +1149,10 @@ inline float updateTruePeakDetector(float *history, float sample);
 
 void processFinalCompressor(float &left, float &right) {
   const bool simplifiedProfile = outputProfile == 1 || outputProfile == 2;
+  // R78H reuses the existing autoMakeup flag as the explicit High/Max Output
+  // request on the simplified profiles. The public WASM ABI stays exactly the
+  // same as the loading R78f build: mvp_set_output_gain(int, float).
+  const bool maxLoudness = simplifiedProfile && autoMakeupEnabled && outputReserveDb >= 5.5f;
 
   if (!simplifiedProfile) {
     finalCompEnvelope = 0.0f;
@@ -1158,10 +1162,6 @@ void processFinalCompressor(float &left, float &right) {
     return;
   }
 
-  // R77I SHARED CLEAN-HEADROOM MANAGER.
-  // This is a linked linear programme trim, not Peak Guard and not a loudness
-  // compressor. It measures the actual post-effect true peak for both Headphones
-  // and Bluetooth, then holds only enough clean room to keep the final guard idle.
   const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
   const float detector = tpL > tpR ? tpL : tpR;
@@ -1174,25 +1174,53 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  if (detector > finalCompEnvelope) finalCompEnvelope = detector;
-  else finalCompEnvelope += (detector - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
-  if (finalCompEnvelope < 0.0000001f) finalCompEnvelope = 0.0f;
+  if (!maxLoudness) {
+    // Keep the already-approved R78f/r77i path byte-for-behavior when High/Max
+    // Output is OFF. Normal playback does not inherit the louder mastering mode.
+    if (detector > finalCompEnvelope) finalCompEnvelope = detector;
+    else finalCompEnvelope += (detector - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
+    if (finalCompEnvelope < 0.0000001f) finalCompEnvelope = 0.0f;
 
-  const float cleanCeiling = static_cast<float>(dbToGain(-1.15f));
-  float required = 1.0f;
-  if (finalCompEnvelope > cleanCeiling && finalCompEnvelope > 0.0000001f) {
-    required = cleanCeiling / finalCompEnvelope;
-  }
-  required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
-  finalCompRequiredGain = required;
+    const float cleanCeiling = static_cast<float>(dbToGain(-1.15f));
+    float required = 1.0f;
+    if (finalCompEnvelope > cleanCeiling && finalCompEnvelope > 0.0000001f) {
+      required = cleanCeiling / finalCompEnvelope;
+    }
+    required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
+    finalCompRequiredGain = required;
 
-  if (required < finalCompGain) {
-    finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
-  } else if (profileTransitionSamplesRemaining <= 0) {
-    finalCompGain += (required - finalCompGain) * finalCompGainReleaseCoeff;
+    if (required < finalCompGain) {
+      finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
+    } else if (profileTransitionSamplesRemaining <= 0) {
+      finalCompGain += (required - finalCompGain) * finalCompGainReleaseCoeff;
+    }
+  } else {
+    // High/Max Output: create REAL crest-factor headroom before clean makeup.
+    // The linked 5 ms lookahead catches the tallest post-effect peaks; a 25 ms
+    // recovery returns musical body quickly instead of holding the whole song
+    // down between drum hits. Reduction is capped at 3.2 dB so this never becomes
+    // the old 4-6 dB continuously clamped path. Peak Guard remains downstream as
+    // emergency true-peak protection only.
+    const float crestCeiling = static_cast<float>(dbToGain(-7.50f));
+    float required = 1.0f;
+    if (detector > crestCeiling && detector > 0.0000001f) {
+      required = crestCeiling / detector;
+    }
+    required = clampf(required, static_cast<float>(dbToGain(-3.20f)), 1.0f);
+    finalCompEnvelope = detector;
+    finalCompRequiredGain = required;
+
+    if (required < finalCompGain) {
+      // The lookahead is already predictive, so surrender gain immediately when
+      // a new peak arrives. This prevents Peak Guard from becoming the loudness stage.
+      finalCompGain = required;
+    } else if (profileTransitionSamplesRemaining <= 0) {
+      const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.025)));
+      finalCompGain += (required - finalCompGain) * releaseCoeff;
+    }
   }
+
   finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-8.0f)), 1.0f);
-
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
   meterFinalCompressorReductionDb = finalCompGain < 0.999999f
@@ -1232,7 +1260,10 @@ void processOutputGain(float &left, float &right) {
     // R77I: recover only gain proven safe by the same oversampled detector used
     // by Peak Guard. OFF may recover transparent source/EQ margin; High/Max adds
     // only additional room that truly exists after the creative processing.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.35f));
+    const bool maxLoudness = autoMakeupEnabled && outputReserveDb >= 5.5f;
+    // High/Max fills the crest room only to -0.50 dBTP. Peak Guard remains at
+    // -0.30 dBTP, leaving a real intersample/transient safety margin.
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(maxLoudness ? -0.50f : -1.35f));
     float cleanCap = requestedDrive;
     if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
     cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
@@ -1257,7 +1288,14 @@ void processOutputGain(float &left, float &right) {
     // attenuates the source below unity; it only removes optional Max/High makeup.
     // With Max/High OFF requestedDrive is unity, so this stage is exactly neutral.
     if (driveTarget < cleanOutputDriveGain) cleanOutputDriveGain = driveTarget;
-    else cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * maxHdGainRiseCoeff;
+    else {
+      // High/Max should become audible quickly, while the OFF path retains the
+      // proven slow r77i recovery behavior.
+      const float riseCoeff = maxLoudness
+        ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.12)))
+        : maxHdGainRiseCoeff;
+      cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
+    }
     cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {

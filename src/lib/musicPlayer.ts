@@ -4139,7 +4139,9 @@ export function setMusicHeadphoneHighOutput(enabled: boolean) {
   // true-peak limiter. The DSP may use less on already-hot masters rather than
   // turning extra gain into distortion.
   next.outputReserveDb = enabled ? 8.0 : 0;
-  next.autoMakeupEnabled = false;
+  // R78H: the existing autoMakeup flag is the native High/Max loudness request.
+  // This deliberately keeps the R78f two-argument WASM output-gain ABI unchanged.
+  next.autoMakeupEnabled = enabled;
   next.limiterEnabled = true;
   applyOutputProfileSnapshot("headphones", next);
 }
@@ -4164,7 +4166,9 @@ export function setMusicSpeakerMaxOutput(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
   next.outputReserveDb = enabled ? 8.0 : 0;
-  next.autoMakeupEnabled = false;
+  // R78H: the existing autoMakeup flag is the native High/Max loudness request.
+  // This deliberately keeps the R78f two-argument WASM output-gain ABI unchanged.
+  next.autoMakeupEnabled = enabled;
   next.limiterEnabled = true;
   applyOutputProfileSnapshot("speaker", next);
 }
