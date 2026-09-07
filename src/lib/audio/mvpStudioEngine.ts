@@ -1,4 +1,4 @@
-// MVP Trainer Pro - Studio WASM bridge V6.2 R78 Audio Intelligence
+// MVP Trainer Pro - Studio WASM bridge V6.3 R78d Audio Intelligence
 // R77i WASM remains the shared protection core. Master Prep is injected in the worklet before that core.
 
 import type { MusicMasterPrepProfile } from "../musicAudioIntelligence";
@@ -112,7 +112,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.2.0-r78-audio-intelligence";
+const MVP_STUDIO_ASSET_VERSION = "6.3.0-r78d-ai-audio-wasm-mount-fix";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -238,6 +238,17 @@ export function setMvpStudioMasterPrep(profile: MusicMasterPrepProfile | null) {
   postMasterPrep(activeStudioNode);
 }
 
+function ensureMusicAiAudioRuntime() {
+  if (runtimeInstalled || typeof window === "undefined") return;
+  runtimeInstalled = true;
+  installMusicAiAudioRuntime(setMvpStudioMasterPrep);
+}
+
+// R78d: mount AI AUDIO from the normal browser module lifecycle, not from
+// successful Studio WASM creation. The UI therefore remains available even if
+// the audio engine is still starting or a compatibility fallback is active.
+ensureMusicAiAudioRuntime();
+
 export async function createMvpStudioNode(context: AudioContext) {
   if (!context.audioWorklet) throw new Error("AudioWorklet is unavailable.");
   runtimeInfo = {
@@ -267,10 +278,7 @@ export async function createMvpStudioNode(context: AudioContext) {
     channelInterpretation: "speakers",
   });
   activeStudioNode = node;
-  if (!runtimeInstalled) {
-    runtimeInstalled = true;
-    installMusicAiAudioRuntime(setMvpStudioMasterPrep);
-  }
+  ensureMusicAiAudioRuntime();
 
   return new Promise<AudioWorkletNode>((resolve, reject) => {
     let settled = false;
