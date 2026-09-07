@@ -1837,7 +1837,6 @@ function applyStudioProcessingSettings(now: number) {
     // gain is safe. Recover transparent source/EQ headroom first, then High/Max
     // Output on top. Unsafe gain is refused instead of being sent into Peak Guard.
     outputReserveDb: processed ? Math.min(18, state.outputReserveDb + autoHeadroomDb) : 0,
-    highOutputEnabled: processed && cleanHdHighOutputActive(),
     autoMakeupEnabled: processed && state.autoMakeupEnabled,
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),

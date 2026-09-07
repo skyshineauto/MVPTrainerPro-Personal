@@ -67,7 +67,6 @@ export type MvpStudioState = {
   headphoneCenter: number;
   headphoneBassImpact: number;
   outputReserveDb: number;
-  highOutputEnabled: boolean;
   autoMakeupEnabled: boolean;
   parametricEnabled: boolean;
   parametricBands: Array<{ enabled: boolean; frequency: number; gainDb: number; q: number; type: number }>;
@@ -122,7 +121,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.5.0-r78g-real-clean-loudness";
+const MVP_STUDIO_ASSET_VERSION = "6.4.0-r78f-final-audio";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
