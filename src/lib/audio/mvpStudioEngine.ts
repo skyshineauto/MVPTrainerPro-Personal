@@ -121,7 +121,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.6.0-r78j-verified-audio-route";
+const MVP_STUDIO_ASSET_VERSION = "6.7.0-r78k-peak-guard-clean-loudness";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -227,7 +227,7 @@ async function loadStudioWasmBytes() {
   if (wasmBytesPromise) return wasmBytesPromise;
   wasmBytesPromise = (async () => {
     if (typeof window === "undefined") throw new Error("MVP Studio requires a browser runtime.");
-    const url = new URL("/audio/mvpStudioEngine-r78j.wasm", window.location.origin);
+    const url = new URL("/audio/mvpStudioEngine-r78k.wasm", window.location.origin);
     url.searchParams.set("v", MVP_STUDIO_ASSET_VERSION);
     const response = await fetch(url.href, { cache: "no-store" });
     if (!response.ok) throw new Error(`MVP Studio WASM download failed (${response.status}).`);
