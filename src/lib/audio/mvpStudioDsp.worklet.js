@@ -373,7 +373,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v6.4-r78f-final-audio-r77i-core",
+        version: "studio-wasm-v6.6-r78j-verified-audio-route",
       });
     } catch (error) {
       this.failed = true;

@@ -1641,15 +1641,15 @@ function studioOutputProfileCode(): 0 | 1 | 2 {
 function cleanHdSafetyHeadroomDb() {
   if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return 0;
 
-  // R77I SHARED CLEAN-HD HEADROOM.
-  // Headphones and Bluetooth use the same source margin. Literal user EQ boosts
-  // reserve real headroom, while creative buttons rely on the measured post-effect
-  // controller so Clear/Bass/Punch/Xpander/Wide are not cancelled by 4-6 dB trims.
-  let required = 2.20;
+  // R78J VERIFIED AUDIO ROUTE: creative effects NEVER buy headroom by turning
+  // the whole song down. Only unusually large literal user EQ/parametric boosts
+  // reserve a modest pre-effect margin. The post-effect crest controller then
+  // recovers safe gain and Peak Guard remains emergency-only.
+  let required = 0;
 
   if (state.eqEnabled) {
     const maxEqBoost = Math.max(0, ...state.eqGains.map((value) => Number(value) || 0));
-    required += Math.min(9.6, maxEqBoost * 0.80);
+    required += Math.min(5.5, Math.max(0, maxEqBoost - 3.0) * 0.55);
   }
 
   if (state.parametricEnabled) {
@@ -1659,25 +1659,10 @@ function cleanHdSafetyHeadroomDb() {
         .filter((band) => band.enabled)
         .map((band) => Number(band.gainDb) || 0),
     );
-    required += Math.min(5.2, maxParametricBoost * 0.68);
+    required += Math.min(3.5, Math.max(0, maxParametricBoost - 3.0) * 0.45);
   }
 
-  let creativeMargin = 0;
-  if (state.bassEngineEnabled) creativeMargin += 0.35;
-  if (state.toneEngineEnabled) creativeMargin += 0.30;
-  if (state.dynamicsRestoreEnabled) creativeMargin += 0.35;
-  if (state.hdXpanderLevel > 0) {
-    const level = Math.max(0, Math.min(3, Math.round(state.hdXpanderLevel)));
-    creativeMargin += [0, 0.25, 0.45, 0.65][level] ?? 0;
-  }
-  if (state.exciterEnabled) creativeMargin += 0.15;
-  if (state.stereoFieldEnabled && state.stereoUserWidth > 100) creativeMargin += 0.20;
-  if (state.outputProfile === "headphones" && state.headphoneMode !== "off") {
-    creativeMargin += state.headphoneMode === "wide" ? 0.20 : state.headphoneMode === "spatial" ? 0.30 : state.headphoneMode === "deep" ? 0.35 : 0.40;
-  }
-
-  required += Math.min(1.60, creativeMargin);
-  return Math.max(2.20, Math.min(18.0, required));
+  return Math.max(0, Math.min(7.5, required));
 }
 
 function calculateStudioGain() {
@@ -2395,6 +2380,7 @@ function rmsDbFromAnalyser(analyser: AnalyserNode) {
 function startLevelMeter() {
   if (typeof window === "undefined" || levelMeterTimer) return;
   levelMeterTimer = window.setInterval(() => {
+    normalizeMusicPostGainIfStale();
     if (!state.playing || !referenceLevelAnalyser || !processedLevelAnalyser) return;
     if (state.dspEngineMode === "studio_wasm") {
       const runtime = getMvpStudioRuntimeInfo();
@@ -2941,7 +2927,7 @@ async function handleTrackEnded() {
     return;
   }
   const { up } = transitionTimings();
-  const originalGain = Math.max(0.0001, musicGain?.gain.value || 1);
+  const originalGain = 1;
   if (up > 0 && musicGain && audioContext) {
     musicGain.gain.cancelScheduledValues(audioContext.currentTime);
     musicGain.gain.setValueAtTime(0.0001, audioContext.currentTime);
@@ -3204,7 +3190,7 @@ async function playTrackWithIntelligentTransition(trackId: string, fromEnded: bo
     await playMusicTrack(trackId, 0);
     return;
   }
-  const originalGain = Math.max(0.0001, musicGain.gain.value || 1);
+  const originalGain = 1;
   if (down > 0) await fadeOutputTo(Math.min(originalGain, 0.0001), down);
   await playMusicTrack(trackId, 0);
   if (up > 0) await fadeOutputTo(originalGain, up);
@@ -4121,6 +4107,13 @@ function applyOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: Outpu
   });
   writeOutputProfileSnapshot(profile, snapshot);
   applyProcessingSettings();
+  // R78J: an effect tap is also a routing assertion. If the browser fell back
+  // after a route/device/cache event, retry the flagship WASM instead of leaving
+  // a button that changes state without owning the audible signal.
+  normalizeMusicPostGainIfStale(true);
+  if ((profile === "headphones" || profile === "speaker") && state.dspEngineMode !== "studio_wasm") {
+    scheduleCleanHdRouteRecovery(140);
+  }
   scheduleProcessingSettle();
 }
 
@@ -4457,10 +4450,12 @@ let cleanHdRouteRecoveryTimer: number | null = null;
 function scheduleCleanHdRouteRecovery(delayMs = 450) {
   if (typeof window === "undefined") return;
   if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
+  if (state.dspEngineMode === "studio_wasm") return;
   if (!state.currentTrack) return;
   if (cleanHdRouteRecoveryTimer != null) window.clearTimeout(cleanHdRouteRecoveryTimer);
   cleanHdRouteRecoveryTimer = window.setTimeout(() => {
     cleanHdRouteRecoveryTimer = null;
+    if (state.dspEngineMode === "studio_wasm") return;
     if (studioRecoveryInFlight) return;
     studioRecoveryInFlight = true;
     lastStudioRecoveryAt = Date.now();
@@ -4553,14 +4548,51 @@ export function getMusicStudioTelemetry() {
 function duckTargetForStrength(strength: MusicDuckingStrength) {
   return strength === "off" ? 1 : strength === "light" ? 0.5 : strength === "strong" ? 0.08 : 0.18;
 }
+let musicPostGainIntentionalLow = false;
+let musicPostGainIntentionalLowSince = 0;
+
+function normalizeMusicPostGainIfStale(force = false) {
+  if (!musicGain || !audioContext) return;
+  const current = Number(musicGain.gain.value);
+  if (!Number.isFinite(current)) return;
+  if (current >= 0.985) {
+    if (current >= 0.999) {
+      musicPostGainIntentionalLow = false;
+      musicPostGainIntentionalLowSince = 0;
+    }
+    return;
+  }
+  const staleIntentionalLow = musicPostGainIntentionalLow && Date.now() - musicPostGainIntentionalLowSince > 12000;
+  if (!force && musicPostGainIntentionalLow && !staleIntentionalLow) return;
+  const now = audioContext.currentTime;
+  musicGain.gain.cancelScheduledValues(now);
+  musicGain.gain.setValueAtTime(1, now);
+  musicPostGainIntentionalLow = false;
+  musicPostGainIntentionalLowSince = 0;
+}
+
 function fadeOutputTo(target: number, milliseconds: number) {
   if (!musicGain || !audioContext) return Promise.resolve();
+  const safeTarget = Math.max(0.0001, target);
+  if (safeTarget < 0.985) {
+    if (!musicPostGainIntentionalLow) musicPostGainIntentionalLowSince = Date.now();
+    musicPostGainIntentionalLow = true;
+  } else {
+    musicPostGainIntentionalLow = false;
+    musicPostGainIntentionalLowSince = 0;
+  }
   const now = audioContext.currentTime;
   const seconds = Math.max(0.03, milliseconds / 1000);
   musicGain.gain.cancelScheduledValues(now);
   musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), now);
-  musicGain.gain.linearRampToValueAtTime(Math.max(0.0001, target), now + seconds);
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds + 20));
+  musicGain.gain.linearRampToValueAtTime(safeTarget, now + seconds);
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds + 20)).then(() => {
+    if (safeTarget >= 0.985 && musicGain && audioContext) {
+      const settledAt = audioContext.currentTime;
+      musicGain.gain.cancelScheduledValues(settledAt);
+      musicGain.gain.setValueAtTime(1, settledAt);
+    }
+  });
 }
 
 export async function playWithMusicDucked(playAlert: () => Promise<void>) {
@@ -4572,7 +4604,7 @@ export async function playWithMusicDucked(playAlert: () => Promise<void>) {
   }
   await unlockMusicAudio();
   if (musicGain && audioContext) {
-    const original = Math.max(0.0001, musicGain.gain.value || 1);
+    const original = 1;
     try {
       await fadeOutputTo(duckTargetForStrength(state.duckingStrength), 180);
       await playAlert();
