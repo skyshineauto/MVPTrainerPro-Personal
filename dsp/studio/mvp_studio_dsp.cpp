@@ -543,6 +543,7 @@ float maxHdCompTruePeakHistoryR[kTruePeakTapsPerPhase] = {};
 int autoMakeupEnabled = 0;
 float autoMakeupGain = 1.0f;
 float outputReserveDb = 0.0f;
+int maxOutputEnabled = 0;
 float outputReserveGain = 1.0f;
 float cleanOutputDriveGain = 1.0f;
 float meterAutoMakeupDb = 0.0f;
@@ -1158,10 +1159,13 @@ void processFinalCompressor(float &left, float &right) {
     return;
   }
 
-  // R77I SHARED CLEAN-HEADROOM MANAGER.
-  // This is a linked linear programme trim, not Peak Guard and not a loudness
-  // compressor. It measures the actual post-effect true peak for both Headphones
-  // and Bluetooth, then holds only enough clean room to keep the final guard idle.
+  // R78G SHARED CREST CONTROLLER.
+  // The stage is always present for Headphones and Bluetooth. With High/Max OFF
+  // it retains the proven r77i emergency crest behavior. With High/Max ON it
+  // becomes a short-release mastering crest controller that trims only the top
+  // few dB of transients. That creates REAL peak room which the following clean
+  // makeup stage can refill, increasing average loudness without driving Peak
+  // Guard continuously. Both channels share one detector and one gain envelope.
   const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
   const float detector = tpL > tpR ? tpL : tpR;
@@ -1174,25 +1178,50 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  if (detector > finalCompEnvelope) finalCompEnvelope = detector;
-  else finalCompEnvelope += (detector - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
-  if (finalCompEnvelope < 0.0000001f) finalCompEnvelope = 0.0f;
+  if (!maxOutputEnabled) {
+    // Proven r77i baseline. This is intentionally conservative and normally idle.
+    if (detector > finalCompEnvelope) finalCompEnvelope = detector;
+    else finalCompEnvelope += (detector - finalCompEnvelope) * finalCompDetectorReleaseCoeff;
+    if (finalCompEnvelope < 0.0000001f) finalCompEnvelope = 0.0f;
 
-  const float cleanCeiling = static_cast<float>(dbToGain(-1.15f));
-  float required = 1.0f;
-  if (finalCompEnvelope > cleanCeiling && finalCompEnvelope > 0.0000001f) {
-    required = cleanCeiling / finalCompEnvelope;
-  }
-  required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
-  finalCompRequiredGain = required;
+    const float cleanCeiling = static_cast<float>(dbToGain(-1.15f));
+    float required = 1.0f;
+    if (finalCompEnvelope > cleanCeiling && finalCompEnvelope > 0.0000001f) {
+      required = cleanCeiling / finalCompEnvelope;
+    }
+    required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
+    finalCompRequiredGain = required;
 
-  if (required < finalCompGain) {
-    finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
-  } else if (profileTransitionSamplesRemaining <= 0) {
-    finalCompGain += (required - finalCompGain) * finalCompGainReleaseCoeff;
+    if (required < finalCompGain) {
+      finalCompGain += (required - finalCompGain) * finalCompGainAttackCoeff;
+    } else if (profileTransitionSamplesRemaining <= 0) {
+      finalCompGain += (required - finalCompGain) * finalCompGainReleaseCoeff;
+    }
+  } else {
+    // High/Max Output: a dedicated short-release crest shave inside the SAME
+    // always-on mastering controller. The lookahead catches only the tallest
+    // peaks and releases quickly, creating several dB of usable peak room for
+    // Max-HD makeup without turning Peak Guard into a loudness processor.
+    const float crestCeiling = static_cast<float>(dbToGain(-7.00f));
+    float required = 1.0f;
+    if (detector > crestCeiling && detector > 0.0000001f) {
+      required = crestCeiling / detector;
+    }
+    required = clampf(required, static_cast<float>(dbToGain(-5.4f)), 1.0f);
+    finalCompEnvelope = detector;
+    finalCompRequiredGain = required;
+
+    // Lookahead makes the attack effectively predictive. A 30 ms release is
+    // fast enough to return musical body between peaks but slow enough to avoid
+    // bass-cycle modulation and grit.
+    if (required < finalCompGain) {
+      finalCompGain = required;
+    } else if (profileTransitionSamplesRemaining <= 0) {
+      const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.030)));
+      finalCompGain += (required - finalCompGain) * releaseCoeff;
+    }
   }
   finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-8.0f)), 1.0f);
-
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
   meterFinalCompressorReductionDb = finalCompGain < 0.999999f
@@ -1232,7 +1261,7 @@ void processOutputGain(float &left, float &right) {
     // R77I: recover only gain proven safe by the same oversampled detector used
     // by Peak Guard. OFF may recover transparent source/EQ margin; High/Max adds
     // only additional room that truly exists after the creative processing.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.35f));
+    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(maxOutputEnabled ? -0.60f : -1.35f));
     float cleanCap = requestedDrive;
     if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
     cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
@@ -1257,7 +1286,12 @@ void processOutputGain(float &left, float &right) {
     // attenuates the source below unity; it only removes optional Max/High makeup.
     // With Max/High OFF requestedDrive is unity, so this stage is exactly neutral.
     if (driveTarget < cleanOutputDriveGain) cleanOutputDriveGain = driveTarget;
-    else cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * maxHdGainRiseCoeff;
+    else {
+      const float riseCoeff = maxOutputEnabled
+        ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.18)))
+        : maxHdGainRiseCoeff;
+      cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
+    }
     cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
     outputReserveGain = cleanOutputDriveGain;
   } else {
@@ -2025,7 +2059,7 @@ __attribute__((visibility("default"))) void mvp_set_stereo_field(int enabled, fl
 }
 __attribute__((visibility("default"))) void mvp_set_dynamics_restore(int enabled, float amount) { dynamicsRestoreEnabled=enabled?1:0; dynamicsRestoreAmount=clampf(amount,0.0f,1.0f); }
 __attribute__((visibility("default"))) void mvp_set_smart_dsp(int enabled, float amount) { smartDspEnabled=enabled?1:0; smartDspAmount=clampf(amount,0.0f,1.0f); }
-__attribute__((visibility("default"))) void mvp_set_output_gain(int autoMakeup, float reserveDb) { autoMakeupEnabled=autoMakeup?1:0; outputReserveDb=clampf(reserveDb,0.0f,18.0f); }
+__attribute__((visibility("default"))) void mvp_set_output_gain(int autoMakeup, float reserveDb, int maxOutput) { autoMakeupEnabled=autoMakeup?1:0; outputReserveDb=clampf(reserveDb,0.0f,18.0f); maxOutputEnabled=maxOutput?1:0; }
 __attribute__((visibility("default"))) void mvp_set_headphone_advanced(int enabled, float angle, float distance, float reflections, float wet) { headphoneAdvancedEnabled=enabled?1:0; headphoneSpeakerAngle=clampf(angle,15.0f,60.0f); headphoneDistance=clampf(distance,0.0f,1.0f); headphoneReflections=clampf(reflections,0.0f,0.30f); headphoneWet=clampf(wet,0.0f,1.0f); }
 
 __attribute__((visibility("default"))) void mvp_reset() { resetBuffers(); }

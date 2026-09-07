@@ -247,7 +247,7 @@ class MvpVenueProcessor {
   }
 }
 
-// MVP Trainer Pro - MVP Studio WASM AudioWorklet V6.4 R78f Final Audio
+// MVP Trainer Pro - MVP Studio WASM AudioWorklet V6.5 R78g Real Clean Loudness
 
 // Master Prep runs before the unchanged r77i C++ core. The r77i core still owns
 // EQ/effects, shared clean headroom, output gain and emergency-only Peak Guard.
@@ -373,7 +373,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v6.4-r78f-final-audio-r77i-core",
+        version: "studio-wasm-v6.5-r78g-real-clean-loudness",
       });
     } catch (error) {
       this.failed = true;
@@ -484,8 +484,17 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       );
     }
 
-    if (typeof api.mvp_set_output_gain === "function" && (first || Boolean(state.autoMakeupEnabled) !== Boolean(previous.autoMakeupEnabled) || !this.sameNumber(state.outputReserveDb, previous.outputReserveDb))) {
-      api.mvp_set_output_gain(state.autoMakeupEnabled ? 1 : 0, Number(state.outputReserveDb) || 0);
+    if (typeof api.mvp_set_output_gain === "function" && (
+      first ||
+      Boolean(state.autoMakeupEnabled) !== Boolean(previous.autoMakeupEnabled) ||
+      Boolean(state.highOutputEnabled) !== Boolean(previous.highOutputEnabled) ||
+      !this.sameNumber(state.outputReserveDb, previous.outputReserveDb)
+    )) {
+      api.mvp_set_output_gain(
+        state.autoMakeupEnabled ? 1 : 0,
+        Number(state.outputReserveDb) || 0,
+        state.highOutputEnabled ? 1 : 0,
+      );
     }
     if (typeof api.mvp_set_parametric_enabled === "function" && (first || Boolean(state.parametricEnabled) !== Boolean(previous.parametricEnabled))) api.mvp_set_parametric_enabled(state.parametricEnabled ? 1 : 0);
     if (typeof api.mvp_set_parametric_band === "function") {
@@ -532,6 +541,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       headphoneCenter: Number.isFinite(Number(state.headphoneCenter)) ? Number(state.headphoneCenter) : 0.5,
       headphoneBassImpact: Number(state.headphoneBassImpact) || 0,
       outputReserveDb: Number(state.outputReserveDb) || 0,
+      highOutputEnabled: Boolean(state.highOutputEnabled),
       autoMakeupEnabled: Boolean(state.autoMakeupEnabled),
       smartDspEnabled: Boolean(state.smartDspEnabled),
     });
