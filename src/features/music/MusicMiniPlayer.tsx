@@ -2083,6 +2083,19 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         </div>
                 {/* MVP_MUSIC_TODAY_AI_R40 */}
         <MusicTodayAi />
+        <button
+          type="button"
+          className="tr-aiAudioPlayerCornerDock"
+          data-mvp-ai-audio-trigger
+          onClick={() => {
+            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("mvp:ai-audio-toggle"));
+          }}
+          aria-label="Open AI Audio"
+          title="AI Audio · Master Prep · Auto Sound · Venue"
+        >
+          <span className="tr-aiAudioCornerIcon">AI</span>
+          <span className="tr-aiAudioCornerLabel">AUDIO</span>
+        </button>
 <button
           type="button"
           data-profile={player.outputProfile}
@@ -11074,6 +11087,42 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           cursor:pointer!important;
         }
 
+        /* R78E AI AUDIO launcher: locked directly above the existing DSP launcher on every expanded player size. */
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock{
+          --ai-audio-rgb:74,218,255;
+          position:absolute!important;
+          right:16px!important;
+          bottom:48px!important;
+          left:auto!important;
+          top:auto!important;
+          z-index:41!important;
+          width:72px!important;
+          min-width:72px!important;
+          max-width:72px!important;
+          height:28px!important;
+          min-height:28px!important;
+          margin:0!important;
+          padding:0 7px 0 5px!important;
+          display:flex!important;
+          align-items:center!important;
+          justify-content:center!important;
+          gap:5px!important;
+          border-radius:9px!important;
+          border:1px solid rgba(var(--ai-audio-rgb),.60)!important;
+          background:radial-gradient(100% 130% at 18% -12%,rgba(var(--ai-audio-rgb),.18),transparent 48%),linear-gradient(180deg,rgba(13,31,40,.985),rgba(3,10,15,.995))!important;
+          color:#fff!important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -1px 0 rgba(var(--ai-audio-rgb),.12),0 5px 14px rgba(0,0,0,.34),0 0 12px rgba(var(--ai-audio-rgb),.12)!important;
+          overflow:hidden!important;
+          cursor:pointer!important;
+          -webkit-tap-highlight-color:transparent!important;
+        }
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock::after{content:"";position:absolute;left:9px;right:9px;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(var(--ai-audio-rgb),.92),transparent);pointer-events:none}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock .tr-aiAudioCornerIcon{position:relative;z-index:2;width:19px;height:19px;min-width:19px;display:grid;place-items:center;border-radius:6px;border:1px solid rgba(var(--ai-audio-rgb),.42);background:rgba(var(--ai-audio-rgb),.10);color:rgb(var(--ai-audio-rgb));font-size:7px;font-weight:1000;letter-spacing:-.02em;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 8px rgba(var(--ai-audio-rgb),.16)}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock .tr-aiAudioCornerLabel{position:relative;z-index:2;color:#fff;font-size:8.5px;line-height:1;font-weight:1000;letter-spacing:.065em;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.9)}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock[data-ready="true"]{--ai-audio-rgb:80,229,173}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock[data-active="true"]{--ai-audio-rgb:255,156,53;border-color:rgba(var(--ai-audio-rgb),.96)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 0 0 1px rgba(var(--ai-audio-rgb),.12),0 0 18px rgba(var(--ai-audio-rgb),.28),0 6px 15px rgba(0,0,0,.35)!important}
+        .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock:hover{border-color:rgba(var(--ai-audio-rgb),.94)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 0 16px rgba(var(--ai-audio-rgb),.22),0 6px 15px rgba(0,0,0,.35)!important}
+
         /* TRUE HERO anchor: direct child of the artwork / animated hero panel. */
         .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock{
           --dsp-corner-rgb:66,214,255;
@@ -11217,6 +11266,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             font-size:12.5px!important;
             transform:translateY(-2px)!important;
           }
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock{
+            right:9px!important;
+            bottom:38px!important;
+            width:54px!important;
+            min-width:54px!important;
+            max-width:54px!important;
+            height:23px!important;
+            min-height:23px!important;
+            padding:0 5px 0 4px!important;
+            gap:4px!important;
+            border-radius:8px!important;
+          }
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock .tr-aiAudioCornerIcon{width:17px!important;height:17px!important;min-width:17px!important;border-radius:5px!important;font-size:6px!important}
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock .tr-aiAudioCornerLabel{font-size:7.3px!important;letter-spacing:.055em!important}
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock{
             right:9px!important;
             bottom:9px!important;
@@ -11245,6 +11308,15 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
           }
         }
         @media(max-width:390px){
+          .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-aiAudioPlayerCornerDock{
+            right:7px!important;
+            bottom:35px!important;
+            width:50px!important;
+            min-width:50px!important;
+            max-width:50px!important;
+            height:22px!important;
+            min-height:22px!important;
+          }
           .tr-audioDeck.tr-audioDeck--pro7 > .tr-playerHero > .tr-dspPlayerCornerDock{
             right:7px!important;
             bottom:7px!important;
