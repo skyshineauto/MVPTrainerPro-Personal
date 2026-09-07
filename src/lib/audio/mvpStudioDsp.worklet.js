@@ -192,8 +192,10 @@ class MvpVenueProcessor {
   update(profile) {
     const value = profile && typeof profile === "object" ? profile : {};
     this.enabled = Boolean(value.enabled);
-    this.width = clamp(value.widthScale, 1, 1.22);
-    this.mix = clamp(value.reflectionMix, 0, 0.16);
+    // R78N: venue modes must be unmistakably different while remaining an
+    // early-reflection/stage effect, not a reverb wash.
+    this.width = clamp(value.widthScale, 1, 1.30);
+    this.mix = clamp(value.reflectionMix, 0, 0.22);
     this.delayA = Math.max(1, Math.min(this.maxDelay - 2, Math.round(this.sampleRate * clamp(value.delayMsA, 4, 55) / 1000)));
     this.delayB = Math.max(1, Math.min(this.maxDelay - 2, Math.round(this.sampleRate * clamp(value.delayMsB, 7, 75) / 1000)));
     this.damping = clamp(value.damping, 0.16, 0.62);
@@ -373,7 +375,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         type: "ready",
         sampleRate,
         maxFrames: this.maxFrames,
-        version: "studio-wasm-v6.6-r78j-verified-audio-route",
+        version: "studio-wasm-v6.9-r78n-all-audio-fixes",
       });
     } catch (error) {
       this.failed = true;
@@ -597,6 +599,15 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
       this.copyBypass(input, output);
       return true;
     }
+
+    // R78N TRUE SINGLE-ROUTE BYPASS:
+    // Reference/A-B skips Master Prep, Venue and creative DSP here. There is no
+    // second raw branch competing with the processed audio at the destination.
+    if (this.appliedState?.bypass) {
+      this.copyBypass(input, output);
+      return true;
+    }
+
     this.masterPrep.processInto(inL, inR || inL, this.prepL, this.prepR, frames);
     this.venue.processInto(this.prepL, this.prepR, this.inputL, this.inputR, frames);
 

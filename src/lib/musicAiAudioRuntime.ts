@@ -94,7 +94,7 @@ function currentControlSnapshot(player: any, profile: ProfileName) {
       hdXpanderLevel: Math.max(0, Math.min(3, Math.round(num(player.hdXpanderLevel)))),
       analog: bool(player.exciterEnabled) ? (num(player.saturationMid) >= 7 ? "warm" : "studio") : "off",
       wide: player.headphoneMode === "wide",
-      highOutput: num(player.outputReserveDb) >= 5.5,
+      highOutput: num(player.outputReserveDb) >= 5.5 && bool(player.autoMakeupEnabled),
     };
   }
   return {
@@ -104,7 +104,7 @@ function currentControlSnapshot(player: any, profile: ProfileName) {
     hdXpanderLevel: Math.max(0, Math.min(3, Math.round(num(player.hdXpanderLevel)))),
     analog: bool(player.exciterEnabled) ? (num(player.saturationMid) >= 7 ? "warm" : "studio") : "off",
     wide: bool(player.stereoFieldEnabled) && num(player.stereoUserWidth) >= 115,
-    highOutput: num(player.outputReserveDb) >= 5.5,
+    highOutput: num(player.outputReserveDb) >= 5.5 && bool(player.autoMakeupEnabled),
   };
 }
 
@@ -312,6 +312,10 @@ async function applyAutoSound(player: any, intelligence: any) {
   delete (expected as any).compatibilityNotes;
   if (runtimeState.venue !== "off") delete (expected as any).wide;
   graceUntil = Date.now() + 1800;
+  const appliedPlayer = music.getMusicPlayerSnapshot();
+  if (appliedPlayer?.dspEngineMode !== "studio_wasm" || appliedPlayer?.dspStatus !== "active") {
+    await music.recoverMusicDsp().catch(() => undefined);
+  }
   return true;
 }
 
@@ -336,18 +340,18 @@ async function applyVenue(player: any) {
   const mode = runtimeState.venue;
   const venueDsp = profile === "headphones"
     ? {
-        studio:       { enabled: true, widthScale: 1.03, reflectionMix: 0.018, delayMsA: 6,  delayMsB: 11, damping: 0.56 },
-        small_club:   { enabled: true, widthScale: 1.07, reflectionMix: 0.050, delayMsA: 11, delayMsB: 18, damping: 0.50 },
-        concert_hall: { enabled: true, widthScale: 1.10, reflectionMix: 0.078, delayMsA: 21, delayMsB: 34, damping: 0.42 },
-        arena:        { enabled: true, widthScale: 1.13, reflectionMix: 0.105, delayMsA: 31, delayMsB: 49, damping: 0.36 },
-        live_stage:   { enabled: true, widthScale: 1.11, reflectionMix: 0.068, delayMsA: 15, delayMsB: 27, damping: 0.46 },
+        studio:       { enabled: true, widthScale: 1.04, reflectionMix: 0.025, delayMsA: 6,  delayMsB: 11, damping: 0.56 },
+        small_club:   { enabled: true, widthScale: 1.11, reflectionMix: 0.090, delayMsA: 11, delayMsB: 18, damping: 0.50 },
+        concert_hall: { enabled: true, widthScale: 1.16, reflectionMix: 0.135, delayMsA: 21, delayMsB: 34, damping: 0.42 },
+        arena:        { enabled: true, widthScale: 1.22, reflectionMix: 0.180, delayMsA: 31, delayMsB: 49, damping: 0.36 },
+        live_stage:   { enabled: true, widthScale: 1.18, reflectionMix: 0.115, delayMsA: 15, delayMsB: 27, damping: 0.46 },
       }
     : {
-        studio:       { enabled: true, widthScale: 1.04, reflectionMix: 0.024, delayMsA: 6,  delayMsB: 11, damping: 0.58 },
-        small_club:   { enabled: true, widthScale: 1.09, reflectionMix: 0.068, delayMsA: 11, delayMsB: 18, damping: 0.52 },
-        concert_hall: { enabled: true, widthScale: 1.14, reflectionMix: 0.105, delayMsA: 21, delayMsB: 34, damping: 0.44 },
-        arena:        { enabled: true, widthScale: 1.19, reflectionMix: 0.145, delayMsA: 31, delayMsB: 49, damping: 0.38 },
-        live_stage:   { enabled: true, widthScale: 1.16, reflectionMix: 0.092, delayMsA: 15, delayMsB: 27, damping: 0.48 },
+        studio:       { enabled: true, widthScale: 1.05, reflectionMix: 0.030, delayMsA: 6,  delayMsB: 11, damping: 0.58 },
+        small_club:   { enabled: true, widthScale: 1.13, reflectionMix: 0.110, delayMsA: 11, delayMsB: 18, damping: 0.52 },
+        concert_hall: { enabled: true, widthScale: 1.20, reflectionMix: 0.160, delayMsA: 21, delayMsB: 34, damping: 0.44 },
+        arena:        { enabled: true, widthScale: 1.28, reflectionMix: 0.200, delayMsA: 31, delayMsB: 49, damping: 0.38 },
+        live_stage:   { enabled: true, widthScale: 1.22, reflectionMix: 0.145, delayMsA: 15, delayMsB: 27, damping: 0.48 },
       };
   venueSink?.(venueDsp[mode as Exclude<VenueMode, "off">]);
   if (profile === "headphones") {
@@ -398,6 +402,10 @@ async function applyVenue(player: any) {
   }
 
   graceUntil = Date.now() + 1800;
+  const appliedPlayer = music.getMusicPlayerSnapshot();
+  if (appliedPlayer?.dspEngineMode !== "studio_wasm" || appliedPlayer?.dspStatus !== "active") {
+    await music.recoverMusicDsp().catch(() => undefined);
+  }
   return true;
 }
 
@@ -413,11 +421,13 @@ function updateUi(intelligence: any) {
   latestIntelligence = intelligence;
   const prep = intelligence?.masterPrep;
   const currentPlayerRecommendation = intelligence?.aiAutoSound;
+  const activeProfile = profileName(lastProfile);
+  const activeRecommendation = activeProfile ? currentPlayerRecommendation?.[activeProfile] : null;
   const overrideCount = Object.keys(runtimeState.overrides).filter((key) => runtimeState.overrides[key]).length;
   if (statusNode) statusNode.textContent = prep ? "MASTER PREP ACTIVE" : "MASTER PREP PENDING";
   if (detailNode) {
     const ai = runtimeState.autoEnabled
-      ? currentPlayerRecommendation
+      ? activeRecommendation
         ? `AI AUTO SOUND ON${overrideCount ? ` · ${overrideCount} MANUAL` : ""}`
         : "AI AUTO SOUND WAITING FOR ENRICHMENT"
       : "AI AUTO SOUND OFF";
@@ -433,7 +443,7 @@ function updateUi(intelligence: any) {
   });
   const toggle = panelNode?.querySelector<HTMLButtonElement>("[data-auto]");
   if (toggle) {
-    const recommendationReady = Boolean(currentPlayerRecommendation);
+    const recommendationReady = Boolean(activeRecommendation);
     toggle.dataset.active = runtimeState.autoEnabled ? "true" : "false";
     toggle.dataset.ready = recommendationReady ? "true" : "false";
     toggle.textContent = runtimeState.autoEnabled
@@ -443,9 +453,26 @@ function updateUi(intelligence: any) {
 
   const technical = intelligence?.audioAnalysis;
   const tech = panelNode?.querySelector<HTMLElement>("[data-tech]");
-  if (tech) tech.textContent = technical
-    ? `${technical.codec || "SOURCE"} · ${technical.truePeakDbtp?.toFixed?.(1) ?? "—"} dBTP · ${technical.crestFactorDb?.toFixed?.(1) ?? "—"} dB CREST · ${technical.correlation?.toFixed?.(2) ?? "—"} CORR`
-    : "Run Enrich Library to create Master Prep and AI sound recommendations for this song.";
+  if (tech) {
+    if (!technical) {
+      tech.textContent = "Run Enrich Library to create Master Prep and AI sound recommendations for this song.";
+    } else {
+      const chosen: string[] = [];
+      if (activeRecommendation?.clear) chosen.push("CLEAR");
+      if (activeRecommendation?.neuralBass) chosen.push("BASS");
+      if (activeRecommendation?.impactOrPunch) chosen.push(activeProfile === "speaker" ? "PUNCH" : "IMPACT");
+      if (Number(activeRecommendation?.hdXpanderLevel) > 0) chosen.push(`XPANDER ${activeRecommendation.hdXpanderLevel}`);
+      if (activeRecommendation?.analog && activeRecommendation.analog !== "off") chosen.push(`ANALOG ${String(activeRecommendation.analog).toUpperCase()}`);
+      if (activeRecommendation?.wide) chosen.push("WIDE");
+      if (activeRecommendation?.highOutput) chosen.push(activeProfile === "speaker" ? "MAX OUTPUT" : "HIGH OUTPUT");
+      const notes = Array.isArray(activeRecommendation?.compatibilityNotes)
+        ? activeRecommendation.compatibilityNotes.filter(Boolean)
+        : [];
+      const aiLine = activeRecommendation ? ` · AI: ${chosen.length ? chosen.join(" + ") : "CLEAN"}` : "";
+      const compatLine = notes.length ? ` · COMPAT: ${notes.join(" / ")}` : "";
+      tech.textContent = `${technical.codec || "SOURCE"} · ${technical.truePeakDbtp?.toFixed?.(1) ?? "—"} dBTP · ${technical.crestFactorDb?.toFixed?.(1) ?? "—"} dB CREST · ${technical.correlation?.toFixed?.(2) ?? "—"} CORR${aiLine}${compatLine}`;
+    }
+  }
 }
 
 async function poll() {

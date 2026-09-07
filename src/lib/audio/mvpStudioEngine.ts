@@ -121,7 +121,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.7.0-r78k-peak-guard-clean-loudness";
+const MVP_STUDIO_ASSET_VERSION = "6.9.0-r78n-all-audio-fixes";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {

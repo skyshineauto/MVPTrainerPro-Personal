@@ -1180,6 +1180,19 @@ function scheduleProcessingSettle() {
   processingSettleTimer = window.setTimeout(() => {
     processingSettleTimer = 0;
     applyProcessingSettings();
+
+    // R78N LIVE STATE ACK WATCH:
+    // A glowing button is not considered good enough. The AudioWorklet must
+    // acknowledge the latest state revision. If it does not, recover/rebuild the
+    // clean-HD route instead of leaving UI state disconnected from audible DSP.
+    window.setTimeout(() => {
+      if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
+      if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
+      const runtime = getMvpStudioRuntimeInfo();
+      if (runtime.faulted || !runtime.ready || runtime.appliedRevision < runtime.requestedRevision) {
+        scheduleCleanHdRouteRecovery(120);
+      }
+    }, 220);
   }, 140);
 }
 function setDspTelemetry(status: MusicDspStatus, effectivePreampDb: number, autoHeadroomDb: number) {
@@ -1727,10 +1740,17 @@ function applyStudioProcessingSettings(now: number) {
   if (masterVolumeGain) setAudioParam(masterVolumeGain.gain, 1, now, 0.01);
   applyVirtualAmpSettings(now);
   if (postLimiterVolumeGain) setAudioParam(postLimiterVolumeGain.gain, volumeToGain(state.volume), now, 0.01);
+  // R78N: only the Studio/WASM branch is audible. Reference/A-B bypasses
+  // processing inside the worklet, then exits through the same branch.
   if (referenceRouteGain) {
-    setAudioParam(referenceRouteGain.gain, pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 0, now, 0.008);
+    referenceRouteGain.gain.cancelScheduledValues(now);
+    referenceRouteGain.gain.setValueAtTime(0, now);
   }
-  if (standardRouteGain) setAudioParam(standardRouteGain.gain, processed ? 1 : 0, now, 0.008);
+  if (standardRouteGain) {
+    const audibleRouteGain = pureReference ? 1 : abBypass ? dbToGain(referenceMatchDb) : 1;
+    standardRouteGain.gain.cancelScheduledValues(now);
+    standardRouteGain.gain.setValueAtTime(audibleRouteGain, now);
+  }
   configureStudioHrtf(now);
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
   const hrtfImmersion = processed && studioHrtfRequested();
@@ -1881,7 +1901,8 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     referenceRouteGain = context.createGain();
     referenceRouteGain.gain.value = 0;
     standardRouteGain = context.createGain();
-    standardRouteGain.gain.value = 0;
+    // R78N: exactly one audible Studio route. Reference/A-B is internal bypass.
+    standardRouteGain.gain.value = 1;
     studioInputBus = context.createGain();
     studioDirectInputGain = context.createGain();
     studioDirectInputGain.gain.value = 1;
@@ -1950,10 +1971,9 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     levelMeterSink.gain.value = 0;
 
     mediaSource.connect(masterVolumeGain);
-    masterVolumeGain.connect(referenceRouteGain);
-    referenceRouteGain.connect(mixBus);
-
-    // Direct processed path.
+    // R78N SINGLE AUDIBLE ROUTE:
+    // The dry/reference feed is deliberately NOT connected to the destination
+    // mix. Reference and A/B use bypass inside the same AudioWorklet instead.
     masterVolumeGain.connect(studioDirectInputGain);
     studioDirectInputGain.connect(studioInputBus);
 
@@ -4395,7 +4415,9 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
   const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
   if (carryCleanOutputEnabled != null && enteringCleanHd) {
     target.outputReserveDb = carryCleanOutputEnabled ? 8.0 : 0;
-    target.autoMakeupEnabled = false;
+    // R78N: the visual High/Max ON state must carry the actual native loudness
+    // request too. Reserve=8 with autoMakeup=false was a false-positive button.
+    target.autoMakeupEnabled = carryCleanOutputEnabled;
     target.limiterEnabled = true;
   }
   applyOutputProfileSnapshot(profile, target);
