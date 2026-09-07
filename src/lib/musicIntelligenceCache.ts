@@ -1,3 +1,9 @@
+import type {
+  MusicAiAutoSoundProfiles,
+  MusicAudioTechnicalAnalysis,
+  MusicMasterPrepProfile,
+} from "./musicAudioIntelligence";
+
 export type MusicSongDNA = {
   energy: number;
   heaviness: number;
@@ -46,6 +52,10 @@ export type MusicTrackIntelligence = {
   musicbrainzArtistId: string | null;
   cyaniteTrackId: string | null;
   cyaniteStatus: string | null;
+  providerPayload?: Record<string, unknown>;
+  audioAnalysis?: MusicAudioTechnicalAnalysis | null;
+  masterPrep?: MusicMasterPrepProfile | null;
+  aiAutoSound?: MusicAiAutoSoundProfiles | null;
   analyzedAt: string | null;
   updatedAt: string;
   error: string | null;
@@ -76,6 +86,16 @@ function blank(): CacheState {
   return { tracks: {}, artists: {} };
 }
 
+function normalizeCachedTrack(item: MusicTrackIntelligence): MusicTrackIntelligence {
+  return {
+    ...item,
+    providerPayload: item.providerPayload && typeof item.providerPayload === "object" ? item.providerPayload : {},
+    audioAnalysis: item.audioAnalysis ?? null,
+    masterPrep: item.masterPrep ?? null,
+    aiAutoSound: item.aiAutoSound ?? null,
+  };
+}
+
 function read(): CacheState {
   if (memory) return memory;
   if (typeof window === "undefined") {
@@ -85,8 +105,11 @@ function read(): CacheState {
   try {
     const raw = window.localStorage.getItem(CACHE_KEY);
     const parsed = raw ? (JSON.parse(raw) as Partial<CacheState>) : null;
+    const tracksRaw = parsed?.tracks && typeof parsed.tracks === "object" ? parsed.tracks : {};
     memory = {
-      tracks: parsed?.tracks && typeof parsed.tracks === "object" ? parsed.tracks : {},
+      tracks: Object.fromEntries(
+        Object.entries(tracksRaw).map(([id, item]) => [id, normalizeCachedTrack(item as MusicTrackIntelligence)]),
+      ),
       artists: parsed?.artists && typeof parsed.artists === "object" ? parsed.artists : {},
     };
   } catch {
@@ -123,18 +146,12 @@ function flushPendingWrite() {
 
 function write() {
   if (typeof window === "undefined") return;
-
-  // Song-by-song enrichment used to stringify/sort the complete intelligence
-  // cache on every analyzed track. That synchronous localStorage work competes
-  // directly with Web Audio visualizers, Three.js and Framer Motion. Keep the
-  // in-memory cache immediate, but batch disk persistence until the scan pauses.
   if (writeTimer === null) {
     writeTimer = window.setTimeout(() => {
       writeTimer = null;
       persistNow();
     }, 4500);
   }
-
   if (!pageHideBound) {
     pageHideBound = true;
     window.addEventListener("pagehide", flushPendingWrite);
@@ -142,17 +159,19 @@ function write() {
 }
 
 export function cacheMusicTrackIntelligence(item: MusicTrackIntelligence) {
+  const normalized = normalizeCachedTrack(item);
   const state = read();
-  state.tracks[item.trackId] = item;
-  if (item.artistKey && Object.keys(item.artistDna || {}).length) {
-    state.artists[item.artistKey] = item.artistDna;
+  state.tracks[normalized.trackId] = normalized;
+  if (normalized.artistKey && Object.keys(normalized.artistDna || {}).length) {
+    state.artists[normalized.artistKey] = normalized.artistDna;
   }
   write();
 }
 
 export function cacheMusicTrackIntelligenceMany(items: MusicTrackIntelligence[]) {
   const state = read();
-  for (const item of items) {
+  for (const raw of items) {
+    const item = normalizeCachedTrack(raw);
     state.tracks[item.trackId] = item;
     if (item.artistKey && Object.keys(item.artistDna || {}).length) {
       state.artists[item.artistKey] = item.artistDna;

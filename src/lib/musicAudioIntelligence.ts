@@ -1,3 +1,67 @@
+export type MusicAudioSourceQuality = "lossless" | "high" | "standard" | "low" | "unknown";
+
+export type MusicAudioTechnicalAnalysis = {
+  codec: string;
+  bitrateKbps: number | null;
+  sampleRateHz: number;
+  bitDepth: number | null;
+  channelCount: number;
+  lossless: boolean;
+  sourceQuality: MusicAudioSourceQuality;
+  averageLoudnessDb: number | null;
+  rmsDb: number | null;
+  samplePeakDbfs: number;
+  truePeakDbtp: number;
+  intersampleOvers: number;
+  clippedSamples: number;
+  crestFactorDb: number;
+  dynamicRangeDb: number;
+  bassExtension: number;
+  lowMidBuildup: number;
+  presenceBalance: number;
+  harshness: number;
+  sibilance: number;
+  hfRolloff: number;
+  transientStrength: number;
+  stereoWidthPercent: number;
+  correlation: number;
+  channelBalanceDb: number;
+  dcOffset: number;
+  rumble: number;
+  phaseRisk: boolean;
+  defects: string[];
+};
+
+export type MusicMasterPrepProfile = {
+  enabled: boolean;
+  sourceGainDb: number;
+  highpassHz: number;
+  lowMidDb: number;
+  presenceDb: number;
+  harshnessDb: number;
+  channelBalanceDb: number;
+  widthScale: number;
+  reasons: string[];
+};
+
+export type MusicAnalogRecommendation = "off" | "studio" | "warm";
+
+export type MusicAiAutoSoundRecommendation = {
+  clear: boolean;
+  neuralBass: boolean;
+  impactOrPunch: boolean;
+  hdXpanderLevel: 0 | 1 | 2 | 3;
+  analog: MusicAnalogRecommendation;
+  wide: boolean;
+  highOutput: boolean;
+  compatibilityNotes: string[];
+};
+
+export type MusicAiAutoSoundProfiles = {
+  headphones: MusicAiAutoSoundRecommendation;
+  speaker: MusicAiAutoSoundRecommendation;
+};
+
 export type LocalAudioIntelligence = {
   bpm: number | null;
   bpmConfidence: number;
@@ -12,15 +76,31 @@ export type LocalAudioIntelligence = {
   zeroCrossingRate: number | null;
   rmsDb: number | null;
   durationSeconds: number;
+  technical: MusicAudioTechnicalAnalysis;
+  masterPrep: MusicMasterPrepProfile;
+  autoSound: MusicAiAutoSoundProfiles;
   successfulFeatures: string[];
   failedFeatures: Array<{ feature: string; error: string }>;
+};
+
+export type MusicAudioSourceMeta = {
+  fileSizeBytes?: number | null;
+  mimeType?: string | null;
+  originalName?: string | null;
+  releaseYear?: number | null;
+  genre?: string | null;
+  energyLevel?: string | null;
+  bitDepth?: number | null;
+  channelCount?: number | null;
 };
 
 type AnalyzeRequest = {
   type: "analyze";
   id: number;
-  pcm: Float32Array;
+  pcmLeft: Float32Array;
+  pcmRight: Float32Array;
   sampleRate: number;
+  sourceMeta: MusicAudioSourceMeta;
 };
 
 type AnalyzeSuccess = {
@@ -84,7 +164,21 @@ function finite(value: number | null | undefined, fallback = 0) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
-async function decodeToMono(audioUrl: string) {
+function wavBitDepth(bytes: ArrayBuffer, mimeType: string | null | undefined, originalName: string | null | undefined) {
+  const mime = String(mimeType || "").toLowerCase();
+  const name = String(originalName || "").toLowerCase();
+  if (!mime.includes("wav") && !name.endsWith(".wav")) return null;
+  try {
+    const view = new DataView(bytes);
+    if (view.byteLength < 36) return null;
+    const bits = view.getUint16(34, true);
+    return bits >= 8 && bits <= 64 ? bits : null;
+  } catch {
+    return null;
+  }
+}
+
+async function decodeStereo(audioUrl: string, sourceMeta: MusicAudioSourceMeta) {
   const response = await fetch(audioUrl, { cache: "no-store" });
   if (!response.ok) throw new Error(`Audio fetch failed (${response.status}).`);
   const bytes = await response.arrayBuffer();
@@ -97,23 +191,35 @@ async function decodeToMono(audioUrl: string) {
     const decoded = await context.decodeAudioData(bytes.slice(0));
     if (!decoded.length || !decoded.numberOfChannels) throw new Error("Decoded audio is empty.");
 
-    // One full channel is enough for tempo/key/energy analysis and avoids a large
-    // stereo down-mix on the UI thread. The PCM copy is transferred to the worker.
-    const source = decoded.getChannelData(0);
-    const pcm = new Float32Array(source.length);
-    pcm.set(source);
+    const leftSource = decoded.getChannelData(0);
+    const rightSource = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : leftSource;
+    const pcmLeft = new Float32Array(leftSource.length);
+    const pcmRight = new Float32Array(rightSource.length);
+    pcmLeft.set(leftSource);
+    pcmRight.set(rightSource);
+
     return {
-      pcm,
+      pcmLeft,
+      pcmRight,
       sampleRate: finite(decoded.sampleRate, 44100),
-      durationSeconds: finite(decoded.duration, source.length / Math.max(1, decoded.sampleRate)),
+      durationSeconds: finite(decoded.duration, leftSource.length / Math.max(1, decoded.sampleRate)),
+      sourceMeta: {
+        ...sourceMeta,
+        fileSizeBytes: finite(sourceMeta.fileSizeBytes, bytes.byteLength) || bytes.byteLength,
+        bitDepth: sourceMeta.bitDepth ?? wavBitDepth(bytes, sourceMeta.mimeType, sourceMeta.originalName),
+        channelCount: decoded.numberOfChannels,
+      },
     };
   } finally {
     void context.close().catch(() => undefined);
   }
 }
 
-export async function analyzeMusicAudioLocally(audioUrl: string): Promise<LocalAudioIntelligence> {
-  const { pcm, sampleRate, durationSeconds } = await decodeToMono(audioUrl);
+export async function analyzeMusicAudioLocally(
+  audioUrl: string,
+  sourceMeta: MusicAudioSourceMeta = {},
+): Promise<LocalAudioIntelligence> {
+  const { pcmLeft, pcmRight, sampleRate, durationSeconds, sourceMeta: decodedMeta } = await decodeStereo(audioUrl, sourceMeta);
   const id = nextId++;
   const target = getWorker();
 
@@ -121,10 +227,17 @@ export async function analyzeMusicAudioLocally(audioUrl: string): Promise<LocalA
     const timeout = window.setTimeout(() => {
       pending.delete(id);
       reject(new Error("Local audio analysis timed out."));
-    }, 150_000);
+    }, 180_000);
     pending.set(id, { resolve, reject, timeout });
-    const request: AnalyzeRequest = { type: "analyze", id, pcm, sampleRate };
-    target.postMessage(request, [pcm.buffer]);
+    const request: AnalyzeRequest = {
+      type: "analyze",
+      id,
+      pcmLeft,
+      pcmRight,
+      sampleRate,
+      sourceMeta: decodedMeta,
+    };
+    target.postMessage(request, [pcmLeft.buffer, pcmRight.buffer]);
   });
 
   return {

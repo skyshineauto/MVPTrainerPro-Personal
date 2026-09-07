@@ -17,8 +17,9 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 3;
+export const MUSIC_INTELLIGENCE_VERSION = 4;
 const TRACK_TABLE = "trainer_music_track_intelligence";
+const TRACK_SELECT = "track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,provider_payload,analyzed_at,updated_at,error";
 
 type DbTrackIntelligence = {
   track_id: string;
@@ -44,6 +45,7 @@ type DbTrackIntelligence = {
   musicbrainz_artist_id: string | null;
   cyanite_track_id: string | null;
   cyanite_status: string | null;
+  provider_payload: Record<string, unknown> | null;
   analyzed_at: string | null;
   updated_at: string | null;
   error: string | null;
@@ -89,7 +91,12 @@ function sanitizeSongDna(value: Partial<MusicSongDNA> | null | undefined): Music
   };
 }
 
+function objectPayload(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function fromDb(row: DbTrackIntelligence): MusicTrackIntelligence {
+  const providerPayload = objectPayload(row.provider_payload);
   return {
     trackId: row.track_id,
     artistKey: row.artist_key || "",
@@ -114,12 +121,15 @@ function fromDb(row: DbTrackIntelligence): MusicTrackIntelligence {
     musicbrainzArtistId: row.musicbrainz_artist_id || null,
     cyaniteTrackId: row.cyanite_track_id || null,
     cyaniteStatus: row.cyanite_status || null,
+    providerPayload,
+    audioAnalysis: (providerPayload.audio_analysis && typeof providerPayload.audio_analysis === "object" ? providerPayload.audio_analysis : null) as MusicTrackIntelligence["audioAnalysis"],
+    masterPrep: (providerPayload.master_prep && typeof providerPayload.master_prep === "object" ? providerPayload.master_prep : null) as MusicTrackIntelligence["masterPrep"],
+    aiAutoSound: (providerPayload.ai_auto_sound && typeof providerPayload.ai_auto_sound === "object" ? providerPayload.ai_auto_sound : null) as MusicTrackIntelligence["aiAutoSound"],
     analyzedAt: row.analyzed_at || null,
     updatedAt: row.updated_at || new Date().toISOString(),
     error: row.error || null,
   };
 }
-
 
 function clampUnit(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -144,23 +154,19 @@ function normalizeRange(value: number | null, low: number, high: number, fallbac
 function mergeLocalAudioDna(base: MusicSongDNA, facts: LocalAudioIntelligence): MusicSongDNA {
   const bpm = facts.bpm;
   const pace = bpm == null ? base.drive : normalizeRange(bpm, 62, 176, base.drive);
-  const dance = facts.danceability == null
-    ? base.upbeat
-    : clamp((facts.danceability / 3) * 100, base.upbeat);
+  const dance = facts.danceability == null ? base.upbeat : clamp((facts.danceability / 3) * 100, base.upbeat);
   const intensityMeasured = facts.intensityScore == null
     ? clamp(base.intensity * .58 + base.energy * .24 + base.drive * .18, base.intensity)
     : clamp(facts.intensityScore, base.intensity);
   const loudness = normalizeRange(facts.rmsDb, -28, -7, base.energy);
   const brightnessMeasured = normalizeRange(facts.spectralCentroidHz, 650, 5200, base.brightness);
   const noiseMotion = normalizeRange(facts.zeroCrossingRate, 0.018, 0.19, base.chaotic);
-
   const audioEnergy = clamp(pace * .22 + dance * .17 + intensityMeasured * .28 + loudness * .33);
   const audioDrive = clamp(pace * .46 + dance * .31 + intensityMeasured * .23);
   const audioIntensity = clamp(intensityMeasured * .48 + audioEnergy * .30 + audioDrive * .22);
   const audioUpbeat = clamp(pace * .30 + dance * .38 + brightnessMeasured * .22 + (100 - base.darkness) * .10);
   const audioRelaxing = clamp(100 - (audioEnergy * .38 + audioDrive * .35 + audioIntensity * .17 + noiseMotion * .10));
   const audioWorkout = clamp(audioEnergy * .30 + audioDrive * .40 + audioIntensity * .20 + (100 - audioRelaxing) * .10);
-
   const mix = (current: number, measured: number, amount: number) => clamp(current * (1 - amount) + measured * amount);
   return {
     ...base,
@@ -185,10 +191,7 @@ function formatKeySignature(facts: LocalAudioIntelligence) {
 
 function describeLocalFailures(facts: LocalAudioIntelligence) {
   if (!facts.failedFeatures?.length) return null;
-  return facts.failedFeatures
-    .map((item) => `${item.feature}: ${item.error}`)
-    .join(" | ")
-    .slice(0, 900);
+  return facts.failedFeatures.map((item) => `${item.feature}: ${item.error}`).join(" | ").slice(0, 900);
 }
 
 async function saveLocalAudioIntelligence(
@@ -204,7 +207,6 @@ async function saveLocalAudioIntelligence(
   const localFeatures = Array.isArray(facts.successfulFeatures) ? facts.successfulFeatures.filter(Boolean) : [];
   const hasLocalMeasurements = localFeatures.length > 0;
   const coreComplete = bpm != null && Boolean(keySignature) && hasLocalMeasurements;
-
   if (!hasLocalMeasurements) {
     const failureDetail = describeLocalFailures(facts);
     throw new Error(failureDetail || "Local audio analysis returned no usable measurements.");
@@ -218,10 +220,25 @@ async function saveLocalAudioIntelligence(
     ? confidenceSignals.reduce((sum, value) => sum + value, 0) / confidenceSignals.length
     : .55;
   const confidence = Math.max(base.confidence, Math.min(.99, base.confidence * .74 + clampUnit(localConfidence, .55) * .18 + .08));
-  const source = [...new Set([...(base.source || []), "essentia"])];
+  const source = [...new Set([...(base.source || []), "essentia", "mvp-master-prep"])];
   const songDna = mergeLocalAudioDna(base.songDna, { ...facts, bpm: localBpm ?? bpm });
   const updatedAt = new Date().toISOString();
   const failureDetail = describeLocalFailures(facts);
+  const providerPayload = {
+    ...(base.providerPayload || {}),
+    audio_analysis: facts.technical,
+    master_prep: facts.masterPrep,
+    ai_auto_sound: facts.autoSound,
+    local_audio_features: {
+      rmsDb: facts.rmsDb,
+      loudnessDb: facts.loudnessDb,
+      dynamicComplexity: facts.dynamicComplexity,
+      spectralCentroidHz: facts.spectralCentroidHz,
+      zeroCrossingRate: facts.zeroCrossingRate,
+      successfulFeatures: facts.successfulFeatures,
+      failedFeatures: facts.failedFeatures,
+    },
+  };
 
   const { data, error } = await supabase
     .from(TRACK_TABLE)
@@ -234,12 +251,13 @@ async function saveLocalAudioIntelligence(
       bpm,
       key_signature: keySignature,
       tempo_label: tempoLabelFromBpm(bpm),
+      provider_payload: providerPayload,
       analyzed_at: updatedAt,
       updated_at: updatedAt,
       error: coreComplete ? null : (failureDetail || "Local audio analysis is partial. BPM or key is still missing."),
     })
     .eq("track_id", base.trackId)
-    .select("track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,analyzed_at,updated_at,error")
+    .select(TRACK_SELECT)
     .single();
 
   if (error) throw error;
@@ -266,10 +284,9 @@ export async function getMusicTrackIntelligence(trackId: string) {
 
   const { data, error } = await supabase
     .from(TRACK_TABLE)
-    .select("track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,analyzed_at,updated_at,error")
+    .select(TRACK_SELECT)
     .eq("track_id", trackId)
     .maybeSingle();
-
   if (error) throw error;
   if (!data) return null;
   const parsed = fromDb(data as DbTrackIntelligence);
@@ -284,13 +301,9 @@ export async function listMusicTrackIntelligenceMap(trackIds: string[]) {
     const cached = getCachedMusicTrackIntelligence(id);
     if (cached && cached.status !== "processing" && cached.status !== "stale" && cached.status !== "failed") map.set(id, cached);
   }
-
   const missing = ids.filter((id) => !map.has(id));
   for (const group of chunk(missing, 180)) {
-    const { data, error } = await supabase
-      .from(TRACK_TABLE)
-      .select("track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,analyzed_at,updated_at,error")
-      .in("track_id", group);
+    const { data, error } = await supabase.from(TRACK_TABLE).select(TRACK_SELECT).in("track_id", group);
     if (error) throw error;
     const parsed = ((data ?? []) as DbTrackIntelligence[]).map(fromDb);
     cacheMusicTrackIntelligenceMany(parsed);
@@ -339,7 +352,6 @@ export async function analyzeMusicTrackIntelligence(
     const current = await getMusicTrackIntelligence(track.id).catch(() => null);
     if (current && isMusicIntelligenceCurrent(current) && current.status !== "stale" && current.status !== "failed") {
       if (current.status !== "processing") return current;
-      // Processing rows are allowed back through so Cyanite results can be collected.
     }
   }
 
@@ -351,17 +363,17 @@ export async function analyzeMusicTrackIntelligence(
     // Metadata/artist intelligence can still complete without direct audio access.
   }
 
+  const payload = trackPayload(track);
   options.onStage?.("artist_dna", "Researching artist style and musical character…");
   const { data, error } = await supabase.functions.invoke("music-intelligence", {
     body: {
       action: "analyze",
       force: Boolean(options.force),
       analysisVersion: MUSIC_INTELLIGENCE_VERSION,
-      track: trackPayload(track),
+      track: payload,
       audioUrl,
     },
   });
-
   if (error) throw error;
   const response = (data ?? {}) as { intelligence?: DbTrackIntelligence | MusicTrackIntelligence; error?: string };
   if (response.error) throw new Error(response.error);
@@ -369,39 +381,43 @@ export async function analyzeMusicTrackIntelligence(
 
   options.onStage?.("song_dna", "Building Song DNA from mood, style, energy and movement…");
   const raw = response.intelligence;
-  let parsed = "track_id" in raw ? fromDb(raw as DbTrackIntelligence) : (raw as MusicTrackIntelligence);
+  let parsed = "track_id" in raw ? fromDb(raw as DbTrackIntelligence) : {
+    ...(raw as MusicTrackIntelligence),
+    providerPayload: (raw as MusicTrackIntelligence).providerPayload || {},
+    audioAnalysis: (raw as MusicTrackIntelligence).audioAnalysis || null,
+    masterPrep: (raw as MusicTrackIntelligence).masterPrep || null,
+    aiAutoSound: (raw as MusicTrackIntelligence).aiAutoSound || null,
+  };
   cacheMusicTrackIntelligence(parsed);
 
   if (audioUrl) {
-    options.onStage?.("audio_intelligence", "Analyzing the actual audio locally for BPM, key, rhythm and sonic character…");
+    options.onStage?.("audio_intelligence", "Analyzing the actual audio for Master Prep, BPM, key, dynamics, true-peak risk and stereo integrity…");
     try {
-      const facts = await analyzeMusicAudioLocally(audioUrl);
-      if (facts.failedFeatures?.length) {
-        console.warn("MVP local audio feature fallbacks", track.id, facts.failedFeatures);
-      }
-      options.onStage?.("saving", "Saving local audio intelligence to your library…");
+      const facts = await analyzeMusicAudioLocally(audioUrl, payload);
+      if (facts.failedFeatures?.length) console.warn("MVP local audio feature fallbacks", track.id, facts.failedFeatures);
+      options.onStage?.("saving", "Saving Master Prep + local audio intelligence to your library…");
       parsed = await saveLocalAudioIntelligence(parsed, facts);
       cacheMusicTrackIntelligence(parsed);
       options.onStage?.(
         "audio_intelligence",
         parsed.analysisVersion >= MUSIC_INTELLIGENCE_VERSION
-          ? `Audio intelligence complete ✓ ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "—"}`
+          ? `Master Prep complete ✓ ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "—"}`
           : `Audio intelligence partial • ${parsed.bpm ?? "—"} BPM · ${parsed.keySignature ?? "key pending"} • retry available`,
       );
-    } catch (error) {
-      console.warn("MVP local audio intelligence failed", track.id, error);
-      options.onStage?.("audio_intelligence", "Song + Artist DNA ready • local audio analysis can be retried.");
+    } catch (localError) {
+      console.warn("MVP local audio intelligence failed", track.id, localError);
+      options.onStage?.("audio_intelligence", "Song + Artist DNA ready • Master Prep analysis can be retried.");
     }
   } else {
-    options.onStage?.("audio_intelligence", "Song + Artist DNA ready • audio file was unavailable for local analysis.");
+    options.onStage?.("audio_intelligence", "Song + Artist DNA ready • audio file was unavailable for Master Prep analysis.");
   }
 
   if (parsed.analysisVersion < MUSIC_INTELLIGENCE_VERSION) {
-    options.onStage?.("saving", "Metadata intelligence saved · audio intelligence still pending…");
+    options.onStage?.("saving", "Metadata intelligence saved · Master Prep audio analysis still pending…");
   }
   options.onStage?.("complete", parsed.analysisVersion >= MUSIC_INTELLIGENCE_VERSION
-    ? "Music Intelligence complete"
-    : "Music Intelligence ready · local audio analysis pending");
+    ? "Music Intelligence + Master Prep complete"
+    : "Music Intelligence ready · Master Prep pending");
   return parsed;
 }
 
@@ -417,6 +433,6 @@ export async function markMusicTrackIntelligenceStale(trackId: string) {
 export function describeMusicIntelligenceSources(item: MusicTrackIntelligence | null | undefined) {
   if (!item?.source.length) return "MVP analysis";
   return item.source
-    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "essentia" ? "Essentia" : value === "deezer" ? "Deezer" : value === "mvp" ? "MVP" : value)
+    .map((value) => value === "lastfm" ? "Last.fm" : value === "musicbrainz" ? "MusicBrainz" : value === "cyanite" ? "Cyanite" : value === "essentia" ? "Essentia" : value === "mvp-master-prep" ? "Master Prep" : value === "deezer" ? "Deezer" : value === "mvp" ? "MVP" : value)
     .join(" + ");
 }

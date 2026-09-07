@@ -1,5 +1,8 @@
-// MVP Trainer Pro - Studio WASM bridge V5 Advanced Audio Engine
-// This bridge owns asset freshness, processor lifecycle, state revisions and low-rate telemetry.
+// MVP Trainer Pro - Studio WASM bridge V6.2 R78 Audio Intelligence
+// R77i WASM remains the shared protection core. Master Prep is injected in the worklet before that core.
+
+import type { MusicMasterPrepProfile } from "../musicAudioIntelligence";
+import { installMusicAiAudioRuntime } from "../musicAiAudioRuntime";
 
 export type MvpStudioTelemetry = {
   inputPeak: number;
@@ -109,7 +112,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.1.0-r77i-shared-clean-headroom";
+const MVP_STUDIO_ASSET_VERSION = "6.2.0-r78-audio-intelligence";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -149,6 +152,9 @@ const EMPTY_TELEMETRY: MvpStudioTelemetry = {
 let latestTelemetry: MvpStudioTelemetry = { ...EMPTY_TELEMETRY };
 let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
 let nextStateRevision = 0;
+let activeStudioNode: AudioWorkletNode | null = null;
+let activeMasterPrep: MusicMasterPrepProfile | null = null;
+let runtimeInstalled = false;
 let runtimeInfo: MvpStudioRuntimeInfo = {
   assetVersion: MVP_STUDIO_ASSET_VERSION,
   processorVersion: "not-ready",
@@ -168,12 +174,7 @@ function finite(value: unknown, fallback = 0) {
 
 function fixedFour(value: unknown): [number, number, number, number] {
   const values = Array.isArray(value) ? value : [];
-  return [
-    finite(values[0]),
-    finite(values[1]),
-    finite(values[2]),
-    finite(values[3]),
-  ];
+  return [finite(values[0]), finite(values[1]), finite(values[2]), finite(values[3])];
 }
 
 function updateTelemetry(data: Record<string, unknown>) {
@@ -228,9 +229,17 @@ async function loadStudioWasmBytes() {
   return wasmBytesPromise;
 }
 
+function postMasterPrep(node: AudioWorkletNode | null) {
+  node?.port.postMessage({ type: "master-prep", profile: activeMasterPrep });
+}
+
+export function setMvpStudioMasterPrep(profile: MusicMasterPrepProfile | null) {
+  activeMasterPrep = profile && profile.enabled ? { ...profile, reasons: [...(profile.reasons || [])] } : null;
+  postMasterPrep(activeStudioNode);
+}
+
 export async function createMvpStudioNode(context: AudioContext) {
   if (!context.audioWorklet) throw new Error("AudioWorklet is unavailable.");
-
   runtimeInfo = {
     assetVersion: MVP_STUDIO_ASSET_VERSION,
     processorVersion: "loading",
@@ -257,6 +266,11 @@ export async function createMvpStudioNode(context: AudioContext) {
     channelCountMode: "explicit",
     channelInterpretation: "speakers",
   });
+  activeStudioNode = node;
+  if (!runtimeInstalled) {
+    runtimeInstalled = true;
+    installMusicAiAudioRuntime(setMvpStudioMasterPrep);
+  }
 
   return new Promise<AudioWorkletNode>((resolve, reject) => {
     let settled = false;
@@ -264,6 +278,7 @@ export async function createMvpStudioNode(context: AudioContext) {
       if (settled) return;
       settled = true;
       runtimeInfo = { ...runtimeInfo, faulted: true, lastError: "MVP Studio processor timed out during startup." };
+      if (activeStudioNode === node) activeStudioNode = null;
       try { node.port.close(); } catch { /* already closed */ }
       reject(new Error(runtimeInfo.lastError ?? "MVP Studio startup timeout."));
     }, READY_TIMEOUT_MS);
@@ -273,6 +288,7 @@ export async function createMvpStudioNode(context: AudioContext) {
       if (settled) return;
       settled = true;
       window.clearTimeout(timeout);
+      if (activeStudioNode === node) activeStudioNode = null;
       try { node.port.close(); } catch { /* already closed */ }
       reject(new Error(message));
     };
@@ -280,15 +296,9 @@ export async function createMvpStudioNode(context: AudioContext) {
     node.port.onmessage = (event: MessageEvent) => {
       const data = event.data as Record<string, unknown> | null;
       if (!data || typeof data !== "object") return;
-
       if (data.type === "ready") {
-        runtimeInfo = {
-          ...runtimeInfo,
-          processorVersion: String(data.version || "studio-wasm"),
-          ready: true,
-          faulted: false,
-          lastError: null,
-        };
+        runtimeInfo = { ...runtimeInfo, processorVersion: String(data.version || "studio-wasm"), ready: true, faulted: false, lastError: null };
+        postMasterPrep(node);
         if (!settled) {
           settled = true;
           window.clearTimeout(timeout);
@@ -296,24 +306,15 @@ export async function createMvpStudioNode(context: AudioContext) {
         }
         return;
       }
-
       if (data.type === "telemetry") {
         updateTelemetry(data);
         return;
       }
-
       if (data.type === "state-applied") {
         const revision = Math.max(0, Math.floor(finite(data.revision)));
-        runtimeInfo = {
-          ...runtimeInfo,
-          appliedRevision: Math.max(runtimeInfo.appliedRevision, revision),
-          ready: true,
-          faulted: false,
-          lastAppliedAt: Date.now(),
-        };
+        runtimeInfo = { ...runtimeInfo, appliedRevision: Math.max(runtimeInfo.appliedRevision, revision), ready: true, faulted: false, lastAppliedAt: Date.now() };
         return;
       }
-
       if (data.type === "error") {
         const message = String(data.message || "MVP Studio processor error.");
         if (!settled) failStartup(message);
@@ -323,11 +324,11 @@ export async function createMvpStudioNode(context: AudioContext) {
 
     node.addEventListener("processorerror", () => {
       const message = "MVP Studio AudioWorklet processor stopped unexpectedly.";
+      if (activeStudioNode === node) activeStudioNode = null;
       if (!settled) failStartup(message);
       else runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
     });
 
-    // Transfer a private copy so a failed/rebuilt node never detaches the cached bytes.
     const initBytes = wasmBytes.slice(0);
     node.port.postMessage({ type: "init", wasmBytes: initBytes }, [initBytes]);
   });
@@ -336,11 +337,7 @@ export async function createMvpStudioNode(context: AudioContext) {
 export function setMvpStudioState(node: AudioWorkletNode | null, state: MvpStudioState) {
   if (!node) return 0;
   const revision = ++nextStateRevision;
-  runtimeInfo = {
-    ...runtimeInfo,
-    requestedRevision: revision,
-    lastRequestedAt: Date.now(),
-  };
+  runtimeInfo = { ...runtimeInfo, requestedRevision: revision, lastRequestedAt: Date.now() };
   node.port.postMessage({ type: "state", revision, state });
   return revision;
 }
@@ -351,6 +348,7 @@ export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
 
 export function resetMvpStudio(node: AudioWorkletNode | null) {
   node?.port.postMessage({ type: "reset" });
+  postMasterPrep(node);
 }
 
 export function getMvpStudioTelemetry(): MvpStudioTelemetry {
