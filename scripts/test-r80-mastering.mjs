@@ -158,7 +158,6 @@ let comboTone = 0;
 let comboBass = 0;
 let comboExciter = 0;
 let comboTransient = 0;
-let comboWidth = 100;
 let comboP1 = 0;
 let comboP2 = 0;
 for (let block = 0; block < 1700; block += 1) {
@@ -177,7 +176,6 @@ for (let block = 0; block < 1700; block += 1) {
     comboBass = Math.max(comboBass, Number(dsp.mvp_meter_bass_activity_db()) || 0);
     comboExciter = Math.max(comboExciter, Number(dsp.mvp_meter_exciter_activity()) || 0);
     comboTransient = Math.max(comboTransient, Number(dsp.mvp_meter_transient_boost_db()) || 0);
-    comboWidth = Math.max(comboWidth, Number(dsp.mvp_meter_stereo_width_percent()) || 100);
   }
 }
 // Combination assertions prove every selected DSP stage remains non-zero in the
@@ -187,8 +185,70 @@ if (comboTone < 0.20) throw new Error("Clear + Xpander tone combination did not 
 if (comboBass < 0.10) throw new Error("Neural Bass did not remain active in the combination");
 if (comboExciter < 0.001) throw new Error("Analog + Xpander harmonic processing did not remain active");
 if (comboTransient < 0.02) throw new Error("Punch/Impact + Xpander transient processing did not remain active");
-if (comboWidth < 101) throw new Error("Wide processing did not remain active in the combination");
 if (comboGuard > 0.40) throw new Error("Combined effects turned Peak Guard into routine processing: " + comboGuard.toFixed(2) + " dB");
+
+// R81-R5: mvp_meter_stereo_width_percent() reports the earlier Stereo Integrity
+// stage, not the later user WIDE stage. Prove WIDE from the actual rendered PCM.
+// All the other effects remain ON in both renders, so this specifically verifies
+// that WIDE survives the real combined-effects chain instead of being cancelled.
+function renderCombinedWidth(userWidth) {
+  configure(2, 12, true, 0);
+  dsp.mvp_set_bass_engine(1, 5.8, 3.4, 2.0, 0.84);
+  dsp.mvp_set_tone_engine(1, 5.1, 8.7, 10.5, 0);
+  dsp.mvp_set_exciter(1, 0.26, 0.10, 0.16, 0.10);
+  dsp.mvp_set_stereo_field(1, userWidth, 1.0, 105);
+  dsp.mvp_set_transient(1, 1.0);
+
+  let phaseA = 0;
+  let phaseB = 0;
+  let midEnergy = 0;
+  let sideEnergy = 0;
+  let samples = 0;
+
+  for (let block = 0; block < 1200; block += 1) {
+    for (let i = 0; i < frames; i += 1) {
+      const t = block * frames + i;
+      const pulse = (t % 2200) < 240 ? 1.0 : 0.60;
+      inL[i] = pulse * (0.58 * Math.sin(phaseA) + 0.19 * Math.sin(phaseB));
+      inR[i] = pulse * (0.55 * Math.sin(phaseA + 0.18) + 0.18 * Math.sin(phaseB + 0.37));
+      phaseA += (2 * Math.PI * 887) / 48000;
+      phaseB += (2 * Math.PI * 2771) / 48000;
+    }
+
+    if (dsp.mvp_process(frames) !== 1) {
+      throw new Error("mvp_process failed in combined WIDE render");
+    }
+
+    if (block > 180) {
+      for (let i = 0; i < frames; i += 1) {
+        const mid = 0.5 * (outL[i] + outR[i]);
+        const side = 0.5 * (outL[i] - outR[i]);
+        midEnergy += mid * mid;
+        sideEnergy += side * side;
+        samples += 1;
+      }
+    }
+  }
+
+  const midRms = Math.sqrt(midEnergy / Math.max(1, samples));
+  const sideRms = Math.sqrt(sideEnergy / Math.max(1, samples));
+  return {
+    midRms,
+    sideRms,
+    sideToMid: sideRms / Math.max(1e-9, midRms),
+  };
+}
+
+const combinedWidthOff = renderCombinedWidth(1.0);
+const combinedWidthOn = renderCombinedWidth(1.52);
+const combinedWideLift = combinedWidthOn.sideToMid / Math.max(1e-9, combinedWidthOff.sideToMid);
+
+if (combinedWideLift < 1.20) {
+  throw new Error(
+    "WIDE did not produce enough real stereo-side expansion with all effects active: " +
+    JSON.stringify({ combinedWidthOff, combinedWidthOn, combinedWideLift })
+  );
+}
 
 // Also verify the frontend source no longer contains the old cancellation rules.
 const playerSource = fs.readFileSync(path.join(root, "src/lib/musicPlayer.ts"), "utf8");
@@ -209,6 +269,15 @@ console.table(extremeRows.map((row) => ({
   "Extreme Lift": row.liftDb.toFixed(2) + " dB",
   "Peak Guard GR": row.extreme.maxGuard.toFixed(2) + " dB",
 })));
-console.log("R81 combination meters:", { comboTone, comboBass, comboExciter, comboTransient, comboWidth, comboGuard });
+console.log("R81 combination meters:", {
+  comboTone,
+  comboBass,
+  comboExciter,
+  comboTransient,
+  comboGuard,
+  combinedWidthOff,
+  combinedWidthOn,
+  combinedWideLift,
+});
 
 console.log("R81 mastering/effects test: PASS");
