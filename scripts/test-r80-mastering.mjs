@@ -38,7 +38,10 @@ for (const name of [
   "mvp_set_output_correction","mvp_set_stereo_integrity","mvp_set_loudness",
   "mvp_set_limiter","mvp_set_output_profile","mvp_set_headphone","mvp_set_output_gain",
   "mvp_process","mvp_reset","mvp_meter_gain_reduction_db",
-  "mvp_meter_final_compressor_reduction_db","mvp_meter_true_peak_dbtp"
+  "mvp_meter_final_compressor_reduction_db","mvp_meter_true_peak_dbtp",
+  "mvp_set_bass_engine","mvp_set_tone_engine","mvp_set_exciter","mvp_set_stereo_field",
+  "mvp_meter_bass_activity_db","mvp_meter_tone_activity_db","mvp_meter_exciter_activity",
+  "mvp_meter_transient_boost_db","mvp_meter_stereo_width_percent"
 ]) {
   if (typeof dsp[name] !== "function") throw new Error("Missing WASM export: " + name);
 }
@@ -48,6 +51,8 @@ const frames = 128;
 const maxFrames = Number(dsp.mvp_max_frames());
 const inL = new Float32Array(memory.buffer, Number(dsp.mvp_input_l()), maxFrames);
 const inR = new Float32Array(memory.buffer, Number(dsp.mvp_input_r()), maxFrames);
+const outL = new Float32Array(memory.buffer, Number(dsp.mvp_output_l()), maxFrames);
+const outR = new Float32Array(memory.buffer, Number(dsp.mvp_output_r()), maxFrames);
 
 function configure(profile, reserveDb, autoMakeup, preampDb) {
   dsp.mvp_reset();
@@ -74,6 +79,8 @@ function runCase(profile, reserveDb, autoMakeup, preampDb) {
   let maxGuard = 0;
   let maxMaster = 0;
   let maxTruePeak = -120;
+  let energy = 0;
+  let sampleCount = 0;
 
   for (let block = 0; block < 1900; block += 1) {
     for (let i = 0; i < frames; i += 1) {
@@ -89,9 +96,13 @@ function runCase(profile, reserveDb, autoMakeup, preampDb) {
       maxGuard = Math.max(maxGuard, Number(dsp.mvp_meter_gain_reduction_db()) || 0);
       maxMaster = Math.max(maxMaster, Number(dsp.mvp_meter_final_compressor_reduction_db()) || 0);
       maxTruePeak = Math.max(maxTruePeak, Number(dsp.mvp_meter_true_peak_dbtp()) || -120);
+      for (let i = 0; i < frames; i += 1) {
+        energy += 0.5 * (outL[i] * outL[i] + outR[i] * outR[i]);
+        sampleCount += 1;
+      }
     }
   }
-  return { maxGuard, maxMaster, maxTruePeak };
+  return { maxGuard, maxMaster, maxTruePeak, rms: Math.sqrt(energy / Math.max(1, sampleCount)) };
 }
 
 const rows = [];
@@ -114,6 +125,72 @@ for (const profile of [0, 1, 2]) {
   }
 }
 
+// Extreme loudness must create a real perceived-level change at the same raw
+// preamp setting. It is no longer allowed to disappear into the final limiter.
+const extremeRows = [];
+for (const profile of [0, 1, 2]) {
+  const normal = runCase(profile, 0, false, 0);
+  const extreme = runCase(profile, 12, true, 0);
+  const liftDb = 20 * Math.log10(Math.max(1e-9, extreme.rms) / Math.max(1e-9, normal.rms));
+  extremeRows.push({ profile, liftDb, normal, extreme });
+  if (liftDb < 2.0) {
+    throw new Error("Extreme loudness lift is too small: profile=" + profile + " lift=" + liftDb.toFixed(2) + " dB");
+  }
+  if (extreme.maxGuard > 0.40) {
+    throw new Error("Extreme routed routine loudness into Peak Guard: profile=" + profile + " GR=" + extreme.maxGuard.toFixed(2));
+  }
+}
+
+// Prove the advanced effects coexist in the same render instead of cancelling
+// each other when several user controls are ON.
+configure(2, 12, true, 0);
+dsp.mvp_set_bass_engine(1, 5.8, 3.4, 2.0, 0.84);
+dsp.mvp_set_tone_engine(1, 5.1, 8.7, 10.5, 0);
+dsp.mvp_set_exciter(1, 0.26, 0.10, 0.16, 0.10);
+dsp.mvp_set_stereo_field(1, 1.52, 1.0, 105);
+dsp.mvp_set_transient(1, 1.0);
+
+let comboGuard = 0;
+let comboTone = 0;
+let comboBass = 0;
+let comboExciter = 0;
+let comboTransient = 0;
+let comboWidth = 100;
+let comboP1 = 0;
+let comboP2 = 0;
+for (let block = 0; block < 1700; block += 1) {
+  for (let i = 0; i < frames; i += 1) {
+    const t = block * frames + i;
+    const pulse = (t % 2200) < 240 ? 1.0 : 0.60;
+    inL[i] = pulse * (0.58 * Math.sin(comboP1) + 0.19 * Math.sin(comboP2));
+    inR[i] = pulse * (0.55 * Math.sin(comboP1 + 0.18) + 0.18 * Math.sin(comboP2 + 0.37));
+    comboP1 += (2 * Math.PI * 887) / 48000;
+    comboP2 += (2 * Math.PI * 2771) / 48000;
+  }
+  if (dsp.mvp_process(frames) !== 1) throw new Error("mvp_process failed in R81 combination test");
+  if (block > 180) {
+    comboGuard = Math.max(comboGuard, Number(dsp.mvp_meter_gain_reduction_db()) || 0);
+    comboTone = Math.max(comboTone, Number(dsp.mvp_meter_tone_activity_db()) || 0);
+    comboBass = Math.max(comboBass, Number(dsp.mvp_meter_bass_activity_db()) || 0);
+    comboExciter = Math.max(comboExciter, Number(dsp.mvp_meter_exciter_activity()) || 0);
+    comboTransient = Math.max(comboTransient, Number(dsp.mvp_meter_transient_boost_db()) || 0);
+    comboWidth = Math.max(comboWidth, Number(dsp.mvp_meter_stereo_width_percent()) || 100);
+  }
+}
+if (comboTone < 6.0) throw new Error("Clear + Xpander tone combination did not remain active");
+if (comboBass < 2.0) throw new Error("Neural Bass did not remain active in the combination");
+if (comboExciter < 0.01) throw new Error("Analog + Xpander harmonic processing did not remain active");
+if (comboTransient < 0.20) throw new Error("Punch/Impact + Xpander transient processing did not remain active");
+if (comboWidth < 108) throw new Error("Wide processing did not remain active in the combination");
+if (comboGuard > 0.40) throw new Error("Combined effects turned Peak Guard into routine processing: " + comboGuard.toFixed(2) + " dB");
+
+// Also verify the frontend source no longer contains the old cancellation rules.
+const playerSource = fs.readFileSync(path.join(root, "src/lib/musicPlayer.ts"), "utf8");
+for (const forbidden of ["xpanderToneScale", "xpanderTransientScale", "Math.max(state.exciterAmount / 100, xpander.exciterAmount)"]) {
+  if (playerSource.includes(forbidden)) throw new Error("Old effect-cancellation rule still present: " + forbidden);
+}
+if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Extreme loudness routing is missing from musicPlayer.ts");
+
 console.table(rows.map((row) => ({
   profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
   output: row.highOutput ? "HIGH/MAX" : "NORMAL",
@@ -121,5 +198,11 @@ console.table(rows.map((row) => ({
   "Peak Guard GR": row.maxGuard.toFixed(2) + " dB",
   "True Peak": row.maxTruePeak.toFixed(2) + " dBTP",
 })));
+console.table(extremeRows.map((row) => ({
+  profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
+  "Extreme Lift": row.liftDb.toFixed(2) + " dB",
+  "Peak Guard GR": row.extreme.maxGuard.toFixed(2) + " dB",
+})));
+console.log("R81 combination meters:", { comboTone, comboBass, comboExciter, comboTransient, comboWidth, comboGuard });
 
-console.log("R80 mastering test: PASS");
+console.log("R81 mastering/effects test: PASS");

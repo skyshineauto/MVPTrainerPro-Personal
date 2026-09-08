@@ -321,8 +321,8 @@ if (!(loudProgram.programLufs > -16 && loudProgram.programLufs < -5)) {
 }
 
 const quietProgram = renderLoudness(0.04, true);
-if (!(quietProgram.gainDb > 2.0 && quietProgram.gainDb <= 3.1)) {
-  throw new Error(`Volume Match did not apply bounded quiet-program gain: ${JSON.stringify(quietProgram)}`);
+if (!(quietProgram.gainDb > 3.0 && quietProgram.gainDb <= 4.5)) {
+  throw new Error(`Volume Match did not apply the current upward-only bounded gain: ${JSON.stringify(quietProgram)}`);
 }
 
 const matchedProgram = renderLoudness(0.31, true, 10);

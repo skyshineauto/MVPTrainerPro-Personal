@@ -1172,9 +1172,15 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  // Routine crest control happens HERE, after EQ/effects/spatial and before the
-  // loudness maximizer. Peak Guard is not the normal compressor.
-  const float crestCeiling = static_cast<float>(dbToGain(highOutput ? -3.40f : -1.85f));
+  // MVP_R81_R2_EFFECTS_LOUDNESS_INTERACTION: routine crest control happens HERE, after EQ/effects/spatial and
+  // before the loudness maximizer. Output reserve is now also the loudness
+  // intensity request used by Extreme Preamp. More drive creates more crest room
+  // for clean makeup instead of simply slamming Peak Guard.
+  const float loudnessIntensity = clampf(outputReserveDb / 18.0f, 0.0f, 1.0f);
+  const float crestCeilingDb = highOutput
+    ? (-3.80f - loudnessIntensity * 3.50f)
+    : (-1.85f - loudnessIntensity * 1.20f);
+  const float crestCeiling = static_cast<float>(dbToGain(crestCeilingDb));
   float required = 1.0f;
   if (detector > crestCeiling && detector > 0.0000001f) {
     required = crestCeiling / detector;
@@ -2025,7 +2031,9 @@ __attribute__((visibility("default"))) void mvp_set_bass_engine(int enabled, flo
   configureAdvancedTone();
 }
 __attribute__((visibility("default"))) void mvp_set_tone_engine(int enabled, float presence, float clarity, float air, float deharsh) {
-  toneEngineEnabled=enabled?1:0; presenceDb=clampf(presence,-8.0f,8.0f); clarityDb=clampf(clarity,-8.0f,8.0f); airDb=clampf(air,-8.0f,8.0f); deharshAmount=clampf(deharsh,0.0f,1.0f); configureAdvancedTone();
+  // R81 combination headroom: Clear + Xpander may coexist instead of one being
+  // attenuated by the frontend compatibility manager.
+  toneEngineEnabled=enabled?1:0; presenceDb=clampf(presence,-12.0f,12.0f); clarityDb=clampf(clarity,-12.0f,12.0f); airDb=clampf(air,-12.0f,12.0f); deharshAmount=clampf(deharsh,0.0f,1.0f); configureAdvancedTone();
 }
 __attribute__((visibility("default"))) void mvp_set_exciter(int enabled, float amount, float lowSat, float midSat, float highSat) {
   exciterEnabled=enabled?1:0; exciterAmount=clampf(amount,0.0f,1.0f); saturationLow=clampf(lowSat,0.0f,1.0f); saturationMid=clampf(midSat,0.0f,1.0f); saturationHigh=clampf(highSat,0.0f,1.0f);

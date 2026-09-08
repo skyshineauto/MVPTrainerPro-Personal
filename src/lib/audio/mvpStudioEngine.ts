@@ -123,7 +123,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "7.1.0-r80-r3-final-audio-control";
+const MVP_STUDIO_ASSET_VERSION = "8.1.0-r81-effects-loudness-interaction";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {

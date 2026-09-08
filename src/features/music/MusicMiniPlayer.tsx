@@ -2708,7 +2708,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-preampTrimCopy">
               <span>EXTREME OUTPUT</span>
               <strong>EXTREME PREAMP</strong>
-              <small>Separate +0 to +12 dB drive. OFF is exactly 0 dB. Each output profile stores its own value.</small>
+              <small>+0 to +12 dB loudness drive. It creates mastering crest room and clean makeup instead of simply slamming Peak Guard. OFF is exactly 0 dB.</small>
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{player.extremePreampEnabled ? "ARMED" : "OFF"}</span><b>{player.extremePreampEnabled ? `+${player.extremePreampDb.toFixed(1)} dB` : "0.0 dB"}</b></div>

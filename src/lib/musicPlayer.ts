@@ -1694,23 +1694,27 @@ function cleanHdSafetyHeadroomDb() {
 
 function calculateStudioGain() {
   if (state.outputProfile === "reference") {
-    return { effectivePreampDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
+    return { effectivePreampDb: 0, extremeLoudnessDb: 0, autoHeadroomDb: 0, referenceMatchDb: 0 };
   }
 
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const extremePreampDb = state.extremePreampEnabled ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0)) : 0;
+  const extremeLoudnessDb = state.extremePreampEnabled
+    ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0))
+    : 0;
   const normalPreampDb = state.eqEnabled
     ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
     : 0;
-  const requested = Math.max(-18, Math.min(12, normalPreampDb + extremePreampDb));
 
+  // MVP_R81_R2_EFFECTS_LOUDNESS_INTERACTION: normal Preamp remains literal input gain. Extreme is deliberately
+  // routed to the post-effect mastering/loudness stage so +12 dB produces more
+  // average loudness instead of being immediately cancelled by peak protection.
+  const effectivePreampDb = normalPreampDb;
   const autoHeadroomDb = simplifiedProfile ? cleanHdSafetyHeadroomDb() : 0;
-  const effectivePreampDb = requested;
   const measuredMatch = Number.isFinite(lastReferenceRmsDb) && Number.isFinite(lastProcessedRmsDb)
     ? Math.max(-6, Math.min(3, lastProcessedRmsDb - lastReferenceRmsDb))
     : Math.max(-6, Math.min(3, effectivePreampDb));
 
-  return { effectivePreampDb, autoHeadroomDb, referenceMatchDb: measuredMatch };
+  return { effectivePreampDb, extremeLoudnessDb, autoHeadroomDb, referenceMatchDb: measuredMatch };
 }
 
 function cleanHdHighOutputActive() {
@@ -1743,7 +1747,7 @@ function hdXpanderProfile(level: number) {
 
 function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode | null = studioProcessorNode) {
   if (!audioContext || !targetNode) return 0;
-  const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
+  const { effectivePreampDb, extremeLoudnessDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
   const pureReference = state.outputProfile === "reference";
   const abBypass = !pureReference && state.dspBypass;
   const processed = !pureReference && !abBypass;
@@ -1783,22 +1787,19 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
   const presetTransientAmount = !cleanHdProfile && processed && state.eqEnabled
     ? Math.max(0, Math.min(1, currentTransientAmount() * sourceTransientScale() * studioPersonality.transientScale))
     : 0;
-  // R77I EFFECT COMPATIBILITY MANAGER. Compatible effects may stay on together,
-  // but processors that target the same resource share one budget instead of
-  // blindly stacking into clipping. This policy is identical on both clean-HD paths.
-  const clearActive = cleanHdProfile && state.toneEngineEnabled;
-  const xpanderToneScale = clearActive && xpander.level >= 2 ? (xpander.level === 3 ? 0.78 : 0.88) : 1;
-  const xpanderTransientScale = userImpactAmount > 0.001 ? (xpander.level === 3 ? 0.58 : xpander.level === 2 ? 0.72 : 0.86) : 1;
+  // MVP_R81_R2_EFFECTS_LOUDNESS_INTERACTION: selected effects compose instead of silently cancelling one
+  // another. Shared processors receive the SUM of each user's requested character,
+  // with only a final safety ceiling at the actual DSP stage.
   const effectiveTransientAmount = Math.max(
     0,
-    Math.min(0.96, presetTransientAmount + userImpactAmount + xpander.transientAmount * xpanderTransientScale),
+    Math.min(1.0, presetTransientAmount + userImpactAmount + xpander.transientAmount),
   );
-  const effectivePresenceDb = Math.max(-6, Math.min(5.4, state.presenceDb + xpander.presenceDb * xpanderToneScale));
-  const effectiveClarityDb = Math.max(-6, Math.min(5.8, state.clarityDb + xpander.clarityDb * xpanderToneScale));
-  const effectiveAirDb = Math.max(-6, Math.min(6.0, state.airDb + xpander.airDb * xpanderToneScale));
-  // Analog and Xpander both add harmonics, so the stronger request wins instead
-  // of summing into a second hidden gain stage.
-  const effectiveExciterAmount = Math.min(0.14, Math.max(state.exciterAmount / 100, xpander.exciterAmount));
+  const effectivePresenceDb = Math.max(-10, Math.min(10.0, state.presenceDb + xpander.presenceDb));
+  const effectiveClarityDb = Math.max(-10, Math.min(11.0, state.clarityDb + xpander.clarityDb));
+  const effectiveAirDb = Math.max(-10, Math.min(12.0, state.airDb + xpander.airDb));
+  // Analog supplies its saturation character while Xpander contributes additional
+  // high-frequency harmonics. They are additive, not winner-takes-all.
+  const effectiveExciterAmount = Math.min(0.30, state.exciterAmount / 100 + xpander.exciterAmount);
   const requestedRevision = setMvpStudioState(targetNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
@@ -1806,9 +1807,8 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     // Both EQ topologies now run inside the same Studio WASM processor.
     eqTopologyCode: state.eqTopology === "linear_phase" ? 1 : 0,
     eqGains: [...state.eqGains],
-    // R79A Extreme Preamp is a separate deliberate gain request. It uses the
-    // existing WASM pre-effect gain and therefore remains upstream of the shared
-    // final mastering / true-peak protection. OFF is exactly 0 dB from this control.
+    // R81: raw Preamp is only the normal preamp. Extreme is a separate loudness
+    // request sent to the mastering/output stage below.
     preampDb: Math.max(-18, Math.min(12, effectivePreampDb)),
     headroomDb: autoHeadroomDb,
     transientEnabled: effectiveTransientAmount > 0.001,
@@ -1850,11 +1850,11 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     headphoneCrossfeed: headphoneEnabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0,
     headphoneCenter: headphoneEnabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5,
     headphoneBassImpact: headphoneEnabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0,
-    // R77I: the WASM sees the actual post-effect true peak before deciding what
-    // gain is safe. Recover transparent source/EQ headroom first, then High/Max
-    // Output on top. Unsafe gain is refused instead of being sent into Peak Guard.
-    outputReserveDb: processed ? Math.min(18, state.outputReserveDb + autoHeadroomDb) : 0,
-    autoMakeupEnabled: processed && state.autoMakeupEnabled,
+    // MVP_R81_R2_EFFECTS_LOUDNESS_INTERACTION: Extreme adds mastering drive, not raw input gain. Max/High Output
+    // and Extreme may coexist, with the combined request capped at the WASM's
+    // existing +18 dB mastering range.
+    outputReserveDb: processed ? Math.min(18, state.outputReserveDb + autoHeadroomDb + extremeLoudnessDb) : 0,
+    autoMakeupEnabled: processed && (state.autoMakeupEnabled || extremeLoudnessDb > 0.01),
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),
     bassEngineEnabled: processed && state.bassEngineEnabled,
