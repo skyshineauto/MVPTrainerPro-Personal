@@ -278,9 +278,9 @@ if (!(speakerHotDeltaDb < -0.1 && speakerHotDeltaDb > -2.7)) {
   throw new Error(`Bluetooth output correction change is implausible: ${speakerHotDeltaDb.toFixed(3)} dB`);
 }
 
-// 6) Volume Match should move program gain slowly toward -10 LUFS,
-// without becoming a short-term compressor. A loud steady program attenuates;
-// a quiet one receives a bounded boost.
+// 6) Volume Match is upward-only in the current clean-HD architecture.
+// It must never blanket-attenuate an already-loud master. Quiet masters may
+// receive a bounded lift, while already-matched/loud material stays at unity.
 function renderLoudness(amplitude, enabled, seconds = 14) {
   dsp.mvp_reset();
   baseState();
@@ -313,8 +313,8 @@ function renderLoudness(amplitude, enabled, seconds = 14) {
 }
 
 const loudProgram = renderLoudness(0.4, true);
-if (!(loudProgram.gainDb < -1.0 && loudProgram.gainDb >= -2.2)) {
-  throw new Error(`Volume Match did not apply the expected bounded trim: ${JSON.stringify(loudProgram)}`);
+if (Math.abs(loudProgram.gainDb) > 0.15) {
+  throw new Error(`Volume Match must not blanket-attenuate an already-loud master: ${JSON.stringify(loudProgram)}`);
 }
 if (!(loudProgram.programLufs > -16 && loudProgram.programLufs < -5)) {
   throw new Error(`Loud program meter is implausible: ${loudProgram.programLufs}`);
