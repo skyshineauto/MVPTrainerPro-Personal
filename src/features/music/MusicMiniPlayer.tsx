@@ -102,6 +102,8 @@ import {
   setMusicHeadphoneReflections,
   setMusicHeadphoneWet,
   setMusicPreamp,
+  setMusicExtremePreamp,
+  setMusicExtremePreampEnabled,
   setMusicOutputProfile,
   setMusicTransitionMode,
   setMusicVolume,
@@ -2700,6 +2702,20 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <div className="tr-preampTrimScale" aria-hidden="true"><span>-12 dB</span><span className="tr-preampTrimZero">0 dB</span><span>+6 dB</span></div>
             </div>
             <button type="button" className="tr-preampAutoButton" disabled={Math.abs(player.preampDb) < 0.05} onClick={() => void runDspMutation(() => setMusicPreamp(0), true)}>RESET TO AUTO</button>
+          </section>
+          {/* MVP_R79A_LIVE_STATE_RELIABILITY */}
+          <section className={`tr-preampTrim tr-extremePreamp ${player.extremePreampEnabled ? "is-active" : ""}`} aria-label="Extreme preamp" data-mobile-dsp-section="output">
+            <div className="tr-preampTrimCopy">
+              <span>EXTREME OUTPUT</span>
+              <strong>EXTREME PREAMP</strong>
+              <small>Separate +0 to +12 dB drive. OFF contributes exactly 0 dB. Final mastering and true-peak Peak Guard remain active.</small>
+            </div>
+            <div className="tr-preampTrimControl">
+              <div className="tr-preampTrimReadout"><span>{player.extremePreampEnabled ? "ARMED" : "OFF"}</span><b>{player.extremePreampEnabled ? `+${player.extremePreampDb.toFixed(1)} dB` : "0.0 dB"}</b></div>
+              <input type="range" min="0" max="12" step="0.5" disabled={!player.extremePreampEnabled} value={Math.max(0, Math.min(12, player.extremePreampDb))} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicExtremePreamp(Number(event.target.value)), true)} aria-label="Extreme preamp in decibels" />
+              <div className="tr-preampTrimScale" aria-hidden="true"><span>0 dB</span><span>+6 dB</span><span>+12 dB</span></div>
+            </div>
+            <button type="button" className={`tr-preampAutoButton ${player.extremePreampEnabled ? "is-active" : ""}`} onClick={() => void runDspMutation(() => setMusicExtremePreampEnabled(!player.extremePreampEnabled), true)}>{player.extremePreampEnabled ? "EXTREME PREAMP ON" : "ENABLE EXTREME PREAMP"}</button>
           </section>
 
           <section className="tr-v10ProcessorCard tr-v10OutputReserve" data-mobile-dsp-section="output">

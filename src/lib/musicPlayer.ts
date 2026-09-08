@@ -1,10 +1,14 @@
 import { useSyncExternalStore } from "react";
 import {
+  activateMvpStudioNode,
   createMvpStudioNode,
+  disposeMvpStudioNode,
   getMvpStudioRuntimeInfo,
   getMvpStudioTelemetry,
+  repostMvpStudioState,
   resetMvpStudioLoudness,
   setMvpStudioState,
+  waitForMvpStudioRevision,
 } from "./audio/mvpStudioEngine";
 import {
   clearMusicUrlCache,
@@ -299,6 +303,7 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   },
 };
 
+// MVP_R79A_LIVE_STATE_RELIABILITY
 export type MusicPlayerState = {
   libraryTracks: MusicTrack[];
   tracks: MusicTrack[];
@@ -319,6 +324,8 @@ export type MusicPlayerState = {
   eqGains: number[];
   eqTopology: MusicEqTopology;
   preampDb: number;
+  extremePreampEnabled: boolean;
+  extremePreampDb: number;
   effectivePreampDb: number;
   autoHeadroomDb: number;
   outputReserveDb: number;
@@ -414,6 +421,8 @@ const STORAGE_KEYS = {
   eqGains: "mvp_music_eq_gains",
   eqTopology: "mvp_music_eq_topology_v13_8",
   preampDb: "mvp_music_eq_preamp_db",
+  extremePreampEnabled: "mvp_music_extreme_preamp_enabled_r79a",
+  extremePreampDb: "mvp_music_extreme_preamp_db_r79a",
   outputReserveDb: "mvp_music_output_reserve_db_v10",
   autoMakeupEnabled: "mvp_music_auto_makeup_v10",
   parametricEnabled: "mvp_music_parametric_enabled_v10",
@@ -696,6 +705,8 @@ let state: MusicPlayerState = {
   eqGains: readEqGains(initialPreset),
   eqTopology: readEqTopology(),
   preampDb: readPreamp(initialPreset),
+  extremePreampEnabled: readBoolean(STORAGE_KEYS.extremePreampEnabled, false),
+  extremePreampDb: readNumber(STORAGE_KEYS.extremePreampDb, 0, 0, 12),
   effectivePreampDb: 0,
   autoHeadroomDb: 0,
   outputReserveDb: readNumber(STORAGE_KEYS.outputReserveDb, 3, 0, 12),
@@ -803,6 +814,7 @@ let masterVolumeGain: GainNode | null = null;
 let referenceRouteGain: GainNode | null = null;
 let preampGain: GainNode | null = null;
 let studioProcessorNode: AudioWorkletNode | null = null;
+let studioProcessorRouteGain: GainNode | null = null;
 let transientProcessorNode: AudioWorkletNode | null = null;
 let loudnessNormalizerNode: AudioWorkletNode | null = null;
 let multibandProcessorNode: AudioWorkletNode | null = null;
@@ -1152,11 +1164,11 @@ function calculateProcessingGain() {
   // EQ-derived headroom from the user control. The protected limiter is the final
   // peak-safety stage on processed paths.
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const requested = simplifiedProfile
-    ? 0
-    : eqProcessingRequested()
-      ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
-      : 0;
+  const extremePreampDb = state.extremePreampEnabled ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0)) : 0;
+  const normalPreampDb = !simplifiedProfile && eqProcessingRequested()
+    ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
+    : 0;
+  const requested = Math.max(-18, Math.min(12, normalPreampDb + extremePreampDb));
   const response = measureProcessingResponse();
   const makeupDb = currentOutputTuning()?.makeupDb ?? 0;
   // R77E compatibility parity: reserve transparent headroom before EQ/effects.
@@ -1190,7 +1202,7 @@ function scheduleProcessingSettle() {
       if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
       const runtime = getMvpStudioRuntimeInfo();
       if (runtime.faulted || !runtime.ready || runtime.appliedRevision < runtime.requestedRevision) {
-        scheduleCleanHdRouteRecovery(120);
+        void verifyOrRecoverStudioLiveState();
       }
     }, 220);
   }, 140);
@@ -1494,6 +1506,7 @@ function releaseGraph() {
     referenceRouteGain,
     preampGain,
     studioProcessorNode,
+    studioProcessorRouteGain,
     transientProcessorNode,
     loudnessNormalizerNode,
     multibandProcessorNode,
@@ -1567,6 +1580,7 @@ function releaseGraph() {
   preampGain = null;
   try { studioProcessorNode?.port.close(); } catch { /* already closed */ }
   studioProcessorNode = null;
+  studioProcessorRouteGain = null;
   transientProcessorNode = null;
   loudnessNormalizerNode = null;
   multibandProcessorNode = null;
@@ -1684,11 +1698,11 @@ function calculateStudioGain() {
   }
 
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const requested = simplifiedProfile
-    ? 0
-    : state.eqEnabled
-      ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
-      : 0;
+  const extremePreampDb = state.extremePreampEnabled ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0)) : 0;
+  const normalPreampDb = !simplifiedProfile && state.eqEnabled
+    ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
+    : 0;
+  const requested = Math.max(-18, Math.min(12, normalPreampDb + extremePreampDb));
 
   const autoHeadroomDb = simplifiedProfile ? cleanHdSafetyHeadroomDb() : 0;
   const effectivePreampDb = requested;
@@ -1727,8 +1741,8 @@ function hdXpanderProfile(level: number) {
   return { level: 0, presenceDb: 0, clarityDb: 0, airDb: 0, exciterAmount: 0, transientAmount: 0 };
 }
 
-function applyStudioProcessingSettings(now: number) {
-  if (!audioContext || !studioProcessorNode) return;
+function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode | null = studioProcessorNode) {
+  if (!audioContext || !targetNode) return 0;
   const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
   const pureReference = state.outputProfile === "reference";
   const abBypass = !pureReference && state.dspBypass;
@@ -1785,19 +1799,17 @@ function applyStudioProcessingSettings(now: number) {
   // Analog and Xpander both add harmonics, so the stronger request wins instead
   // of summing into a second hidden gain stage.
   const effectiveExciterAmount = Math.min(0.14, Math.max(state.exciterAmount / 100, xpander.exciterAmount));
-  setMvpStudioState(studioProcessorNode, {
+  const requestedRevision = setMvpStudioState(targetNode, {
     bypass: !processed,
     eqEnabled: processed && state.eqEnabled,
     // MVP_STUDIO_WASM_V3_PHASE3_LINEAR_PHASE
     // Both EQ topologies now run inside the same Studio WASM processor.
     eqTopologyCode: state.eqTopology === "linear_phase" ? 1 : 0,
     eqGains: [...state.eqGains],
-    preampDb:
-      state.outputProfile === "headphones" || state.outputProfile === "speaker"
-        ? 0
-        : state.eqEnabled
-          ? state.preampDb
-          : 0,
+    // R79A Extreme Preamp is a separate deliberate gain request. It uses the
+    // existing WASM pre-effect gain and therefore remains upstream of the shared
+    // final mastering / true-peak protection. OFF is exactly 0 dB from this control.
+    preampDb: Math.max(-18, Math.min(12, effectivePreampDb)),
     headroomDb: autoHeadroomDb,
     transientEnabled: effectiveTransientAmount > 0.001,
     transientAmount: effectiveTransientAmount,
@@ -1882,6 +1894,7 @@ function applyStudioProcessingSettings(now: number) {
   setDspTelemetry(status, effectivePreampDb, autoHeadroomDb);
   const immersionStatus = currentImmersionStatus();
   if (state.immersionStatus !== immersionStatus) emit({ immersionStatus });
+  return requestedRevision;
 }
 async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElement) {
   // V3 Phase 3: Minimum Phase and Linear Phase are both flagship Studio WASM modes.
@@ -1903,6 +1916,8 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     standardRouteGain = context.createGain();
     // R78N: exactly one audible Studio route. Reference/A-B is internal bypass.
     standardRouteGain.gain.value = 1;
+    studioProcessorRouteGain = context.createGain();
+    studioProcessorRouteGain.gain.value = 1;
     studioInputBus = context.createGain();
     studioDirectInputGain = context.createGain();
     studioDirectInputGain.gain.value = 1;
@@ -2007,7 +2022,8 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     // effects. The browser compressor is not allowed to pre-compress the raw
     // source and then let later EQ boosts create fresh peaks.
     studioInputBus.connect(studioProcessorNode);
-    studioProcessorNode.connect(standardRouteGain);
+    studioProcessorNode.connect(studioProcessorRouteGain);
+    studioProcessorRouteGain.connect(standardRouteGain);
     standardRouteGain.connect(mixBus);
     mixBus.connect(analyserNode);
     analyserNode.connect(postLimiterVolumeGain);
@@ -3508,6 +3524,21 @@ export function setMusicPreamp(preampDb: number) {
   scheduleProcessingSettle();
 }
 
+export function setMusicExtremePreampEnabled(enabled: boolean) {
+  savePlayerSetting(STORAGE_KEYS.extremePreampEnabled, String(enabled));
+  emit({ extremePreampEnabled: enabled });
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
+export function setMusicExtremePreamp(value: number) {
+  const next = Math.max(0, Math.min(12, Number(value) || 0));
+  savePlayerSetting(STORAGE_KEYS.extremePreampDb, String(next));
+  emit({ extremePreampDb: next });
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
 export function setMusicEqTopology(topology: MusicEqTopology) {
   const next: MusicEqTopology = topology === "linear_phase" ? "linear_phase" : "minimum_phase";
   const previous = state.eqTopology;
@@ -4467,17 +4498,118 @@ export async function rebuildMusicAudioEngine() {
   if (wasPlaying) await ensureAudioElement().play();
 }
 
+// MVP_R79A_LIVE_STATE_RELIABILITY: no-stop Studio live-state recovery.
+// HTMLAudioElement, MediaElementSource, currentTime, queue and AudioContext stay alive.
+async function hotSwapStudioProcessor(reason = "state-ack-timeout") {
+  if (studioRecoveryInFlight) return false;
+  const context = audioContext;
+  const inputBus = studioInputBus;
+  const outputBus = standardRouteGain;
+  const oldNode = studioProcessorNode;
+  const oldRouteGain = studioProcessorRouteGain;
+  if (!context || !inputBus || !outputBus || !oldNode || !oldRouteGain || state.dspEngineMode !== "studio_wasm") return false;
+
+  studioRecoveryInFlight = true;
+  lastStudioRecoveryAt = Date.now();
+  emit({ dspStatus: "recovering" });
+
+  let replacementNode: AudioWorkletNode | null = null;
+  let replacementRouteGain: GainNode | null = null;
+  try {
+    // The old processor remains fully connected and audible while the replacement
+    // downloads/instantiates its private WASM instance. No transport operation occurs.
+    replacementNode = await createMvpStudioNode(context);
+    replacementRouteGain = context.createGain();
+    replacementRouteGain.gain.value = 0;
+    inputBus.connect(replacementNode);
+    replacementNode.connect(replacementRouteGain);
+    replacementRouteGain.connect(outputBus);
+    if (processedLevelAnalyser) replacementNode.connect(processedLevelAnalyser);
+
+    let revision = applyStudioProcessingSettings(context.currentTime, replacementNode);
+    let verified = revision > 0 && await waitForMvpStudioRevision(replacementNode, revision, 360);
+    if (!verified) {
+      revision = repostMvpStudioState(replacementNode);
+      verified = revision > 0 && await waitForMvpStudioRevision(replacementNode, revision, 280);
+    }
+    if (!verified) throw new Error("Replacement Studio node did not ACK current state (" + reason + ").");
+
+    // 35 ms equal-time crossfade. The old node is not disconnected until the new
+    // node has ACKed the COMPLETE current state and is already rendering audio.
+    const start = context.currentTime + 0.004;
+    const end = start + 0.035;
+    oldRouteGain.gain.cancelScheduledValues(start);
+    oldRouteGain.gain.setValueAtTime(Math.max(0, oldRouteGain.gain.value), start);
+    oldRouteGain.gain.linearRampToValueAtTime(0, end);
+    replacementRouteGain.gain.cancelScheduledValues(start);
+    replacementRouteGain.gain.setValueAtTime(0, start);
+    replacementRouteGain.gain.linearRampToValueAtTime(1, end);
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 55));
+
+    studioProcessorNode = replacementNode;
+    studioProcessorRouteGain = replacementRouteGain;
+    activateMvpStudioNode(replacementNode);
+    try { inputBus.disconnect(oldNode); } catch { /* already disconnected */ }
+    try { oldNode.disconnect(); } catch { /* already disconnected */ }
+    try { oldRouteGain.disconnect(); } catch { /* already disconnected */ }
+    disposeMvpStudioNode(oldNode);
+
+    applyProcessingSettings();
+    scheduleProcessingSettle();
+    return true;
+  } catch (error) {
+    console.warn("MVP Studio hot-swap recovery failed; keeping the existing audible node connected.", error);
+    if (replacementNode) {
+      try { inputBus.disconnect(replacementNode); } catch { /* no-op */ }
+      disposeMvpStudioNode(replacementNode);
+    }
+    try { replacementRouteGain?.disconnect(); } catch { /* no-op */ }
+    activateMvpStudioNode(oldNode);
+    const now = context.currentTime;
+    oldRouteGain.gain.cancelScheduledValues(now);
+    oldRouteGain.gain.setValueAtTime(1, now);
+    emit({ dspStatus: "recovering" });
+    return false;
+  } finally {
+    studioRecoveryInFlight = false;
+  }
+}
+
+async function verifyOrRecoverStudioLiveState() {
+  const node = studioProcessorNode;
+  if (!node || state.dspEngineMode !== "studio_wasm") return;
+  let runtime = getMvpStudioRuntimeInfo();
+  if (!runtime.faulted && runtime.ready && runtime.appliedRevision >= runtime.requestedRevision) return;
+
+  // First recovery step is deliberately cheap: replay the COMPLETE latest state
+  // with the same revision. If that ACKs, audio never changes route at all.
+  const revision = repostMvpStudioState(node);
+  if (revision > 0 && await waitForMvpStudioRevision(node, revision, 240)) {
+    applyProcessingSettings();
+    return;
+  }
+
+  runtime = getMvpStudioRuntimeInfo();
+  await hotSwapStudioProcessor(runtime.lastError || "state-ack-timeout");
+}
+
 let cleanHdRouteRecoveryTimer: number | null = null;
 
 function scheduleCleanHdRouteRecovery(delayMs = 450) {
   if (typeof window === "undefined") return;
   if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
-  if (state.dspEngineMode === "studio_wasm") return;
   if (!state.currentTrack) return;
   if (cleanHdRouteRecoveryTimer != null) window.clearTimeout(cleanHdRouteRecoveryTimer);
   cleanHdRouteRecoveryTimer = window.setTimeout(() => {
     cleanHdRouteRecoveryTimer = null;
-    if (state.dspEngineMode === "studio_wasm") return;
+    if (state.dspEngineMode === "studio_wasm") {
+      if (audioContext?.state === "suspended") {
+        void audioContext.resume().then(() => applyProcessingSettings()).catch(() => undefined);
+      }
+      void verifyOrRecoverStudioLiveState();
+      return;
+    }
     if (studioRecoveryInFlight) return;
     studioRecoveryInFlight = true;
     lastStudioRecoveryAt = Date.now();
@@ -4492,6 +4624,11 @@ function installCleanHdRouteRecovery() {
   const guardedWindow = window as Window & { __mvpCleanHdRouteWatchInstalled?: boolean };
   if (guardedWindow.__mvpCleanHdRouteWatchInstalled) return;
   guardedWindow.__mvpCleanHdRouteWatchInstalled = true;
+
+  window.addEventListener("mvp-studio-runtime-fault", () => {
+    if (state.dspEngineMode !== "studio_wasm") return;
+    void hotSwapStudioProcessor("processor-fault");
+  });
 
   try {
     navigator.mediaDevices?.addEventListener?.("devicechange", () => scheduleCleanHdRouteRecovery(500));

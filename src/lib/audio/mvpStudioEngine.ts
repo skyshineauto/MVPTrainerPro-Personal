@@ -1,4 +1,5 @@
-// MVP Trainer Pro - Studio WASM bridge V6.3 R78d Audio Intelligence
+// MVP Trainer Pro R79A Studio WASM bridge
+// MVP_R79A_LIVE_STATE_RELIABILITY: full-state ACK tracking + disposable Studio nodes
 // R77i WASM remains the shared protection core. Master Prep is injected in the worklet before that core.
 
 import type { MusicMasterPrepProfile } from "../musicAudioIntelligence";
@@ -121,7 +122,7 @@ export type MvpStudioRuntimeInfo = {
   lastAppliedAt: number;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "6.9.0-r78n-all-audio-fixes";
+const MVP_STUDIO_ASSET_VERSION = "7.0.0-r79a-live-state-reliability";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -164,6 +165,23 @@ let nextStateRevision = 0;
 let activeStudioNode: AudioWorkletNode | null = null;
 let activeMasterPrep: MusicMasterPrepProfile | null = null;
 let activeVenue: MvpStudioVenueProfile | null = null;
+
+// MVP_R79A_LIVE_STATE_RELIABILITY: each disposable Worklet keeps its own state/revision record.
+// The UI-facing runtime follows only activeStudioNode, so an old node can never
+// overwrite the health of a replacement during the short crossfade window.
+const requestedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
+const appliedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
+const faultedByNode = new WeakMap<AudioWorkletNode, boolean>();
+const latestStateByNode = new WeakMap<AudioWorkletNode, { revision: number; state: MvpStudioState }>();
+
+function cloneStudioState(state: MvpStudioState): MvpStudioState {
+  return {
+    ...state,
+    eqGains: [...state.eqGains],
+    parametricBands: state.parametricBands.map((band) => ({ ...band })),
+  };
+}
+
 let runtimeInstalled = false;
 let runtimeInfo: MvpStudioRuntimeInfo = {
   assetVersion: MVP_STUDIO_ASSET_VERSION,
@@ -297,6 +315,9 @@ export async function createMvpStudioNode(context: AudioContext) {
     channelInterpretation: "speakers",
   });
   activeStudioNode = node;
+  requestedRevisionByNode.set(node, 0);
+  appliedRevisionByNode.set(node, 0);
+  faultedByNode.set(node, false);
   ensureMusicAiAudioRuntime();
 
   return new Promise<AudioWorkletNode>((resolve, reject) => {
@@ -324,7 +345,10 @@ export async function createMvpStudioNode(context: AudioContext) {
       const data = event.data as Record<string, unknown> | null;
       if (!data || typeof data !== "object") return;
       if (data.type === "ready") {
-        runtimeInfo = { ...runtimeInfo, processorVersion: String(data.version || "studio-wasm"), ready: true, faulted: false, lastError: null };
+        faultedByNode.set(node, false);
+        if (activeStudioNode === node) {
+          runtimeInfo = { ...runtimeInfo, processorVersion: String(data.version || "studio-wasm"), ready: true, faulted: false, lastError: null };
+        }
         postMasterPrep(node);
         postVenue(node);
         if (!settled) {
@@ -335,26 +359,37 @@ export async function createMvpStudioNode(context: AudioContext) {
         return;
       }
       if (data.type === "telemetry") {
-        updateTelemetry(data);
+        if (activeStudioNode === node) updateTelemetry(data);
         return;
       }
       if (data.type === "state-applied") {
         const revision = Math.max(0, Math.floor(finite(data.revision)));
-        runtimeInfo = { ...runtimeInfo, appliedRevision: Math.max(runtimeInfo.appliedRevision, revision), ready: true, faulted: false, lastAppliedAt: Date.now() };
+        appliedRevisionByNode.set(node, Math.max(appliedRevisionByNode.get(node) || 0, revision));
+        faultedByNode.set(node, false);
+        if (activeStudioNode === node) {
+          runtimeInfo = { ...runtimeInfo, appliedRevision: Math.max(runtimeInfo.appliedRevision, revision), ready: true, faulted: false, lastError: null, lastAppliedAt: Date.now() };
+        }
         return;
       }
       if (data.type === "error") {
         const message = String(data.message || "MVP Studio processor error.");
+        faultedByNode.set(node, true);
         if (!settled) failStartup(message);
-        else runtimeInfo = { ...runtimeInfo, faulted: true, lastError: message };
+        else if (activeStudioNode === node) {
+          runtimeInfo = { ...runtimeInfo, faulted: true, lastError: message };
+          if (typeof window !== "undefined") window.dispatchEvent(new Event("mvp-studio-runtime-fault"));
+        }
       }
     };
 
     node.addEventListener("processorerror", () => {
       const message = "MVP Studio AudioWorklet processor stopped unexpectedly.";
-      if (activeStudioNode === node) activeStudioNode = null;
+      faultedByNode.set(node, true);
       if (!settled) failStartup(message);
-      else runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
+      else if (activeStudioNode === node) {
+        runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("mvp-studio-runtime-fault"));
+      }
     });
 
     const initBytes = wasmBytes.slice(0);
@@ -365,9 +400,67 @@ export async function createMvpStudioNode(context: AudioContext) {
 export function setMvpStudioState(node: AudioWorkletNode | null, state: MvpStudioState) {
   if (!node) return 0;
   const revision = ++nextStateRevision;
-  runtimeInfo = { ...runtimeInfo, requestedRevision: revision, lastRequestedAt: Date.now() };
-  node.port.postMessage({ type: "state", revision, state });
+  const snapshot = cloneStudioState(state);
+  requestedRevisionByNode.set(node, revision);
+  latestStateByNode.set(node, { revision, state: snapshot });
+  if (activeStudioNode === node) {
+    runtimeInfo = { ...runtimeInfo, requestedRevision: revision, lastRequestedAt: Date.now() };
+  }
+  node.port.postMessage({ type: "state", revision, state: snapshot });
   return revision;
+}
+
+// Re-send the exact same authoritative snapshot/revision once before deciding
+// that the Worklet control path must be replaced. No incremental mutation is used.
+export function repostMvpStudioState(node: AudioWorkletNode | null) {
+  if (!node) return 0;
+  const latest = latestStateByNode.get(node);
+  if (!latest) return 0;
+  if (activeStudioNode === node) runtimeInfo = { ...runtimeInfo, lastRequestedAt: Date.now() };
+  node.port.postMessage({ type: "state", revision: latest.revision, state: cloneStudioState(latest.state) });
+  return latest.revision;
+}
+
+export async function waitForMvpStudioRevision(node: AudioWorkletNode | null, revision: number, timeoutMs = 320) {
+  if (!node || revision <= 0) return false;
+  const started = Date.now();
+  return new Promise<boolean>((resolve) => {
+    const poll = () => {
+      if ((appliedRevisionByNode.get(node) || 0) >= revision) { resolve(true); return; }
+      if (faultedByNode.get(node)) { resolve(false); return; }
+      if (Date.now() - started >= Math.max(60, timeoutMs)) { resolve(false); return; }
+      window.setTimeout(poll, 12);
+    };
+    poll();
+  });
+}
+
+export function activateMvpStudioNode(node: AudioWorkletNode | null) {
+  activeStudioNode = node;
+  if (!node) {
+    runtimeInfo = { ...runtimeInfo, ready: false };
+    return;
+  }
+  const requestedRevision = requestedRevisionByNode.get(node) || 0;
+  const appliedRevision = appliedRevisionByNode.get(node) || 0;
+  const faulted = Boolean(faultedByNode.get(node));
+  runtimeInfo = {
+    ...runtimeInfo,
+    ready: !faulted,
+    faulted,
+    requestedRevision,
+    appliedRevision,
+    lastError: faulted ? runtimeInfo.lastError : null,
+  };
+  postMasterPrep(node);
+  postVenue(node);
+}
+
+export function disposeMvpStudioNode(node: AudioWorkletNode | null) {
+  if (!node) return;
+  if (activeStudioNode === node) activeStudioNode = null;
+  try { node.disconnect(); } catch { /* already disconnected */ }
+  try { node.port.close(); } catch { /* already closed */ }
 }
 
 export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
