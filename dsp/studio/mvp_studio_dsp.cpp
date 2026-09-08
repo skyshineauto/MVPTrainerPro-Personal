@@ -1177,9 +1177,13 @@ void processFinalCompressor(float &left, float &right) {
   // intensity request used by Extreme Preamp. More drive creates more crest room
   // for clean makeup instead of simply slamming Peak Guard.
   const float loudnessIntensity = clampf(outputReserveDb / 18.0f, 0.0f, 1.0f);
+  // R81-R4: Extreme/Max must create a substantial average-loudness increase.
+  // The stronger crest target is still upstream of the true-peak-capped output
+  // maximizer, so Peak Guard remains the final emergency catcher rather than
+  // becoming the routine compressor.
   const float crestCeilingDb = highOutput
-    ? (-3.80f - loudnessIntensity * 3.50f)
-    : (-1.85f - loudnessIntensity * 1.20f);
+    ? (-4.40f - loudnessIntensity * 5.60f)
+    : (-1.85f - loudnessIntensity * 1.60f);
   const float crestCeiling = static_cast<float>(dbToGain(crestCeilingDb));
   float required = 1.0f;
   if (detector > crestCeiling && detector > 0.0000001f) {
