@@ -2694,7 +2694,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-preampTrimCopy">
               <span>ADVANCED GAIN</span>
               <strong>PREAMP TRIM</strong>
-              <small>Independent preamp. EQ bands change only their frequencies; the WASM output limiter catches real peaks.</small>
+              <small>Real input gain on every output profile. The post-effect mastering stage handles routine peaks before Peak Guard.</small>
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{Math.abs(player.preampDb) < 0.05 ? "AUTO" : "MANUAL"}</span><b>{player.preampDb > 0 ? "+" : ""}{player.preampDb.toFixed(1)} dB</b></div>
@@ -2708,7 +2708,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <div className="tr-preampTrimCopy">
               <span>EXTREME OUTPUT</span>
               <strong>EXTREME PREAMP</strong>
-              <small>Separate +0 to +12 dB drive. OFF contributes exactly 0 dB. Final mastering and true-peak Peak Guard remain active.</small>
+              <small>Separate +0 to +12 dB drive. OFF is exactly 0 dB. Each output profile stores its own value.</small>
             </div>
             <div className="tr-preampTrimControl">
               <div className="tr-preampTrimReadout"><span>{player.extremePreampEnabled ? "ARMED" : "OFF"}</span><b>{player.extremePreampEnabled ? `+${player.extremePreampDb.toFixed(1)} dB` : "0.0 dB"}</b></div>
@@ -12835,10 +12835,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-dspControlCenter[data-output-profile="speaker"] .tr-dspTabs{
           grid-template-columns:repeat(2,minmax(0,1fr))!important;
         }
-        .tr-dspControlCenter[data-output-profile="headphones"] .tr-preampTrim,
-        .tr-dspControlCenter[data-output-profile="speaker"] .tr-preampTrim,
-        .tr-dspControlCenter[data-output-profile="headphones"] .tr-v10OutputReserve,
-        .tr-dspControlCenter[data-output-profile="speaker"] .tr-v10OutputReserve,
+        /* MVP_R80_CLOUD_R2_FINAL_AUDIO: Preamp, Extreme Preamp and Output Reserve stay visible. */
         .tr-dspControlCenter[data-output-profile="headphones"] .tr-dspProofPanel,
         .tr-dspControlCenter[data-output-profile="speaker"] .tr-dspProofPanel,
         .tr-dspControlCenter[data-output-profile="headphones"] [data-mobile-dsp-section="tone"],

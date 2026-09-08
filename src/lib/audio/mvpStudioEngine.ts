@@ -120,9 +120,10 @@ export type MvpStudioRuntimeInfo = {
   lastError: string | null;
   lastRequestedAt: number;
   lastAppliedAt: number;
+  appliedState: MvpStudioState | null;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "7.0.0-r79a-live-state-reliability";
+const MVP_STUDIO_ASSET_VERSION = "7.1.0-r80-r3-final-audio-control";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -193,6 +194,7 @@ let runtimeInfo: MvpStudioRuntimeInfo = {
   lastError: null,
   lastRequestedAt: 0,
   lastAppliedAt: 0,
+  appliedState: null,
 };
 
 function finite(value: unknown, fallback = 0) {
@@ -298,6 +300,7 @@ export async function createMvpStudioNode(context: AudioContext) {
     lastError: null,
     lastRequestedAt: 0,
     lastAppliedAt: 0,
+    appliedState: null,
   };
   latestTelemetry = { ...EMPTY_TELEMETRY };
 
@@ -367,7 +370,18 @@ export async function createMvpStudioNode(context: AudioContext) {
         appliedRevisionByNode.set(node, Math.max(appliedRevisionByNode.get(node) || 0, revision));
         faultedByNode.set(node, false);
         if (activeStudioNode === node) {
-          runtimeInfo = { ...runtimeInfo, appliedRevision: Math.max(runtimeInfo.appliedRevision, revision), ready: true, faulted: false, lastError: null, lastAppliedAt: Date.now() };
+          const appliedState = data.appliedState && typeof data.appliedState === "object"
+            ? cloneStudioState(data.appliedState as MvpStudioState)
+            : runtimeInfo.appliedState;
+          runtimeInfo = {
+            ...runtimeInfo,
+            appliedRevision: Math.max(runtimeInfo.appliedRevision, revision),
+            ready: true,
+            faulted: false,
+            lastError: null,
+            lastAppliedAt: Date.now(),
+            appliedState,
+          };
         }
         return;
       }

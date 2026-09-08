@@ -1147,11 +1147,12 @@ void processSmartDsp(float &left, float &right) {
 
 inline float updateTruePeakDetector(float *history, float sample);
 
+// MVP_R80_FINAL_MASTERING_CORE
 void processFinalCompressor(float &left, float &right) {
-  const bool simplifiedProfile = outputProfile == 1 || outputProfile == 2;
-  const bool maxLoudness = simplifiedProfile && autoMakeupEnabled && outputReserveDb >= 5.5f;
+  const bool processedProfile = outputProfile >= 0 && outputProfile <= 2;
+  const bool highOutput = autoMakeupEnabled && outputReserveDb >= 5.5f;
 
-  if (!simplifiedProfile) {
+  if (!processedProfile) {
     finalCompEnvelope = 0.0f;
     finalCompGain = 1.0f;
     finalCompRequiredGain = 1.0f;
@@ -1171,29 +1172,27 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  // R78K FINAL CREST CONTROLLER.
-  // This is the normal post-effect safety/mastering stage, not Peak Guard.
-  // With High/Max OFF it only keeps the finished mix comfortably below the
-  // emergency limiter. With High/Max ON it creates a small, bounded amount of
-  // extra crest room that the clean-output stage may recover as average level.
-  const float crestCeiling = static_cast<float>(dbToGain(maxLoudness ? -3.20f : -2.00f));
+  // Routine crest control happens HERE, after EQ/effects/spatial and before the
+  // loudness maximizer. Peak Guard is not the normal compressor.
+  const float crestCeiling = static_cast<float>(dbToGain(highOutput ? -3.40f : -1.85f));
   float required = 1.0f;
   if (detector > crestCeiling && detector > 0.0000001f) {
     required = crestCeiling / detector;
   }
-  required = clampf(required, static_cast<float>(dbToGain(-8.0f)), 1.0f);
+  required = clampf(required, static_cast<float>(dbToGain(-18.0f)), 1.0f);
+
   finalCompEnvelope = detector;
   finalCompRequiredGain = required;
 
   if (required < finalCompGain) {
     finalCompGain = required;
   } else if (profileTransitionSamplesRemaining <= 0) {
-    const float releaseSeconds = maxLoudness ? 0.022f : 0.070f;
+    const float releaseSeconds = highOutput ? 0.060f : 0.140f;
     const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * releaseSeconds)));
     finalCompGain += (required - finalCompGain) * releaseCoeff;
   }
 
-  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-8.0f)), 1.0f);
+  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-18.0f)), 1.0f);
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
   meterFinalCompressorReductionDb = finalCompGain < 0.999999f
@@ -1204,90 +1203,89 @@ void processOutputGain(float &left, float &right) {
   const float preLimitPeak = absf(left) > absf(right) ? absf(left) : absf(right);
   if (preLimitPeak > meterInternalPeak) meterInternalPeak = preLimitPeak;
 
-  float makeupTargetDb = 0.0f;
+  float compensationDb = 0.0f;
   if (autoMakeupEnabled) {
-    makeupTargetDb = clampf(multibandEnabled ? meterMultibandGainReductionDb * 0.35f : 0.0f, 0.0f, 2.0f);
-    makeupTargetDb += clampf(deharshAmount * meterDeharshReductionDb * 0.15f, 0.0f, 0.8f);
+    compensationDb = clampf(multibandEnabled ? meterMultibandGainReductionDb * 0.30f : 0.0f, 0.0f, 1.6f);
+    compensationDb += clampf(deharshAmount * meterDeharshReductionDb * 0.12f, 0.0f, 0.6f);
   }
-  const float makeupTarget = static_cast<float>(dbToGain(makeupTargetDb));
-  const float makeupCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.350)));
-  autoMakeupGain += (makeupTarget-autoMakeupGain)*makeupCoeff;
 
-  const float requestedDrive = static_cast<float>(dbToGain(outputReserveDb));
-  if (outputProfile == 1 || outputProfile == 2) {
-    // R76 STABLE MAX-HD CONTROLLER
-    // Measure the finished, post-compressor signal with the exact same 4x
-    // oversampled true-peak detector family used by Peak Guard. Hold/decay the
-    // programme peak slowly so makeup gain does not oscillate between every kick
-    // and snare. Extra gain may fall to unity, but this stage never attenuates the
-    // user's dry source or EQ below unity.
-    const float tpL = updateTruePeakDetector(maxHdTruePeakHistoryL, left);
-    const float tpR = updateTruePeakDetector(maxHdTruePeakHistoryR, right);
-    const float truePeak = tpL > tpR ? tpL : tpR;
-    if (truePeak > maxHdHeldTruePeak) maxHdHeldTruePeak = truePeak;
-    else maxHdHeldTruePeak += (truePeak - maxHdHeldTruePeak) * maxHdPeakReleaseCoeff;
-    if (maxHdHeldTruePeak < 0.0000001f) maxHdHeldTruePeak = 0.0f;
-    meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
-      ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
+  const float requestedTotalDb = clampf(outputReserveDb + compensationDb, 0.0f, 18.0f);
+  const float requestedDrive = static_cast<float>(dbToGain(requestedTotalDb));
 
-    // R77I: recover only gain proven safe by the same oversampled detector used
-    // by Peak Guard. OFF may recover transparent source/EQ margin; High/Max adds
-    // only additional room that truly exists after the creative processing.
-    const bool maxLoudness = autoMakeupEnabled && outputReserveDb >= 5.5f;
-    // R78K keeps routine output well below the emergency Peak Guard. High/Max
-    // may recover crest room only to -1.35 dBTP, leaving more than 1 dB of
-    // intersample margin below the -0.30 dBTP emergency ceiling.
-    const float maxHdTargetTruePeak = static_cast<float>(dbToGain(-1.70f));
-    float cleanCap = requestedDrive;
-    if (maxHdHeldTruePeak > 0.000001f) cleanCap = maxHdTargetTruePeak / maxHdHeldTruePeak;
-    cleanCap = clampf(cleanCap, 1.0f, requestedDrive);
+  const float tpL = updateTruePeakDetector(maxHdTruePeakHistoryL, left);
+  const float tpR = updateTruePeakDetector(maxHdTruePeakHistoryR, right);
+  const float truePeak = tpL > tpR ? tpL : tpR;
 
-    // If Peak Guard had to work unexpectedly, remember that event and remove only
-    // the extra Max-HD makeup. The feedback decays slowly, so the controller cannot
-    // immediately climb back into the limiter and flash again on the next transient.
-    const float limiterReductionDb = limiterGain < 0.999999f
-      ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f;
-    if (limiterReductionDb > maxHdLimiterFeedbackDb) maxHdLimiterFeedbackDb = limiterReductionDb;
-    else maxHdLimiterFeedbackDb += (0.0f - maxHdLimiterFeedbackDb) * maxHdFeedbackReleaseCoeff;
+  if (truePeak > maxHdHeldTruePeak) maxHdHeldTruePeak = truePeak;
+  else maxHdHeldTruePeak += (truePeak - maxHdHeldTruePeak) * maxHdPeakReleaseCoeff;
+  if (maxHdHeldTruePeak < 0.0000001f) maxHdHeldTruePeak = 0.0f;
 
-    float driveTarget = cleanCap;
-    if (maxHdLimiterFeedbackDb > 0.02f && driveTarget > 1.0f) {
-      const float feedbackDb = clampf(maxHdLimiterFeedbackDb + 0.75f, 0.0f, 6.0f);
-      driveTarget *= static_cast<float>(dbToGain(-feedbackDb));
-      if (driveTarget < 1.0f) driveTarget = 1.0f;
-    }
+  meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
+    ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-    // R77F: optional gain may rise slowly, but it must surrender immediately when
-    // a new true peak proves that the extra gain is no longer safe. This never
-    // attenuates the source below unity; it only removes optional Max/High makeup.
-    // With Max/High OFF requestedDrive is unity, so this stage is exactly neutral.
-    if (driveTarget < cleanOutputDriveGain) cleanOutputDriveGain = driveTarget;
-    else {
-      // High/Max should become audible quickly, while the OFF path retains the
-      // proven slow r77i recovery behavior.
-      const float riseCoeff = maxLoudness
-        ? static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.12)))
-        : maxHdGainRiseCoeff;
-      cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
-    }
-    cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
-    outputReserveGain = cleanOutputDriveGain;
+  const bool highOutput = autoMakeupEnabled && outputReserveDb >= 5.5f;
+
+  // Peak Guard detector is ~0.1 dB below the requested limiter ceiling. Keep the
+  // normal mastering target a further 0.5 dB below that so routine music stays
+  // out of Peak Guard even with intersample reconstruction.
+  const float masteringTarget = static_cast<float>(dbToGain(highOutput ? -0.90f : -1.20f));
+  float safeCap = requestedDrive;
+  if (maxHdHeldTruePeak > 0.000001f) {
+    safeCap = masteringTarget / maxHdHeldTruePeak;
+  }
+
+  safeCap = clampf(
+    safeCap,
+    static_cast<float>(dbToGain(-12.0f)),
+    requestedDrive
+  );
+
+  const float limiterReductionDb = limiterGain < 0.999999f
+    ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f;
+
+  if (limiterReductionDb > maxHdLimiterFeedbackDb) {
+    maxHdLimiterFeedbackDb = limiterReductionDb;
   } else {
-    // Car / Hi-Fi remains an explicit advanced gain stage.
-    maxHdHeldTruePeak = 0.0f;
-    maxHdLimiterFeedbackDb = 0.0f;
-    meterMaxHdInputTruePeakDbtp = -120.0f;
-    cleanOutputDriveGain = requestedDrive;
-    outputReserveGain = requestedDrive;
+    maxHdLimiterFeedbackDb += (0.0f - maxHdLimiterFeedbackDb) * maxHdFeedbackReleaseCoeff;
   }
 
-  left *= autoMakeupGain * outputReserveGain;
-  right *= autoMakeupGain * outputReserveGain;
+  float driveTarget = safeCap;
 
-  meterAutoMakeupDb = autoMakeupGain > 0.000001f ? static_cast<float>(20.0*log10(autoMakeupGain)) : 0.0f;
-  meterOutputReserveDb = outputReserveGain > 0.000001f ? static_cast<float>(20.0*log10(outputReserveGain)) : 0.0f;
-  const float after = absf(left)>absf(right)?absf(left):absf(right);
-  meterAvailableHeadroomDb = after > 0.000001f ? clampf(static_cast<float>(-20.0*log10(after)), -12.0f, 24.0f) : 24.0f;
+  // If Peak Guard catches a freak reconstruction spike, surrender optional gain
+  // immediately. This feedback is emergency recovery, not normal gain riding.
+  if (maxHdLimiterFeedbackDb > 0.02f && driveTarget > 1.0f) {
+    const float feedbackDb = clampf(maxHdLimiterFeedbackDb + 0.75f, 0.0f, 8.0f);
+    driveTarget *= static_cast<float>(dbToGain(-feedbackDb));
+  }
+
+  if (driveTarget < cleanOutputDriveGain) {
+    cleanOutputDriveGain = driveTarget;
+  } else {
+    const float riseSeconds = highOutput ? 0.085f : 0.300f;
+    const float riseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * riseSeconds)));
+    cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
+  }
+
+  cleanOutputDriveGain = clampf(
+    cleanOutputDriveGain,
+    static_cast<float>(dbToGain(-12.0f)),
+    requestedDrive
+  );
+
+  outputReserveGain = cleanOutputDriveGain;
+  autoMakeupGain = 1.0f;
+
+  left *= outputReserveGain;
+  right *= outputReserveGain;
+
+  meterAutoMakeupDb = compensationDb;
+  meterOutputReserveDb = outputReserveGain > 0.000001f
+    ? static_cast<float>(20.0 * log10(outputReserveGain)) : -120.0f;
+
+  const float after = absf(left) > absf(right) ? absf(left) : absf(right);
+  meterAvailableHeadroomDb = after > 0.000001f
+    ? clampf(static_cast<float>(-20.0 * log10(after)), -12.0f, 24.0f)
+    : 24.0f;
 }
 
 void configureOutputProfile() {

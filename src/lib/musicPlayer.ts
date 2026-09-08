@@ -1165,7 +1165,7 @@ function calculateProcessingGain() {
   // peak-safety stage on processed paths.
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
   const extremePreampDb = state.extremePreampEnabled ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0)) : 0;
-  const normalPreampDb = !simplifiedProfile && eqProcessingRequested()
+  const normalPreampDb = eqProcessingRequested()
     ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
     : 0;
   const requested = Math.max(-18, Math.min(12, normalPreampDb + extremePreampDb));
@@ -1699,7 +1699,7 @@ function calculateStudioGain() {
 
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
   const extremePreampDb = state.extremePreampEnabled ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0)) : 0;
-  const normalPreampDb = !simplifiedProfile && state.eqEnabled
+  const normalPreampDb = state.eqEnabled
     ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
     : 0;
   const requested = Math.max(-18, Math.min(12, normalPreampDb + extremePreampDb));
@@ -1735,9 +1735,9 @@ function hdXpanderProfile(level: number) {
   const normalized = Math.max(0, Math.min(3, Math.round(Number(level) || 0)));
   // R75: each level must be an unmistakable A/B change, not a decorative button.
   // These remain parallel restoration boosts and never rewrite the 31-band EQ.
-  if (normalized === 1) return { level: 1, presenceDb: 0.75, clarityDb: 1.25, airDb: 1.60, exciterAmount: 0.040, transientAmount: 0.14 };
-  if (normalized === 2) return { level: 2, presenceDb: 1.25, clarityDb: 2.10, airDb: 2.85, exciterAmount: 0.072, transientAmount: 0.24 };
-  if (normalized === 3) return { level: 3, presenceDb: 1.85, clarityDb: 3.10, airDb: 4.10, exciterAmount: 0.110, transientAmount: 0.36 };
+  if (normalized === 1) return { level: 1, presenceDb: 1.00, clarityDb: 1.70, airDb: 2.20, exciterAmount: 0.055, transientAmount: 0.18 };
+  if (normalized === 2) return { level: 2, presenceDb: 1.70, clarityDb: 2.80, airDb: 3.80, exciterAmount: 0.090, transientAmount: 0.30 };
+  if (normalized === 3) return { level: 3, presenceDb: 2.50, clarityDb: 4.20, airDb: 5.40, exciterAmount: 0.140, transientAmount: 0.46 };
   return { level: 0, presenceDb: 0, clarityDb: 0, airDb: 0, exciterAmount: 0, transientAmount: 0 };
 }
 
@@ -3520,6 +3520,7 @@ export function setMusicPreamp(preampDb: number) {
   savePlayerSetting(STORAGE_KEYS.preampDb, String(next));
   savePlayerSetting(STORAGE_KEYS.eqPreset, "custom");
   emit({ preampDb: next, eqPreset: "custom", dspVerificationMode: "off" });
+  writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -3527,6 +3528,7 @@ export function setMusicPreamp(preampDb: number) {
 export function setMusicExtremePreampEnabled(enabled: boolean) {
   savePlayerSetting(STORAGE_KEYS.extremePreampEnabled, String(enabled));
   emit({ extremePreampEnabled: enabled });
+  writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -3535,6 +3537,7 @@ export function setMusicExtremePreamp(value: number) {
   const next = Math.max(0, Math.min(12, Number(value) || 0));
   savePlayerSetting(STORAGE_KEYS.extremePreampDb, String(next));
   emit({ extremePreampDb: next });
+  writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
   applyProcessingSettings();
   scheduleProcessingSettle();
 }
@@ -3714,6 +3717,8 @@ type OutputProfileSnapshot = Pick<
   | "eqGains"
   | "eqTopology"
   | "preampDb"
+  | "extremePreampEnabled"
+  | "extremePreampDb"
   | "outputReserveDb"
   | "autoMakeupEnabled"
   | "parametricEnabled"
@@ -3770,6 +3775,8 @@ function currentOutputProfileSnapshot(): OutputProfileSnapshot {
     eqGains: [...state.eqGains],
     eqTopology: state.eqTopology,
     preampDb: state.preampDb,
+    extremePreampEnabled: state.extremePreampEnabled,
+    extremePreampDb: state.extremePreampDb,
     outputReserveDb: state.outputReserveDb,
     autoMakeupEnabled: state.autoMakeupEnabled,
     parametricEnabled: state.parametricEnabled,
@@ -3825,6 +3832,8 @@ function cleanOutputProfileSnapshot(profile: MusicOutputProfile): OutputProfileS
     eqGains: [...MUSIC_EQ_PRESETS.flat.gains],
     eqTopology: "minimum_phase",
     preampDb: 0,
+    extremePreampEnabled: false,
+    extremePreampDb: 0,
     // Bluetooth Speaker starts at true unity. Extra gain must be explicit; it is
     // never injected as a hidden device-profile default.
     outputReserveDb: profile === "headphones" || profile === "speaker" ? 0 : 3.0,
@@ -4100,6 +4109,8 @@ function persistSnapshotToActiveStorage(snapshot: OutputProfileSnapshot) {
   savePlayerSetting(STORAGE_KEYS.eqGains, JSON.stringify(snapshot.eqGains));
   savePlayerSetting(STORAGE_KEYS.eqTopology, snapshot.eqTopology);
   savePlayerSetting(STORAGE_KEYS.preampDb, String(snapshot.preampDb));
+  savePlayerSetting(STORAGE_KEYS.extremePreampEnabled, String(snapshot.extremePreampEnabled));
+  savePlayerSetting(STORAGE_KEYS.extremePreampDb, String(snapshot.extremePreampDb));
   savePlayerSetting(STORAGE_KEYS.outputReserveDb, String(snapshot.outputReserveDb));
   savePlayerSetting(STORAGE_KEYS.autoMakeupEnabled, String(snapshot.autoMakeupEnabled));
   savePlayerSetting(STORAGE_KEYS.parametricEnabled, String(snapshot.parametricEnabled));
@@ -4170,6 +4181,42 @@ function applyOutputProfileSnapshot(profile: MusicOutputProfile, snapshot: Outpu
 
 migrateMaxHdR74();
 
+const R80_R3_PROFILE_GAIN_KEY = "mvp_music_r80_r3_profile_gain_v1";
+function migrateR80R3ProfileGain() {
+  if (readStored(R80_R3_PROFILE_GAIN_KEY) === "1") return;
+
+  // R79A stored Extreme Preamp globally while its UI was visible only on Car/Hi-Fi.
+  // Preserve that legacy value for Car only, then explicitly neutralize the two
+  // clean-HD profiles so a hidden +8/+12 dB cannot follow the user into them.
+  const legacyExtremeEnabled = state.extremePreampEnabled;
+  const legacyExtremeDb = state.extremePreampDb;
+
+  (["car_hifi", "headphones", "speaker"] as const).forEach((profile) => {
+    const next = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
+    if (profile === "car_hifi") {
+      next.extremePreampEnabled = legacyExtremeEnabled;
+      next.extremePreampDb = legacyExtremeDb;
+    } else {
+      next.extremePreampEnabled = false;
+      next.extremePreampDb = 0;
+    }
+    writeOutputProfileSnapshot(profile, next);
+
+    if (profile === state.outputProfile) {
+      persistSnapshotToActiveStorage(next);
+      state = {
+        ...state,
+        ...next,
+        eqGains: [...next.eqGains],
+        parametricBands: next.parametricBands.map((band) => ({ ...band })),
+      };
+    }
+  });
+
+  savePlayerSetting(R80_R3_PROFILE_GAIN_KEY, "1");
+}
+migrateR80R3ProfileGain();
+
 export function applyMusicHeadphoneStudioHd() {
   const snapshot = cleanOutputProfileSnapshot("headphones");
   snapshot.outputReserveDb = 0;
@@ -4194,9 +4241,9 @@ export function setMusicHeadphoneClear(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
-  next.presenceDb = enabled ? 2.0 : 0;
-  next.clarityDb = enabled ? 3.0 : 0;
-  next.airDb = enabled ? 3.8 : 0;
+  next.presenceDb = enabled ? 2.8 : 0;
+  next.clarityDb = enabled ? 4.5 : 0;
+  next.airDb = enabled ? 5.5 : 0;
   next.deharshAmount = 0;
   applyOutputProfileSnapshot("headphones", next);
 }
@@ -4221,9 +4268,9 @@ export function setMusicSpeakerClear(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
-  next.presenceDb = enabled ? 1.8 : 0;
-  next.clarityDb = enabled ? 2.7 : 0;
-  next.airDb = enabled ? 3.3 : 0;
+  next.presenceDb = enabled ? 2.6 : 0;
+  next.clarityDb = enabled ? 4.2 : 0;
+  next.airDb = enabled ? 5.0 : 0;
   next.deharshAmount = 0;
   applyOutputProfileSnapshot("speaker", next);
 }
@@ -4233,7 +4280,7 @@ export function setMusicSpeakerPunch(enabled: boolean) {
   const next = currentOutputProfileSnapshot();
   // R75: this state is consumed by the Studio transient shaper on clean-HD profiles.
   next.dynamicsRestoreEnabled = enabled;
-  next.dynamicsRestoreAmount = enabled ? 92 : 0;
+  next.dynamicsRestoreAmount = enabled ? 100 : 0;
   applyOutputProfileSnapshot("speaker", next);
 }
 
@@ -4243,7 +4290,7 @@ export function setMusicSpeakerWide(enabled: boolean) {
   // Universal speaker WIDE is intentionally geometry-agnostic Mid/Side width,
   // not crosstalk cancellation. True CTC requires known driver/listener geometry.
   next.stereoFieldEnabled = enabled;
-  next.stereoUserWidth = enabled ? 138 : 100;
+  next.stereoUserWidth = enabled ? 152 : 100;
   next.stereoCenterFocus = 100;
   next.bassMonoHz = enabled ? 105 : 90;
   applyOutputProfileSnapshot("speaker", next);
@@ -4262,15 +4309,15 @@ function applyAnalogModeToSnapshot(next: OutputProfileSnapshot, mode: MusicAnalo
   }
   next.exciterEnabled = true;
   if (mode === "studio") {
-    next.exciterAmount = 8;
-    next.saturationLow = 2;
-    next.saturationMid = 4;
-    next.saturationHigh = 3;
-  } else {
     next.exciterAmount = 12;
     next.saturationLow = 5;
     next.saturationMid = 8;
-    next.saturationHigh = 5;
+    next.saturationHigh = 6;
+  } else {
+    next.exciterAmount = 14;
+    next.saturationLow = 10;
+    next.saturationMid = 16;
+    next.saturationHigh = 10;
   }
 }
 
@@ -4278,10 +4325,10 @@ export function setMusicHeadphoneNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
-  next.bassSubDb = enabled ? 3.8 : 0;
-  next.bassPunchDb = enabled ? 1.8 : 0;
-  next.bassBodyDb = enabled ? 0.8 : 0;
-  next.bassTightness = enabled ? 76 : 55;
+  next.bassSubDb = enabled ? 5.5 : 0;
+  next.bassPunchDb = enabled ? 3.2 : 0;
+  next.bassBodyDb = enabled ? 1.8 : 0;
+  next.bassTightness = enabled ? 82 : 55;
   applyOutputProfileSnapshot("headphones", next);
 }
 
@@ -4289,10 +4336,10 @@ export function setMusicSpeakerNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
-  next.bassSubDb = enabled ? 4.0 : 0;
-  next.bassPunchDb = enabled ? 2.0 : 0;
-  next.bassBodyDb = enabled ? 0.9 : 0;
-  next.bassTightness = enabled ? 78 : 55;
+  next.bassSubDb = enabled ? 5.8 : 0;
+  next.bassPunchDb = enabled ? 3.4 : 0;
+  next.bassBodyDb = enabled ? 2.0 : 0;
+  next.bassTightness = enabled ? 84 : 55;
   applyOutputProfileSnapshot("speaker", next);
 }
 
@@ -4300,7 +4347,7 @@ export function setMusicHeadphoneImpact(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
   const next = currentOutputProfileSnapshot();
   next.dynamicsRestoreEnabled = enabled;
-  next.dynamicsRestoreAmount = enabled ? 92 : 0;
+  next.dynamicsRestoreAmount = enabled ? 100 : 0;
   applyOutputProfileSnapshot("headphones", next);
 }
 
@@ -4415,17 +4462,7 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
     return;
   }
 
-  // R77G: Headphones High Output and Bluetooth Max Output are the same user
-  // intent on two clean-HD device paths. Carry that ON/OFF intent across a
-  // direct Headphones <-> Bluetooth switch so the audible level does not jump
-  // simply because the target profile happened to remember an older toggle.
-  const leavingCleanHd = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const enteringCleanHd = profile === "headphones" || profile === "speaker";
-  const carryCleanOutputEnabled = leavingCleanHd && enteringCleanHd
-    ? state.outputReserveDb >= 5.5
-    : null;
-
-  // Store the profile we are leaving before changing any global active keys.
+  // MVP_R80_CLOUD_R2_FINAL_AUDIO: every output profile owns its complete gain/effect state.
   writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
 
   savePlayerSetting(STORAGE_KEYS.outputProfile, profile);
@@ -4441,16 +4478,7 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
     return;
   }
 
-  // Restore the target device's own tone/effect state. Only the equivalent
-  // clean-output toggle is synchronized between Headphones and Bluetooth.
   const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
-  if (carryCleanOutputEnabled != null && enteringCleanHd) {
-    target.outputReserveDb = carryCleanOutputEnabled ? 8.0 : 0;
-    // R78N: the visual High/Max ON state must carry the actual native loudness
-    // request too. Reserve=8 with autoMakeup=false was a false-positive button.
-    target.autoMakeupEnabled = carryCleanOutputEnabled;
-    target.limiterEnabled = true;
-  }
   applyOutputProfileSnapshot(profile, target);
 }
 

@@ -502,6 +502,7 @@ class MvpStudioWasmProcessor extends AudioWorkletProcessor {
         outputReserveDb: Number(state.outputReserveDb) || 0,
         autoMakeupEnabled: Boolean(state.autoMakeupEnabled),
         smartDspEnabled: Boolean(state.smartDspEnabled),
+        appliedState: this.appliedState,
       });
     } catch (error) {
       this.port.postMessage({

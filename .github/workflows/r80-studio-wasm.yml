@@ -1,0 +1,80 @@
+name: R80 Studio WASM Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "dsp/studio/mvp_studio_dsp.cpp"
+      - "scripts/build-mvp-studio-wasm.sh"
+      - "scripts/test-mvp-studio-wasm.mjs"
+      - "scripts/test-r80-mastering.mjs"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: r80-studio-wasm-main
+  cancel-in-progress: false
+
+jobs:
+  build-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install WASM compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+
+      - name: Build Studio WASM
+        run: |
+          bash scripts/build-mvp-studio-wasm.sh
+          cp public/audio/mvpStudioEngine.wasm public/audio/mvpStudioEngine-r78k.wasm
+
+      - name: Run Studio regression tests
+        run: node scripts/test-mvp-studio-wasm.mjs
+
+      - name: Run R80 mastering tests
+        run: node scripts/test-r80-mastering.mjs
+
+      - name: Run production build
+        run: npm run build
+
+      - name: Upload validated WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: r80-studio-wasm
+          path: |
+            public/audio/mvpStudioEngine.wasm
+            public/audio/mvpStudioEngine-r78k.wasm
+
+      - name: Commit rebuilt WASM
+        shell: bash
+        run: |
+          git add public/audio/mvpStudioEngine.wasm public/audio/mvpStudioEngine-r78k.wasm
+          if git diff --cached --quiet; then
+            echo "WASM binaries are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Build R80 Studio WASM"
+          git push origin HEAD:main
