@@ -1,0 +1,78 @@
+name: MVP HD V2 WASM Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "dsp/v2/mvp_hd_v2.cpp"
+      - "scripts/build-mvp-hd-v2.sh"
+      - "scripts/test-mvp-hd-v2.mjs"
+      - ".github/workflows/mvp-hd-v2-wasm.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mvp-hd-v2-wasm-main
+  cancel-in-progress: false
+
+jobs:
+  build-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install pinned Emscripten SDK
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .emsdk
+          ./.emsdk/emsdk install 3.1.64
+          ./.emsdk/emsdk activate 3.1.64
+
+      - name: Build isolated V2 WASM
+        shell: bash
+        run: |
+          source ./.emsdk/emsdk_env.sh
+          CXX="$PWD/.emsdk/upstream/bin/clang++" bash scripts/build-mvp-hd-v2.sh
+
+      - name: Run V2 raw PCM validation
+        run: node scripts/test-mvp-hd-v2.mjs
+
+      - name: Run production app build
+        run: npm run build
+
+      - name: Upload validated V2 WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvp-hd-v2-wasm
+          path: public/audioV2/mvpHdV2.wasm
+
+      - name: Commit validated V2 WASM only
+        shell: bash
+        run: |
+          git add public/audioV2/mvpHdV2.wasm
+          if git diff --cached --quiet; then
+            echo "V2 WASM binary is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Build MVP HD V2 WASM"
+          git push origin HEAD:main
