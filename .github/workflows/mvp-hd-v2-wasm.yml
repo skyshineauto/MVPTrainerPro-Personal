@@ -9,6 +9,11 @@ on:
       - "dsp/v2/mvp_hd_v2.cpp"
       - "scripts/build-mvp-hd-v2.sh"
       - "scripts/test-mvp-hd-v2.mjs"
+      - "public/audioV2/mvpHdV2.worklet.js"
+      - "public/audioV2/test.html"
+      - "public/audioV2/test.js"
+      - "src/lib/audioV2/**"
+      - "scripts/test-mvp-hd-v2-browser.mjs"
       - ".github/workflows/mvp-hd-v2-wasm.yml"
 
 permissions:
@@ -54,6 +59,12 @@ jobs:
 
       - name: Run V2 raw PCM validation
         run: node scripts/test-mvp-hd-v2.mjs
+
+      - name: Run V2 Stage 2 browser/worklet static validation
+        run: |
+          node --check public/audioV2/mvpHdV2.worklet.js
+          node --check public/audioV2/test.js
+          node scripts/test-mvp-hd-v2-browser.mjs
 
       - name: Run production app build
         run: npm run build
