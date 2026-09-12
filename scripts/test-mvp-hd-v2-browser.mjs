@@ -11,6 +11,7 @@ const html=fs.readFileSync(path.join(root,"public","audioV2","test.html"),"utf8"
 const bridge=fs.readFileSync(path.join(root,"src","lib","audio","mvpStudioEngine.ts"),"utf8");
 const player=fs.readFileSync(path.join(root,"src","lib","musicPlayer.ts"),"utf8");
 const mini=fs.readFileSync(path.join(root,"src","features","music","MusicMiniPlayer.tsx"),"utf8");
+const cpp=fs.readFileSync(path.join(root,"dsp","v2","mvp_hd_v2.cpp"),"utf8");
 
 for(const value of [
   "mvp_v2_set_mode","mvp_v2_set_output_profile","mvp_v2_set_intensity",
@@ -29,9 +30,29 @@ for(const forbidden of ["_malloc","_free","new AudioContext","createMediaElement
 for(const value of ["PURE","ADAPTIVE","POWER","BASS","IMPACT","CLARITY","IMMERSION","Intensity"]) {
   if(!html.includes(value)) throw new Error(`V3 harness UI missing ${value}`);
 }
-for(const value of ["BROADCAST V3 PROOF","SET_PROOF_MUTE","bassCharacter","spaceMode",'"STAGE"','"SPACE"']) {
+for(const value of ["BROADCAST V3 R4 SAME-SECTION PROOF","SET_PROOF_MUTE","bassCharacter","spaceMode",'"STAGE"','"SPACE"']) {
   if(!harness.includes(value)) throw new Error(`V3 harness logic missing ${value}`);
 }
+
+for(const value of [
+  "resetTransitionMemory",
+  "if (next == gMode) return;",
+  "if (next == gOutputProfile) return;",
+]) if(!cpp.includes(value)) throw new Error(`V3 R4 C++ live-state fix missing ${value}`);
+
+for(const value of [
+  "this.exports.mvp_v2_reset_meters();",
+  "this.totalClipCount",
+  "liveLimiterGrDb",
+]) if(!worklet.includes(value)) throw new Error(`V3 R4 live telemetry missing ${value}`);
+
+for(const value of [
+  "captureSameSection",
+  "waitForSeek",
+  'intensity.disabled=pure',
+  'b.disabled=pure',
+  "SAME-SECTION PROOF",
+]) if(!harness.includes(value)) throw new Error(`V3 R4 harness truth check missing ${value}`);
 
 if(bridge.includes("installMusicAiAudioRuntime") || bridge.includes("musicAiAudioRuntime")) {
   throw new Error("AI Audio runtime is still connected to production bridge");
@@ -67,8 +88,16 @@ for(const value of [
 ]) {
   if(!mini.includes(value)) throw new Error(`MusicMiniPlayer V3 UI missing ${value}`);
 }
+for(const value of [
+  'aria-pressed={player.broadcastBassEnabled} disabled={player.experienceMode === "pure"}',
+  'aria-pressed={player.broadcastImpactEnabled} disabled={player.experienceMode === "pure"}',
+  'aria-pressed={player.broadcastClarityEnabled} disabled={player.experienceMode === "pure"}',
+  'aria-pressed={player.broadcastSpatialEnabled} disabled={player.experienceMode === "pure"}',
+  'value={player.broadcastBassCharacter} disabled={player.experienceMode === "pure"}',
+]) if(!mini.includes(value)) throw new Error(`MusicMiniPlayer PURE-disable rule missing ${value}`);
+
 for(const legacy of ["DEVICE DIRECT <span>or</span> MVP HD","BASS STRONG","BASS DEEP"]) {
   if(mini.includes(legacy)) throw new Error(`Legacy R82 UI remains visible: ${legacy}`);
 }
 
-console.log("MVP Broadcast Engine V3 browser/production static validation: PASS");
+console.log("MVP Broadcast Engine V3 R4 browser/production static validation: PASS");

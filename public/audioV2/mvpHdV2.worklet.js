@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V3 AudioWorklet bridge.
+// MVP Trainer Pro Broadcast Engine V3 R4 live-state AudioWorklet bridge.
 // Single audible route. Fixed WASM buffers. No heap allocation in the render loop.
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
@@ -38,6 +38,8 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     this.energySamples = 0;
     this.inputPeak = 0;
     this.outputPeak = 0;
+    this.totalClipCount = 0;
+    this.totalNanCount = 0;
 
     this.port.onmessage = (event) => {
       const message = event.data || {};
@@ -74,6 +76,8 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       }
       if (message.type === "RESET_METERS" || message.type === "reset-loudness") {
         if (this.ready && this.exports) this.exports.mvp_v2_reset_meters();
+        this.totalClipCount = 0;
+        this.totalNanCount = 0;
         return;
       }
       if (message.type === "PING") {
@@ -314,6 +318,20 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
             ? 20 * Math.log10(outputRms / inputRms)
             : outputRms <= 0.00000001 ? -120 : 0;
 
+        // V3 R4 telemetry is a LIVE window, not a stale maximum from some earlier mode.
+        // Safety counters remain cumulative in the bridge while activity meters reset every window.
+        const intervalClipCount = Number(this.exports.mvp_v2_meter_clip_count());
+        const intervalNanCount = Number(this.exports.mvp_v2_meter_nan_count());
+        this.totalClipCount += intervalClipCount;
+        this.totalNanCount += intervalNanCount;
+        const liveTruePeakDbtp = Number(this.exports.mvp_v2_meter_true_peak_dbtp());
+        const liveLimiterGrDb = Number(this.exports.mvp_v2_meter_limiter_gr_db());
+        const liveMultibandGrDb = Number(this.exports.mvp_v2_meter_multiband_gr_db());
+        const liveImpactDb = Number(this.exports.mvp_v2_meter_impact_boost_db());
+        const liveBassDb = Number(this.exports.mvp_v2_meter_bass_activity_db());
+        const liveClarityDb = Number(this.exports.mvp_v2_meter_clarity_activity_db());
+        const liveWidth = Number(this.exports.mvp_v2_meter_spatial_width_percent());
+
         this.port.postMessage({
           type: "TELEMETRY",
           legacyType: "telemetry",
@@ -325,18 +343,19 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           inputPeak: this.inputPeak,
           outputPeak: this.outputPeak,
           rmsDeltaDb,
-          truePeakDbtp: Number(this.exports.mvp_v2_meter_true_peak_dbtp()),
-          limiterGrDb: Number(this.exports.mvp_v2_meter_limiter_gr_db()),
-          limiterGrDbMaxSinceInit: Number(this.exports.mvp_v2_meter_limiter_gr_db()),
-          clipCount: Number(this.exports.mvp_v2_meter_clip_count()),
-          nanCount: Number(this.exports.mvp_v2_meter_nan_count()),
-          multibandGainReductionDb: Number(this.exports.mvp_v2_meter_multiband_gr_db()),
-          impactBoostDb: Number(this.exports.mvp_v2_meter_impact_boost_db()),
-          bassActivityDb: Number(this.exports.mvp_v2_meter_bass_activity_db()),
-          clarityActivityDb: Number(this.exports.mvp_v2_meter_clarity_activity_db()),
-          spatialWidthPercent: Number(this.exports.mvp_v2_meter_spatial_width_percent()),
+          truePeakDbtp: liveTruePeakDbtp,
+          limiterGrDb: liveLimiterGrDb,
+          limiterGrDbMaxSinceInit: liveLimiterGrDb,
+          clipCount: this.totalClipCount,
+          nanCount: this.totalNanCount,
+          multibandGainReductionDb: liveMultibandGrDb,
+          impactBoostDb: liveImpactDb,
+          bassActivityDb: liveBassDb,
+          clarityActivityDb: liveClarityDb,
+          spatialWidthPercent: liveWidth,
         });
 
+        this.exports.mvp_v2_reset_meters();
         this.inputEnergy = 0;
         this.outputEnergy = 0;
         this.energySamples = 0;

@@ -65,6 +65,26 @@ function render(c, generator, seconds=3) {
     width:Number(dsp.mvp_v2_meter_spatial_width_percent()),
   };
 }
+function renderCurrent(generator, seconds=2) {
+  const total=Math.ceil(seconds*SR/frames)*frames;
+  const L=new Float32Array(total), R=new Float32Array(total);
+  for(let pos=0;pos<total;pos+=frames){
+    for(let i=0;i<frames;i++){
+      const [l,r]=generator(pos+i,SR);
+      inL[i]=l;inR[i]=r;
+    }
+    assert.equal(dsp.mvp_v2_process(frames),1);
+    L.set(outL,pos);R.set(outR,pos);
+  }
+  return {
+    L,R,
+    limiter:Number(dsp.mvp_v2_meter_limiter_gr_db()),
+    clips:Number(dsp.mvp_v2_meter_clip_count()),
+    nans:Number(dsp.mvp_v2_meter_nan_count()),
+    mb:Number(dsp.mvp_v2_meter_multiband_gr_db()),
+    impact:Number(dsp.mvp_v2_meter_impact_boost_db()),
+  };
+}
 function rms(x,start=WARM){let e=0,n=0;for(let i=start;i<x.length;i++){e+=x[i]*x[i];n++;}return Math.sqrt(e/Math.max(1,n));}
 function rmsStereo(o,start=WARM){return Math.sqrt((rms(o.L,start)**2+rms(o.R,start)**2)/2);}
 function dbRatio(a,b){return 20*Math.log10(Math.max(a,1e-12)/Math.max(b,1e-12));}
@@ -156,4 +176,30 @@ const allTp=tp(all);
 console.log({allTp,meterTp:all.tp,limiter:all.limiter,mb:all.mb,clips:all.clips,nans:all.nans});
 assert.ok(allTp<=-.05,`True peak too high ${allTp.toFixed(2)} dBTP`);
 assert.equal(all.clips,0);assert.equal(all.nans,0);
-console.log("MVP Broadcast Engine V3 PCM validation: PASS");
+
+// V3 R4 live-switch regression: use ONE DSP instance and switch modes without reinitializing.
+// PURE must immediately return to the native/reference path instead of inheriting old compression.
+configure({mode:2,intensity:.82,profile:1});
+const livePowerA=renderCurrent(program,2);
+dsp.mvp_v2_set_mode(0);
+const livePure=renderCurrent(program,2);
+const livePureDelta=dbRatio(rmsStereo(livePure),pureR);
+assert.ok(Math.abs(livePureDelta)<=.20,`Live switch POWER→PURE did not return to unity: ${livePureDelta.toFixed(2)} dB`);
+assert.ok(livePure.limiter<=.05,`PURE inherited limiter GR ${livePure.limiter.toFixed(2)} dB`);
+assert.ok(livePure.mb<=.05,`PURE inherited multiband GR ${livePure.mb.toFixed(2)} dB`);
+assert.ok(livePure.impact<=.05,`PURE inherited impact activity ${livePure.impact.toFixed(2)} dB`);
+
+dsp.mvp_v2_set_mode(1);
+const liveAdaptive=renderCurrent(program,2);
+dsp.mvp_v2_set_mode(2);
+const livePowerB=renderCurrent(program,2);
+const liveAdaptiveLift=dbRatio(rmsStereo(liveAdaptive),rmsStereo(livePure));
+const livePowerLift=dbRatio(rmsStereo(livePowerB),rmsStereo(liveAdaptive));
+const livePowerRepeatDelta=dbRatio(rmsStereo(livePowerB),rmsStereo(livePowerA));
+console.log({livePureDelta,liveAdaptiveLift,livePowerLift,livePowerRepeatDelta,livePureLimiter:livePure.limiter,livePureMb:livePure.mb});
+assert.ok(liveAdaptiveLift>=.3,`Live Adaptive lift ${liveAdaptiveLift.toFixed(2)} dB`);
+assert.ok(livePowerLift>=1.5,`Live Power over Adaptive ${livePowerLift.toFixed(2)} dB`);
+assert.ok(Math.abs(livePowerRepeatDelta)<=.60,`Power changed after live mode round trip by ${livePowerRepeatDelta.toFixed(2)} dB`);
+assert.equal(livePowerB.clips,0);assert.equal(livePowerB.nans,0);
+
+console.log("MVP Broadcast Engine V3 R4 PCM validation: PASS");

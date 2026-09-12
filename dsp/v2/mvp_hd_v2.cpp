@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V3
+// MVP Trainer Pro Broadcast Engine V3 R4 live-state fix
 // Coordinated adaptive broadcast mastering for Headphones, Bluetooth Speaker and Car/Hi-Fi.
 // Real-time contract: no heap allocation, no locks, no I/O in mvp_v2_process().
 
@@ -254,16 +254,35 @@ void configureEqBand(int band) {
   gEqR[band].peaking(gSampleRate, kEqFrequencies[band], 4.318473046963146, gEqGainDb[band]);
 }
 
-void resetMeters() {
+void resetLiveActivityMeters() {
   gMeterTruePeak = 0.0f;
   gMeterLimiterGrDb = 0.0f;
-  gMeterClipCount = 0;
-  gMeterNanCount = 0;
   gBandGainReductionDb = 0.0f;
   gBassActivityDb = 0.0f;
   gClarityActivityDb = 0.0f;
   gImpactBoostDb = 0.0f;
   gSpatialWidthPercent = 100.0f;
+}
+
+void resetMeters() {
+  resetLiveActivityMeters();
+  gMeterClipCount = 0;
+  gMeterNanCount = 0;
+}
+
+// V3 R4: mode/profile switches must not inherit compressor, maximizer or limiter memory
+// from the previous experience mode. Keep the lookahead audio buffers intact so playback
+// stays continuous, but start the new mastering decision from neutral gain.
+void resetTransitionMemory() {
+  for (int i = 0; i < 4; ++i) gBandDynamics[i].reset();
+  gHarshEnv = 0.0f;
+  gImpactFast = 0.0f;
+  gImpactSlow = 0.0f;
+  gMasterEnv = 0.0f;
+  gMasterDrive = 1.0f;
+  gLimiterGain = 1.0f;
+  for (int i = 0; i < 3; ++i) gTpHistL[i] = gTpHistR[i] = 0.0f;
+  resetLiveActivityMeters();
 }
 
 void resetState() {
@@ -652,15 +671,64 @@ int mvp_v2_init(float sampleRate) {
 void mvp_v2_reset() { resetState(); }
 void mvp_v2_reset_meters() { resetMeters(); }
 
-void mvp_v2_set_mode(int mode) { gMode = mode < 0 ? 0 : (mode > 2 ? 2 : mode); }
-void mvp_v2_set_output_profile(int profile) { gOutputProfile = profile < 0 ? 0 : (profile > 2 ? 2 : profile); }
+void mvp_v2_set_mode(int mode) {
+  const int next = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
+  if (next == gMode) return;
+  gMode = next;
+  resetTransitionMemory();
+}
+void mvp_v2_set_output_profile(int profile) {
+  const int next = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
+  if (next == gOutputProfile) return;
+  gOutputProfile = next;
+  resetTransitionMemory();
+  gSpatialLowL.reset(); gSpatialLowR.reset();
+  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
+  gSpatialIndex = 0;
+}
 void mvp_v2_set_intensity(float amount) { gIntensityTarget = clampf(amount, 0.0f, 1.0f); }
-void mvp_v2_set_bass_enabled(int enabled) { gBassEnabled = enabled ? 1 : 0; }
+void mvp_v2_set_bass_enabled(int enabled) {
+  const int next = enabled ? 1 : 0;
+  if (next == gBassEnabled) return;
+  gBassEnabled = next;
+  gBassDeepL.reset(); gBassDeepR.reset();
+  gBassBodyL.reset(); gBassBodyR.reset();
+  gBassActivityDb = 0.0f;
+}
 void mvp_v2_set_bass_character(float amount) { gBassCharacterTarget = clampf(amount, 0.0f, 1.0f); }
-void mvp_v2_set_impact_enabled(int enabled) { gImpactEnabled = enabled ? 1 : 0; }
-void mvp_v2_set_clarity_enabled(int enabled) { gClarityEnabled = enabled ? 1 : 0; }
-void mvp_v2_set_spatial_enabled(int enabled) { gSpatialEnabled = enabled ? 1 : 0; }
-void mvp_v2_set_space_mode(int mode) { gSpaceMode = mode < 0 ? 0 : (mode > 2 ? 2 : mode); }
+void mvp_v2_set_impact_enabled(int enabled) {
+  const int next = enabled ? 1 : 0;
+  if (next == gImpactEnabled) return;
+  gImpactEnabled = next;
+  gImpactFast = 0.0f;
+  gImpactSlow = 0.0f;
+  gImpactBoostDb = 0.0f;
+}
+void mvp_v2_set_clarity_enabled(int enabled) {
+  const int next = enabled ? 1 : 0;
+  if (next == gClarityEnabled) return;
+  gClarityEnabled = next;
+  gPresenceHpL.reset(); gPresenceHpR.reset();
+  gAirHpL.reset(); gAirHpR.reset();
+  gHarshEnv = 0.0f;
+  gClarityActivityDb = 0.0f;
+}
+void mvp_v2_set_spatial_enabled(int enabled) {
+  const int next = enabled ? 1 : 0;
+  if (next == gSpatialEnabled) return;
+  gSpatialEnabled = next;
+  gSpatialLowL.reset(); gSpatialLowR.reset();
+  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
+  gSpatialIndex = 0;
+  gSpatialWidthPercent = 100.0f;
+}
+void mvp_v2_set_space_mode(int mode) {
+  const int next = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
+  if (next == gSpaceMode) return;
+  gSpaceMode = next;
+  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
+  gSpatialIndex = 0;
+}
 void mvp_v2_set_personal_enabled(int enabled) { gPersonalEnabled = enabled ? 1 : 0; }
 void mvp_v2_set_personal_bass(float value) { gPersonalBass = clampf(value, -1.0f, 1.0f); }
 void mvp_v2_set_personal_presence(float value) { gPersonalPresence = clampf(value, -1.0f, 1.0f); }
@@ -674,12 +742,18 @@ void mvp_v2_set_eq_band(int band, float gainDb) {
 }
 
 // Backward-compatible Stage 1 ABI. The new UI/adapter uses the explicit V3 controls above.
-void mvp_v2_set_bypass(int enabled) { if (enabled) gMode = 0; else if (gMode == 0) gMode = 1; }
-void mvp_v2_set_loudness_mode(int mode) { gMode = mode >= 2 ? 2 : (mode >= 0 ? 1 : 0); }
-void mvp_v2_set_bass(float amount) { gBassEnabled = amount > 0.0001f ? 1 : 0; gBassCharacterTarget = clampf(amount, 0.0f, 1.0f); }
-void mvp_v2_set_clarity(float amount) { gClarityEnabled = amount > 0.0001f ? 1 : 0; }
-void mvp_v2_set_punch(float amount) { gImpactEnabled = amount > 0.0001f ? 1 : 0; }
-void mvp_v2_set_wide(float amount) { gSpatialEnabled = amount > 0.0001f ? 1 : 0; }
+void mvp_v2_set_bypass(int enabled) {
+  if (enabled) mvp_v2_set_mode(0);
+  else if (gMode == 0) mvp_v2_set_mode(1);
+}
+void mvp_v2_set_loudness_mode(int mode) { mvp_v2_set_mode(mode >= 2 ? 2 : (mode >= 0 ? 1 : 0)); }
+void mvp_v2_set_bass(float amount) {
+  mvp_v2_set_bass_enabled(amount > 0.0001f ? 1 : 0);
+  gBassCharacterTarget = clampf(amount, 0.0f, 1.0f);
+}
+void mvp_v2_set_clarity(float amount) { mvp_v2_set_clarity_enabled(amount > 0.0001f ? 1 : 0); }
+void mvp_v2_set_punch(float amount) { mvp_v2_set_impact_enabled(amount > 0.0001f ? 1 : 0); }
+void mvp_v2_set_wide(float amount) { mvp_v2_set_spatial_enabled(amount > 0.0001f ? 1 : 0); }
 
 int mvp_v2_process(int frames) {
   if (frames < 1 || frames > kFrames) return 0;

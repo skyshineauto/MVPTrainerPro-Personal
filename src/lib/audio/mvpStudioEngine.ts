@@ -134,7 +134,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const ASSET_VERSION = "10.0.0-broadcast-v3";
+const ASSET_VERSION = "10.0.1-broadcast-v3-r4-live-state";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {

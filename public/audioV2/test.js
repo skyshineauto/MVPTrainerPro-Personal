@@ -24,6 +24,7 @@ const clips=document.querySelector("#clips");
 const nans=document.querySelector("#nans");
 
 let url="",ctx=null,source=null,node=null,ready=false,revision=0,proofMute=false,lastTelemetry=null;
+let telemetryHistory=[];
 const state={
   mode:"adaptive",outputProfile:"headphones",intensity:.72,
   bassEnabled:false,bassCharacter:.5,impactEnabled:false,clarityEnabled:false,spatialEnabled:false,
@@ -34,18 +35,29 @@ function log(message){const t=new Date().toLocaleTimeString();logEl.textContent=
 function send(){if(!node||!ready)return;revision++;node.port.postMessage({type:"SET_STATE",revision,state:{...state,eqGains:[...state.eqGains]}})}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function refresh(){
+  const pure=state.mode==="pure";
   modeButtons.forEach(b=>b.classList.toggle("active",b.dataset.mode===state.mode));
   profileButtons.forEach(b=>b.classList.toggle("active",b.dataset.profile===state.outputProfile));
-  effectButtons.forEach(b=>b.classList.toggle("active",Boolean(state[b.dataset.effect])));
-  bassCharacterRow.hidden=!state.bassEnabled;
+  effectButtons.forEach(b=>{
+    b.disabled=pure;
+    b.classList.toggle("active",!pure&&Boolean(state[b.dataset.effect]));
+  });
+  intensity.disabled=pure;
+  bassCharacter.disabled=pure;
+  bassCharacterRow.hidden=pure||!state.bassEnabled;
   const label=state.outputProfile==="headphones"?"IMMERSION":state.outputProfile==="speaker"?"STAGE":"SPACE";
   spatialLabel.textContent=label;
-  spaceModes.hidden=!(state.outputProfile==="car_hifi"&&state.spatialEnabled);
-  spaceButtons.forEach(b=>b.classList.toggle("active",b.dataset.space===state.spaceMode));
-  intensityValue.textContent=`${Math.round(state.intensity*100)}%`;
+  spaceModes.hidden=pure||!(state.outputProfile==="car_hifi"&&state.spatialEnabled);
+  spaceButtons.forEach(b=>{
+    b.disabled=pure;
+    b.classList.toggle("active",!pure&&b.dataset.space===state.spaceMode);
+  });
+  intensityValue.textContent=pure?"PURE":`${Math.round(state.intensity*100)}%`;
 }
 function update(t){
   lastTelemetry=t;
+  telemetryHistory.push(t);
+  if(telemetryHistory.length>64)telemetryHistory.shift();
   delta.textContent=`${Number(t.rmsDeltaDb).toFixed(2)} dB`;
   tp.textContent=`${Number(t.truePeakDbtp).toFixed(2)} dBTP`;
   gr.textContent=`${Number(t.limiterGrDb).toFixed(2)} dB`;
@@ -60,8 +72,8 @@ init.addEventListener("click",async()=>{try{
   if(ready){if(ctx?.state==="suspended")await ctx.resume();return}
   if(!audio.src)throw new Error("Choose a song first.");
   ctx=new AudioContext({latencyHint:"playback"});
-  await ctx.audioWorklet.addModule("/audioV2/mvpHdV2.worklet.js?v=broadcast-v3");
-  const response=await fetch("/audioV2/mvpHdV2.wasm?v=broadcast-v3",{cache:"no-store"});
+  await ctx.audioWorklet.addModule("/audioV2/mvpHdV2.worklet.js?v=broadcast-v3-r4-live-state");
+  const response=await fetch("/audioV2/mvpHdV2.wasm?v=broadcast-v3-r4-live-state",{cache:"no-store"});
   if(!response.ok)throw new Error(`WASM ${response.status}`);
   const bytes=await response.arrayBuffer();
   source=ctx.createMediaElementSource(audio);
@@ -79,25 +91,80 @@ init.addEventListener("click",async()=>{try{
   node.port.postMessage({type:"INIT_WASM",wasmBytes:bytes},[bytes]);await wait;await ctx.resume();init.textContent="V3 READY";
 }catch(e){log(`ERROR: ${e instanceof Error?e.message:String(e)}`)}});
 
-modeButtons.forEach(b=>b.addEventListener("click",()=>{state.mode=b.dataset.mode;send();refresh()}));
-profileButtons.forEach(b=>b.addEventListener("click",()=>{state.outputProfile=b.dataset.profile;send();refresh()}));
+modeButtons.forEach(b=>b.addEventListener("click",()=>{
+  state.mode=b.dataset.mode;
+  telemetryHistory=[];
+  if(node&&ready)node.port.postMessage({type:"RESET_METERS"});
+  send();refresh();
+}));
+profileButtons.forEach(b=>b.addEventListener("click",()=>{
+  state.outputProfile=b.dataset.profile;
+  telemetryHistory=[];
+  if(node&&ready)node.port.postMessage({type:"RESET_METERS"});
+  send();refresh();
+}));
 effectButtons.forEach(b=>b.addEventListener("click",()=>{const key=b.dataset.effect;state[key]=!state[key];send();refresh()}));
 spaceButtons.forEach(b=>b.addEventListener("click",()=>{state.spaceMode=b.dataset.space;send();refresh()}));
 intensity.addEventListener("input",()=>{state.intensity=Number(intensity.value)/100;send();refresh()});
 bassCharacter.addEventListener("input",()=>{state.bassCharacter=Number(bassCharacter.value)/100;send();refresh()});
 mute.addEventListener("click",()=>{if(!ready)return;proofMute=!proofMute;node.port.postMessage({type:"SET_PROOF_MUTE",enabled:proofMute});mute.classList.toggle("active",proofMute)});
 
-async function capture(mode){state.mode=mode;send();refresh();await sleep(1600);return lastTelemetry?`${mode.toUpperCase()}: ${Number(lastTelemetry.rmsDeltaDb).toFixed(2)} dB`:`${mode}: no telemetry`}
+function waitForSeek(target){
+  if(Math.abs(audio.currentTime-target)<.015)return Promise.resolve();
+  return new Promise((resolve)=>{
+    let done=false;
+    const finish=()=>{if(done)return;done=true;audio.removeEventListener("seeked",finish);clearTimeout(timer);resolve()};
+    const timer=setTimeout(finish,1500);
+    audio.addEventListener("seeked",finish,{once:true});
+    audio.currentTime=target;
+  });
+}
+function averageDb(samples){
+  const valid=samples.map(t=>Number(t.rmsDeltaDb)).filter(Number.isFinite);
+  if(!valid.length)return NaN;
+  return valid.reduce((sum,value)=>sum+value,0)/valid.length;
+}
+async function captureSameSection(mode,anchor){
+  state.mode=mode;
+  telemetryHistory=[];
+  node.port.postMessage({type:"RESET_METERS"});
+  send();refresh();
+  await waitForSeek(anchor);
+  if(audio.paused)await audio.play();
+  await sleep(650);
+  telemetryHistory=[];
+  await sleep(1100);
+  const avg=averageDb(telemetryHistory.slice(-8));
+  const live=lastTelemetry;
+  return {
+    line:Number.isFinite(avg)?`${mode.toUpperCase()}: ${avg.toFixed(2)} dB`:`${mode.toUpperCase()}: no telemetry`,
+    avg,
+    clips:Number(live?.clipCount??0),
+    nans:Number(live?.nanCount??0),
+  };
+}
 proof.addEventListener("click",async()=>{try{
-  if(!ready)throw new Error("Initialize V3 first.");if(audio.paused)await audio.play();
+  if(!ready)throw new Error("Initialize V3 first.");
   const saved={...state};
+  const savedTime=audio.currentTime;
+  const wasPaused=audio.paused;
+  const duration=Number.isFinite(audio.duration)?audio.duration:0;
+  const anchor=Math.max(0,Math.min(savedTime,duration>3?duration-2.2:savedTime));
   state.bassEnabled=state.impactEnabled=state.clarityEnabled=state.spatialEnabled=false;
-  const lines=[await capture("pure"),await capture("adaptive"),await capture("power")];
+  const pure=await captureSameSection("pure",anchor);
+  const adaptive=await captureSameSection("adaptive",anchor);
+  const power=await captureSameSection("power",anchor);
+  const lines=[pure.line,adaptive.line,power.line];
   node.port.postMessage({type:"SET_PROOF_MUTE",enabled:true});await sleep(700);
   const muteOk=lastTelemetry&&Number(lastTelemetry.outputRms)<.000001;
   node.port.postMessage({type:"SET_PROOF_MUTE",enabled:false});
   Object.assign(state,saved);send();refresh();
-  log(`BROADCAST V3 PROOF ${muteOk?"PASS":"FAIL"}\n${lines.join("\n")}\nProof mute=${muteOk?"PASS":"FAIL"} • clips=${lastTelemetry?.clipCount??"?"} • NaN=${lastTelemetry?.nanCount??"?"}`);
+  await waitForSeek(savedTime);
+  if(wasPaused)audio.pause();else await audio.play();
+  const modeOrder=Number.isFinite(pure.avg)&&Number.isFinite(adaptive.avg)&&Number.isFinite(power.avg)
+    && adaptive.avg>pure.avg+.20&&power.avg>adaptive.avg+.75;
+  const safety=[pure,adaptive,power].every(x=>x.clips===0&&x.nans===0);
+  log(`BROADCAST V3 R4 SAME-SECTION PROOF ${muteOk&&modeOrder&&safety?"PASS":"FAIL"}\n${lines.join("\n")}\nSame song section @ ${anchor.toFixed(2)}s • modeOrder=${modeOrder?"PASS":"FAIL"} • mute=${muteOk?"PASS":"FAIL"} • safety=${safety?"PASS":"FAIL"}`);
 }catch(e){log(`PROOF ERROR: ${e instanceof Error?e.message:String(e)}`)}});
 
 refresh();

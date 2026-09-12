@@ -2395,10 +2395,10 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <div className="tr-v24Section">
                 <span className="tr-v24Label">SOUND</span>
                 <div className="tr-v24Sound">
-                  <button type="button" className={player.broadcastBassEnabled ? "is-active" : ""} aria-pressed={player.broadcastBassEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastBassEnabled(!player.broadcastBassEnabled), true)}>BASS</button>
-                  <button type="button" className={player.broadcastImpactEnabled ? "is-active" : ""} aria-pressed={player.broadcastImpactEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastImpact(!player.broadcastImpactEnabled), true)}>IMPACT</button>
-                  <button type="button" className={player.broadcastClarityEnabled ? "is-active" : ""} aria-pressed={player.broadcastClarityEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastClarity(!player.broadcastClarityEnabled), true)}>CLARITY</button>
-                  <button type="button" className={player.broadcastSpatialEnabled ? "is-active" : ""} aria-pressed={player.broadcastSpatialEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastSpatial(!player.broadcastSpatialEnabled), true)}>
+                  <button type="button" className={player.broadcastBassEnabled ? "is-active" : ""} aria-pressed={player.broadcastBassEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastBassEnabled(!player.broadcastBassEnabled), true)}>BASS</button>
+                  <button type="button" className={player.broadcastImpactEnabled ? "is-active" : ""} aria-pressed={player.broadcastImpactEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastImpact(!player.broadcastImpactEnabled), true)}>IMPACT</button>
+                  <button type="button" className={player.broadcastClarityEnabled ? "is-active" : ""} aria-pressed={player.broadcastClarityEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastClarity(!player.broadcastClarityEnabled), true)}>CLARITY</button>
+                  <button type="button" className={player.broadcastSpatialEnabled ? "is-active" : ""} aria-pressed={player.broadcastSpatialEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastSpatial(!player.broadcastSpatialEnabled), true)}>
                     {player.outputProfile === "headphones" ? "IMMERSION" : player.outputProfile === "speaker" ? "STAGE" : "SPACE"}
                   </button>
                 </div>
@@ -2412,7 +2412,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 {player.broadcastBassEnabled ? (
                   <label className="tr-v24Range tr-v24Character">
                     <span>TIGHT</span>
-                    <input type="range" min="0" max="100" value={player.broadcastBassCharacter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicBroadcastBassCharacter(Number(event.target.value)), true)} />
+                    <input type="range" min="0" max="100" value={player.broadcastBassCharacter} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicBroadcastBassCharacter(Number(event.target.value)), true)} />
                     <span>DEEP</span>
                   </label>
                 ) : null}
@@ -2420,7 +2420,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 {player.outputProfile === "car_hifi" && player.broadcastSpatialEnabled ? (
                   <div className="tr-v24Space" role="group" aria-label="Car space">
                     {(["studio","live","arena"] as const).map((mode) => (
-                      <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} onClick={() => void runDspMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>
+                      <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>
                     ))}
                   </div>
                 ) : null}
