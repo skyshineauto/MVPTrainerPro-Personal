@@ -150,12 +150,14 @@ for (const profile of [0, 1, 2]) {
   const loudLiftDb = 20 * Math.log10(Math.max(1e-9, loud.rms) / Math.max(1e-9, normal.rms));
   const maxLiftDb = 20 * Math.log10(Math.max(1e-9, maxed.rms) / Math.max(1e-9, normal.rms));
   const maxOverLoudDb = 20 * Math.log10(Math.max(1e-9, maxed.rms) / Math.max(1e-9, loud.rms));
-  if (loudLiftDb < 0.60) {
+  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: do not ship another build where the buttons technically work but
+  // sound the same. LOUD must lift the program and MAX must make a large step.
+  if (loudLiftDb < 0.75) {
     throw new Error("LOUD is not audibly distinct from NORMAL: profile=" + profile +
       " lift=" + loudLiftDb.toFixed(2) + " dB");
   }
-  if (maxLiftDb < 1.80 || maxOverLoudDb < 0.60) {
-    throw new Error("MAX is not audibly distinct from LOUD: profile=" + profile +
+  if (maxLiftDb < 3.50 || maxOverLoudDb < 2.50) {
+    throw new Error("MAX jump is not large enough: profile=" + profile +
       " maxLift=" + maxLiftDb.toFixed(2) + " maxOverLoud=" + maxOverLoudDb.toFixed(2) + " dB");
   }
 }
@@ -207,6 +209,7 @@ if (dspSource.includes("const float drive = 1.0f + amount * 2.20f;")) {
 const cleanMaxOrder = [
   "processHdLoudnessMaximizer(left, right);",
   "processOutputGain(left, right);",
+  "processPerceptualDensity(left, right);",
   "processLimiter(left, right, limitedL, limitedR);",
 ];
 let cleanMaxCursor = 0;
@@ -330,6 +333,8 @@ for (const forbidden of ["xpanderToneScale", "xpanderTransientScale", "Math.max(
 if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Legacy Extreme migration marker is missing from musicPlayer.ts");
 if (!playerSource.includes("MusicPlaybackMode")) throw new Error("R82 Device Direct mode is missing from musicPlayer.ts");
 if (!playerSource.includes("hdLoudnessMode")) throw new Error("R82 NORMAL/LOUD/MAX state is missing from musicPlayer.ts");
+if (!playerSource.includes("MVP_R82_R10_R2_BIG_JUMP_FULLNESS")) throw new Error("R10 fullness-preserving simple controls are missing");
+if (!dspSource.includes("processPerceptualDensity")) throw new Error("R10 perceptual density maximizer is missing");
 if (!playerSource.includes("MVP_R82_R9_R3_STABLE_HD_NO_STOP")) throw new Error("R82-R9 persistent mode-switch routing is missing from musicPlayer.ts");
 
 console.table(rows.map((row) => ({

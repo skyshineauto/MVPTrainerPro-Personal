@@ -4607,40 +4607,42 @@ export function setMusicHdBassMode(mode: MusicHdBassMode) {
 
   setMusicBassEngineEnabled(true);
   if (mode === "deep") {
-    setMusicBassSub(6.8);
-    setMusicBassPunch(4.0);
-    setMusicBassBody(3.8);
-    setMusicBassTightness(80);
+    setMusicBassSub(6.2);
+    setMusicBassPunch(4.4);
+    setMusicBassBody(5.0);
+    setMusicBassTightness(66);
   } else {
     setMusicBassSub(3.8);
-    setMusicBassPunch(5.2);
-    setMusicBassBody(2.8);
-    setMusicBassTightness(88);
+    setMusicBassPunch(4.2);
+    setMusicBassBody(3.8);
+    setMusicBassTightness(72);
   }
   scheduleProcessingSettle();
 }
 
 export function setMusicHdClarity(enabled: boolean) {
+  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: Clarity adds detail without turning the whole mix into upper-mid
+  // glare. Keep the high-frequency moves modest and preserve body.
   setMusicToneEngineEnabled(enabled);
   setMusicExciterEnabled(enabled);
   if (!enabled) {
     scheduleProcessingSettle();
     return;
   }
-  setMusicPresence(2.6);
-  setMusicClarity(4.6);
-  setMusicAir(5.0);
-  setMusicDeharsh(10);
-  setMusicExciterAmount(12);
-  setMusicSaturationLow(2);
-  setMusicSaturationMid(5);
-  setMusicSaturationHigh(9);
+  setMusicPresence(1.0);
+  setMusicClarity(1.6);
+  setMusicAir(1.4);
+  setMusicDeharsh(18);
+  setMusicExciterAmount(5);
+  setMusicSaturationLow(0);
+  setMusicSaturationMid(2);
+  setMusicSaturationHigh(3);
   scheduleProcessingSettle();
 }
 
 export function setMusicHdPunch(enabled: boolean) {
   setMusicDynamicsRestoreEnabled(enabled);
-  if (enabled) setMusicDynamicsRestoreAmount(82);
+  if (enabled) setMusicDynamicsRestoreAmount(92);
   scheduleProcessingSettle();
 }
 
@@ -4651,11 +4653,17 @@ export function setMusicHdWide(enabled: boolean) {
     scheduleProcessingSettle();
     return;
   }
+
   setMusicStereoFieldEnabled(enabled);
-  if (!enabled) return;
-  setMusicStereoWidth(152);
+  if (!enabled) {
+    scheduleProcessingSettle();
+    return;
+  }
+
+  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: keep bass/body anchored. Widen the stage, not the foundation.
+  setMusicStereoWidth(136);
   setMusicCenterFocus(100);
-  setMusicBassMonoHz(118);
+  setMusicBassMonoHz(80);
   scheduleProcessingSettle();
 }
 

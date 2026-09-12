@@ -1177,8 +1177,10 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  const float crestCeilingDb = maxMode ? -6.50f : -3.20f;
-  const float maxReductionDb = maxMode ? 8.0f : 4.5f;
+  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: let the density maximizer create the loudness. This stage only
+  // creates controlled crest room so LOUD stays open and MAX stays clean.
+  const float crestCeilingDb = maxMode ? -4.80f : -1.80f;
+  const float maxReductionDb = maxMode ? 5.50f : 2.50f;
   const float crestCeiling = static_cast<float>(dbToGain(crestCeilingDb));
 
   float required = 1.0f;
@@ -1193,7 +1195,7 @@ void processFinalCompressor(float &left, float &right) {
   if (required < finalCompGain) {
     finalCompGain = required;
   } else if (profileTransitionSamplesRemaining <= 0) {
-    const float releaseSeconds = maxMode ? 0.085f : 0.135f;
+    const float releaseSeconds = maxMode ? 0.035f : 0.060f;
     const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * releaseSeconds)));
     finalCompGain += (required - finalCompGain) * releaseCoeff;
   }
@@ -1243,12 +1245,13 @@ void processOutputGain(float &left, float &right) {
   meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
     ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-  const bool highOutput = autoMakeupEnabled && outputReserveDb >= 5.5f;
+  const bool loudOutput = autoMakeupEnabled && outputReserveDb >= 5.5f;
+  const bool maxOutput = autoMakeupEnabled && outputReserveDb >= 14.0f;
 
-  // Peak Guard detector is ~0.1 dB below the requested limiter ceiling. Keep the
-  // normal mastering target a further 0.5 dB below that so routine music stays
-  // out of Peak Guard even with intersample reconstruction.
-  const float masteringTarget = static_cast<float>(dbToGain(highOutput ? -0.90f : -1.20f));
+  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: LOUD and MAX intentionally have different final peak targets.
+  // Density, not raw clipping, creates the large MAX perceived-level jump.
+  const float masteringTargetDb = maxOutput ? -1.35f : (loudOutput ? -1.75f : -1.20f);
+  const float masteringTarget = static_cast<float>(dbToGain(masteringTargetDb));
   float safeCap = requestedDrive;
   if (maxHdHeldTruePeak > 0.000001f) {
     safeCap = masteringTarget / maxHdHeldTruePeak;
@@ -1281,7 +1284,7 @@ void processOutputGain(float &left, float &right) {
   if (driveTarget < cleanOutputDriveGain) {
     cleanOutputDriveGain = driveTarget;
   } else {
-    const float riseSeconds = highOutput ? 0.085f : 0.300f;
+    const float riseSeconds = maxOutput ? 0.035f : (loudOutput ? 0.060f : 0.300f);
     const float riseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * riseSeconds)));
     cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
   }
@@ -1643,6 +1646,28 @@ void processHdLoudnessMaximizer(float &left, float &right) {
   left = processHdMaximizerSample(left, intensity);
   right = processHdMaximizerSample(right, intensity);
 }
+
+// MVP_R82_R10_R2_BIG_JUMP_FULLNESS: broadband perceptual density maximizer.
+// This is a smooth monotonic companding curve, not clipping. It raises average
+// program density while preserving the sign, ordering and full-band tonal balance.
+// y(1) = 1, so full-scale peaks are not multiplied by a raw gain stage.
+inline float processPerceptualDensitySample(float sample, float amount) {
+  const float a = clampf(amount, 0.0f, 5.0f);
+  if (a <= 0.0001f) return sample;
+  const float magnitude = absf(sample);
+  if (magnitude <= 0.0000001f) return sample;
+  const float shaped = magnitude * (1.0f + a) / (1.0f + a * magnitude);
+  return sample < 0.0f ? -shaped : shaped;
+}
+
+void processPerceptualDensity(float &left, float &right) {
+  if (!autoMakeupEnabled || outputReserveDb < 5.5f) return;
+  const bool maxMode = outputReserveDb >= 14.0f;
+  const float amount = maxMode ? 5.0f : 0.35f;
+  left = processPerceptualDensitySample(left, amount);
+  right = processPerceptualDensitySample(right, amount);
+}
+
 
 void processHeadphoneOutputDrive(float &left, float &right) {
   // V5: no hidden headphone gain. User-controlled Output Reserve owns final drive.
@@ -2160,6 +2185,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     // output stage creates level cleanly; Peak Guard remains the last catcher.
     processHdLoudnessMaximizer(left, right);
     processOutputGain(left, right);
+    processPerceptualDensity(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;
