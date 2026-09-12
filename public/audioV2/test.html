@@ -3,22 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MVP HD V2 Isolated Audio Test</title>
+  <title>MVP HD V2 Route Proof</title>
   <style>
-    :root{font-family:Inter,system-ui,sans-serif;color-scheme:dark;background:#070a0f;color:#f7fbff}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;box-sizing:border-box}main{width:min(820px,100%);background:#0e141d;border:1px solid #223044;border-radius:18px;padding:20px;box-sizing:border-box}h1{margin:0 0 6px;font-size:24px}.sub{color:#9eafc4;margin-bottom:18px}.row{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0;align-items:center}button,.file{border:1px solid #31445e;background:#151f2d;color:white;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}button.active{border-color:#16d7ff;box-shadow:0 0 0 1px #16d7ff inset,0 0 18px rgba(22,215,255,.22)}button.warn.active{border-color:#ff9d2e;box-shadow:0 0 0 1px #ff9d2e inset,0 0 18px rgba(255,157,46,.22)}audio{width:100%;margin:10px 0}.meters{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:16px}.meter{background:#0a1018;border:1px solid #1c2a3b;border-radius:12px;padding:12px}.label{color:#8fa2b9;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.value{font:700 20px ui-monospace,SFMono-Regular,monospace;margin-top:4px}#log{margin-top:16px;white-space:pre-wrap;min-height:90px;background:#080d13;border:1px solid #1d2939;border-radius:12px;padding:12px;color:#b8c8da;font:12px ui-monospace,SFMono-Regular,monospace}
+    :root{font-family:Inter,system-ui,sans-serif;color-scheme:dark;background:#070a0f;color:#f7fbff}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;box-sizing:border-box}
+    main{width:min(940px,100%);background:#0e141d;border:1px solid #223044;border-radius:18px;padding:20px;box-sizing:border-box}
+    h1{margin:0 0 6px;font-size:24px}.sub{color:#9eafc4;margin-bottom:18px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0;align-items:center}
+    button,.file{border:1px solid #31445e;background:#151f2d;color:white;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    button.active{border-color:#16d7ff;box-shadow:0 0 0 1px #16d7ff inset,0 0 18px rgba(22,215,255,.22)}
+    button.warn.active{border-color:#ff9d2e;box-shadow:0 0 0 1px #ff9d2e inset,0 0 18px rgba(255,157,46,.22)}
+    button.proof{border-color:#ff4d67}.proof.active{background:#7e1730;border-color:#ff4d67}
+    button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none!important}
+    audio{width:100%;margin:10px 0}
+    .notice{background:#101b27;border:1px solid #263b53;border-radius:10px;padding:10px 12px;color:#b8c8da;font-size:13px}
+    .meters{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:16px}
+    .meter{background:#0a1018;border:1px solid #1c2a3b;border-radius:12px;padding:12px}
+    .label{color:#8fa2b9;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+    .value{font:700 18px ui-monospace,SFMono-Regular,monospace;margin-top:4px;overflow-wrap:anywhere}
+    #state{font-size:13px}
+    #log{margin-top:16px;white-space:pre-wrap;min-height:130px;background:#080d13;border:1px solid #1d2939;border-radius:12px;padding:12px;color:#b8c8da;font:12px ui-monospace,SFMono-Regular,monospace}
   </style>
 </head>
 <body>
   <main>
-    <h1>MVP HD V2 • Isolated Browser Harness</h1>
-    <div class="sub">Uses the validated V2 WASM only. It does not use the production MVP music player or R83 DSP.</div>
-    <div class="row"><label class="file">Choose a local song <input id="file" type="file" accept="audio/*" /></label><button id="init">Initialize V2</button><button id="continuity">Run switch test</button></div>
+    <h1>MVP HD V2 • Audible Route Proof</h1>
+    <div class="sub">This page measures the PCM entering and leaving the V2 Worklet in the browser.</div>
+
+    <div class="row">
+      <label class="file">Choose a local song <input id="file" type="file" accept="audio/*" /></label>
+      <button id="init">Initialize V2</button>
+      <button id="autoProof">RUN AUDIO PROOF</button>
+      <button id="proofMute" class="proof">PROOF MUTE</button>
+      <button id="continuity">Run continuity test</button>
+    </div>
+
     <audio id="audio" controls preload="metadata"></audio>
-    <div class="row" id="modes"><button data-mode="direct" class="active">DEVICE DIRECT</button><button data-mode="normal">NORMAL</button><button data-mode="loud">LOUD</button><button data-mode="max" class="warn">MAX</button></div>
-    <div class="row" id="effects"><button data-effect="bass">BASS</button><button data-effect="clarity">CLARITY</button><button data-effect="punch">PUNCH</button><button data-effect="wide">WIDE</button></div>
-    <div class="meters"><div class="meter"><div class="label">True Peak</div><div class="value" id="tp">--</div></div><div class="meter"><div class="label">Limiter GR</div><div class="value" id="gr">--</div></div><div class="meter"><div class="label">Clip Count</div><div class="value" id="clips">0</div></div><div class="meter"><div class="label">NaN Count</div><div class="value" id="nans">0</div></div><div class="meter"><div class="label">Revision</div><div class="value" id="revision">0</div></div></div>
+
+    <div class="notice">DEVICE DIRECT bypasses Bass, Clarity, Punch and Wide. Switch to NORMAL / LOUD / MAX before testing effects.</div>
+
+    <div class="row" id="modes">
+      <button data-mode="direct" class="active">DEVICE DIRECT</button>
+      <button data-mode="normal">NORMAL</button>
+      <button data-mode="loud">LOUD</button>
+      <button data-mode="max" class="warn">MAX</button>
+    </div>
+
+    <div class="row" id="effects">
+      <button data-effect="bass" disabled>BASS</button>
+      <button data-effect="clarity" disabled>CLARITY</button>
+      <button data-effect="punch" disabled>PUNCH</button>
+      <button data-effect="wide" disabled>WIDE</button>
+    </div>
+
+    <div class="meters">
+      <div class="meter"><div class="label">Input RMS</div><div class="value" id="inputRms">--</div></div>
+      <div class="meter"><div class="label">Output RMS</div><div class="value" id="outputRms">--</div></div>
+      <div class="meter"><div class="label">Output / Input</div><div class="value" id="delta">--</div></div>
+      <div class="meter"><div class="label">Output Peak</div><div class="value" id="outputPeak">--</div></div>
+      <div class="meter"><div class="label">True Peak Max</div><div class="value" id="tp">--</div></div>
+      <div class="meter"><div class="label">Limiter GR Max</div><div class="value" id="gr">--</div></div>
+      <div class="meter"><div class="label">Clip Count</div><div class="value" id="clips">0</div></div>
+      <div class="meter"><div class="label">NaN Count</div><div class="value" id="nans">0</div></div>
+      <div class="meter"><div class="label">Applied State</div><div class="value" id="state">--</div></div>
+      <div class="meter"><div class="label">Revision</div><div class="value" id="revision">0</div></div>
+    </div>
+
     <div id="log">Choose a local audio file, then press Initialize V2.</div>
   </main>
-  <script type="module" src="/audioV2/test.js"></script>
+
+  <script type="module" src="/audioV2/test.js?v=2.0.0-stage2-r3"></script>
 </body>
 </html>

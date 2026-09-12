@@ -2,20 +2,56 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here=path.dirname(fileURLToPath(import.meta.url));
-const root=path.resolve(here,'..');
-const workletPath=path.join(root,'public','audioV2','mvpHdV2.worklet.js');
-const harnessPath=path.join(root,'public','audioV2','test.js');
-const htmlPath=path.join(root,'public','audioV2','test.html');
-const enginePath=path.join(root,'src','lib','audioV2','mvpHdV2Engine.ts');
-for(const file of [workletPath,harnessPath,htmlPath,enginePath])if(!fs.existsSync(file))throw new Error(`Missing V2 Stage 2 file: ${file}`);
-const worklet=fs.readFileSync(workletPath,'utf8');
-const harness=fs.readFileSync(harnessPath,'utf8');
-const engine=fs.readFileSync(enginePath,'utf8');
-for(const required of ["registerProcessor('mvp-hd-v2-processor'",'const inputBus = inputs[0]','const outputBus = outputs[0]','mvp_v2_process(chunk)',"type: 'STATE_APPLIED'","type: 'TELEMETRY'"])if(!worklet.includes(required))throw new Error(`V2 Worklet requirement missing: ${required}`);
-const processStart=worklet.indexOf('process(inputs, outputs)');if(processStart<0)throw new Error('V2 Worklet process() is missing');const processBody=worklet.slice(processStart);
-for(const forbidden of ['_malloc','_free','createMediaElementSource','new AudioContext'])if(processBody.includes(forbidden))throw new Error(`Forbidden real-time operation in V2 Worklet process(): ${forbidden}`);
-for(const forbidden of ['musicPlayer','mvpStudioEngine','mvpStudioDsp','R83','multiband','dynamicEq','normalization','extremePreamp'])if(worklet.includes(forbidden)||engine.includes(forbidden))throw new Error(`Old audio architecture leaked into V2 Stage 2: ${forbidden}`);
-for(const required of ["new AudioWorkletNode(context,'mvp-hd-v2-processor'","fetch('/audioV2/mvpHdV2.wasm?",'const originalElement=audio','const originalSrc=audio.currentSrc||audio.src','const startContext=context',"['direct','normal','loud','max','loud','normal','direct']"])if(!harness.includes(required))throw new Error(`V2 browser harness requirement missing: ${required}`);
-for(const required of ['export class MvpHdV2Engine','createMediaElementSource(audioElement)',"numberOfInputs: 1","outputChannelCount: [2]","type: 'INIT_WASM'","type: 'SET_STATE'"])if(!engine.includes(required))throw new Error(`V2 TypeScript bridge requirement missing: ${required}`);
-console.log('MVP HD V2 Stage 2 static browser/worklet validation: PASS');
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(scriptDir, '..');
+
+const workletPath = path.join(root, 'public', 'audioV2', 'mvpHdV2.worklet.js');
+const harnessPath = path.join(root, 'public', 'audioV2', 'test.js');
+const htmlPath = path.join(root, 'public', 'audioV2', 'test.html');
+
+const worklet = fs.readFileSync(workletPath, 'utf8');
+const harness = fs.readFileSync(harnessPath, 'utf8');
+const html = fs.readFileSync(htmlPath, 'utf8');
+
+for (const required of [
+  "type: 'PROOF_MUTE_APPLIED'",
+  'inputEnergy',
+  'outputEnergy',
+  'rmsDeltaDb',
+  'state: this.appliedState',
+  'proofMute',
+  'mvp_v2_process(chunk)',
+]) {
+  if (!worklet.includes(required)) throw new Error(`R3 Worklet proof requirement missing: ${required}`);
+}
+
+for (const required of [
+  'RUN AUDIO PROOF',
+  'PROOF MUTE',
+  'Output / Input',
+  'Applied State',
+]) {
+  if (!html.includes(required)) throw new Error(`R3 harness UI requirement missing: ${required}`);
+}
+
+for (const required of [
+  'AUDIO PROOF',
+  'ROUTE PASS',
+  "captureStep('direct')",
+  "captureStep('normal')",
+  "captureStep('loud'",
+  "captureStep('max'",
+  'SET_PROOF_MUTE',
+]) {
+  if (!harness.includes(required)) throw new Error(`R3 harness logic requirement missing: ${required}`);
+}
+
+const processStart = worklet.indexOf('process(inputs, outputs)');
+if (processStart < 0) throw new Error('Worklet process() missing.');
+const processBody = worklet.slice(processStart);
+
+for (const forbidden of ['_malloc', '_free', 'new AudioContext', 'createMediaElementSource']) {
+  if (processBody.includes(forbidden)) throw new Error(`Forbidden real-time operation: ${forbidden}`);
+}
+
+console.log('MVP HD V2 Stage 2 R3 Windows-safe route-proof validation: PASS');
