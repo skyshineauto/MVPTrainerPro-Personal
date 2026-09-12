@@ -1203,6 +1203,29 @@ function calculateProcessingGain() {
     referenceMatchDb: measuredMatch,
   };
 }
+function simplifiedStudioAppliedStateMatches() {
+  if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return true;
+  const applied = getMvpStudioRuntimeInfo().appliedState;
+  if (!applied) return false;
+
+  const direct = state.playbackMode === "device_direct";
+  if (Boolean(applied.bypass) !== direct) return false;
+  if (direct) return true;
+
+  const expectedReserve =
+    state.hdLoudnessMode === "max" ? 18 :
+    state.hdLoudnessMode === "loud" ? 9 :
+    0;
+  const expectedMakeup = state.hdLoudnessMode !== "normal";
+  if (Math.abs((Number(applied.outputReserveDb) || 0) - expectedReserve) > 0.15) return false;
+  if (Boolean(applied.autoMakeupEnabled) !== expectedMakeup) return false;
+  if (Boolean(applied.bassEngineEnabled) !== Boolean(state.bassEngineEnabled)) return false;
+  if (Boolean(applied.toneEngineEnabled) !== Boolean(state.toneEngineEnabled)) return false;
+  if (Boolean(applied.dynamicsRestoreEnabled) !== Boolean(state.dynamicsRestoreEnabled)) return false;
+  if (Boolean(applied.stereoFieldEnabled) !== Boolean(state.stereoFieldEnabled)) return false;
+  return true;
+}
+
 function scheduleProcessingSettle() {
   if (typeof window === "undefined") return;
   if (processingSettleTimer) window.clearTimeout(processingSettleTimer);
@@ -1218,7 +1241,12 @@ function scheduleProcessingSettle() {
       if (state.outputProfile !== "headphones" && state.outputProfile !== "speaker") return;
       if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
       const runtime = getMvpStudioRuntimeInfo();
-      if (runtime.faulted || !runtime.ready || runtime.appliedRevision < runtime.requestedRevision) {
+      if (
+        runtime.faulted ||
+        !runtime.ready ||
+        runtime.appliedRevision < runtime.requestedRevision ||
+        !simplifiedStudioAppliedStateMatches()
+      ) {
         void verifyOrRecoverStudioLiveState();
       }
     }, 220);
@@ -2613,31 +2641,32 @@ function startLevelMeter() {
 }
 
 async function unlockMusicAudio() {
-  // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: DEVICE DIRECT never creates or resumes the Web Audio graph.
-  // The HTMLAudioElement feeds the OS / Bluetooth / car / headphone stack natively.
-  if (state.playbackMode === "device_direct") {
-    const audio = ensureAudioElement();
-    audio.volume = state.volume;
-    if (
-      state.dspStatus !== "bypassed" ||
-      state.dspEngineMode !== "unavailable" ||
-      state.immersionStatus !== "bypassed"
-    ) {
-      emit({ dspStatus: "bypassed", dspEngineMode: "unavailable", immersionStatus: "bypassed" });
-    }
-    return;
+  // MVP_R82_R9_R3_STABLE_HD_NO_STOP: always keep one continuous player/graph. Direct is a true bypass
+  // inside the same Worklet, not a second element that can stop or fail to reload.
+  const direct = state.playbackMode === "device_direct";
+  const expectedBypass = direct;
+  if (state.dspBypass !== expectedBypass) {
+    savePlayerSetting(STORAGE_KEYS.dspBypass, expectedBypass ? "true" : "false");
+    emit({ dspBypass: expectedBypass, dspVerificationMode: "off" });
   }
 
-  if (state.dspBypass) {
-    savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
-    emit({ dspBypass: false, dspVerificationMode: "off" });
-  }
   await connectMusicGraph();
   const context = getAudioContext();
   if (context?.state === "suspended") await context.resume();
+
+  const audio = ensureAudioElement();
   if (mediaSourceConnected) {
+    audio.volume = 1;
     applyProcessingSettings();
     startLevelMeter();
+  } else {
+    // Graceful browser fallback only. Never rebuild/reload the song.
+    audio.volume = state.volume;
+    emit({
+      dspStatus: direct ? "bypassed" : "unavailable",
+      dspEngineMode: "unavailable",
+      immersionStatus: direct ? "bypassed" : "unavailable",
+    });
   }
 }
 
@@ -4522,52 +4551,41 @@ export function setMusicDspVerificationMode(mode: MusicDspVerificationMode) {
   scheduleProcessingSettle();
 }
 
-// MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: switching modes replaces the media element. A MediaElementSourceNode
-// permanently owns the element it captures, so reusing that same element would
-// NOT be true native playback. Position, track and play state are preserved.
+// MVP_R82_R9_R3_STABLE_HD_NO_STOP: DEVICE DIRECT and MVP HD share the SAME live media element and
+// SAME graph. The Worklet's authoritative bypass supplies the transparent Direct
+// path. Never pause, destroy, reload, reseek, or recreate the song for a DSP mode.
 export async function setMusicPlaybackMode(mode: MusicPlaybackMode) {
   if (mode !== "device_direct" && mode !== "mvp_hd") return;
   if (mode === state.playbackMode) return;
 
-  const previous = audioElement;
-  const track = state.currentTrack;
-  const position = Math.max(0, Number(previous?.currentTime ?? state.currentTime) || 0);
-  const wasPlaying = Boolean(previous && !previous.paused && !previous.ended && previous.src);
-
-  try { previous?.pause(); } catch {}
-  releaseGraph();
-
-  const previousContext = audioContext;
-  audioContext = null;
-  if (previousContext && previousContext.state !== "closed") {
-    try { await previousContext.close(); } catch {}
-  }
-
-  audioElement = null;
-  mediaSourceConnected = false;
-  graphBuildPromise = null;
-
+  const audio = ensureAudioElement();
   savePlayerSetting(STORAGE_KEYS.playbackMode, mode);
   savePlayerSetting(STORAGE_KEYS.dspBypass, mode === "device_direct" ? "true" : "false");
   emit({
     playbackMode: mode,
     dspBypass: mode === "device_direct",
-    dspStatus: mode === "device_direct" ? "bypassed" : "recovering",
-    dspEngineMode: "unavailable",
-    immersionStatus: "bypassed",
+    dspStatus: "recovering",
     dspVerificationMode: "off",
   });
 
-  if (!track) return;
+  // Build once if this session started in Direct. createMediaElementSource()
+  // takes over the SAME element at its current timestamp without reassigning src.
+  await connectMusicGraph();
+  const context = getAudioContext();
+  if (context?.state === "suspended") await context.resume();
 
-  await loadTrack(track, position);
-  const nextAudio = ensureAudioElement();
-  nextAudio.volume = mode === "device_direct" ? state.volume : 1;
-
-  if (wasPlaying) {
-    await unlockMusicAudio();
-    await nextAudio.play();
+  // Once captured, the element itself stays at unity. Listener volume remains
+  // post-limiter in the graph for both Direct and MVP HD.
+  if (mediaSourceConnected) {
+    audio.volume = 1;
+    applyProcessingSettings();
+    startLevelMeter();
+  } else if (mode === "device_direct") {
+    // Only if Web Audio is genuinely unavailable do we fall back to native volume.
+    audio.volume = state.volume;
   }
+
+  scheduleProcessingSettle();
 }
 
 export function setMusicHdLoudnessMode(mode: MusicHdLoudnessMode) {
@@ -4583,6 +4601,7 @@ export function setMusicHdBassMode(mode: MusicHdBassMode) {
 
   if (mode === "off") {
     setMusicBassEngineEnabled(false);
+    scheduleProcessingSettle();
     return;
   }
 
@@ -4598,12 +4617,16 @@ export function setMusicHdBassMode(mode: MusicHdBassMode) {
     setMusicBassBody(2.8);
     setMusicBassTightness(88);
   }
+  scheduleProcessingSettle();
 }
 
 export function setMusicHdClarity(enabled: boolean) {
   setMusicToneEngineEnabled(enabled);
   setMusicExciterEnabled(enabled);
-  if (!enabled) return;
+  if (!enabled) {
+    scheduleProcessingSettle();
+    return;
+  }
   setMusicPresence(2.6);
   setMusicClarity(4.6);
   setMusicAir(5.0);
@@ -4612,17 +4635,20 @@ export function setMusicHdClarity(enabled: boolean) {
   setMusicSaturationLow(2);
   setMusicSaturationMid(5);
   setMusicSaturationHigh(9);
+  scheduleProcessingSettle();
 }
 
 export function setMusicHdPunch(enabled: boolean) {
   setMusicDynamicsRestoreEnabled(enabled);
   if (enabled) setMusicDynamicsRestoreAmount(82);
+  scheduleProcessingSettle();
 }
 
 export function setMusicHdWide(enabled: boolean) {
   if (state.outputProfile === "headphones") {
     setMusicHeadphoneAdvancedEnabled(false);
     setMusicHeadphoneMode(enabled ? "wide" : "off");
+    scheduleProcessingSettle();
     return;
   }
   setMusicStereoFieldEnabled(enabled);
@@ -4630,6 +4656,7 @@ export function setMusicHdWide(enabled: boolean) {
   setMusicStereoWidth(152);
   setMusicCenterFocus(100);
   setMusicBassMonoHz(118);
+  scheduleProcessingSettle();
 }
 
 export function setMusicOutputProfile(profile: MusicOutputProfile) {

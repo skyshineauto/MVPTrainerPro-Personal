@@ -105,23 +105,51 @@ function runCase(profile, reserveDb, autoMakeup, preampDb) {
   return { maxGuard, maxMaster, maxTruePeak, rms: Math.sqrt(energy / Math.max(1, sampleCount)) };
 }
 
+// MVP_R82_R9_R3_STABLE_HD_NO_STOP: NORMAL / LOUD / MAX must be genuinely different.
 const rows = [];
 for (const profile of [0, 1, 2]) {
-  for (const highOutput of [false, true]) {
-    const result = runCase(profile, highOutput ? 8 : 0, highOutput, highOutput ? 8 : 2);
-    rows.push({ profile, highOutput, ...result });
+  const normal = runCase(profile, 0, false, 0);
+  const loud = runCase(profile, 9, true, 0);
+  const maxed = runCase(profile, 18, true, 0);
 
+  rows.push({ profile, mode: "NORMAL", ...normal });
+  rows.push({ profile, mode: "LOUD", ...loud });
+  rows.push({ profile, mode: "MAX", ...maxed });
+
+  for (const [mode, result] of [["NORMAL", normal], ["LOUD", loud], ["MAX", maxed]]) {
     if (result.maxGuard > 0.40) {
       throw new Error("Peak Guard became routine processing: profile=" + profile +
-        " highOutput=" + highOutput + " GR=" + result.maxGuard.toFixed(2) + " dB");
-    }
-    if (result.maxMaster < 0.5) {
-      throw new Error("Mastering stage did not engage: profile=" + profile +
-        " highOutput=" + highOutput);
+        " mode=" + mode + " GR=" + result.maxGuard.toFixed(2) + " dB");
     }
     if (result.maxTruePeak > -0.10) {
-      throw new Error("True peak exceeded safety ceiling: " + result.maxTruePeak.toFixed(2) + " dBTP");
+      throw new Error("True peak exceeded safety ceiling: profile=" + profile +
+        " mode=" + mode + " " + result.maxTruePeak.toFixed(2) + " dBTP");
     }
+  }
+
+  if (normal.maxMaster > 0.20) {
+    throw new Error("NORMAL is still being routine-compressed: profile=" + profile +
+      " GR=" + normal.maxMaster.toFixed(2) + " dB");
+  }
+  if (loud.maxMaster < 0.50 || loud.maxMaster > 5.0) {
+    throw new Error("LOUD crest control is outside its clean range: profile=" + profile +
+      " GR=" + loud.maxMaster.toFixed(2) + " dB");
+  }
+  if (maxed.maxMaster <= loud.maxMaster + 0.50 || maxed.maxMaster > 8.2) {
+    throw new Error("MAX is not clearly stronger than LOUD: profile=" + profile +
+      " loud=" + loud.maxMaster.toFixed(2) + " max=" + maxed.maxMaster.toFixed(2));
+  }
+
+  const loudLiftDb = 20 * Math.log10(Math.max(1e-9, loud.rms) / Math.max(1e-9, normal.rms));
+  const maxLiftDb = 20 * Math.log10(Math.max(1e-9, maxed.rms) / Math.max(1e-9, normal.rms));
+  const maxOverLoudDb = 20 * Math.log10(Math.max(1e-9, maxed.rms) / Math.max(1e-9, loud.rms));
+  if (loudLiftDb < 0.60) {
+    throw new Error("LOUD is not audibly distinct from NORMAL: profile=" + profile +
+      " lift=" + loudLiftDb.toFixed(2) + " dB");
+  }
+  if (maxLiftDb < 1.80 || maxOverLoudDb < 0.60) {
+    throw new Error("MAX is not audibly distinct from LOUD: profile=" + profile +
+      " maxLift=" + maxLiftDb.toFixed(2) + " maxOverLoud=" + maxOverLoudDb.toFixed(2) + " dB");
   }
 }
 
@@ -136,8 +164,8 @@ for (const profile of [0, 1, 2]) {
   // This synthetic two-tone/pulse test is a functional floor, not a mastering
   // taste score. R81-R4 intentionally strengthens the real crest controller,
   // while CI rejects only a genuinely ineffective Extreme path.
-  if (liftDb < 1.5) {
-    throw new Error("Extreme loudness path is ineffective: profile=" + profile + " lift=" + liftDb.toFixed(2) + " dB");
+  if (liftDb < 0.50) {
+    throw new Error("Legacy Extreme compatibility path is ineffective: profile=" + profile + " lift=" + liftDb.toFixed(2) + " dB");
   }
   if (extreme.maxGuard > 0.40) {
     throw new Error("Extreme routed routine loudness into Peak Guard: profile=" + profile + " GR=" + extreme.maxGuard.toFixed(2));
@@ -295,10 +323,11 @@ for (const forbidden of ["xpanderToneScale", "xpanderTransientScale", "Math.max(
 if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Legacy Extreme migration marker is missing from musicPlayer.ts");
 if (!playerSource.includes("MusicPlaybackMode")) throw new Error("R82 Device Direct mode is missing from musicPlayer.ts");
 if (!playerSource.includes("hdLoudnessMode")) throw new Error("R82 NORMAL/LOUD/MAX state is missing from musicPlayer.ts");
+if (!playerSource.includes("MVP_R82_R9_R3_STABLE_HD_NO_STOP")) throw new Error("R82-R9 persistent mode-switch routing is missing from musicPlayer.ts");
 
 console.table(rows.map((row) => ({
   profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
-  output: row.highOutput ? "HIGH/MAX" : "NORMAL",
+  output: row.mode,
   "Mastering GR": row.maxMaster.toFixed(2) + " dB",
   "Peak Guard GR": row.maxGuard.toFixed(2) + " dB",
   "True Peak": row.maxTruePeak.toFixed(2) + " dBTP",

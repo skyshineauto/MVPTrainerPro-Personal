@@ -123,7 +123,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "8.2.1-r82-r6-clean-max";
+const MVP_STUDIO_ASSET_VERSION = "8.3.0-r82-r9-stable-hd-no-stop";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
