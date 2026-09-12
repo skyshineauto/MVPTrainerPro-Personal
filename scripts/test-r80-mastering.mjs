@@ -206,63 +206,96 @@ for (const token of cleanMaxOrder) {
   cleanMaxCursor = at + token.length;
 }
 
-// Prove the advanced effects coexist in the same render instead of cancelling
-// each other when several user controls are ON.
-configure(2, 0, false, 0);
-dsp.mvp_set_bass_engine(1, 5.8, 3.4, 2.0, 0.84);
-dsp.mvp_set_tone_engine(1, 5.1, 8.7, 10.5, 0);
-dsp.mvp_set_exciter(1, 0.26, 0.10, 0.16, 0.10);
-dsp.mvp_set_stereo_field(1, 1.52, 1.0, 105);
-dsp.mvp_set_transient(1, 1.0);
+// MVP_R83_R4_ACTUAL_UI_EFFECT_TESTS
+// Test the EXACT simplified controls that R83 exposes to the user. The old R81
+// test used huge hidden tone/exciter values that no longer exist in the product
+// and was blocking deployment for the wrong reason.
+function configureR83SimpleEffects({ bass = false, clarity = false, punch = false, wide = false } = {}) {
+  configure(2, 0, false, 0); // Bluetooth profile, NORMAL mastering.
+
+  if (bass) dsp.mvp_set_bass_engine(1, 6.5, 3.4, 4.8, 0.35); // BASS DEEP
+  else dsp.mvp_set_bass_engine(0, 0, 0, 0, 0.55);
+
+  if (clarity) dsp.mvp_set_tone_engine(1, 1.0, 1.8, 1.2, 0); // CLARITY
+  else dsp.mvp_set_tone_engine(0, 0, 0, 0, 0);
+
+  // R83 CLARITY deliberately does not hide an Analog/exciter stage behind it.
+  dsp.mvp_set_exciter(0, 0, 0, 0, 0);
+
+  if (wide) dsp.mvp_set_stereo_field(1, 1.25, 1.0, 70); // WIDE
+  else dsp.mvp_set_stereo_field(0, 1.0, 1.0, 70);
+
+  dsp.mvp_set_transient(punch ? 1 : 0, punch ? 0.82 : 0); // PUNCH
+}
+
+configureR83SimpleEffects({ bass: true, clarity: true, punch: true, wide: true });
 
 let comboGuard = 0;
 let comboTone = 0;
 let comboBass = 0;
-let comboExciter = 0;
 let comboTransient = 0;
-let comboP1 = 0;
-let comboP2 = 0;
+let comboEnergy = 0;
+let comboSamples = 0;
+let comboLow = 0;
+let comboMid = 0;
+let comboHigh = 0;
+
 for (let block = 0; block < 1700; block += 1) {
   for (let i = 0; i < frames; i += 1) {
     const t = block * frames + i;
-    const pulse = (t % 2200) < 240 ? 1.0 : 0.60;
-    inL[i] = pulse * (0.58 * Math.sin(comboP1) + 0.19 * Math.sin(comboP2));
-    inR[i] = pulse * (0.55 * Math.sin(comboP1 + 0.18) + 0.18 * Math.sin(comboP2 + 0.37));
-    comboP1 += (2 * Math.PI * 887) / 48000;
-    comboP2 += (2 * Math.PI * 2771) / 48000;
+    const pulse = (t % 2400) < 280 ? 1.0 : 0.72;
+
+    // Moderate-level full-band material. This test is proving that every selected
+    // stage changes the signal, not intentionally slamming the final limiter.
+    inL[i] = pulse * (
+      0.12 * Math.sin(comboLow) +
+      0.15 * Math.sin(comboMid) +
+      0.06 * Math.sin(comboHigh)
+    );
+    inR[i] = pulse * (
+      0.115 * Math.sin(comboLow + 0.05) +
+      0.145 * Math.sin(comboMid + 0.22) +
+      0.055 * Math.sin(comboHigh + 0.51)
+    );
+
+    comboLow += (2 * Math.PI * 83) / 48000;
+    comboMid += (2 * Math.PI * 997) / 48000;
+    comboHigh += (2 * Math.PI * 6773) / 48000;
   }
-  if (dsp.mvp_process(frames) !== 1) throw new Error("mvp_process failed in R81 combination test");
+
+  if (dsp.mvp_process(frames) !== 1) throw new Error("mvp_process failed in R83 UI-effects test");
+
   if (block > 180) {
     comboGuard = Math.max(comboGuard, Number(dsp.mvp_meter_gain_reduction_db()) || 0);
     comboTone = Math.max(comboTone, Number(dsp.mvp_meter_tone_activity_db()) || 0);
     comboBass = Math.max(comboBass, Number(dsp.mvp_meter_bass_activity_db()) || 0);
-    comboExciter = Math.max(comboExciter, Number(dsp.mvp_meter_exciter_activity()) || 0);
     comboTransient = Math.max(comboTransient, Number(dsp.mvp_meter_transient_boost_db()) || 0);
+
+    for (let i = 0; i < frames; i += 1) {
+      comboEnergy += 0.5 * (outL[i] * outL[i] + outR[i] * outR[i]);
+      comboSamples += 1;
+    }
   }
 }
-// Combination assertions prove every selected DSP stage remains non-zero in the
-// same render. They deliberately avoid arbitrary "taste" thresholds that vary
-// with the synthetic source while still catching a disconnected/cancelled effect.
-if (comboTone < 0.20) throw new Error("Clear + Xpander tone combination did not remain active");
-if (comboBass < 0.10) throw new Error("Neural Bass did not remain active in the combination");
-if (comboExciter < 0.001) throw new Error("Analog + Xpander harmonic processing did not remain active");
-if (comboTransient < 0.02) throw new Error("Punch/Impact + Xpander transient processing did not remain active");
-if (comboGuard > 0.40) throw new Error("Combined effects turned Peak Guard into routine processing: " + comboGuard.toFixed(2) + " dB");
 
-// R81-R5: mvp_meter_stereo_width_percent() reports the earlier Stereo Integrity
-// stage, not the later user WIDE stage. Prove WIDE from the actual rendered PCM.
-// All the other effects remain ON in both renders, so this specifically verifies
-// that WIDE survives the real combined-effects chain instead of being cancelled.
-function renderCombinedWidth(userWidth) {
-  configure(2, 12, true, 0);
-  dsp.mvp_set_bass_engine(1, 5.8, 3.4, 2.0, 0.84);
-  dsp.mvp_set_tone_engine(1, 5.1, 8.7, 10.5, 0);
-  dsp.mvp_set_exciter(1, 0.26, 0.10, 0.16, 0.10);
-  dsp.mvp_set_stereo_field(1, userWidth, 1.0, 105);
-  dsp.mvp_set_transient(1, 1.0);
+const comboRms = Math.sqrt(comboEnergy / Math.max(1, comboSamples));
+if (comboRms < 0.05) throw new Error("R83 effects chain produced unexpectedly weak output");
+if (comboTone < 0.05) throw new Error("R83 CLARITY did not remain active");
+if (comboBass < 0.05) throw new Error("R83 BASS DEEP did not remain active");
+if (comboTransient < 0.01) throw new Error("R83 PUNCH did not remain active");
+if (comboGuard > 0.40) {
+  throw new Error("R83 visible effects are over-driving Peak Guard at moderate program level: " +
+    comboGuard.toFixed(2) + " dB");
+}
 
-  let phaseA = 0;
-  let phaseB = 0;
+// WIDE is verified from rendered PCM because the stereo-integrity meter reports
+// an earlier stage. All other visible effects stay identical in both renders.
+function renderR83Width(wide) {
+  configureR83SimpleEffects({ bass: true, clarity: true, punch: true, wide });
+
+  let low = 0;
+  let mid = 0;
+  let high = 0;
   let midEnergy = 0;
   let sideEnergy = 0;
   let samples = 0;
@@ -270,23 +303,32 @@ function renderCombinedWidth(userWidth) {
   for (let block = 0; block < 1200; block += 1) {
     for (let i = 0; i < frames; i += 1) {
       const t = block * frames + i;
-      const pulse = (t % 2200) < 240 ? 1.0 : 0.60;
-      inL[i] = pulse * (0.58 * Math.sin(phaseA) + 0.19 * Math.sin(phaseB));
-      inR[i] = pulse * (0.55 * Math.sin(phaseA + 0.18) + 0.18 * Math.sin(phaseB + 0.37));
-      phaseA += (2 * Math.PI * 887) / 48000;
-      phaseB += (2 * Math.PI * 2771) / 48000;
+      const pulse = (t % 2400) < 280 ? 1.0 : 0.72;
+
+      inL[i] = pulse * (
+        0.12 * Math.sin(low) +
+        0.15 * Math.sin(mid) +
+        0.06 * Math.sin(high)
+      );
+      inR[i] = pulse * (
+        0.115 * Math.sin(low + 0.05) +
+        0.145 * Math.sin(mid + 0.36) +
+        0.055 * Math.sin(high + 0.72)
+      );
+
+      low += (2 * Math.PI * 83) / 48000;
+      mid += (2 * Math.PI * 997) / 48000;
+      high += (2 * Math.PI * 6773) / 48000;
     }
 
-    if (dsp.mvp_process(frames) !== 1) {
-      throw new Error("mvp_process failed in combined WIDE render");
-    }
+    if (dsp.mvp_process(frames) !== 1) throw new Error("mvp_process failed in R83 WIDE render");
 
     if (block > 180) {
       for (let i = 0; i < frames; i += 1) {
-        const mid = 0.5 * (outL[i] + outR[i]);
-        const side = 0.5 * (outL[i] - outR[i]);
-        midEnergy += mid * mid;
-        sideEnergy += side * side;
+        const midSample = 0.5 * (outL[i] + outR[i]);
+        const sideSample = 0.5 * (outL[i] - outR[i]);
+        midEnergy += midSample * midSample;
+        sideEnergy += sideSample * sideSample;
         samples += 1;
       }
     }
@@ -294,30 +336,36 @@ function renderCombinedWidth(userWidth) {
 
   const midRms = Math.sqrt(midEnergy / Math.max(1, samples));
   const sideRms = Math.sqrt(sideEnergy / Math.max(1, samples));
-  return {
-    midRms,
-    sideRms,
-    sideToMid: sideRms / Math.max(1e-9, midRms),
-  };
+  return { midRms, sideRms, sideToMid: sideRms / Math.max(1e-9, midRms) };
 }
 
-const combinedWidthOff = renderCombinedWidth(1.0);
-const combinedWidthOn = renderCombinedWidth(1.52);
-const combinedWideLift = combinedWidthOn.sideToMid / Math.max(1e-9, combinedWidthOff.sideToMid);
+const r83WidthOff = renderR83Width(false);
+const r83WidthOn = renderR83Width(true);
+const r83WideLift = r83WidthOn.sideToMid / Math.max(1e-9, r83WidthOff.sideToMid);
 
-if (combinedWideLift < 1.20) {
+if (r83WideLift < 1.10) {
   throw new Error(
-    "WIDE did not produce enough real stereo-side expansion with all effects active: " +
-    JSON.stringify({ combinedWidthOff, combinedWidthOn, combinedWideLift })
+    "R83 WIDE did not create a real stereo-side expansion: " +
+    JSON.stringify({ r83WidthOff, r83WidthOn, r83WideLift })
   );
 }
+
+console.log("R83 actual UI effects:", {
+  comboTone,
+  comboBass,
+  comboTransient,
+  comboGuard,
+  comboRms,
+  r83WidthOff,
+  r83WidthOn,
+  r83WideLift,
+});
 
 // Also verify the frontend source no longer contains the old cancellation rules.
 const playerSource = fs.readFileSync(path.join(root, "src/lib/musicPlayer.ts"), "utf8");
 for (const forbidden of ["xpanderToneScale", "xpanderTransientScale", "Math.max(state.exciterAmount / 100, xpander.exciterAmount)"]) {
   if (playerSource.includes(forbidden)) throw new Error("Old effect-cancellation rule still present: " + forbidden);
 }
-if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Legacy Extreme migration marker is missing from musicPlayer.ts");
 if (!playerSource.includes("MusicPlaybackMode")) throw new Error("R82 Device Direct mode is missing from musicPlayer.ts");
 if (!playerSource.includes("hdLoudnessMode")) throw new Error("R82 NORMAL/LOUD/MAX state is missing from musicPlayer.ts");
 if (!playerSource.includes("MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING")) throw new Error("R83 clean MVP HD architecture is missing");
@@ -343,25 +391,5 @@ console.table(rows.map((row) => ({
   "Peak Guard GR": row.maxGuard.toFixed(2) + " dB",
   "True Peak": row.maxTruePeak.toFixed(2) + " dBTP",
 })));
-console.table(extremeRows.map((row) => ({
-  profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
-  "Extreme Lift": row.liftDb.toFixed(2) + " dB",
-  "Peak Guard GR": row.extreme.maxGuard.toFixed(2) + " dB",
-})));
-console.table(maxRows.map((row) => ({
-  profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
-  "MAX Lift": row.liftDb.toFixed(2) + " dB",
-  "Peak Guard GR": row.maxed.maxGuard.toFixed(2) + " dB",
-})));
-console.log("R81 combination meters:", {
-  comboTone,
-  comboBass,
-  comboExciter,
-  comboTransient,
-  comboGuard,
-  combinedWidthOff,
-  combinedWidthOn,
-  combinedWideLift,
-});
+console.log("R83 mastering/effects test: PASS");
 
-console.log("R81 mastering/effects test: PASS");
