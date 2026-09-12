@@ -795,7 +795,8 @@ let state: MusicPlayerState = {
   outputProfile: readOutputProfile(),
   playbackMode: readPlaybackMode(),
   hdLoudnessMode: readHdLoudnessMode(),
-  dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false),
+  // MVP_R82_R8_MVP_HD_ROUTING_LOCK: DEVICE DIRECT is the only top-level bypass. MVP HD always boots processed.
+  dspBypass: readPlaybackMode() === "device_direct",
   dspStatus: "recovering",
   dspEngineMode: "unavailable",
   immersionStatus: "bypassed",
@@ -1461,6 +1462,12 @@ function applyLimiterSettings(now: number, limiterActive: boolean) {
   }
 }
 function applyProcessingSettings() {
+  // MVP_R82_R8_MVP_HD_ROUTING_LOCK: MVP HD owns the processed route. Clear any stale legacy A/B bypass
+  // before sending state to Studio WASM or compatibility processing.
+  if (state.playbackMode === "mvp_hd" && state.dspBypass) {
+    savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
+    emit({ dspBypass: false, dspVerificationMode: "off" });
+  }
   if (!audioContext || !mediaSourceConnected) return;
   const now = audioContext.currentTime;
   if (studioProcessorNode && state.dspEngineMode === "studio_wasm") {
@@ -1472,7 +1479,10 @@ function applyProcessingSettings() {
   configureOutputFilters(now);
   const { effectivePreampDb, autoHeadroomDb, makeupDb, referenceMatchDb } = calculateProcessingGain();
   const pureReference = state.outputProfile === "reference";
-  const abBypass = !pureReference && state.dspBypass;
+  const abBypass =
+    !pureReference &&
+    state.playbackMode !== "mvp_hd" &&
+    state.dspBypass;
   const processed = !pureReference && !abBypass;
   const headphones = processed && state.outputProfile === "headphones" && Boolean(headphoneProcessorNode || nativeImmersionAvailable());
   const standard = processed && !headphones;
@@ -1766,7 +1776,10 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
   if (!audioContext || !targetNode) return 0;
   const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
   const pureReference = state.outputProfile === "reference";
-  const abBypass = !pureReference && state.dspBypass;
+  const abBypass =
+    !pureReference &&
+    state.playbackMode !== "mvp_hd" &&
+    state.dspBypass;
   const processed = !pureReference && !abBypass;
   const cleanHdProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
   const mvpHdProfile = state.outputProfile !== "reference";
@@ -2465,7 +2478,10 @@ function startLevelMeter() {
         return;
       }
       const pureReference = state.outputProfile === "reference";
-      const abBypass = !pureReference && state.dspBypass;
+      const abBypass =
+    !pureReference &&
+    state.playbackMode !== "mvp_hd" &&
+    state.dspBypass;
       const stateVerified = runtime.ready && runtime.requestedRevision <= runtime.appliedRevision;
       // If a control change (EQ/preset/effect) has been requested but the AudioWorklet
       // has not acknowledged it after a real settling window, rebuild the graph instead
@@ -2612,6 +2628,10 @@ async function unlockMusicAudio() {
     return;
   }
 
+  if (state.dspBypass) {
+    savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
+    emit({ dspBypass: false, dspVerificationMode: "off" });
+  }
   await connectMusicGraph();
   const context = getAudioContext();
   if (context?.state === "suspended") await context.resume();
@@ -4528,8 +4548,10 @@ export async function setMusicPlaybackMode(mode: MusicPlaybackMode) {
   graphBuildPromise = null;
 
   savePlayerSetting(STORAGE_KEYS.playbackMode, mode);
+  savePlayerSetting(STORAGE_KEYS.dspBypass, mode === "device_direct" ? "true" : "false");
   emit({
     playbackMode: mode,
+    dspBypass: mode === "device_direct",
     dspStatus: mode === "device_direct" ? "bypassed" : "recovering",
     dspEngineMode: "unavailable",
     immersionStatus: "bypassed",
@@ -4640,8 +4662,9 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
 }
 
 export function setMusicDspBypass(bypassed: boolean) {
-  savePlayerSetting(STORAGE_KEYS.dspBypass, String(bypassed));
-  emit({ dspBypass: bypassed, dspVerificationMode: "off" });
+  const next = state.playbackMode === "mvp_hd" ? false : bypassed;
+  savePlayerSetting(STORAGE_KEYS.dspBypass, String(next));
+  emit({ dspBypass: next, dspVerificationMode: "off" });
   applyProcessingSettings();
 }
 
