@@ -159,6 +159,23 @@ for (const profile of [0, 1, 2]) {
   }
 }
 
+// MVP_R82_R6_CLEAN_MAX: prevent a regression back to the audible R82 MAX overdrive.
+const dspSource = fs.readFileSync(path.join(root, "dsp/studio/mvp_studio_dsp.cpp"), "utf8");
+if (dspSource.includes("const float drive = 1.0f + amount * 2.20f;")) {
+  throw new Error("Old full-waveform MAX overdrive is still present");
+}
+const cleanMaxOrder = [
+  "processHdLoudnessMaximizer(left, right);",
+  "processOutputGain(left, right);",
+  "processLimiter(left, right, limitedL, limitedR);",
+];
+let cleanMaxCursor = 0;
+for (const token of cleanMaxOrder) {
+  const at = dspSource.indexOf(token, cleanMaxCursor);
+  if (at < 0) throw new Error("Clean MAX mastering order is missing: " + token);
+  cleanMaxCursor = at + token.length;
+}
+
 // Prove the advanced effects coexist in the same render instead of cancelling
 // each other when several user controls are ON.
 configure(2, 12, true, 0);

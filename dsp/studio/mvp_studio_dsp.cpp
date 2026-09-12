@@ -1603,18 +1603,26 @@ void processHeadphone(float &left, float &right) {
   right = dryR + (widenedR - dryR) * wet;
 }
 
-// MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: mastering-style soft clipper. LOUD/MAX reduce crest factor here
-// after adaptive makeup but before the true-peak emergency limiter. This raises
-// average perceived level instead of wasting gain against Peak Guard.
+// MVP_R82_R6_CLEAN_MAX: clean mastering peak shaver.
+// LOUD/MAX loudness comes from crest control + adaptive makeup. This stage no
+// longer overdrives the entire waveform. It only rounds the tallest residual
+// peaks before final makeup, so MAX stays dense without sounding fuzzy.
 inline float processHdMaximizerSample(float sample, float intensity) {
   const float amount = clampf(intensity, 0.0f, 1.0f);
   if (amount <= 0.0001f) return sample;
 
-  const float drive = 1.0f + amount * 2.20f;
-  const float shaped = sample * drive;
-  const float denominator = 1.0f + absf(shaped) * (0.55f + amount * 0.35f);
-  const float saturated = shaped / denominator;
-  return saturated * (1.0f + amount * 0.12f);
+  // LOUD is effectively untouched. At MAX the knee begins only around 0.38,
+  // roughly 1.6 dB above the normal MAX crest target after final compression.
+  // Typical samples pass unchanged; only residual overshoots enter the knee.
+  const float threshold = 0.72f - amount * 0.34f;
+  const float magnitude = absf(sample);
+  if (magnitude <= threshold) return sample;
+
+  const float excess = magnitude - threshold;
+  const float knee = 0.10f + amount * 0.08f;
+  const float roundedExcess = knee * static_cast<float>(1.0 - exp(-excess / knee));
+  const float outputMagnitude = threshold + roundedExcess;
+  return sample < 0.0f ? -outputMagnitude : outputMagnitude;
 }
 
 void processHdLoudnessMaximizer(float &left, float &right) {
@@ -2136,8 +2144,10 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     processLoudness(left, right);
     processFinalCompressor(left, right);
     processHeadphoneOutputDrive(left, right);
-    processOutputGain(left, right);
+    // MVP_R82_R6_CLEAN_MAX: peak shaving happens BEFORE final adaptive makeup. The final
+    // output stage creates level cleanly; Peak Guard remains the last catcher.
     processHdLoudnessMaximizer(left, right);
+    processOutputGain(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;
