@@ -1552,7 +1552,9 @@ void processHeadphone(float &left, float &right) {
   const float lowSide = headphoneSideLowpass.process(side);
   const float highSide = side - lowSide;
   const float lowSideScale = 1.0f + width * 0.06f;
-  const float highSideScale = 1.0f + width * 0.52f;
+  // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: WIDE must be obvious. Bass stays nearly centered while the upper
+  // side channel gets a real expansion instead of a barely audible change.
+  const float highSideScale = 1.0f + width * 0.88f;
   const float widenedSide = lowSide * lowSideScale + highSide * highSideScale;
   const float midScale = 0.98f + center * 0.04f;
   float widenedL = mid * midScale + widenedSide;
@@ -1596,9 +1598,30 @@ void processHeadphone(float &left, float &right) {
   // R71 WIDE never replaces the clean Studio HD foundation. In the normal
   // headphone path blend the frequency-dependent widener in parallel so bass,
   // center image, transients and overall tonal balance remain anchored to dry.
-  const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 0.62f;
+  const float wet = headphoneAdvancedEnabled ? clampf(headphoneWet, 0.0f, 1.0f) : 1.0f;
   left = dryL + (widenedL - dryL) * wet;
   right = dryR + (widenedR - dryR) * wet;
+}
+
+// MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: mastering-style soft clipper. LOUD/MAX reduce crest factor here
+// after adaptive makeup but before the true-peak emergency limiter. This raises
+// average perceived level instead of wasting gain against Peak Guard.
+inline float processHdMaximizerSample(float sample, float intensity) {
+  const float amount = clampf(intensity, 0.0f, 1.0f);
+  if (amount <= 0.0001f) return sample;
+
+  const float drive = 1.0f + amount * 2.20f;
+  const float shaped = sample * drive;
+  const float denominator = 1.0f + absf(shaped) * (0.55f + amount * 0.35f);
+  const float saturated = shaped / denominator;
+  return saturated * (1.0f + amount * 0.12f);
+}
+
+void processHdLoudnessMaximizer(float &left, float &right) {
+  if (!autoMakeupEnabled || outputReserveDb < 5.5f) return;
+  const float intensity = clampf((outputReserveDb - 5.5f) / 12.5f, 0.0f, 1.0f);
+  left = processHdMaximizerSample(left, intensity);
+  right = processHdMaximizerSample(right, intensity);
 }
 
 void processHeadphoneOutputDrive(float &left, float &right) {
@@ -2114,6 +2137,7 @@ __attribute__((visibility("default"))) int mvp_process(int frames) {
     processFinalCompressor(left, right);
     processHeadphoneOutputDrive(left, right);
     processOutputGain(left, right);
+    processHdLoudnessMaximizer(left, right);
 
     float limitedL = 0.0f;
     float limitedR = 0.0f;

@@ -144,6 +144,21 @@ for (const profile of [0, 1, 2]) {
   }
 }
 
+// MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: MAX is a mastering mode, not another decorative gain switch.
+const maxRows = [];
+for (const profile of [0, 1, 2]) {
+  const normal = runCase(profile, 0, false, 0);
+  const maxed = runCase(profile, 18, true, 0);
+  const liftDb = 20 * Math.log10(Math.max(1e-9, maxed.rms) / Math.max(1e-9, normal.rms));
+  maxRows.push({ profile, liftDb, normal, maxed });
+  if (liftDb < 3.0) {
+    throw new Error("MAX mastering lift is too small: profile=" + profile + " lift=" + liftDb.toFixed(2) + " dB");
+  }
+  if (maxed.maxGuard > 0.40) {
+    throw new Error("MAX turned Peak Guard into routine processing: profile=" + profile + " GR=" + maxed.maxGuard.toFixed(2) + " dB");
+  }
+}
+
 // Prove the advanced effects coexist in the same render instead of cancelling
 // each other when several user controls are ON.
 configure(2, 12, true, 0);
@@ -255,7 +270,9 @@ const playerSource = fs.readFileSync(path.join(root, "src/lib/musicPlayer.ts"), 
 for (const forbidden of ["xpanderToneScale", "xpanderTransientScale", "Math.max(state.exciterAmount / 100, xpander.exciterAmount)"]) {
   if (playerSource.includes(forbidden)) throw new Error("Old effect-cancellation rule still present: " + forbidden);
 }
-if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Extreme loudness routing is missing from musicPlayer.ts");
+if (!playerSource.includes("extremeLoudnessDb")) throw new Error("Legacy Extreme migration marker is missing from musicPlayer.ts");
+if (!playerSource.includes("MusicPlaybackMode")) throw new Error("R82 Device Direct mode is missing from musicPlayer.ts");
+if (!playerSource.includes("hdLoudnessMode")) throw new Error("R82 NORMAL/LOUD/MAX state is missing from musicPlayer.ts");
 
 console.table(rows.map((row) => ({
   profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
@@ -268,6 +285,11 @@ console.table(extremeRows.map((row) => ({
   profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
   "Extreme Lift": row.liftDb.toFixed(2) + " dB",
   "Peak Guard GR": row.extreme.maxGuard.toFixed(2) + " dB",
+})));
+console.table(maxRows.map((row) => ({
+  profile: row.profile === 0 ? "Car/Hi-Fi" : row.profile === 1 ? "Headphones" : "Bluetooth",
+  "MAX Lift": row.liftDb.toFixed(2) + " dB",
+  "Peak Guard GR": row.maxed.maxGuard.toFixed(2) + " dB",
 })));
 console.log("R81 combination meters:", {
   comboTone,

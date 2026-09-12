@@ -69,6 +69,9 @@ export type MusicDspVerificationMode = "off" | "eq" | "spatial";
 export type MusicEqTopology = "minimum_phase" | "linear_phase";
 export type MusicHeadphoneMode = "off" | "wide" | "spatial" | "deep" | "stage" | "focus" | "bass_impact";
 export type MusicOutputProfile = "reference" | "car_hifi" | "headphones" | "speaker";
+export type MusicPlaybackMode = "device_direct" | "mvp_hd";
+export type MusicHdLoudnessMode = "normal" | "loud" | "max";
+export type MusicHdBassMode = "off" | "strong" | "deep";
 export type MusicTransitionMode = "auto" | "gapless" | "smooth" | "off";
 export type MusicParametricFilterType = "bell" | "low_shelf" | "high_shelf" | "high_pass" | "low_pass" | "notch";
 export type MusicParametricBand = { enabled: boolean; frequency: number; gainDb: number; q: number; type: MusicParametricFilterType };
@@ -400,6 +403,8 @@ export type MusicPlayerState = {
   headphoneCenter: number;
   headphoneBassImpact: number;
   outputProfile: MusicOutputProfile;
+  playbackMode: MusicPlaybackMode;
+  hdLoudnessMode: MusicHdLoudnessMode;
   dspBypass: boolean;
   dspStatus: MusicDspStatus;
   dspEngineMode: MusicDspEngineMode;
@@ -475,6 +480,8 @@ const STORAGE_KEYS = {
   headphoneCenter: "mvp_music_headphone_center",
   headphoneBassImpact: "mvp_music_headphone_bass_impact",
   outputProfile: "mvp_music_output_profile_v12",
+  playbackMode: "mvp_music_playback_mode_r82",
+  hdLoudnessMode: "mvp_music_hd_loudness_mode_r82",
   dspBypass: "mvp_music_dsp_bypass",
   audioEngineVersion: "mvp_music_audio_engine_version",
   custom1: "mvp_music_eq_custom_1",
@@ -611,6 +618,13 @@ function readOutputProfile(): MusicOutputProfile {
   return value === "reference" || value === "car_hifi" || value === "headphones" || value === "speaker"
     ? value
     : "car_hifi";
+}
+function readPlaybackMode(): MusicPlaybackMode {
+  return readStored(STORAGE_KEYS.playbackMode) === "device_direct" ? "device_direct" : "mvp_hd";
+}
+function readHdLoudnessMode(): MusicHdLoudnessMode {
+  const value = readStored(STORAGE_KEYS.hdLoudnessMode);
+  return value === "normal" || value === "loud" || value === "max" ? value : "normal";
 }
 function readEqTopology(): MusicEqTopology {
   return readStored(STORAGE_KEYS.eqTopology) === "linear_phase" ? "linear_phase" : "minimum_phase";
@@ -779,6 +793,8 @@ let state: MusicPlayerState = {
   headphoneCenter: readNumber(STORAGE_KEYS.headphoneCenter, 50, 0, 100),
   headphoneBassImpact: readNumber(STORAGE_KEYS.headphoneBassImpact, 0, 0, 100),
   outputProfile: readOutputProfile(),
+  playbackMode: readPlaybackMode(),
+  hdLoudnessMode: readHdLoudnessMode(),
   dspBypass: readBoolean(STORAGE_KEYS.dspBypass, false),
   dspStatus: "recovering",
   dspEngineMode: "unavailable",
@@ -1311,7 +1327,8 @@ function configureStudioHrtf(now: number) {
   const threeDMode = mode === "stage";
   const deepMode = mode === "deep";
   const spatialMode = mode === "spatial";
-  const wetMix = active ? (threeDMode ? 0.34 : deepMode ? 0.27 : 0.20) : 0;
+  // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: immersive modes must be unmistakable on real headphones.
+  const wetMix = active ? (threeDMode ? 0.85 : deepMode ? 0.75 : 0.65) : 0;
   setAudioParam(studioHrtfInputGain.gain, wetMix, now, 0.018);
   if (!active || !studioHrtfLeftPanner || !studioHrtfRightPanner || !studioHrtfBassShelf) {
     if (studioHrtfReflectionGainA) setAudioParam(studioHrtfReflectionGainA.gain, 0, now, 0.025);
@@ -1354,11 +1371,11 @@ function configureStudioHrtf(now: number) {
   // HRTF already supplies the localization cues. Reflections are deliberately
   // tiny and only add a hint of depth, never an audible reverb tail.
   const reflectionAmount = threeDMode
-    ? Math.min(0.030, depth * 0.030)
+    ? Math.min(0.090, depth * 0.090)
     : deepMode
-      ? Math.min(0.022, depth * 0.022)
+      ? Math.min(0.065, depth * 0.065)
       : spatialMode
-        ? Math.min(0.008, depth * 0.008)
+        ? Math.min(0.035, depth * 0.035)
         : 0;
   if (studioHrtfReflectionDelayA) setAudioParam(studioHrtfReflectionDelayA.delayTime, threeDMode ? 0.017 : deepMode ? 0.013 : 0.009, now, 0.05);
   if (studioHrtfReflectionDelayB) setAudioParam(studioHrtfReflectionDelayB.delayTime, threeDMode ? 0.027 : deepMode ? 0.021 : 0.014, now, 0.05);
@@ -1698,9 +1715,9 @@ function calculateStudioGain() {
   }
 
   const simplifiedProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
-  const extremeLoudnessDb = state.extremePreampEnabled
-    ? Math.max(0, Math.min(12, Number(state.extremePreampDb) || 0))
-    : 0;
+  // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: legacy Extreme Preamp is intentionally ignored by the new
+  // three-position mastering control. It remains in state only for migration.
+  const extremeLoudnessDb = 0;
   const normalPreampDb = state.eqEnabled
     ? Math.max(-12, Math.min(6, Number(state.preampDb) || 0))
     : 0;
@@ -1747,11 +1764,16 @@ function hdXpanderProfile(level: number) {
 
 function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode | null = studioProcessorNode) {
   if (!audioContext || !targetNode) return 0;
-  const { effectivePreampDb, extremeLoudnessDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
+  const { effectivePreampDb, autoHeadroomDb, referenceMatchDb } = calculateStudioGain();
   const pureReference = state.outputProfile === "reference";
   const abBypass = !pureReference && state.dspBypass;
   const processed = !pureReference && !abBypass;
   const cleanHdProfile = state.outputProfile === "headphones" || state.outputProfile === "speaker";
+  const mvpHdProfile = state.outputProfile !== "reference";
+  const hdLoudnessReserveDb =
+    state.hdLoudnessMode === "max" ? 18 :
+    state.hdLoudnessMode === "loud" ? 9 :
+    0;
   const xpander = hdXpanderProfile(processed && cleanHdProfile ? state.hdXpanderLevel : 0);
   // Studio path also runs at unity into WASM. Listener volume is applied after
   // the WASM limiter, preventing volume-dependent distortion.
@@ -1814,7 +1836,10 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     transientEnabled: effectiveTransientAmount > 0.001,
     transientAmount: effectiveTransientAmount,
     // MVP_STUDIO_WASM_V2_PHASE2_MULTIBAND
-    multibandEnabled: processed && state.multibandEnabled,
+    multibandEnabled:
+      processed &&
+      (state.multibandEnabled ||
+        (mvpHdProfile && state.playbackMode === "mvp_hd" && state.hdLoudnessMode !== "normal")),
     multibandAmount: studioPersonality.multibandAmount,
     // MVP_STUDIO_WASM_V3_PHASE1_DYNAMIC_EQ
     // Cut-only adaptive resonance control. It never adds makeup gain and therefore
@@ -1853,8 +1878,16 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     // MVP_R81_R2_EFFECTS_LOUDNESS_INTERACTION: Extreme adds mastering drive, not raw input gain. Max/High Output
     // and Extreme may coexist, with the combined request capped at the WASM's
     // existing +18 dB mastering range.
-    outputReserveDb: processed ? Math.min(18, state.outputReserveDb + autoHeadroomDb + extremeLoudnessDb) : 0,
-    autoMakeupEnabled: processed && (state.autoMakeupEnabled || extremeLoudnessDb > 0.01),
+    // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: NORMAL / LOUD / MAX is now the single authoritative loudness
+    // request. Legacy Output Reserve / Auto Makeup / Extreme cannot stack on top.
+    outputReserveDb:
+      processed && state.playbackMode === "mvp_hd"
+        ? Math.min(18, hdLoudnessReserveDb + autoHeadroomDb)
+        : 0,
+    autoMakeupEnabled:
+      processed &&
+      state.playbackMode === "mvp_hd" &&
+      state.hdLoudnessMode !== "normal",
     parametricEnabled: processed && state.parametricEnabled,
     parametricBands: state.parametricBands.map((band) => ({ ...band, type: parametricTypeCode(band.type) })),
     bassEngineEnabled: processed && state.bassEngineEnabled,
@@ -1876,8 +1909,9 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     stereoUserWidth: state.stereoUserWidth / 100,
     stereoCenterFocus: state.stereoCenterFocus / 100,
     bassMonoHz: state.bassMonoHz,
-    dynamicsRestoreEnabled: processed && !cleanHdProfile && state.dynamicsRestoreEnabled,
-    dynamicsRestoreAmount: !cleanHdProfile ? state.dynamicsRestoreAmount / 100 : 0,
+    // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: PUNCH remains a real stage on Headphones and Bluetooth too.
+    dynamicsRestoreEnabled: processed && state.dynamicsRestoreEnabled,
+    dynamicsRestoreAmount: state.dynamicsRestoreAmount / 100,
     smartDspEnabled: processed && state.smartDspEnabled,
     smartDspAmount: state.smartDspAmount / 100,
     headphoneAdvancedEnabled: headphoneEnabled && state.headphoneAdvancedEnabled,
@@ -2563,6 +2597,21 @@ function startLevelMeter() {
 }
 
 async function unlockMusicAudio() {
+  // MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: DEVICE DIRECT never creates or resumes the Web Audio graph.
+  // The HTMLAudioElement feeds the OS / Bluetooth / car / headphone stack natively.
+  if (state.playbackMode === "device_direct") {
+    const audio = ensureAudioElement();
+    audio.volume = state.volume;
+    if (
+      state.dspStatus !== "bypassed" ||
+      state.dspEngineMode !== "unavailable" ||
+      state.immersionStatus !== "bypassed"
+    ) {
+      emit({ dspStatus: "bypassed", dspEngineMode: "unavailable", immersionStatus: "bypassed" });
+    }
+    return;
+  }
+
   await connectMusicGraph();
   const context = getAudioContext();
   if (context?.state === "suspended") await context.resume();
@@ -4451,6 +4500,114 @@ export function setMusicDspVerificationMode(mode: MusicDspVerificationMode) {
   emit({ dspVerificationMode: next });
   applyProcessingSettings();
   scheduleProcessingSettle();
+}
+
+// MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: switching modes replaces the media element. A MediaElementSourceNode
+// permanently owns the element it captures, so reusing that same element would
+// NOT be true native playback. Position, track and play state are preserved.
+export async function setMusicPlaybackMode(mode: MusicPlaybackMode) {
+  if (mode !== "device_direct" && mode !== "mvp_hd") return;
+  if (mode === state.playbackMode) return;
+
+  const previous = audioElement;
+  const track = state.currentTrack;
+  const position = Math.max(0, Number(previous?.currentTime ?? state.currentTime) || 0);
+  const wasPlaying = Boolean(previous && !previous.paused && !previous.ended && previous.src);
+
+  try { previous?.pause(); } catch {}
+  releaseGraph();
+
+  const previousContext = audioContext;
+  audioContext = null;
+  if (previousContext && previousContext.state !== "closed") {
+    try { await previousContext.close(); } catch {}
+  }
+
+  audioElement = null;
+  mediaSourceConnected = false;
+  graphBuildPromise = null;
+
+  savePlayerSetting(STORAGE_KEYS.playbackMode, mode);
+  emit({
+    playbackMode: mode,
+    dspStatus: mode === "device_direct" ? "bypassed" : "recovering",
+    dspEngineMode: "unavailable",
+    immersionStatus: "bypassed",
+    dspVerificationMode: "off",
+  });
+
+  if (!track) return;
+
+  await loadTrack(track, position);
+  const nextAudio = ensureAudioElement();
+  nextAudio.volume = mode === "device_direct" ? state.volume : 1;
+
+  if (wasPlaying) {
+    await unlockMusicAudio();
+    await nextAudio.play();
+  }
+}
+
+export function setMusicHdLoudnessMode(mode: MusicHdLoudnessMode) {
+  if (mode !== "normal" && mode !== "loud" && mode !== "max") return;
+  savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, mode);
+  emit({ hdLoudnessMode: mode });
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
+export function setMusicHdBassMode(mode: MusicHdBassMode) {
+  if (mode !== "off" && mode !== "strong" && mode !== "deep") return;
+
+  if (mode === "off") {
+    setMusicBassEngineEnabled(false);
+    return;
+  }
+
+  setMusicBassEngineEnabled(true);
+  if (mode === "deep") {
+    setMusicBassSub(6.8);
+    setMusicBassPunch(4.0);
+    setMusicBassBody(3.8);
+    setMusicBassTightness(80);
+  } else {
+    setMusicBassSub(3.8);
+    setMusicBassPunch(5.2);
+    setMusicBassBody(2.8);
+    setMusicBassTightness(88);
+  }
+}
+
+export function setMusicHdClarity(enabled: boolean) {
+  setMusicToneEngineEnabled(enabled);
+  setMusicExciterEnabled(enabled);
+  if (!enabled) return;
+  setMusicPresence(2.6);
+  setMusicClarity(4.6);
+  setMusicAir(5.0);
+  setMusicDeharsh(10);
+  setMusicExciterAmount(12);
+  setMusicSaturationLow(2);
+  setMusicSaturationMid(5);
+  setMusicSaturationHigh(9);
+}
+
+export function setMusicHdPunch(enabled: boolean) {
+  setMusicDynamicsRestoreEnabled(enabled);
+  if (enabled) setMusicDynamicsRestoreAmount(82);
+}
+
+export function setMusicHdWide(enabled: boolean) {
+  if (state.outputProfile === "headphones") {
+    setMusicHeadphoneAdvancedEnabled(false);
+    setMusicHeadphoneMode(enabled ? "wide" : "off");
+    return;
+  }
+  setMusicStereoFieldEnabled(enabled);
+  if (!enabled) return;
+  setMusicStereoWidth(152);
+  setMusicCenterFocus(100);
+  setMusicBassMonoHz(118);
 }
 
 export function setMusicOutputProfile(profile: MusicOutputProfile) {
