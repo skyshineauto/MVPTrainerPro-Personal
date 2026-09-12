@@ -1153,11 +1153,8 @@ inline float updateTruePeakDetector(float *history, float sample);
 // LOUD   = moderate linked crest control.
 // MAX    = stronger, still bounded crest control for clean average loudness.
 void processFinalCompressor(float &left, float &right) {
-  const bool processedProfile = outputProfile >= 0 && outputProfile <= 2;
-  const bool loudMode = autoMakeupEnabled && outputReserveDb >= 5.5f && outputReserveDb < 14.0f;
   const bool maxMode = autoMakeupEnabled && outputReserveDb >= 14.0f;
-
-  if (!processedProfile || (!loudMode && !maxMode)) {
+  if (!maxMode) {
     finalCompEnvelope = 0.0f;
     finalCompGain = 1.0f;
     finalCompRequiredGain = 1.0f;
@@ -1168,7 +1165,6 @@ void processFinalCompressor(float &left, float &right) {
   const float tpL = updateTruePeakDetector(maxHdCompTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdCompTruePeakHistoryR, right);
   const float detector = tpL > tpR ? tpL : tpR;
-
   maxHdCompDelayL[maxHdCompWrite] = left;
   maxHdCompDelayR[maxHdCompWrite] = right;
   int read = maxHdCompWrite - maxHdCompLookahead;
@@ -1177,30 +1173,20 @@ void processFinalCompressor(float &left, float &right) {
   const float delayedR = maxHdCompDelayR[read];
   maxHdCompWrite = (maxHdCompWrite + 1) % kMaxLookahead;
 
-  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: let the density maximizer create the loudness. This stage only
-  // creates controlled crest room so LOUD stays open and MAX stays clean.
-  const float crestCeilingDb = maxMode ? -4.80f : -1.80f;
-  const float maxReductionDb = maxMode ? 5.50f : 2.50f;
-  const float crestCeiling = static_cast<float>(dbToGain(crestCeilingDb));
-
-  float required = 1.0f;
-  if (detector > crestCeiling && detector > 0.0000001f) {
-    required = crestCeiling / detector;
-  }
-  required = clampf(required, static_cast<float>(dbToGain(-maxReductionDb)), 1.0f);
-
+  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: MAX uses modest crest control only to create clean room for the
+  // broadband maximizer. LOUD is intentionally left open and uncompressed.
+  const float ceiling = static_cast<float>(dbToGain(-3.0f));
+  float required = detector > ceiling && detector > 0.0000001f ? ceiling / detector : 1.0f;
+  required = clampf(required, static_cast<float>(dbToGain(-3.5f)), 1.0f);
   finalCompEnvelope = detector;
   finalCompRequiredGain = required;
 
-  if (required < finalCompGain) {
-    finalCompGain = required;
-  } else if (profileTransitionSamplesRemaining <= 0) {
-    const float releaseSeconds = maxMode ? 0.035f : 0.060f;
-    const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * releaseSeconds)));
+  if (required < finalCompGain) finalCompGain = required;
+  else if (profileTransitionSamplesRemaining <= 0) {
+    const float releaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * 0.050f)));
     finalCompGain += (required - finalCompGain) * releaseCoeff;
   }
-
-  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-maxReductionDb)), 1.0f);
+  finalCompGain = clampf(finalCompGain, static_cast<float>(dbToGain(-3.5f)), 1.0f);
   left = delayedL * finalCompGain;
   right = delayedR * finalCompGain;
   meterFinalCompressorReductionDb = finalCompGain < 0.999999f
@@ -1211,9 +1197,7 @@ void processOutputGain(float &left, float &right) {
   const float preLimitPeak = absf(left) > absf(right) ? absf(left) : absf(right);
   if (preLimitPeak > meterInternalPeak) meterInternalPeak = preLimitPeak;
 
-  // MVP_R82_R9_R3_STABLE_HD_NO_STOP: NORMAL stays at unity. Do not quietly turn normal playback down
-  // to manufacture artificial headroom. The true-peak limiter remains final safety.
-  if (!autoMakeupEnabled || outputReserveDb < 0.5f) {
+  if (!autoMakeupEnabled || outputReserveDb < 5.5f) {
     cleanOutputDriveGain = 1.0f;
     outputReserveGain = 1.0f;
     autoMakeupGain = 1.0f;
@@ -1225,19 +1209,11 @@ void processOutputGain(float &left, float &right) {
     return;
   }
 
-  float compensationDb = 0.0f;
-  if (autoMakeupEnabled) {
-    compensationDb = clampf(multibandEnabled ? meterMultibandGainReductionDb * 0.30f : 0.0f, 0.0f, 1.6f);
-    compensationDb += clampf(deharshAmount * meterDeharshReductionDb * 0.12f, 0.0f, 0.6f);
-  }
-
-  const float requestedTotalDb = clampf(outputReserveDb + compensationDb, 0.0f, 18.0f);
-  const float requestedDrive = static_cast<float>(dbToGain(requestedTotalDb));
-
+  const bool maxMode = outputReserveDb >= 14.0f;
+  const float requestedDrive = static_cast<float>(dbToGain(clampf(outputReserveDb, 0.0f, 18.0f)));
   const float tpL = updateTruePeakDetector(maxHdTruePeakHistoryL, left);
   const float tpR = updateTruePeakDetector(maxHdTruePeakHistoryR, right);
   const float truePeak = tpL > tpR ? tpL : tpR;
-
   if (truePeak > maxHdHeldTruePeak) maxHdHeldTruePeak = truePeak;
   else maxHdHeldTruePeak += (truePeak - maxHdHeldTruePeak) * maxHdPeakReleaseCoeff;
   if (maxHdHeldTruePeak < 0.0000001f) maxHdHeldTruePeak = 0.0f;
@@ -1245,66 +1221,40 @@ void processOutputGain(float &left, float &right) {
   meterMaxHdInputTruePeakDbtp = maxHdHeldTruePeak > 0.000001f
     ? static_cast<float>(20.0 * log10(maxHdHeldTruePeak)) : -120.0f;
 
-  const bool loudOutput = autoMakeupEnabled && outputReserveDb >= 5.5f;
-  const bool maxOutput = autoMakeupEnabled && outputReserveDb >= 14.0f;
-
-  // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: LOUD and MAX intentionally have different final peak targets.
-  // Density, not raw clipping, creates the large MAX perceived-level jump.
-  const float masteringTargetDb = maxOutput ? -1.35f : (loudOutput ? -1.75f : -1.20f);
-  const float masteringTarget = static_cast<float>(dbToGain(masteringTargetDb));
+  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: optional clean makeup may use real headroom, but LOUD/MAX are
+  // NEVER allowed to attenuate below unity. The old safe-cap logic was the main
+  // reason MVP HD could sound softer than Device Direct.
+  const float target = static_cast<float>(dbToGain(maxMode ? -0.15f : -0.25f));
   float safeCap = requestedDrive;
-  if (maxHdHeldTruePeak > 0.000001f) {
-    safeCap = masteringTarget / maxHdHeldTruePeak;
-  }
-
-  safeCap = clampf(
-    safeCap,
-    static_cast<float>(dbToGain(-12.0f)),
-    requestedDrive
-  );
+  if (maxHdHeldTruePeak > 0.000001f) safeCap = target / maxHdHeldTruePeak;
+  float driveTarget = clampf(safeCap, 1.0f, requestedDrive);
 
   const float limiterReductionDb = limiterGain < 0.999999f
     ? static_cast<float>(-20.0 * log10(limiterGain)) : 0.0f;
+  if (limiterReductionDb > maxHdLimiterFeedbackDb) maxHdLimiterFeedbackDb = limiterReductionDb;
+  else maxHdLimiterFeedbackDb += (0.0f - maxHdLimiterFeedbackDb) * maxHdFeedbackReleaseCoeff;
 
-  if (limiterReductionDb > maxHdLimiterFeedbackDb) {
-    maxHdLimiterFeedbackDb = limiterReductionDb;
-  } else {
-    maxHdLimiterFeedbackDb += (0.0f - maxHdLimiterFeedbackDb) * maxHdFeedbackReleaseCoeff;
+  if (maxHdLimiterFeedbackDb > 0.10f && driveTarget > 1.0f) {
+    const float feedbackDb = clampf(maxHdLimiterFeedbackDb, 0.0f, 4.0f);
+    driveTarget = clampf(driveTarget * static_cast<float>(dbToGain(-feedbackDb)), 1.0f, requestedDrive);
   }
 
-  float driveTarget = safeCap;
-
-  // If Peak Guard catches a freak reconstruction spike, surrender optional gain
-  // immediately. This feedback is emergency recovery, not normal gain riding.
-  if (maxHdLimiterFeedbackDb > 0.02f && driveTarget > 1.0f) {
-    const float feedbackDb = clampf(maxHdLimiterFeedbackDb + 0.75f, 0.0f, 8.0f);
-    driveTarget *= static_cast<float>(dbToGain(-feedbackDb));
-  }
-
-  if (driveTarget < cleanOutputDriveGain) {
-    cleanOutputDriveGain = driveTarget;
-  } else {
-    const float riseSeconds = maxOutput ? 0.035f : (loudOutput ? 0.060f : 0.300f);
+  if (driveTarget < cleanOutputDriveGain) cleanOutputDriveGain = driveTarget;
+  else {
+    const float riseSeconds = maxMode ? 0.040f : 0.065f;
     const float riseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRateHz * riseSeconds)));
     cleanOutputDriveGain += (driveTarget - cleanOutputDriveGain) * riseCoeff;
   }
 
-  cleanOutputDriveGain = clampf(
-    cleanOutputDriveGain,
-    static_cast<float>(dbToGain(-12.0f)),
-    requestedDrive
-  );
-
+  cleanOutputDriveGain = clampf(cleanOutputDriveGain, 1.0f, requestedDrive);
   outputReserveGain = cleanOutputDriveGain;
   autoMakeupGain = 1.0f;
-
   left *= outputReserveGain;
   right *= outputReserveGain;
 
-  meterAutoMakeupDb = compensationDb;
+  meterAutoMakeupDb = 0.0f;
   meterOutputReserveDb = outputReserveGain > 0.000001f
-    ? static_cast<float>(20.0 * log10(outputReserveGain)) : -120.0f;
-
+    ? static_cast<float>(20.0 * log10(outputReserveGain)) : 0.0f;
   const float after = absf(left) > absf(right) ? absf(left) : absf(right);
   meterAvailableHeadroomDb = after > 0.000001f
     ? clampf(static_cast<float>(-20.0 * log10(after)), -12.0f, 24.0f)
@@ -1639,12 +1589,10 @@ inline float processHdMaximizerSample(float sample, float intensity) {
 }
 
 void processHdLoudnessMaximizer(float &left, float &right) {
-  // MVP_R82_R9_R3_STABLE_HD_NO_STOP: LOUD remains completely clean. Only MAX gets gentle residual
-  // peak rounding, after its bounded crest control and before clean makeup.
-  if (!autoMakeupEnabled || outputReserveDb < 14.0f) return;
-  const float intensity = clampf((outputReserveDb - 14.0f) / 4.0f, 0.0f, 1.0f);
-  left = processHdMaximizerSample(left, intensity);
-  right = processHdMaximizerSample(right, intensity);
+  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: legacy peak-shaver retired. The new density maximizer below owns
+  // loudness, and the final true-peak limiter owns safety.
+  (void)left;
+  (void)right;
 }
 
 // MVP_R82_R10_R2_BIG_JUMP_FULLNESS: broadband perceptual density maximizer.
@@ -1652,7 +1600,7 @@ void processHdLoudnessMaximizer(float &left, float &right) {
 // program density while preserving the sign, ordering and full-band tonal balance.
 // y(1) = 1, so full-scale peaks are not multiplied by a raw gain stage.
 inline float processPerceptualDensitySample(float sample, float amount) {
-  const float a = clampf(amount, 0.0f, 5.0f);
+  const float a = clampf(amount, 0.0f, 10.0f);
   if (a <= 0.0001f) return sample;
   const float magnitude = absf(sample);
   if (magnitude <= 0.0000001f) return sample;
@@ -1663,7 +1611,9 @@ inline float processPerceptualDensitySample(float sample, float amount) {
 void processPerceptualDensity(float &left, float &right) {
   if (!autoMakeupEnabled || outputReserveDb < 5.5f) return;
   const bool maxMode = outputReserveDb >= 14.0f;
-  const float amount = maxMode ? 5.0f : 0.35f;
+  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: LOUD is a real but open lift. MAX is deliberately a much denser
+  // mastering curve so the jump is unmistakable without a raw clipping stage.
+  const float amount = maxMode ? 10.0f : 0.70f;
   left = processPerceptualDensitySample(left, amount);
   right = processPerceptualDensitySample(right, amount);
 }

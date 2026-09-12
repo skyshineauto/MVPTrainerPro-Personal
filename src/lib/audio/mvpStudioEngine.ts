@@ -123,7 +123,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const MVP_STUDIO_ASSET_VERSION = "8.4.1-r82-r10-r2-big-jump-fullness";
+const MVP_STUDIO_ASSET_VERSION = "9.0.0-r83-big-guys-clean-mastering";
 const READY_TIMEOUT_MS = 6000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
