@@ -1,4 +1,4 @@
-name: MVP HD V2 WASM Build
+name: MVP Broadcast V3 WASM Build
 
 on:
   workflow_dispatch:
@@ -13,6 +13,10 @@ on:
       - "public/audioV2/test.html"
       - "public/audioV2/test.js"
       - "src/lib/audioV2/**"
+      - "src/lib/audio/mvpStudioEngine.ts"
+      - "src/lib/musicPlayer.ts"
+      - "src/features/music/MusicMiniPlayer.tsx"
+      - "src/lib/musicAiAudioRuntime.ts"
       - "scripts/test-mvp-hd-v2-browser.mjs"
       - ".github/workflows/mvp-hd-v2-wasm.yml"
 
@@ -20,7 +24,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mvp-hd-v2-wasm-main
+  group: mvp-broadcast-v3-wasm-main
   cancel-in-progress: false
 
 jobs:
@@ -51,16 +55,16 @@ jobs:
           ./.emsdk/emsdk install 3.1.64
           ./.emsdk/emsdk activate 3.1.64
 
-      - name: Build isolated V2 WASM
+      - name: Build Broadcast V3 WASM
         shell: bash
         run: |
           source ./.emsdk/emsdk_env.sh
           CXX="$PWD/.emsdk/upstream/bin/clang++" bash scripts/build-mvp-hd-v2.sh
 
-      - name: Run V2 raw PCM validation
+      - name: Run Broadcast V3 raw PCM validation
         run: node scripts/test-mvp-hd-v2.mjs
 
-      - name: Run V2 Stage 2 browser/worklet static validation
+      - name: Run Broadcast V3 browser and production static validation
         run: |
           node --check public/audioV2/mvpHdV2.worklet.js
           node --check public/audioV2/test.js
@@ -69,21 +73,21 @@ jobs:
       - name: Run production app build
         run: npm run build
 
-      - name: Upload validated V2 WASM
+      - name: Upload validated Broadcast V3 WASM
         uses: actions/upload-artifact@v4
         with:
-          name: mvp-hd-v2-wasm
+          name: mvp-broadcast-v3-wasm
           path: public/audioV2/mvpHdV2.wasm
 
-      - name: Commit validated V2 WASM only
+      - name: Commit validated Broadcast V3 WASM only
         shell: bash
         run: |
           git add public/audioV2/mvpHdV2.wasm
           if git diff --cached --quiet; then
-            echo "V2 WASM binary is already current."
+            echo "Broadcast V3 WASM binary is already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Build MVP HD V2 WASM"
+          git commit -m "Build MVP Broadcast V3 WASM"
           git push origin HEAD:main

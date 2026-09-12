@@ -72,6 +72,8 @@ export type MusicOutputProfile = "reference" | "car_hifi" | "headphones" | "spea
 export type MusicPlaybackMode = "device_direct" | "mvp_hd";
 export type MusicHdLoudnessMode = "normal" | "loud" | "max";
 export type MusicHdBassMode = "off" | "strong" | "deep";
+export type MusicExperienceMode = "pure" | "adaptive" | "power";
+export type MusicSpaceMode = "studio" | "live" | "arena";
 export type MusicTransitionMode = "auto" | "gapless" | "smooth" | "off";
 export type MusicParametricFilterType = "bell" | "low_shelf" | "high_shelf" | "high_pass" | "low_pass" | "notch";
 export type MusicParametricBand = { enabled: boolean; frequency: number; gainDb: number; q: number; type: MusicParametricFilterType };
@@ -255,17 +257,17 @@ export const MUSIC_OUTPUT_PROFILES: Record<
   car_hifi: {
     label: "Car / Hi-Fi",
     shortLabel: "CAR / HI-FI",
-    description: "Near-neutral full-range path with conservative gain and true-peak protection for a tuned vehicle or hi-fi system.",
+    description: "Adaptive full-range mastering for car and hi-fi systems with optional Studio, Live and Arena space.",
   },
   headphones: {
     label: "Headphones",
     shortLabel: "HEADPHONES",
-    description: "Studio HD headphone path: full-range clarity, high clean output and optional Wide / Spatial / Deep immersion.",
+    description: "Adaptive broadcast mastering for headphones with optional Immersion and personalized tonal targeting.",
   },
   speaker: {
     label: "Bluetooth Speaker",
     shortLabel: "BLUETOOTH",
-    description: "Clean HD Bluetooth path with maximum usable output, full-range clarity and automatic peak protection.",
+    description: "Adaptive Bluetooth mastering with controlled low-end extension, clarity and Stage processing.",
   },
 };
 
@@ -368,6 +370,18 @@ export type MusicPlayerState = {
   outputProfile: MusicOutputProfile;
   playbackMode: MusicPlaybackMode;
   hdLoudnessMode: MusicHdLoudnessMode;
+  experienceMode: MusicExperienceMode;
+  hdIntensity: number;
+  broadcastBassEnabled: boolean;
+  broadcastBassCharacter: number;
+  broadcastImpactEnabled: boolean;
+  broadcastClarityEnabled: boolean;
+  broadcastSpatialEnabled: boolean;
+  spaceMode: MusicSpaceMode;
+  personalSoundEnabled: boolean;
+  personalBass: number;
+  personalPresence: number;
+  personalBrightness: number;
   dspBypass: boolean;
   dspStatus: MusicDspStatus;
   dspEngineMode: MusicDspEngineMode;
@@ -452,7 +466,8 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v23-r83-big-guys-clean-mastering";
+const AUDIO_ENGINE_VERSION = "v24-broadcast-engine-v3";
+// MVP_BROADCAST_V3_FULL_REBUILD
 const OUTPUT_PROFILE_STATE_VERSION = 2;
 const listeners = new Set<() => void>();
 
@@ -589,6 +604,90 @@ function readHdLoudnessMode(): MusicHdLoudnessMode {
   const value = readStored(STORAGE_KEYS.hdLoudnessMode);
   return value === "normal" || value === "loud" || value === "max" ? value : "normal";
 }
+
+type MusicBroadcastProfileSettings = {
+  experienceMode: MusicExperienceMode;
+  hdIntensity: number;
+  broadcastBassEnabled: boolean;
+  broadcastBassCharacter: number;
+  broadcastImpactEnabled: boolean;
+  broadcastClarityEnabled: boolean;
+  broadcastSpatialEnabled: boolean;
+  spaceMode: MusicSpaceMode;
+  personalSoundEnabled: boolean;
+  personalBass: number;
+  personalPresence: number;
+  personalBrightness: number;
+};
+
+const BROADCAST_PROFILE_STATE_VERSION = 1;
+
+function broadcastProfileStateKey(profile: MusicOutputProfile) {
+  return `mvp_music_broadcast_profile_v${BROADCAST_PROFILE_STATE_VERSION}:${profile}`;
+}
+
+function broadcastNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(min, Math.min(max, numeric)) : fallback;
+}
+
+function defaultBroadcastProfileSettings(_profile: MusicOutputProfile): MusicBroadcastProfileSettings {
+  const legacyPlayback = readPlaybackMode();
+  const legacyLoudness = readHdLoudnessMode();
+  return {
+    experienceMode: legacyPlayback === "device_direct" ? "pure" : legacyLoudness === "max" ? "power" : "adaptive",
+    hdIntensity: 72,
+    broadcastBassEnabled: false,
+    broadcastBassCharacter: 50,
+    broadcastImpactEnabled: false,
+    broadcastClarityEnabled: false,
+    broadcastSpatialEnabled: false,
+    spaceMode: "studio",
+    personalSoundEnabled: false,
+    personalBass: 0,
+    personalPresence: 0,
+    personalBrightness: 0,
+  };
+}
+
+function readBroadcastProfileSettings(profile: MusicOutputProfile): MusicBroadcastProfileSettings {
+  const fallback = defaultBroadcastProfileSettings(profile);
+  try {
+    const raw = readStored(broadcastProfileStateKey(profile));
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<MusicBroadcastProfileSettings>;
+    const experienceMode: MusicExperienceMode =
+      parsed.experienceMode === "pure" || parsed.experienceMode === "adaptive" || parsed.experienceMode === "power"
+        ? parsed.experienceMode
+        : fallback.experienceMode;
+    const spaceMode: MusicSpaceMode =
+      parsed.spaceMode === "studio" || parsed.spaceMode === "live" || parsed.spaceMode === "arena"
+        ? parsed.spaceMode
+        : "studio";
+    return {
+      experienceMode,
+      hdIntensity: broadcastNumber(parsed.hdIntensity, fallback.hdIntensity, 0, 100),
+      broadcastBassEnabled: Boolean(parsed.broadcastBassEnabled),
+      broadcastBassCharacter: broadcastNumber(parsed.broadcastBassCharacter, fallback.broadcastBassCharacter, 0, 100),
+      broadcastImpactEnabled: Boolean(parsed.broadcastImpactEnabled),
+      broadcastClarityEnabled: Boolean(parsed.broadcastClarityEnabled),
+      broadcastSpatialEnabled: Boolean(parsed.broadcastSpatialEnabled),
+      spaceMode,
+      personalSoundEnabled: Boolean(parsed.personalSoundEnabled),
+      personalBass: broadcastNumber(parsed.personalBass, 0, -100, 100),
+      personalPresence: broadcastNumber(parsed.personalPresence, 0, -100, 100),
+      personalBrightness: broadcastNumber(parsed.personalBrightness, 0, -100, 100),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeBroadcastProfileSettings(profile: MusicOutputProfile, settings: MusicBroadcastProfileSettings) {
+  savePlayerSetting(broadcastProfileStateKey(profile), JSON.stringify(settings));
+}
+
+const initialBroadcastProfile = readBroadcastProfileSettings(readOutputProfile());
 function readEqTopology(): MusicEqTopology {
   return readStored(STORAGE_KEYS.eqTopology) === "linear_phase" ? "linear_phase" : "minimum_phase";
 }
@@ -786,6 +885,18 @@ let state: MusicPlayerState = {
   outputProfile: readOutputProfile(),
   playbackMode: readPlaybackMode(),
   hdLoudnessMode: readHdLoudnessMode(),
+  experienceMode: initialBroadcastProfile.experienceMode,
+  hdIntensity: initialBroadcastProfile.hdIntensity,
+  broadcastBassEnabled: initialBroadcastProfile.broadcastBassEnabled,
+  broadcastBassCharacter: initialBroadcastProfile.broadcastBassCharacter,
+  broadcastImpactEnabled: initialBroadcastProfile.broadcastImpactEnabled,
+  broadcastClarityEnabled: initialBroadcastProfile.broadcastClarityEnabled,
+  broadcastSpatialEnabled: initialBroadcastProfile.broadcastSpatialEnabled,
+  spaceMode: initialBroadcastProfile.spaceMode,
+  personalSoundEnabled: initialBroadcastProfile.personalSoundEnabled,
+  personalBass: initialBroadcastProfile.personalBass,
+  personalPresence: initialBroadcastProfile.personalPresence,
+  personalBrightness: initialBroadcastProfile.personalBrightness,
   // MVP_R82_R8_MVP_HD_ROUTING_LOCK: DEVICE DIRECT is the only top-level bypass. MVP HD always boots processed.
   dspBypass: readPlaybackMode() === "device_direct",
   dspStatus: "recovering",
@@ -930,6 +1041,62 @@ const signedUrlCache = new Map<string, { url: string; cachedAt: number }>();
 const SIGNED_URL_TTL_MS = 8 * 60 * 1000;
 const GRAPHIC_EQ_Q = 4.318;
 const PRO_PEAK_COUNT = 6;
+
+
+function currentBroadcastProfileSettings(): MusicBroadcastProfileSettings {
+  return {
+    experienceMode: state.experienceMode,
+    hdIntensity: state.hdIntensity,
+    broadcastBassEnabled: state.broadcastBassEnabled,
+    broadcastBassCharacter: state.broadcastBassCharacter,
+    broadcastImpactEnabled: state.broadcastImpactEnabled,
+    broadcastClarityEnabled: state.broadcastClarityEnabled,
+    broadcastSpatialEnabled: state.broadcastSpatialEnabled,
+    spaceMode: state.spaceMode,
+    personalSoundEnabled: state.personalSoundEnabled,
+    personalBass: state.personalBass,
+    personalPresence: state.personalPresence,
+    personalBrightness: state.personalBrightness,
+  };
+}
+
+function applyBroadcastProfileSettings(profile: MusicOutputProfile, settings: MusicBroadcastProfileSettings) {
+  const playbackMode: MusicPlaybackMode = settings.experienceMode === "pure" ? "device_direct" : "mvp_hd";
+  const hdLoudnessMode: MusicHdLoudnessMode = settings.experienceMode === "power" ? "max" : "normal";
+  savePlayerSetting(STORAGE_KEYS.playbackMode, playbackMode);
+  savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, hdLoudnessMode);
+  savePlayerSetting(STORAGE_KEYS.dspBypass, playbackMode === "device_direct" ? "true" : "false");
+
+  const headphoneMode: MusicHeadphoneMode =
+    profile === "headphones" && settings.broadcastSpatialEnabled ? "stage" : "off";
+  const headphoneValues = MUSIC_HEADPHONE_MODES[headphoneMode];
+  if (profile === "headphones") {
+    savePlayerSetting(STORAGE_KEYS.headphoneMode, headphoneMode);
+    savePlayerSetting(STORAGE_KEYS.headphoneWidth, String(headphoneValues.width));
+    savePlayerSetting(STORAGE_KEYS.headphoneDepth, String(headphoneValues.depth));
+    savePlayerSetting(STORAGE_KEYS.headphoneCrossfeed, String(headphoneValues.crossfeed));
+    savePlayerSetting(STORAGE_KEYS.headphoneCenter, String(headphoneValues.center));
+    savePlayerSetting(STORAGE_KEYS.headphoneBassImpact, String(headphoneValues.bass));
+  }
+
+  emit({
+    ...settings,
+    playbackMode,
+    hdLoudnessMode,
+    dspBypass: playbackMode === "device_direct",
+    ...(profile === "headphones" ? {
+      headphoneMode,
+      headphoneWidth: headphoneValues.width,
+      headphoneDepth: headphoneValues.depth,
+      headphoneCrossfeed: headphoneValues.crossfeed,
+      headphoneCenter: headphoneValues.center,
+      headphoneBassImpact: headphoneValues.bass,
+    } : {}),
+  });
+  writeBroadcastProfileSettings(profile, settings);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
 
 function emit(patch: Partial<MusicPlayerState>) {
   state = { ...state, ...patch };
@@ -1881,6 +2048,19 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     headphoneDistance: state.headphoneDistance / 100,
     headphoneReflections: 0,
     headphoneWet: 0,
+
+    broadcastModeCode: state.experienceMode === "power" ? 2 : state.experienceMode === "adaptive" ? 1 : 0,
+    broadcastIntensity: state.hdIntensity / 100,
+    broadcastBassEnabled: state.broadcastBassEnabled,
+    broadcastBassCharacter: state.broadcastBassCharacter / 100,
+    broadcastImpactEnabled: state.broadcastImpactEnabled,
+    broadcastClarityEnabled: state.broadcastClarityEnabled,
+    broadcastSpatialEnabled: state.broadcastSpatialEnabled,
+    broadcastSpaceModeCode: state.spaceMode === "arena" ? 2 : state.spaceMode === "live" ? 1 : 0,
+    broadcastPersonalEnabled: state.personalSoundEnabled,
+    broadcastPersonalBass: state.personalBass / 100,
+    broadcastPersonalPresence: state.personalPresence / 100,
+    broadcastPersonalBrightness: state.personalBrightness / 100,
   });
 
   const runtime = getMvpStudioRuntimeInfo();
@@ -4515,6 +4695,73 @@ export function setMusicHdLoudnessMode(mode: MusicHdLoudnessMode) {
   scheduleProcessingSettle();
 }
 
+function commitBroadcastProfilePatch(patch: Partial<MusicBroadcastProfileSettings>) {
+  const next: MusicBroadcastProfileSettings = { ...currentBroadcastProfileSettings(), ...patch };
+  emit(patch as Partial<MusicPlayerState>);
+  writeBroadcastProfileSettings(state.outputProfile, next);
+  applyProcessingSettings();
+  scheduleProcessingSettle();
+}
+
+export async function setMusicExperienceMode(mode: MusicExperienceMode) {
+  if (mode !== "pure" && mode !== "adaptive" && mode !== "power") return;
+  const targetPlayback: MusicPlaybackMode = mode === "pure" ? "device_direct" : "mvp_hd";
+  const targetLoudness: MusicHdLoudnessMode = mode === "power" ? "max" : "normal";
+  savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, targetLoudness);
+  emit({ experienceMode: mode, hdLoudnessMode: targetLoudness });
+  writeBroadcastProfileSettings(state.outputProfile, currentBroadcastProfileSettings());
+  if (state.playbackMode !== targetPlayback) {
+    await setMusicPlaybackMode(targetPlayback);
+  } else {
+    applyProcessingSettings();
+    scheduleProcessingSettle();
+  }
+}
+
+export function setMusicHdIntensity(value: number) {
+  const next = Math.max(0, Math.min(100, Number(value) || 0));
+  commitBroadcastProfilePatch({ hdIntensity: next });
+}
+
+export function setMusicBroadcastBassEnabled(enabled: boolean) {
+  commitBroadcastProfilePatch({ broadcastBassEnabled: enabled });
+}
+
+export function setMusicBroadcastBassCharacter(value: number) {
+  const next = Math.max(0, Math.min(100, Number(value) || 0));
+  commitBroadcastProfilePatch({ broadcastBassCharacter: next });
+}
+
+export function setMusicBroadcastImpact(enabled: boolean) {
+  commitBroadcastProfilePatch({ broadcastImpactEnabled: enabled });
+}
+
+export function setMusicBroadcastClarity(enabled: boolean) {
+  commitBroadcastProfilePatch({ broadcastClarityEnabled: enabled });
+}
+
+export function setMusicBroadcastSpatial(enabled: boolean) {
+  commitBroadcastProfilePatch({ broadcastSpatialEnabled: enabled });
+  if (state.outputProfile === "headphones") setMusicHeadphoneMode(enabled ? "stage" : "off");
+}
+
+export function setMusicSpaceMode(mode: MusicSpaceMode) {
+  if (mode !== "studio" && mode !== "live" && mode !== "arena") return;
+  commitBroadcastProfilePatch({ spaceMode: mode });
+}
+
+export function setMusicPersonalSoundEnabled(enabled: boolean) {
+  commitBroadcastProfilePatch({ personalSoundEnabled: enabled });
+}
+
+export function setMusicPersonalSoundTargets(values: { bass?: number; presence?: number; brightness?: number }) {
+  commitBroadcastProfilePatch({
+    personalBass: Math.max(-100, Math.min(100, Number(values.bass ?? state.personalBass) || 0)),
+    personalPresence: Math.max(-100, Math.min(100, Number(values.presence ?? state.personalPresence) || 0)),
+    personalBrightness: Math.max(-100, Math.min(100, Number(values.brightness ?? state.personalBrightness) || 0)),
+  });
+}
+
 export function setMusicHdBassMode(mode: MusicHdBassMode) {
   if (mode !== "off" && mode !== "strong" && mode !== "deep") return;
   if (mode === "off") {
@@ -4587,6 +4834,7 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
 
   // MVP_R80_CLOUD_R2_FINAL_AUDIO: every output profile owns its complete gain/effect state.
   writeOutputProfileSnapshot(state.outputProfile, currentOutputProfileSnapshot());
+  writeBroadcastProfileSettings(state.outputProfile, currentBroadcastProfileSettings());
 
   savePlayerSetting(STORAGE_KEYS.outputProfile, profile);
   savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
@@ -4603,6 +4851,7 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
 
   const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
   applyOutputProfileSnapshot(profile, target);
+  applyBroadcastProfileSettings(profile, readBroadcastProfileSettings(profile));
 }
 
 export function setMusicDspBypass(bypassed: boolean) {

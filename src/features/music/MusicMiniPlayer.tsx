@@ -104,12 +104,16 @@ import {
   setMusicPreamp,
   setMusicExtremePreamp,
   setMusicExtremePreampEnabled,
-  setMusicPlaybackMode,
-  setMusicHdLoudnessMode,
-  setMusicHdBassMode,
-  setMusicHdClarity,
-  setMusicHdPunch,
-  setMusicHdWide,
+  setMusicExperienceMode,
+  setMusicHdIntensity,
+  setMusicBroadcastBassEnabled,
+  setMusicBroadcastBassCharacter,
+  setMusicBroadcastImpact,
+  setMusicBroadcastClarity,
+  setMusicBroadcastSpatial,
+  setMusicSpaceMode,
+  setMusicPersonalSoundEnabled,
+  setMusicPersonalSoundTargets,
   setMusicOutputProfile,
   setMusicTransitionMode,
   setMusicVolume,
@@ -2263,7 +2267,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             }}
           >
             <header className="tr-dspControlCenterHeader">
-              <div><small>MVP STUDIO</small><strong>DSP CONTROL CENTER</strong><span>{player.dspEngineMode === "studio_wasm" ? "WASM ACTIVE" : player.dspEngineMode === "advanced_worklet" ? "WORKLET ACTIVE" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "DSP UNAVAILABLE"} • {MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span></div>
+              <div><small>MVP AUDIO</small><strong>BROADCAST ENGINE</strong><span>{player.dspEngineMode === "studio_wasm" ? "WASM ACTIVE" : player.dspEngineMode === "advanced_worklet" ? "WORKLET ACTIVE" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "DSP UNAVAILABLE"} • {MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span></div>
               <button type="button" onClick={() => setEqOpen(false)} aria-label="Close DSP Control Center">×</button>
             </header>
           <div className="tr-mobileDspWorkspace" aria-label="Mobile Studio DSP workspace">
@@ -2318,11 +2322,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             <label className="tr-outputProfileSelect">
               <span className="tr-outputProfileSelectLabel"><i data-profile={player.outputProfile}><PlayerIcon name={outputProfileIconName(player.outputProfile)} /></i><b>OUTPUT PROFILE</b></span>
               <select value={player.outputProfile} onChange={(event: ChangeEvent<HTMLSelectElement>) => void runDspMutation(() => setMusicOutputProfile(event.target.value as MusicOutputProfile))}>
-                {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
+                {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).filter(([value]) => value !== "reference").map(([value, profile]) => <option key={value} value={value}>{profile.label}</option>)}
               </select>
             </label>
             <div className="tr-outputProfileChoices" aria-label="Output profile quick select">
-              {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).map(([value, profile]) => (
+              {(Object.entries(MUSIC_OUTPUT_PROFILES) as Array<[MusicOutputProfile, (typeof MUSIC_OUTPUT_PROFILES)[MusicOutputProfile]]>).filter(([value]) => value !== "reference").map(([value, profile]) => (
                 <button key={value} type="button" data-profile={value} className={player.outputProfile === value ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicOutputProfile(value))} aria-pressed={player.outputProfile === value}>
                   <i><PlayerIcon name={outputProfileIconName(value)} /></i><span>{profile.shortLabel}</span>
                 </button>
@@ -2349,97 +2353,92 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             </div>
           </div>
 
-          <style>{"/* MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO: simplified high-output audio UI */\n        .tr-dspControlCenter .tr-headphoneSimplePanel,\n        .tr-dspControlCenter .tr-preampTrim,\n        .tr-dspControlCenter .tr-v10OutputReserve{display:none!important}\n        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"tone\"],\n        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"dynamics\"],\n        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"space\"],\n        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"smart\"],\n        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"meter\"]{display:none!important}\n        .tr-dspControlCenter .tr-dspTabs{grid-template-columns:repeat(2,minmax(0,1fr))!important}\n        .tr-dspControlCenter[data-playback-mode=\"device_direct\"] .tr-dspTabs button[data-dsp-tab=\"eq\"]{opacity:.38!important;pointer-events:none!important}\n\n        .tr-r82AudioPanel{display:grid;gap:14px;padding:16px;border:1px solid rgba(77,211,255,.28);border-radius:18px;background:radial-gradient(720px 280px at 0 -20%,rgba(41,170,232,.16),transparent 64%),linear-gradient(180deg,rgba(9,28,39,.98),rgba(3,12,18,.99));box-shadow:0 18px 50px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.04)}\n        .tr-r82AudioHead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}\n        .tr-r82AudioHead>div{display:grid;gap:4px;min-width:0}.tr-r82AudioHead small{font-size:8px;font-weight:1000;letter-spacing:.14em;color:#55d9ff}.tr-r82AudioHead strong{font-size:20px;color:#fff;line-height:1}.tr-r82AudioHead strong span{font-size:10px;color:#708d99;font-weight:800}.tr-r82AudioHead p{margin:0;max-width:430px;font-size:9px;line-height:1.45;color:#91abb6}.tr-r82AudioHead>b{flex:0 0 auto;padding:7px 10px;border-radius:999px;font-size:8px;letter-spacing:.10em}.tr-r82AudioHead>b.is-direct{color:#dce8ee;border:1px solid rgba(198,216,225,.24);background:rgba(255,255,255,.055)}.tr-r82AudioHead>b.is-hd{color:#a9f3ff;border:1px solid rgba(71,218,255,.43);background:rgba(20,105,133,.38);box-shadow:0 0 18px rgba(51,205,246,.12)}\n        .tr-r82ModeSwitch,.tr-r82Three,.tr-r82Effects,.tr-r82Immersion{display:grid;gap:8px}.tr-r82ModeSwitch{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-r82Three{grid-template-columns:repeat(3,minmax(0,1fr))}.tr-r82Effects{grid-template-columns:repeat(3,minmax(0,1fr))}.tr-r82Immersion{grid-template-columns:repeat(5,minmax(0,1fr))}\n        .tr-r82ModeSwitch button,.tr-r82Three button,.tr-r82Effects button,.tr-r82Immersion button{min-width:0;border:1px solid rgba(128,178,199,.16);border-radius:12px;background:linear-gradient(180deg,rgba(18,30,39,.96),rgba(7,14,20,.98));color:#8da5b0;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.035);transition:.16s ease}\n        .tr-r82ModeSwitch button{min-height:58px;padding:10px}.tr-r82Three button{min-height:52px;padding:9px 6px}.tr-r82Effects button{min-height:58px;padding:9px 7px}.tr-r82Immersion button{min-height:40px;padding:7px 4px;font-size:8px;font-weight:1000;letter-spacing:.05em}\n        .tr-r82ModeSwitch button b,.tr-r82Three button b,.tr-r82Effects button b{display:block;color:#e6f3f8;font-size:9px;font-weight:1000;letter-spacing:.055em}.tr-r82ModeSwitch button small,.tr-r82Three button small,.tr-r82Effects button small{display:block;margin-top:3px;color:#708995;font-size:7px;line-height:1.25;font-weight:800}\n        .tr-r82ModeSwitch button.is-active,.tr-r82Three button.is-active,.tr-r82Effects button.is-active,.tr-r82Immersion button.is-active{border-color:rgba(70,219,255,.72);color:#fff;background:linear-gradient(180deg,rgba(18,91,118,.92),rgba(7,43,57,.96));box-shadow:0 0 18px rgba(48,202,242,.13),inset 0 1px rgba(255,255,255,.08)}\n        .tr-r82Three button.is-active b,.tr-r82Effects button.is-active b,.tr-r82ModeSwitch button.is-active b{color:#fff}\n        .tr-r82Three button:nth-child(3).is-active{border-color:rgba(255,154,58,.78);background:linear-gradient(180deg,rgba(126,63,15,.95),rgba(59,28,7,.98));box-shadow:0 0 20px rgba(255,129,33,.16)}\n        .tr-r82Section{display:grid;gap:8px;padding-top:11px;border-top:1px solid rgba(255,255,255,.065)}.tr-r82SectionTitle{display:flex;align-items:end;justify-content:space-between;gap:10px}.tr-r82SectionTitle span{font-size:9px;font-weight:1000;letter-spacing:.12em;color:#eaf8fc}.tr-r82SectionTitle small{font-size:7px;color:#708793;text-align:right}\n        .tr-r82DirectNotice{display:grid;gap:5px;padding:16px;border:1px solid rgba(195,216,225,.15);border-radius:13px;background:rgba(255,255,255,.025)}.tr-r82DirectNotice b{font-size:10px;color:#e8f2f6}.tr-r82DirectNotice span{font-size:8px;line-height:1.45;color:#8299a3}\n        .tr-r82Footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.065)}.tr-r82Footer span{font-size:7px;color:#718a95}.tr-r82Footer b{font-size:8px;color:#7ce8ff;letter-spacing:.08em}\n        @media(max-width:520px){.tr-r82AudioPanel{padding:13px;gap:12px}.tr-r82AudioHead strong{font-size:17px}.tr-r82Three{grid-template-columns:1fr}.tr-r82Effects{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-r82Immersion{grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}.tr-r82Immersion button{font-size:6.8px}.tr-r82SectionTitle{align-items:flex-start;flex-direction:column}.tr-r82SectionTitle small{text-align:left}.tr-r82Footer{align-items:flex-start;flex-direction:column}}"}</style>
-          {/* MVP_R82_R5_DIRECT_HD_BIG_GUYS_AUDIO */}
+          <style>{"/* MVP_BROADCAST_V3_SIMPLE_UI */\n\
+        .tr-dspControlCenter .tr-headphoneSimplePanel,.tr-dspControlCenter .tr-preampTrim,.tr-dspControlCenter .tr-v10OutputReserve{display:none!important}\n\
+        .tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"tone\"],.tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"dynamics\"],.tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"space\"],.tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"smart\"],.tr-dspControlCenter .tr-dspTabs button[data-dsp-tab=\"meter\"]{display:none!important}\n\
+        .tr-dspControlCenter .tr-dspTabs{grid-template-columns:repeat(2,minmax(0,1fr))!important}\n\
+        .tr-v24Broadcast{display:grid;gap:13px;padding:15px;border:1px solid rgba(73,211,255,.30);border-radius:18px;background:radial-gradient(700px 260px at 0 -30%,rgba(32,173,226,.17),transparent 64%),linear-gradient(180deg,rgba(8,25,35,.98),rgba(3,11,17,.99));box-shadow:0 18px 55px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.04)}\n\
+        .tr-v24Head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.tr-v24Head>div{display:grid;gap:3px}.tr-v24Head small{font-size:8px;font-weight:1000;letter-spacing:.14em;color:#54d9ff}.tr-v24Head strong{font-size:19px;color:#fff}.tr-v24Head span{font-size:8px;color:#78919d}.tr-v24Device{flex:0 0 auto;padding:7px 9px;border:1px solid rgba(81,216,255,.28);border-radius:999px;color:#9ceeff!important;background:rgba(18,88,112,.27);font-size:7px!important;font-weight:1000;letter-spacing:.08em}\n\
+        .tr-v24Section{display:grid;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,.065)}.tr-v24Label{font-size:8px;font-weight:1000;letter-spacing:.12em;color:#91aab6}\n\
+        .tr-v24Modes,.tr-v24Sound,.tr-v24Space,.tr-v24Extras{display:grid;gap:7px}.tr-v24Modes{grid-template-columns:repeat(3,minmax(0,1fr))}.tr-v24Sound{grid-template-columns:repeat(4,minmax(0,1fr))}.tr-v24Space{grid-template-columns:repeat(3,minmax(0,1fr))}.tr-v24Extras{grid-template-columns:repeat(2,minmax(0,1fr))}\n\
+        .tr-v24Broadcast button{border:1px solid rgba(128,178,199,.18);border-radius:11px;background:linear-gradient(180deg,rgba(18,31,40,.97),rgba(7,14,20,.99));color:#9bb0ba;min-height:44px;padding:8px 6px;font-size:9px;font-weight:1000;letter-spacing:.055em;cursor:pointer}.tr-v24Broadcast button.is-active{border-color:rgba(62,219,255,.75);background:linear-gradient(180deg,rgba(16,91,119,.94),rgba(7,42,56,.98));color:#fff;box-shadow:0 0 18px rgba(43,207,249,.14)}.tr-v24Modes button.is-power.is-active{border-color:rgba(255,157,58,.82);background:linear-gradient(180deg,rgba(127,63,15,.96),rgba(58,27,7,.99));box-shadow:0 0 20px rgba(255,133,33,.16)}\n\
+        .tr-v24Range{display:grid;grid-template-columns:74px 1fr 48px;align-items:center;gap:9px}.tr-v24Range>span,.tr-v24Range>b{font-size:8px;color:#a9bdc7}.tr-v24Range>b{text-align:right;color:#eaf8fc}.tr-v24Range input{width:100%;accent-color:#34d4ff}.tr-v24Character{grid-template-columns:42px 1fr 42px}.tr-v24Character span:last-child{text-align:right}\n\
+        .tr-v24Personal{display:grid;gap:8px;padding:9px;border:1px solid rgba(255,255,255,.065);border-radius:11px;background:rgba(255,255,255,.02)}\n\
+        @media(max-width:540px){.tr-v24Broadcast{padding:12px}.tr-v24Sound{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-v24Head{flex-direction:column}.tr-v24Device{align-self:flex-start}.tr-v24Range{grid-template-columns:64px 1fr 42px}}\n"}</style>
+          {/* MVP_BROADCAST_V3_SIMPLE_UI */}
           {player.outputProfile !== "reference" ? (
-            <section className="tr-r82AudioPanel" aria-label="MVP HD audio controls" data-mobile-dsp-section="output">
-              <header className="tr-r82AudioHead">
+            <section className="tr-v24Broadcast" aria-label="MVP Broadcast audio controls" data-mobile-dsp-section="output">
+              <header className="tr-v24Head">
                 <div>
                   <small>{player.outputProfile === "headphones" ? "HEADPHONES" : player.outputProfile === "speaker" ? "BLUETOOTH SPEAKER" : "CAR / HI-FI"}</small>
-                  <strong>DEVICE DIRECT <span>or</span> MVP HD</strong>
-                  <p>{player.playbackMode === "device_direct" ? "Native device playback. MVP audio processing is completely out of the signal path." : "High-output mastering with coordinated bass, clarity, punch and spatial processing."}</p>
+                  <strong>MVP BROADCAST</strong>
+                  <span>Adaptive mastering • one clean signal path</span>
                 </div>
-                <b className={player.playbackMode === "device_direct" ? "is-direct" : "is-hd"}>{player.playbackMode === "device_direct" ? "DIRECT" : "MVP HD"}</b>
+                <span className="tr-v24Device">DEVICE PROFILE • {player.outputProfile === "headphones" ? "HEADPHONES" : player.outputProfile === "speaker" ? "BLUETOOTH" : "CAR / HI-FI"}</span>
               </header>
 
-              <div className="tr-r82ModeSwitch" role="group" aria-label="Playback processing mode">
-                <button type="button" className={player.playbackMode === "device_direct" ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicPlaybackMode("device_direct"), true)}>
-                  <b>DEVICE DIRECT</b>
-                  <small>Phone / car / headphones process it</small>
-                </button>
-                <button type="button" className={player.playbackMode === "mvp_hd" ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicPlaybackMode("mvp_hd"), true)}>
-                  <b>MVP HD</b>
-                  <small>High-end mastering + effects</small>
-                </button>
+              <div className="tr-v24Section">
+                <span className="tr-v24Label">MODE</span>
+                <div className="tr-v24Modes">
+                  {(["pure","adaptive","power"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`${player.experienceMode === mode ? "is-active" : ""} ${mode === "power" ? "is-power" : ""}`}
+                      aria-pressed={player.experienceMode === mode}
+                      onClick={() => void runDspMutation(() => setMusicExperienceMode(mode), true)}
+                    >{mode.toUpperCase()}</button>
+                  ))}
+                </div>
               </div>
 
-              {player.playbackMode === "mvp_hd" ? (
-                <>
-                  <div className="tr-r82Section">
-                    <div className="tr-r82SectionTitle"><span>LOUDNESS</span><small>One control. No Extreme / Reserve / Auto Makeup stacking.</small></div>
-                    <div className="tr-r82Three">
-                      {(["normal","loud","max"] as const).map((mode) => (
-                        <button key={mode} type="button" className={player.hdLoudnessMode === mode ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHdLoudnessMode(mode), true)}>
-                          <b>{mode.toUpperCase()}</b>
-                          <small>{mode === "normal" ? "Clean" : mode === "loud" ? "Strong" : "Maximum"}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="tr-r82Section">
-                    <div className="tr-r82SectionTitle"><span>SOUND</span><small>Coordinated processing. Selected controls work together.</small></div>
-                    <div className="tr-r82Three">
-                      {(["off","strong","deep"] as const).map((mode) => {
-                        const currentBass = !player.bassEngineEnabled ? "off" : player.bassSubDb >= 5.5 ? "deep" : "strong";
-                        return (
-                          <button key={mode} type="button" className={currentBass === mode ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHdBassMode(mode), true)}>
-                            <b>{mode === "off" ? "BASS OFF" : mode === "strong" ? "BASS STRONG" : "BASS DEEP"}</b>
-                            <small>{mode === "deep" ? "Psychoacoustic depth" : mode === "strong" ? "Impact + body" : "Neutral low end"}</small>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="tr-r82Effects">
-                      <button type="button" className={player.toneEngineEnabled ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHdClarity(!player.toneEngineEnabled), true)}><b>CLARITY</b><small>Presence • detail • air</small></button>
-                      <button type="button" className={player.dynamicsRestoreEnabled ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHdPunch(!player.dynamicsRestoreEnabled), true)}><b>PUNCH</b><small>Kick • snare • attack</small></button>
-                      {player.outputProfile !== "headphones" ? (
-                        <button type="button" className={player.stereoFieldEnabled ? "is-active" : ""} onClick={() => void runDspMutation(() => setMusicHdWide(!player.stereoFieldEnabled), true)}><b>WIDE</b><small>Speaker-stage expansion</small></button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {player.outputProfile === "headphones" ? (
-                    <div className="tr-r82Section">
-                      <div className="tr-r82SectionTitle"><span>IMMERSION</span><small>Each mode is intentionally obvious, not a tiny garnish.</small></div>
-                      <div className="tr-r82Immersion">
-                        {([
-                          ["off","OFF"],
-                          ["wide","WIDE"],
-                          ["spatial","SPATIAL"],
-                          ["deep","DEEP"],
-                          ["stage","3D"],
-                        ] as const).map(([mode,label]) => (
-                          <button key={mode} type="button" className={player.headphoneMode === mode ? "is-active" : ""} onClick={() => void runDspMutation(() => {
-                            setMusicHeadphoneAdvancedEnabled(false);
-                            setMusicHeadphoneMode(mode);
-                          }, true)}>{label}</button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <footer className="tr-r82Footer">
-                    <span>31-BAND EQ stays available in the EQ tab.</span>
-                    <b>{player.hdLoudnessMode === "max" ? "MAX MASTERING" : player.hdLoudnessMode === "loud" ? "LOUD MASTERING" : "CLEAN MASTERING"}</b>
-                  </footer>
-                </>
-              ) : (
-                <div className="tr-r82DirectNotice">
-                  <b>MVP DSP BYPASSED AT THE SOURCE</b>
-                  <span>Volume goes straight through the native media path to the operating system and connected device.</span>
+              <div className="tr-v24Section">
+                <span className="tr-v24Label">SOUND</span>
+                <div className="tr-v24Sound">
+                  <button type="button" className={player.broadcastBassEnabled ? "is-active" : ""} aria-pressed={player.broadcastBassEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastBassEnabled(!player.broadcastBassEnabled), true)}>BASS</button>
+                  <button type="button" className={player.broadcastImpactEnabled ? "is-active" : ""} aria-pressed={player.broadcastImpactEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastImpact(!player.broadcastImpactEnabled), true)}>IMPACT</button>
+                  <button type="button" className={player.broadcastClarityEnabled ? "is-active" : ""} aria-pressed={player.broadcastClarityEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastClarity(!player.broadcastClarityEnabled), true)}>CLARITY</button>
+                  <button type="button" className={player.broadcastSpatialEnabled ? "is-active" : ""} aria-pressed={player.broadcastSpatialEnabled} onClick={() => void runDspMutation(() => setMusicBroadcastSpatial(!player.broadcastSpatialEnabled), true)}>
+                    {player.outputProfile === "headphones" ? "IMMERSION" : player.outputProfile === "speaker" ? "STAGE" : "SPACE"}
+                  </button>
                 </div>
-              )}
+
+                <label className="tr-v24Range">
+                  <span>INTENSITY</span>
+                  <input type="range" min="0" max="100" value={player.hdIntensity} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHdIntensity(Number(event.target.value)), true)} />
+                  <b>{Math.round(player.hdIntensity)}%</b>
+                </label>
+
+                {player.broadcastBassEnabled ? (
+                  <label className="tr-v24Range tr-v24Character">
+                    <span>TIGHT</span>
+                    <input type="range" min="0" max="100" value={player.broadcastBassCharacter} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicBroadcastBassCharacter(Number(event.target.value)), true)} />
+                    <span>DEEP</span>
+                  </label>
+                ) : null}
+
+                {player.outputProfile === "car_hifi" && player.broadcastSpatialEnabled ? (
+                  <div className="tr-v24Space" role="group" aria-label="Car space">
+                    {(["studio","live","arena"] as const).map((mode) => (
+                      <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} onClick={() => void runDspMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="tr-v24Section">
+                <div className="tr-v24Extras">
+                  <button type="button" className={player.personalSoundEnabled ? "is-active" : ""} aria-pressed={player.personalSoundEnabled} onClick={() => void runDspMutation(() => setMusicPersonalSoundEnabled(!player.personalSoundEnabled), true)}>PERSONAL SOUND</button>
+                  <button type="button" onClick={() => setDspTab("eq")}>ADVANCED EQ</button>
+                </div>
+                {player.personalSoundEnabled ? (
+                  <div className="tr-v24Personal">
+                    <label className="tr-v24Range"><span>BASS</span><input type="range" min="-100" max="100" value={player.personalBass} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ bass: Number(event.target.value) }), true)} /><b>{player.personalBass > 0 ? "+" : ""}{Math.round(player.personalBass)}</b></label>
+                    <label className="tr-v24Range"><span>PRESENCE</span><input type="range" min="-100" max="100" value={player.personalPresence} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ presence: Number(event.target.value) }), true)} /><b>{player.personalPresence > 0 ? "+" : ""}{Math.round(player.personalPresence)}</b></label>
+                    <label className="tr-v24Range"><span>BRIGHT</span><input type="range" min="-100" max="100" value={player.personalBrightness} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ brightness: Number(event.target.value) }), true)} /><b>{player.personalBrightness > 0 ? "+" : ""}{Math.round(player.personalBrightness)}</b></label>
+                  </div>
+                ) : null}
+              </div>
             </section>
           ) : null}
 

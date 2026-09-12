@@ -22,6 +22,20 @@ mkdir -p "$(dirname "$OUT")"
   -Wl,--export=mvp_v2_max_frames \
   -Wl,--export=mvp_v2_init \
   -Wl,--export=mvp_v2_reset \
+  -Wl,--export=mvp_v2_reset_meters \
+  -Wl,--export=mvp_v2_set_mode \
+  -Wl,--export=mvp_v2_set_output_profile \
+  -Wl,--export=mvp_v2_set_intensity \
+  -Wl,--export=mvp_v2_set_bass_enabled \
+  -Wl,--export=mvp_v2_set_bass_character \
+  -Wl,--export=mvp_v2_set_impact_enabled \
+  -Wl,--export=mvp_v2_set_clarity_enabled \
+  -Wl,--export=mvp_v2_set_spatial_enabled \
+  -Wl,--export=mvp_v2_set_space_mode \
+  -Wl,--export=mvp_v2_set_personal_enabled \
+  -Wl,--export=mvp_v2_set_personal_bass \
+  -Wl,--export=mvp_v2_set_personal_presence \
+  -Wl,--export=mvp_v2_set_personal_brightness \
   -Wl,--export=mvp_v2_set_bypass \
   -Wl,--export=mvp_v2_set_loudness_mode \
   -Wl,--export=mvp_v2_set_bass \
@@ -35,6 +49,11 @@ mkdir -p "$(dirname "$OUT")"
   -Wl,--export=mvp_v2_meter_limiter_gr_db \
   -Wl,--export=mvp_v2_meter_clip_count \
   -Wl,--export=mvp_v2_meter_nan_count \
+  -Wl,--export=mvp_v2_meter_multiband_gr_db \
+  -Wl,--export=mvp_v2_meter_impact_boost_db \
+  -Wl,--export=mvp_v2_meter_bass_activity_db \
+  -Wl,--export=mvp_v2_meter_clarity_activity_db \
+  -Wl,--export=mvp_v2_meter_spatial_width_percent \
   -Wl,--allow-undefined \
   -o "$OUT"
 
