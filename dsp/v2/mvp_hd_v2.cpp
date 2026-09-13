@@ -1,5 +1,6 @@
-// MVP Trainer Pro Broadcast Engine V3 R4 live-state fix
-// Coordinated adaptive broadcast mastering for Headphones, Bluetooth Speaker and Car/Hi-Fi.
+// MVP Trainer Pro Broadcast Engine V5
+// One continuous-state broadcast/mastering processor for Headphones, Bluetooth Speaker and Car/Hi-Fi.
+// ABI intentionally remains mvp_v2_* so the existing production Worklet/player wiring does not change.
 // Real-time contract: no heap allocation, no locks, no I/O in mvp_v2_process().
 
 extern "C" double sin(double) __attribute__((import_module("env"), import_name("sin")));
@@ -25,8 +26,10 @@ extern "C" void* memcpy(void* dest, const void* src, unsigned long count) {
 namespace {
 constexpr int kFrames = 128;
 constexpr int kEqBands = 31;
-constexpr int kLookaheadMax = 256;
-constexpr int kSpatialDelayMax = 2048;
+constexpr int kBands = 5;
+constexpr int kLookaheadMax = 320;
+constexpr int kSpatialDelayMax = 4096;
+constexpr int kTpPhaseTaps = 16;
 constexpr double kPi = 3.1415926535897932384626433832795;
 
 inline float absf(float v) { return v < 0.0f ? -v : v; }
@@ -35,11 +38,30 @@ inline double clampd(double v, double lo, double hi) { return v < lo ? lo : (v >
 inline float dbToGain(float db) { return static_cast<float>(pow(10.0, static_cast<double>(db) / 20.0)); }
 inline float gainToDb(float gain) { return gain > 0.0000001f ? static_cast<float>(20.0 * log10(gain)) : -120.0f; }
 
+inline float softCeiling(float x, float knee, float asymptote) {
+  const float a = absf(x);
+  if (a <= knee) return x;
+  const float span = asymptote - knee;
+  const float excess = a - knee;
+  const float y = knee + excess / (1.0f + excess / span);
+  return x < 0.0f ? -y : y;
+}
+
 const double kEqFrequencies[kEqBands] = {
   20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0,
   200.0, 250.0, 315.0, 400.0, 500.0, 630.0, 800.0, 1000.0, 1250.0,
   1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0,
   10000.0, 12500.0, 16000.0, 20000.0
+};
+
+// 64-tap Blackman-windowed sinc interpolation filter, decomposed into four 16-tap phases.
+// Passband gain is normalized to unity per reconstructed phase (phase sums are ~1.0).
+// This is used for actual 4x inter-sample peak detection, replacing the old cubic estimator.
+const float kTpFir[4][kTpPhaseTaps] = {
+  {0.0000000000f, 0.0006967276f, -0.0036114518f, 0.0106894409f, -0.0243920034f, 0.0473988787f, -0.0853522687f, 0.1749621972f, 0.9271834644f, -0.0558089374f, 0.0065336228f, 0.0051465217f, -0.0059139618f, 0.0036139880f, -0.0014253083f, 0.0002466871f},
+  {-0.0000259944f, 0.0009306425f, -0.0045142792f, 0.0140661965f, -0.0349789143f, 0.0763806998f, -0.1630375417f, 0.4750888740f, 0.7567609472f, -0.1677299103f, 0.0663150886f, -0.0261387989f, 0.0088488163f, -0.0022472932f, 0.0003169478f, -0.0000030777f},
+  {-0.0000030777f, 0.0003169478f, -0.0022472932f, 0.0088488163f, -0.0261387989f, 0.0663150886f, -0.1677299103f, 0.7567609472f, 0.4750888740f, -0.1630375417f, 0.0763806998f, -0.0349789143f, 0.0140661965f, -0.0045142792f, 0.0009306425f, -0.0000259944f},
+  {0.0002466871f, -0.0014253083f, 0.0036139880f, -0.0059139618f, 0.0051465217f, 0.0065336228f, -0.0558089374f, 0.9271834644f, 0.1749621972f, -0.0853522687f, 0.0473988787f, -0.0243920034f, 0.0106894409f, -0.0036114518f, 0.0006967276f, 0.0000000000f}
 };
 
 struct Biquad {
@@ -53,7 +75,6 @@ struct Biquad {
     z2 = b2 * x - a2 * y;
     return static_cast<float>(y);
   }
-
   void reset() { z1 = z2 = 0.0; }
   void identity() { b0 = 1.0; b1 = b2 = a1 = a2 = 0.0; }
 
@@ -99,39 +120,51 @@ struct Biquad {
   }
 };
 
-struct LR4Split {
-  Biquad lp1, lp2, hp1, hp2;
-
-  void configure(double sr, double freq) {
-    lp1.lowpass(sr, freq); lp2.lowpass(sr, freq);
-    hp1.highpass(sr, freq); hp2.highpass(sr, freq);
-  }
-  void reset() { lp1.reset(); lp2.reset(); hp1.reset(); hp2.reset(); }
-
+// Low is a 4th-order low-pass; high is defined as x-low, so every split is an exact
+// sample-domain complement. Five bands always sum back to the original sample exactly
+// before per-band dynamics/correction.
+struct ExactSplit {
+  Biquad lp1, lp2;
+  void configure(double sr, double freq) { lp1.lowpass(sr, freq); lp2.lowpass(sr, freq); }
+  void reset() { lp1.reset(); lp2.reset(); }
   inline void process(float x, float &low, float &high) {
     low = lp2.process(lp1.process(x));
-    high = hp2.process(hp1.process(x));
+    high = x - low;
   }
 };
 
 struct BandDynamics {
   float env = 0.0f;
   float gain = 1.0f;
-
   void reset() { env = 0.0f; gain = 1.0f; }
-
   inline float update(float detector, float threshold, float ratio, float attackCoeff, float releaseCoeff) {
-    const float envCoeff = detector > env ? attackCoeff : releaseCoeff;
-    env += (detector - env) * envCoeff;
-
+    const float ec = detector > env ? attackCoeff : releaseCoeff;
+    env += (detector - env) * ec;
     float target = 1.0f;
     if (env > threshold && env > 0.000001f) {
       const float over = env / threshold;
       target = static_cast<float>(pow(over, (1.0f / ratio) - 1.0f));
     }
-    const float gainCoeff = target < gain ? attackCoeff : releaseCoeff;
-    gain += (target - gain) * gainCoeff;
-    return clampf(gain, 0.12f, 1.0f);
+    const float gc = target < gain ? attackCoeff : releaseCoeff;
+    gain += (target - gain) * gc;
+    return clampf(gain, 0.10f, 1.0f);
+  }
+};
+
+struct TruePeak4x {
+  float hist[kTpPhaseTaps] = {};
+  void reset() { for (int i = 0; i < kTpPhaseTaps; ++i) hist[i] = 0.0f; }
+  inline float update(float x) {
+    for (int i = kTpPhaseTaps - 1; i > 0; --i) hist[i] = hist[i - 1];
+    hist[0] = x;
+    float peak = absf(x);
+    for (int p = 0; p < 4; ++p) {
+      float y = 0.0f;
+      for (int k = 0; k < kTpPhaseTaps; ++k) y += hist[k] * kTpFir[p][k];
+      const float a = absf(y);
+      if (a > peak) peak = a;
+    }
+    return peak;
   }
 };
 
@@ -148,7 +181,7 @@ int gOutputProfile = 1; // 0 Car/Hi-Fi, 1 Headphones, 2 Bluetooth Speaker
 float gIntensityTarget = 0.72f;
 float gIntensity = 0.72f;
 int gBassEnabled = 0;
-float gBassCharacterTarget = 0.50f; // 0 Tight, 1 Deep
+float gBassCharacterTarget = 0.50f;
 float gBassCharacter = 0.50f;
 int gImpactEnabled = 0;
 int gClarityEnabled = 0;
@@ -165,11 +198,22 @@ float gEqGainDb[kEqBands] = {};
 Biquad gEqL[kEqBands];
 Biquad gEqR[kEqBands];
 
-// Four-band broadcast dynamics.
-LR4Split gSplit120L, gSplit120R;
-LR4Split gSplit600L, gSplit600R;
-LR4Split gSplit4500L, gSplit4500R;
-BandDynamics gBandDynamics[4];
+// Program-density / AGC analysis.
+float gProgramPeak = 0.0f;
+float gProgramAvg = 0.0f;
+float gProgramDensity = 0.0f;
+float gPeakAttack = 0.0f, gPeakRelease = 0.0f;
+float gAvgAttack = 0.0f, gAvgRelease = 0.0f;
+float gAgcGain = 1.0f;
+float gAgcUpCoeff = 0.0f, gAgcDownCoeff = 0.0f;
+float gIntensitySmoothCoeff = 0.0f, gBassSmoothCoeff = 0.0f;
+
+// Five-band exact-complement broadcast dynamics.
+ExactSplit gSplit90L, gSplit90R;
+ExactSplit gSplit320L, gSplit320R;
+ExactSplit gSplit1400L, gSplit1400R;
+ExactSplit gSplit5200L, gSplit5200R;
+BandDynamics gBandDynamics[kBands];
 float gBandAttackCoeff = 0.0f;
 float gBandReleaseCoeff = 0.0f;
 float gBandGainReductionDb = 0.0f;
@@ -179,7 +223,7 @@ Biquad gBassDeepL, gBassDeepR;
 Biquad gBassBodyL, gBassBodyR;
 float gBassActivityDb = 0.0f;
 
-// Clarity / deharsh.
+// Clarity / de-harsh.
 Biquad gPresenceHpL, gPresenceHpR;
 Biquad gAirHpL, gAirHpR;
 float gHarshEnv = 0.0f;
@@ -203,50 +247,28 @@ int gSpatialIndex = 0;
 int gSpatialDelaySamples = 480;
 float gSpatialWidthPercent = 100.0f;
 
-// Intelligent maximizer.
+// Final density controller.
 float gMasterEnv = 0.0f;
 float gMasterAttack = 0.0f;
 float gMasterRelease = 0.0f;
-float gMasterDrive = 1.0f;
-float gSmoothCoeff = 0.001f;
 
-// Lookahead true-peak limiter.
+// Lookahead limiter.
 float gLookL[kLookaheadMax] = {};
 float gLookR[kLookaheadMax] = {};
 float gLookPeak[kLookaheadMax] = {};
-int gLookaheadSamples = 96;
+int gLookaheadSamples = 120;
 int gLookIndex = 0;
 float gLimiterGain = 1.0f;
-float gLimiterReleaseCoeff = 0.00025f;
-const float gLimiterCeiling = 0.9500f;
+float gLimiterReleaseCoeff = 0.0004f;
+const float gLimiterCeiling = 0.9380f;
 
-// True-peak history and meters.
-float gTpHistL[3] = {};
-float gTpHistR[3] = {};
-float gOutTpHistL[3] = {};
-float gOutTpHistR[3] = {};
+// True-peak detectors and meters.
+TruePeak4x gLimiterTpL, gLimiterTpR;
+TruePeak4x gMeterTpL, gMeterTpR;
 float gMeterTruePeak = 0.0f;
 float gMeterLimiterGrDb = 0.0f;
 unsigned int gMeterClipCount = 0;
 unsigned int gMeterNanCount = 0;
-
-inline float cubic(float p0, float p1, float p2, float p3, float t) {
-  const float a0 = -0.5f*p0 + 1.5f*p1 - 1.5f*p2 + 0.5f*p3;
-  const float a1 = p0 - 2.5f*p1 + 2.0f*p2 - 0.5f*p3;
-  const float a2 = -0.5f*p0 + 0.5f*p2;
-  return ((a0*t + a1)*t + a2)*t + p1;
-}
-
-inline float reconstructedPeak4x(float *h, float x) {
-  const float p0 = h[0], p1 = h[1], p2 = h[2], p3 = x;
-  float peak = absf(p1);
-  const float a = absf(cubic(p0, p1, p2, p3, 0.25f)); if (a > peak) peak = a;
-  const float b = absf(cubic(p0, p1, p2, p3, 0.50f)); if (b > peak) peak = b;
-  const float c = absf(cubic(p0, p1, p2, p3, 0.75f)); if (c > peak) peak = c;
-  const float d = absf(p2); if (d > peak) peak = d;
-  h[0] = h[1]; h[1] = h[2]; h[2] = x;
-  return peak;
-}
 
 void configureEqBand(int band) {
   if (band < 0 || band >= kEqBands) return;
@@ -268,29 +290,16 @@ void resetMeters() {
   resetLiveActivityMeters();
   gMeterClipCount = 0;
   gMeterNanCount = 0;
-}
-
-// V3 R4: mode/profile switches must not inherit compressor, maximizer or limiter memory
-// from the previous experience mode. Keep the lookahead audio buffers intact so playback
-// stays continuous, but start the new mastering decision from neutral gain.
-void resetTransitionMemory() {
-  for (int i = 0; i < 4; ++i) gBandDynamics[i].reset();
-  gHarshEnv = 0.0f;
-  gImpactFast = 0.0f;
-  gImpactSlow = 0.0f;
-  gMasterEnv = 0.0f;
-  gMasterDrive = 1.0f;
-  gLimiterGain = 1.0f;
-  for (int i = 0; i < 3; ++i) gTpHistL[i] = gTpHistR[i] = 0.0f;
-  resetLiveActivityMeters();
+  gMeterTpL.reset(); gMeterTpR.reset();
 }
 
 void resetState() {
   for (int i = 0; i < kEqBands; ++i) { gEqL[i].reset(); gEqR[i].reset(); }
-  gSplit120L.reset(); gSplit120R.reset();
-  gSplit600L.reset(); gSplit600R.reset();
-  gSplit4500L.reset(); gSplit4500R.reset();
-  for (int i = 0; i < 4; ++i) gBandDynamics[i].reset();
+  gSplit90L.reset(); gSplit90R.reset();
+  gSplit320L.reset(); gSplit320R.reset();
+  gSplit1400L.reset(); gSplit1400R.reset();
+  gSplit5200L.reset(); gSplit5200R.reset();
+  for (int i = 0; i < kBands; ++i) gBandDynamics[i].reset();
 
   gBassDeepL.reset(); gBassDeepR.reset();
   gBassBodyL.reset(); gBassBodyR.reset();
@@ -303,194 +312,199 @@ void resetState() {
 
   gSpatialIndex = 0;
   gLookIndex = 0;
+  gProgramPeak = gProgramAvg = gProgramDensity = 0.0f;
+  gAgcGain = 1.0f;
   gHarshEnv = 0.0f;
-  gImpactFast = 0.0f;
-  gImpactSlow = 0.0f;
+  gImpactFast = gImpactSlow = 0.0f;
   gMasterEnv = 0.0f;
-  gMasterDrive = 1.0f;
   gLimiterGain = 1.0f;
   gIntensity = gIntensityTarget;
   gBassCharacter = gBassCharacterTarget;
-
-  for (int i = 0; i < 3; ++i) {
-    gTpHistL[i] = gTpHistR[i] = gOutTpHistL[i] = gOutTpHistR[i] = 0.0f;
-  }
+  gLimiterTpL.reset(); gLimiterTpR.reset();
+  gMeterTpL.reset(); gMeterTpR.reset();
   resetMeters();
 }
 
-inline float softBassHarmonics(float low, float amount) {
-  const float drive = 1.0f + 2.2f * amount;
-  const float x = clampf(low * drive, -1.15f, 1.15f);
-  const float shaped = x - (x*x*x) * 0.16f;
-  return (shaped / drive) - low;
+inline void updateProgramAnalysis(float l, float r) {
+  const float detector = absf(l) > absf(r) ? absf(l) : absf(r);
+  const float pc = detector > gProgramPeak ? gPeakAttack : gPeakRelease;
+  const float ac = detector > gProgramAvg ? gAvgAttack : gAvgRelease;
+  gProgramPeak += (detector - gProgramPeak) * pc;
+  gProgramAvg += (detector - gProgramAvg) * ac;
+  const float denom = gProgramPeak > 0.00001f ? gProgramPeak : 0.00001f;
+  gProgramDensity = clampf(gProgramAvg / denom, 0.0f, 1.0f);
+}
+
+inline void applyProgramAgc(float &l, float &r) {
+  if (gMode == 0) {
+    gAgcGain += (1.0f - gAgcGain) * gAgcDownCoeff;
+    return;
+  }
+
+  const bool power = gMode == 2;
+  const float targetAvg = power ? (0.220f + 0.050f * gIntensity) : (0.165f + 0.035f * gIntensity);
+  const float maxDb = power ? (4.2f + 2.1f * gIntensity) : (2.0f + 1.4f * gIntensity);
+  float targetGain = gProgramAvg > 0.00001f ? targetAvg / gProgramAvg : 1.0f;
+  targetGain = clampf(targetGain, 1.0f, dbToGain(maxDb));
+
+  // Do not chase silence/noise upward.
+  const float gate = clampf((gProgramAvg - 0.0025f) / 0.018f, 0.0f, 1.0f);
+  targetGain = 1.0f + (targetGain - 1.0f) * gate;
+
+  // Dense masters need less raw AGC and more controlled density processing.
+  const float denseTrim = 1.0f - clampf((gProgramDensity - 0.70f) * 0.55f, 0.0f, 0.18f);
+  targetGain = 1.0f + (targetGain - 1.0f) * denseTrim;
+
+  const float coeff = targetGain > gAgcGain ? gAgcUpCoeff : gAgcDownCoeff;
+  gAgcGain += (targetGain - gAgcGain) * coeff;
+  l *= gAgcGain;
+  r *= gAgcGain;
 }
 
 inline void splitBands(float l, float r, float *bl, float *br) {
-  float lowL, restL, lowR, restR;
-  gSplit120L.process(l, lowL, restL);
-  gSplit120R.process(r, lowR, restR);
-
-  float lowMidL, upperL, lowMidR, upperR;
-  gSplit600L.process(restL, lowMidL, upperL);
-  gSplit600R.process(restR, lowMidR, upperR);
-
-  float highMidL, highL, highMidR, highR;
-  gSplit4500L.process(upperL, highMidL, highL);
-  gSplit4500R.process(upperR, highMidR, highR);
-
-  bl[0] = lowL; bl[1] = lowMidL; bl[2] = highMidL; bl[3] = highL;
-  br[0] = lowR; br[1] = lowMidR; br[2] = highMidR; br[3] = highR;
+  float h1L, h1R, h2L, h2R, h3L, h3R, h4L, h4R;
+  gSplit90L.process(l, bl[0], h1L); gSplit90R.process(r, br[0], h1R);
+  gSplit320L.process(h1L, bl[1], h2L); gSplit320R.process(h1R, br[1], h2R);
+  gSplit1400L.process(h2L, bl[2], h3L); gSplit1400R.process(h2R, br[2], h3R);
+  gSplit5200L.process(h3L, bl[3], h4L); gSplit5200R.process(h3R, br[3], h4R);
+  bl[4] = h4L; br[4] = h4R;
 }
 
 inline void applyBroadcastDynamics(float &l, float &r) {
-  float bl[4], br[4];
+  float bl[kBands], br[kBands];
   splitBands(l, r, bl, br);
 
-  const float intensity = gIntensity;
   const bool power = gMode == 2;
-
-  // Device-aware thresholds keep small Bluetooth speakers dense while preserving
-  // more crest factor on headphones and car/hi-fi.
-  const float profileBias =
-    gOutputProfile == 2 ? -0.025f :
-    gOutputProfile == 1 ? 0.012f : 0.0f;
-
-  const float adaptiveThresholds[4] = {0.28f, 0.24f, 0.20f, 0.16f};
-  const float powerThresholds[4]    = {0.22f, 0.19f, 0.16f, 0.13f};
-  const float adaptiveRatios[4] = {1.55f, 1.65f, 1.72f, 1.78f};
-  const float powerRatios[4]    = {2.35f, 2.55f, 2.75f, 2.90f};
+  const float adaptiveThreshold[kBands] = {0.105f, 0.085f, 0.068f, 0.052f, 0.040f};
+  const float powerThreshold[kBands]    = {0.078f, 0.064f, 0.052f, 0.042f, 0.034f};
+  const float adaptiveRatio[kBands] = {1.42f, 1.52f, 1.58f, 1.64f, 1.68f};
+  const float powerRatio[kBands]    = {2.05f, 2.22f, 2.38f, 2.52f, 2.62f};
 
   float maxGr = 0.0f;
-  for (int band = 0; band < 4; ++band) {
+  for (int band = 0; band < kBands; ++band) {
     const float detector = absf(bl[band]) > absf(br[band]) ? absf(bl[band]) : absf(br[band]);
-    const float baseThreshold = power ? powerThresholds[band] : adaptiveThresholds[band];
-    const float threshold = clampf(baseThreshold + profileBias - intensity * (power ? 0.030f : 0.012f), 0.08f, 0.45f);
-    const float ratioBase = power ? powerRatios[band] : adaptiveRatios[band];
-    const float ratio = 1.0f + (ratioBase - 1.0f) * (0.45f + 0.55f * intensity);
-    const float gain = gBandDynamics[band].update(detector, threshold, ratio, gBandAttackCoeff, gBandReleaseCoeff);
+    const float thresholdBase = power ? powerThreshold[band] : adaptiveThreshold[band];
+    const float threshold = clampf(thresholdBase * (1.03f - 0.13f * gIntensity), 0.020f, 0.20f);
+    const float ratioBase = power ? powerRatio[band] : adaptiveRatio[band];
+    const float ratio = 1.0f + (ratioBase - 1.0f) * (0.48f + 0.52f * gIntensity);
+    const float dynGain = gBandDynamics[band].update(detector, threshold, ratio, gBandAttackCoeff, gBandReleaseCoeff);
+    const float grDb = -gainToDb(dynGain);
+    if (grDb > maxGr) maxGr = grDb;
 
-    const float gr = -gainToDb(gain);
-    if (gr > maxGr) maxGr = gr;
-
-    // Small device/personal target correction inside the coordinated band stage.
     float deviceDb = 0.0f;
-    if (gOutputProfile == 1) { // headphones
-      const float d[4] = {0.35f, -0.15f, 0.20f, 0.45f};
+    if (gOutputProfile == 1) {
+      const float d[kBands] = {0.20f, -0.12f, 0.08f, 0.20f, 0.34f};
       deviceDb = d[band];
-    } else if (gOutputProfile == 2) { // Bluetooth speaker
-      const float d[4] = {0.80f, 0.15f, 0.35f, 0.55f};
+    } else if (gOutputProfile == 2) {
+      const float d[kBands] = {0.68f, 0.28f, -0.08f, 0.32f, 0.52f};
       deviceDb = d[band];
-    } else { // car/hifi
-      const float d[4] = {0.10f, 0.0f, 0.15f, 0.18f};
+    } else {
+      const float d[kBands] = {0.08f, 0.00f, 0.02f, 0.08f, 0.12f};
       deviceDb = d[band];
     }
 
     float personalDb = 0.0f;
     if (gPersonalEnabled) {
-      if (band == 0) personalDb += gPersonalBass * 2.5f;
-      if (band == 2) personalDb += gPersonalPresence * 2.0f;
-      if (band == 3) personalDb += gPersonalBrightness * 2.4f;
+      if (band <= 1) personalDb += gPersonalBass * (band == 0 ? 2.2f : 1.0f);
+      if (band == 3) personalDb += gPersonalPresence * 1.8f;
+      if (band == 4) personalDb += gPersonalBrightness * 2.1f;
     }
 
-    const float targetGain = dbToGain(deviceDb + personalDb);
-    bl[band] *= gain * targetGain;
-    br[band] *= gain * targetGain;
+    // Recover most compression reduction as density, instead of simply slamming a final limiter.
+    const float recovery = power ? (0.90f + 0.04f * gIntensity) : (0.94f + 0.03f * gIntensity);
+    const float baseMakeupDb = power ? (0.85f + 0.55f * gIntensity) : (0.50f + 0.40f * gIntensity);
+    const float bandGain = dynGain * dbToGain(deviceDb + personalDb + baseMakeupDb + grDb * recovery);
+    bl[band] *= bandGain;
+    br[band] *= bandGain;
   }
 
   if (maxGr > gBandGainReductionDb) gBandGainReductionDb = maxGr;
+  l = bl[0] + bl[1] + bl[2] + bl[3] + bl[4];
+  r = br[0] + br[1] + br[2] + br[3] + br[4];
+}
 
-  l = bl[0] + bl[1] + bl[2] + bl[3];
-  r = br[0] + br[1] + br[2] + br[3];
+inline float softBassHarmonics(float low, float amount) {
+  const float drive = 1.0f + 2.0f * amount;
+  const float x = clampf(low * drive, -1.10f, 1.10f);
+  const float shaped = x - 0.15f * x * x * x;
+  return shaped / drive - low;
 }
 
 inline void applyBassEngine(float &l, float &r) {
-  if (!gBassEnabled) return;
-
+  // Keep filter memory live even while disabled so repeated toggles do not wake up stale.
   const float deepL = gBassDeepL.process(l);
   const float deepR = gBassDeepR.process(r);
   const float broadL = gBassBodyL.process(l);
   const float broadR = gBassBodyR.process(r);
+  if (!gBassEnabled) return;
+
   const float bodyL = broadL - deepL;
   const float bodyR = broadR - deepR;
-
   const float c = gBassCharacter;
-  const float amount = (0.62f + 0.58f * gIntensity) * (gMode == 2 ? 1.12f : 1.0f);
-  const float deepGain = amount * (0.38f + 0.92f * c);
-  const float bodyGain = amount * (0.82f - 0.34f * c);
-  const float harmonicMix = amount * (0.22f + 0.30f * c);
+  const float amount = (0.60f + 0.60f * gIntensity) * (gMode == 2 ? 1.10f : 1.0f);
+  const float deepGain = amount * (0.26f + 1.02f * c);
+  const float bodyGain = amount * (0.92f - 0.34f * c);
+  const float harmonicMix = amount * ((gOutputProfile == 2 ? 0.34f : 0.18f) + 0.22f * c);
 
   const float harmL = softBassHarmonics(deepL, amount);
   const float harmR = softBassHarmonics(deepR, amount);
   const float addL = deepL * deepGain + bodyL * bodyGain + harmL * harmonicMix;
   const float addR = deepR * deepGain + bodyR * bodyGain + harmR * harmonicMix;
+  l += addL; r += addR;
 
-  l += addL;
-  r += addR;
-
-  const float inPeak = absf(broadL) > absf(broadR) ? absf(broadL) : absf(broadR);
-  const float addPeak = absf(addL) > absf(addR) ? absf(addL) : absf(addR);
-  if (inPeak > 0.00001f) {
-    const float activity = gainToDb(1.0f + addPeak / inPeak);
+  const float src = absf(broadL) > absf(broadR) ? absf(broadL) : absf(broadR);
+  const float add = absf(addL) > absf(addR) ? absf(addL) : absf(addR);
+  if (src > 0.00001f) {
+    const float activity = gainToDb(1.0f + add / src);
     if (activity > gBassActivityDb) gBassActivityDb = activity;
   }
 }
 
 inline void applyClarityEngine(float &l, float &r) {
-  if (!gClarityEnabled) return;
-
   const float presenceL = gPresenceHpL.process(l);
   const float presenceR = gPresenceHpR.process(r);
   const float airL = gAirHpL.process(l);
   const float airR = gAirHpR.process(r);
 
   const float highDetector = absf(airL) > absf(airR) ? absf(airL) : absf(airR);
-  const float coeff = highDetector > gHarshEnv ? gHarshAttack : gHarshRelease;
-  gHarshEnv += (highDetector - gHarshEnv) * coeff;
+  const float hc = highDetector > gHarshEnv ? gHarshAttack : gHarshRelease;
+  gHarshEnv += (highDetector - gHarshEnv) * hc;
+  if (!gClarityEnabled) return;
 
-  // Dynamic de-harsh prevents the clarity control from turning hot masters brittle.
-  const float harshReduction = clampf((gHarshEnv - 0.13f) * 2.8f, 0.0f, 0.48f);
+  const float harshReduction = clampf((gHarshEnv - 0.12f) * 2.5f, 0.0f, 0.42f);
   const float scale = 1.0f - harshReduction;
-  const float presenceMix = (0.24f + 0.24f * gIntensity) * scale;
-  const float airMix = (0.18f + 0.28f * gIntensity) * scale;
-
+  const float presenceMix = (0.19f + 0.22f * gIntensity) * scale;
+  const float airMix = (0.16f + 0.25f * gIntensity) * scale;
   const float addL = presenceL * presenceMix + airL * airMix;
   const float addR = presenceR * presenceMix + airR * airMix;
-  l += addL;
-  r += addR;
+  l += addL; r += addR;
 
-  const float sourcePeak = absf(presenceL) > absf(presenceR) ? absf(presenceL) : absf(presenceR);
-  const float addPeak = absf(addL) > absf(addR) ? absf(addL) : absf(addR);
-  if (sourcePeak > 0.00001f) {
-    const float activity = gainToDb(1.0f + addPeak / sourcePeak);
+  const float src = absf(presenceL) > absf(presenceR) ? absf(presenceL) : absf(presenceR);
+  const float add = absf(addL) > absf(addR) ? absf(addL) : absf(addR);
+  if (src > 0.00001f) {
+    const float activity = gainToDb(1.0f + add / src);
     if (activity > gClarityActivityDb) gClarityActivityDb = activity;
   }
 }
 
 inline void applyImpactEngine(float &l, float &r) {
+  const float detector = absf(l) > absf(r) ? absf(l) : absf(r);
+  const float fc = detector > gImpactFast ? gImpactFastAttack : gImpactFastRelease;
+  const float sc = detector > gImpactSlow ? gImpactSlowAttack : gImpactSlowRelease;
+  gImpactFast += (detector - gImpactFast) * fc;
+  gImpactSlow += (detector - gImpactSlow) * sc;
   if (!gImpactEnabled) return;
 
-  const float detector = absf(l) > absf(r) ? absf(l) : absf(r);
-  const float fastCoeff = detector > gImpactFast ? gImpactFastAttack : gImpactFastRelease;
-  const float slowCoeff = detector > gImpactSlow ? gImpactSlowAttack : gImpactSlowRelease;
-  gImpactFast += (detector - gImpactFast) * fastCoeff;
-  gImpactSlow += (detector - gImpactSlow) * slowCoeff;
-
-  const float transient = clampf(gImpactFast - gImpactSlow, 0.0f, 0.38f);
-  const float strength = (6.0f + 6.0f * gIntensity) * (gMode == 2 ? 1.08f : 1.0f);
+  const float transient = clampf(gImpactFast - gImpactSlow, 0.0f, 0.34f);
+  const float strength = (6.4f + 6.8f * gIntensity) * (gMode == 2 ? 1.06f : 1.0f);
   const float gain = 1.0f + transient * strength;
-  l *= gain;
-  r *= gain;
-
+  l *= gain; r *= gain;
   const float boost = gainToDb(gain);
   if (boost > gImpactBoostDb) gImpactBoostDb = boost;
 }
 
 inline void applySpatialEngine(float &l, float &r) {
-  if (!gSpatialEnabled) {
-    gSpatialWidthPercent = 100.0f;
-    return;
-  }
-
+  // State advances regardless of enable state, eliminating stale delay/filter wake-up.
   const float lowL = gSpatialLowL.process(l);
   const float lowR = gSpatialLowR.process(r);
   const float lowMono = 0.5f * (lowL + lowR);
@@ -499,30 +513,26 @@ inline void applySpatialEngine(float &l, float &r) {
   const float mid = 0.5f * (highL + highR);
   float side = 0.5f * (highL - highR);
 
-  float width = 1.0f;
-  float delayMix = 0.0f;
-  float delayMs = 8.0f;
-
-  if (gOutputProfile == 1) { // IMMERSION, headphones
-    width = 1.18f + 0.25f * gIntensity;
+  float width = 1.0f, delayMix = 0.0f, delayMs = 7.0f;
+  if (gOutputProfile == 1) {
+    width = 1.18f + 0.28f * gIntensity;
     delayMix = 0.035f + 0.045f * gIntensity;
     delayMs = 7.0f;
-  } else if (gOutputProfile == 2) { // STAGE, Bluetooth speaker
-    width = 1.34f + 0.34f * gIntensity;
-    delayMix = 0.070f + 0.060f * gIntensity;
+  } else if (gOutputProfile == 2) {
+    width = 1.36f + 0.36f * gIntensity;
+    delayMix = 0.070f + 0.065f * gIntensity;
     delayMs = 10.0f;
-  } else { // SPACE, car/hifi
-    const float modeWidth = gSpaceMode == 2 ? 0.42f : gSpaceMode == 1 ? 0.28f : 0.12f;
+  } else {
+    const float modeWidth = gSpaceMode == 2 ? 0.48f : (gSpaceMode == 1 ? 0.31f : 0.14f);
     width = 1.0f + modeWidth * (0.55f + 0.45f * gIntensity);
-    delayMix = (gSpaceMode == 2 ? 0.13f : gSpaceMode == 1 ? 0.085f : 0.035f) * (0.60f + 0.40f * gIntensity);
-    delayMs = gSpaceMode == 2 ? 18.0f : gSpaceMode == 1 ? 12.0f : 7.0f;
+    delayMix = (gSpaceMode == 2 ? 0.135f : (gSpaceMode == 1 ? 0.085f : 0.032f)) * (0.62f + 0.38f * gIntensity);
+    delayMs = gSpaceMode == 2 ? 18.0f : (gSpaceMode == 1 ? 12.0f : 7.0f);
   }
 
   int delaySamples = static_cast<int>(gSampleRate * delayMs * 0.001f + 0.5f);
   if (delaySamples < 1) delaySamples = 1;
   if (delaySamples >= kSpatialDelayMax) delaySamples = kSpatialDelayMax - 1;
   gSpatialDelaySamples = delaySamples;
-
   int readIndex = gSpatialIndex - gSpatialDelaySamples;
   if (readIndex < 0) readIndex += kSpatialDelayMax;
   const float delayedSide = gSpatialDelay[readIndex];
@@ -530,41 +540,49 @@ inline void applySpatialEngine(float &l, float &r) {
   gSpatialIndex += 1;
   if (gSpatialIndex >= kSpatialDelayMax) gSpatialIndex = 0;
 
+  if (!gSpatialEnabled) { gSpatialWidthPercent = 100.0f; return; }
   side = side * width + delayedSide * delayMix;
-
   l = lowMono + mid + side;
   r = lowMono + mid - side;
   gSpatialWidthPercent = width * 100.0f;
 }
 
-inline void applyIntelligentMaximizer(float &l, float &r) {
+inline void applyDensityMaximizer(float &l, float &r) {
   const float detector = absf(l) > absf(r) ? absf(l) : absf(r);
-  const float envCoeff = detector > gMasterEnv ? gMasterAttack : gMasterRelease;
-  gMasterEnv += (detector - gMasterEnv) * envCoeff;
+  const float ec = detector > gMasterEnv ? gMasterAttack : gMasterRelease;
+  gMasterEnv += (detector - gMasterEnv) * ec;
 
   const bool power = gMode == 2;
-  const float threshold = power
-    ? (0.46f - 0.10f * gIntensity)
-    : (0.62f - 0.07f * gIntensity);
-  const float ratio = power
-    ? (2.1f + 1.8f * gIntensity)
-    : (1.25f + 0.55f * gIntensity);
-
+  const float threshold = power ? (0.300f - 0.075f * gIntensity) : (0.390f - 0.065f * gIntensity);
+  const float ratio = power ? (2.00f + 1.50f * gIntensity) : (1.28f + 0.52f * gIntensity);
   float compGain = 1.0f;
   if (gMasterEnv > threshold && gMasterEnv > 0.000001f) {
     const float over = gMasterEnv / threshold;
     compGain = static_cast<float>(pow(over, (1.0f / ratio) - 1.0f));
   }
 
+  const float blend = power ? (0.70f + 0.18f * gIntensity) : (0.46f + 0.18f * gIntensity);
+  const float densityL = l * ((1.0f - blend) + blend * compGain);
+  const float densityR = r * ((1.0f - blend) + blend * compGain);
+  const float densePowerBonus = power ? 1.35f * clampf((gProgramDensity - 0.58f) / 0.26f, 0.0f, 1.0f) : 0.0f;
   const float makeupDb = power
-    ? (3.1f + 4.0f * gIntensity)
-    : (0.9f + 1.1f * gIntensity);
-  const float driveTarget = dbToGain(makeupDb);
-  gMasterDrive += (driveTarget - gMasterDrive) * gSmoothCoeff;
+    ? (3.10f + 5.10f * gIntensity + 0.34f * gProgramDensity + densePowerBonus)
+    : (0.95f + 1.45f * gIntensity + 0.16f * gProgramDensity);
+  const float makeup = dbToGain(makeupDb);
+  l = densityL * makeup;
+  r = densityR * makeup;
 
-  const float gain = compGain * gMasterDrive;
-  l *= gain;
-  r *= gain;
+  // A smooth mastering ceiling absorbs only the tallest pre-limiter crests. Its derivative
+  // is unity at the knee, so it behaves as a soft peak shaper rather than a hard clipper.
+  // This lets POWER add density to already-loud masters without parking the true-peak
+  // limiter several dB down for the entire passage.
+  if (power) {
+    l = softCeiling(l, 0.82f, 1.10f);
+    r = softCeiling(r, 0.82f, 1.10f);
+  } else {
+    l = softCeiling(l, 0.91f, 1.085f);
+    r = softCeiling(r, 0.91f, 1.085f);
+  }
 }
 
 inline void applyLimiterAndDelay(float currentL, float currentR, float &outL, float &outR, bool limitingEnabled) {
@@ -574,10 +592,14 @@ inline void applyLimiterAndDelay(float currentL, float currentR, float &outL, fl
 
   float currentPeak = absf(currentL) > absf(currentR) ? absf(currentL) : absf(currentR);
   if (limitingEnabled) {
-    const float tpL = reconstructedPeak4x(gTpHistL, currentL);
-    const float tpR = reconstructedPeak4x(gTpHistR, currentR);
+    const float tpL = gLimiterTpL.update(currentL);
+    const float tpR = gLimiterTpR.update(currentR);
     if (tpL > currentPeak) currentPeak = tpL;
     if (tpR > currentPeak) currentPeak = tpR;
+  } else {
+    // Keep TP history warm through PURE without applying gain reduction.
+    gLimiterTpL.update(currentL);
+    gLimiterTpR.update(currentR);
   }
 
   gLookL[gLookIndex] = currentL;
@@ -588,32 +610,28 @@ inline void applyLimiterAndDelay(float currentL, float currentR, float &outL, fl
 
   if (!limitingEnabled) {
     gLimiterGain = 1.0f;
-    outL = delayedL;
-    outR = delayedR;
+    outL = delayedL; outR = delayedR;
     return;
   }
 
   float futurePeak = delayedPeak;
-  for (int i = 0; i < gLookaheadSamples; ++i) {
-    if (gLookPeak[i] > futurePeak) futurePeak = gLookPeak[i];
-  }
+  for (int i = 0; i < gLookaheadSamples; ++i) if (gLookPeak[i] > futurePeak) futurePeak = gLookPeak[i];
 
   float required = 1.0f;
   if (futurePeak > gLimiterCeiling && futurePeak > 0.000001f) required = gLimiterCeiling / futurePeak;
   if (required < gLimiterGain) gLimiterGain = required;
   else gLimiterGain += (1.0f - gLimiterGain) * gLimiterReleaseCoeff;
-  gLimiterGain = clampf(gLimiterGain, 0.025f, 1.0f);
+  gLimiterGain = clampf(gLimiterGain, 0.02f, 1.0f);
 
   outL = delayedL * gLimiterGain;
   outR = delayedR * gLimiterGain;
-
   const float gr = -gainToDb(gLimiterGain);
   if (gr > gMeterLimiterGrDb) gMeterLimiterGrDb = gr;
 }
 
 inline void trackOutput(float l, float r) {
-  const float tpL = reconstructedPeak4x(gOutTpHistL, l);
-  const float tpR = reconstructedPeak4x(gOutTpHistR, r);
+  const float tpL = gMeterTpL.update(l);
+  const float tpR = gMeterTpR.update(r);
   const float tp = tpL > tpR ? tpL : tpR;
   if (tp > gMeterTruePeak) gMeterTruePeak = tp;
   if (absf(l) > 1.0f || absf(r) > 1.0f) gMeterClipCount += 1;
@@ -632,36 +650,43 @@ int mvp_v2_init(float sampleRate) {
   if (sampleRate < 32000.0f || sampleRate > 96000.0f) return 0;
   gSampleRate = sampleRate;
 
-  gLookaheadSamples = static_cast<int>(sampleRate * 0.002f + 0.5f);
-  if (gLookaheadSamples < 32) gLookaheadSamples = 32;
+  gLookaheadSamples = static_cast<int>(sampleRate * 0.0025f + 0.5f);
+  if (gLookaheadSamples < 64) gLookaheadSamples = 64;
   if (gLookaheadSamples > kLookaheadMax) gLookaheadSamples = kLookaheadMax;
 
-  gSmoothCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.020)));
+  gPeakAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.0007)));
+  gPeakRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.180)));
+  gAvgAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.030)));
+  gAvgRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.380)));
+  gAgcUpCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.160)));
+  gAgcDownCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.055)));
+  gIntensitySmoothCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.020)));
+  gBassSmoothCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.025)));
+
   gBandAttackCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.004)));
-  gBandReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.120)));
+  gBandReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.130)));
   gHarshAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.010)));
   gHarshRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.220)));
 
   gImpactFastAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.0012)));
   gImpactFastRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.010)));
-  gImpactSlowAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.025)));
+  gImpactSlowAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.026)));
   gImpactSlowRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.180)));
 
-  gMasterAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.002)));
-  gMasterRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.100)));
-  gLimiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.006)));
+  gMasterAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.0025)));
+  gMasterRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.120)));
+  gLimiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.022)));
 
-  gSplit120L.configure(sampleRate, 120.0); gSplit120R.configure(sampleRate, 120.0);
-  gSplit600L.configure(sampleRate, 600.0); gSplit600R.configure(sampleRate, 600.0);
-  gSplit4500L.configure(sampleRate, 4500.0); gSplit4500R.configure(sampleRate, 4500.0);
+  gSplit90L.configure(sampleRate, 90.0); gSplit90R.configure(sampleRate, 90.0);
+  gSplit320L.configure(sampleRate, 320.0); gSplit320R.configure(sampleRate, 320.0);
+  gSplit1400L.configure(sampleRate, 1400.0); gSplit1400R.configure(sampleRate, 1400.0);
+  gSplit5200L.configure(sampleRate, 5200.0); gSplit5200R.configure(sampleRate, 5200.0);
 
-  gBassDeepL.lowpass(sampleRate, 85.0); gBassDeepR.lowpass(sampleRate, 85.0);
-  gBassBodyL.lowpass(sampleRate, 180.0); gBassBodyR.lowpass(sampleRate, 180.0);
-
-  gPresenceHpL.highpass(sampleRate, 3200.0); gPresenceHpR.highpass(sampleRate, 3200.0);
-  gAirHpL.highpass(sampleRate, 8200.0); gAirHpR.highpass(sampleRate, 8200.0);
-
-  gSpatialLowL.lowpass(sampleRate, 120.0); gSpatialLowR.lowpass(sampleRate, 120.0);
+  gBassDeepL.lowpass(sampleRate, 82.0); gBassDeepR.lowpass(sampleRate, 82.0);
+  gBassBodyL.lowpass(sampleRate, 190.0); gBassBodyR.lowpass(sampleRate, 190.0);
+  gPresenceHpL.highpass(sampleRate, 3000.0); gPresenceHpR.highpass(sampleRate, 3000.0);
+  gAirHpL.highpass(sampleRate, 7600.0); gAirHpR.highpass(sampleRate, 7600.0);
+  gSpatialLowL.lowpass(sampleRate, 140.0); gSpatialLowR.lowpass(sampleRate, 140.0);
 
   for (int i = 0; i < kEqBands; ++i) configureEqBand(i);
   resetState();
@@ -675,73 +700,40 @@ void mvp_v2_set_mode(int mode) {
   const int next = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
   if (next == gMode) return;
   gMode = next;
-  resetTransitionMemory();
+  // V5 deliberately preserves compressor/AGC/limiter memory. This is one continuous processor.
+  resetLiveActivityMeters();
 }
 void mvp_v2_set_output_profile(int profile) {
   const int next = profile < 0 ? 0 : (profile > 2 ? 2 : profile);
   if (next == gOutputProfile) return;
   gOutputProfile = next;
-  resetTransitionMemory();
-  gSpatialLowL.reset(); gSpatialLowR.reset();
-  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
-  gSpatialIndex = 0;
+  resetLiveActivityMeters();
 }
 void mvp_v2_set_intensity(float amount) { gIntensityTarget = clampf(amount, 0.0f, 1.0f); }
-void mvp_v2_set_bass_enabled(int enabled) {
-  const int next = enabled ? 1 : 0;
-  if (next == gBassEnabled) return;
-  gBassEnabled = next;
-  gBassDeepL.reset(); gBassDeepR.reset();
-  gBassBodyL.reset(); gBassBodyR.reset();
-  gBassActivityDb = 0.0f;
-}
+void mvp_v2_set_bass_enabled(int enabled) { gBassEnabled = enabled ? 1 : 0; gBassActivityDb = 0.0f; }
 void mvp_v2_set_bass_character(float amount) { gBassCharacterTarget = clampf(amount, 0.0f, 1.0f); }
-void mvp_v2_set_impact_enabled(int enabled) {
-  const int next = enabled ? 1 : 0;
-  if (next == gImpactEnabled) return;
-  gImpactEnabled = next;
-  gImpactFast = 0.0f;
-  gImpactSlow = 0.0f;
-  gImpactBoostDb = 0.0f;
-}
-void mvp_v2_set_clarity_enabled(int enabled) {
-  const int next = enabled ? 1 : 0;
-  if (next == gClarityEnabled) return;
-  gClarityEnabled = next;
-  gPresenceHpL.reset(); gPresenceHpR.reset();
-  gAirHpL.reset(); gAirHpR.reset();
-  gHarshEnv = 0.0f;
-  gClarityActivityDb = 0.0f;
-}
-void mvp_v2_set_spatial_enabled(int enabled) {
-  const int next = enabled ? 1 : 0;
-  if (next == gSpatialEnabled) return;
-  gSpatialEnabled = next;
-  gSpatialLowL.reset(); gSpatialLowR.reset();
-  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
-  gSpatialIndex = 0;
-  gSpatialWidthPercent = 100.0f;
-}
-void mvp_v2_set_space_mode(int mode) {
-  const int next = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
-  if (next == gSpaceMode) return;
-  gSpaceMode = next;
-  for (int i = 0; i < kSpatialDelayMax; ++i) gSpatialDelay[i] = 0.0f;
-  gSpatialIndex = 0;
-}
+void mvp_v2_set_impact_enabled(int enabled) { gImpactEnabled = enabled ? 1 : 0; gImpactBoostDb = 0.0f; }
+void mvp_v2_set_clarity_enabled(int enabled) { gClarityEnabled = enabled ? 1 : 0; gClarityActivityDb = 0.0f; }
+void mvp_v2_set_spatial_enabled(int enabled) { gSpatialEnabled = enabled ? 1 : 0; gSpatialWidthPercent = 100.0f; }
+void mvp_v2_set_space_mode(int mode) { gSpaceMode = mode < 0 ? 0 : (mode > 2 ? 2 : mode); }
 void mvp_v2_set_personal_enabled(int enabled) { gPersonalEnabled = enabled ? 1 : 0; }
 void mvp_v2_set_personal_bass(float value) { gPersonalBass = clampf(value, -1.0f, 1.0f); }
 void mvp_v2_set_personal_presence(float value) { gPersonalPresence = clampf(value, -1.0f, 1.0f); }
 void mvp_v2_set_personal_brightness(float value) { gPersonalBrightness = clampf(value, -1.0f, 1.0f); }
 
-void mvp_v2_set_eq_enabled(int enabled) { gEqEnabled = enabled ? 1 : 0; }
+void mvp_v2_set_eq_enabled(int enabled) {
+  const int next = enabled ? 1 : 0;
+  if (next == gEqEnabled) return;
+  gEqEnabled = next;
+  for (int i = 0; i < kEqBands; ++i) { gEqL[i].reset(); gEqR[i].reset(); }
+}
 void mvp_v2_set_eq_band(int band, float gainDb) {
   if (band < 0 || band >= kEqBands) return;
   gEqGainDb[band] = clampf(gainDb, -12.0f, 12.0f);
   configureEqBand(band);
 }
 
-// Backward-compatible Stage 1 ABI. The new UI/adapter uses the explicit V3 controls above.
+// Backward-compatible ABI used by older adapters.
 void mvp_v2_set_bypass(int enabled) {
   if (enabled) mvp_v2_set_mode(0);
   else if (gMode == 0) mvp_v2_set_mode(1);
@@ -759,14 +751,15 @@ int mvp_v2_process(int frames) {
   if (frames < 1 || frames > kFrames) return 0;
 
   for (int i = 0; i < frames; ++i) {
-    float l = gInputL[i];
-    float r = gInputR[i];
+    const float dryL = gInputL[i];
+    const float dryR = gInputR[i];
+    updateProgramAnalysis(dryL, dryR);
 
-    gIntensity += (gIntensityTarget - gIntensity) * gSmoothCoeff;
-    gBassCharacter += (gBassCharacterTarget - gBassCharacter) * gSmoothCoeff;
+    gIntensity += (gIntensityTarget - gIntensity) * gIntensitySmoothCoeff;
+    gBassCharacter += (gBassCharacterTarget - gBassCharacter) * gBassSmoothCoeff;
 
+    float l = dryL, r = dryR;
     const bool processed = gMode != 0;
-
     if (processed) {
       if (gEqEnabled) {
         for (int band = 0; band < kEqBands; ++band) {
@@ -775,12 +768,22 @@ int mvp_v2_process(int frames) {
         }
       }
 
+      applyProgramAgc(l, r);
       applyBroadcastDynamics(l, r);
       applyBassEngine(l, r);
       applyClarityEngine(l, r);
       applyImpactEngine(l, r);
       applySpatialEngine(l, r);
-      applyIntelligentMaximizer(l, r);
+      applyDensityMaximizer(l, r);
+    } else {
+      // Keep effect analysis/state hot while PURE is selected, but output dry/reference audio.
+      float shadowL = l, shadowR = r;
+      applyProgramAgc(shadowL, shadowR);
+      applyBassEngine(shadowL, shadowR);
+      applyClarityEngine(shadowL, shadowR);
+      applyImpactEngine(shadowL, shadowR);
+      applySpatialEngine(shadowL, shadowR);
+      applyDensityMaximizer(shadowL, shadowR);
     }
 
     float outL = 0.0f, outR = 0.0f;
@@ -789,7 +792,6 @@ int mvp_v2_process(int frames) {
     gOutputR[i] = outR;
     trackOutput(outL, outR);
   }
-
   return 1;
 }
 
