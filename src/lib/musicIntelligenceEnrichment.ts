@@ -17,7 +17,7 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 4;
+export const MUSIC_INTELLIGENCE_VERSION = 5;
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const TRACK_SELECT = "track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,provider_payload,analyzed_at,updated_at,error";
 
@@ -124,7 +124,6 @@ function fromDb(row: DbTrackIntelligence): MusicTrackIntelligence {
     providerPayload,
     audioAnalysis: (providerPayload.audio_analysis && typeof providerPayload.audio_analysis === "object" ? providerPayload.audio_analysis : null) as MusicTrackIntelligence["audioAnalysis"],
     masterPrep: (providerPayload.master_prep && typeof providerPayload.master_prep === "object" ? providerPayload.master_prep : null) as MusicTrackIntelligence["masterPrep"],
-    aiAutoSound: (providerPayload.ai_auto_sound && typeof providerPayload.ai_auto_sound === "object" ? providerPayload.ai_auto_sound : null) as MusicTrackIntelligence["aiAutoSound"],
     analyzedAt: row.analyzed_at || null,
     updatedAt: row.updated_at || new Date().toISOString(),
     error: row.error || null,
@@ -228,7 +227,6 @@ async function saveLocalAudioIntelligence(
     ...(base.providerPayload || {}),
     audio_analysis: facts.technical,
     master_prep: facts.masterPrep,
-    ai_auto_sound: facts.autoSound,
     local_audio_features: {
       rmsDb: facts.rmsDb,
       loudnessDb: facts.loudnessDb,
@@ -386,7 +384,6 @@ export async function analyzeMusicTrackIntelligence(
     providerPayload: (raw as MusicTrackIntelligence).providerPayload || {},
     audioAnalysis: (raw as MusicTrackIntelligence).audioAnalysis || null,
     masterPrep: (raw as MusicTrackIntelligence).masterPrep || null,
-    aiAutoSound: (raw as MusicTrackIntelligence).aiAutoSound || null,
   };
   cacheMusicTrackIntelligence(parsed);
 

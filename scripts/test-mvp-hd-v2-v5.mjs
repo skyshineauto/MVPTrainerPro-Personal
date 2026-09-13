@@ -36,7 +36,14 @@ function setControls(c={}){
   dsp.mvp_v2_set_clarity_enabled(c.clarity?1:0);
   dsp.mvp_v2_set_spatial_enabled(c.spatial?1:0);
   dsp.mvp_v2_set_space_mode(c.spaceMode ?? 0);
-  if(dsp.mvp_v2_set_personal_enabled) dsp.mvp_v2_set_personal_enabled(0);
+  if(dsp.mvp_v2_set_personal_enabled) dsp.mvp_v2_set_personal_enabled(c.personal?1:0);
+  if(dsp.mvp_v2_set_personal_bass) dsp.mvp_v2_set_personal_bass(c.personalBass ?? 0);
+  if(dsp.mvp_v2_set_personal_presence) dsp.mvp_v2_set_personal_presence(c.personalPresence ?? 0);
+  if(dsp.mvp_v2_set_personal_brightness) dsp.mvp_v2_set_personal_brightness(c.personalBrightness ?? 0);
+  if(dsp.mvp_v2_set_master_prep){
+    const m=c.masterPrep || {};
+    dsp.mvp_v2_set_master_prep(c.masterPrep?1:0,m.sourceGainDb??0,m.highpassHz??18,m.lowMidDb??0,m.presenceDb??0,m.harshnessDb??0,m.balanceDb??0,m.widthScale??1);
+  }
   dsp.mvp_v2_set_eq_enabled(c.eq?1:0);
   for(let i=0;i<31;i++) dsp.mvp_v2_set_eq_band(i,0);
   if(c.eqBands) for(const [i,g] of c.eqBands) dsp.mvp_v2_set_eq_band(i,g);
@@ -122,29 +129,64 @@ for(const genre of ['rock','electronic','hiphop','pop']) for(const level of ['dy
 
 const program=corpus('rock','hot');
 const i0=render({mode:2,intensity:0,profile:1},program), i50=render({mode:2,intensity:.5,profile:1},program), i100=render({mode:2,intensity:1,profile:1},program);
-gate('Intensity 0 < 50 < 100',()=>{const a=rmsStereo(i0),b=rmsStereo(i50),c=rmsStereo(i100);assert.ok(b>a*1.03&&c>b*1.03,`${dbRatio(b,a).toFixed(2)}, ${dbRatio(c,b).toFixed(2)} dB`)});
+gate('Intensity 0 < 50 < 100',()=>{const a=rmsStereo(i0),b=rmsStereo(i50),c=rmsStereo(i100);assert.ok(dbRatio(b,a)>=1.5&&dbRatio(c,b)>=0.8,`${dbRatio(b,a).toFixed(2)}, ${dbRatio(c,b).toFixed(2)} dB`)});
 
 const bassSig=(i,sr)=>{const t=i/sr,x=.035*Math.sin(2*Math.PI*80*t)+.035*Math.sin(2*Math.PI*1000*t);return[x,x]};
 const bassOff=render({mode:1,intensity:.8},bassSig),bassOn=render({mode:1,intensity:.8,bass:true,bassCharacter:.5},bassSig);
 gate('Bass produces strong low-frequency lift without 1 kHz spill',()=>{const b80=dbRatio(goertzel(bassOn.L,80),goertzel(bassOff.L,80)),b1=dbRatio(goertzel(bassOn.L,1000),goertzel(bassOff.L,1000));assert.ok(b80>=3.5,`${b80.toFixed(2)} dB at 80`);assert.ok(Math.abs(b1)<=1.0,`${b1.toFixed(2)} dB at 1k`)});
 const deepSig=(i,sr)=>{const t=i/sr,x=.03*Math.sin(2*Math.PI*50*t)+.03*Math.sin(2*Math.PI*140*t);return[x,x]};
 const tight=render({mode:1,intensity:.8,bass:true,bassCharacter:0},deepSig), deep=render({mode:1,intensity:.8,bass:true,bassCharacter:1},deepSig);
-gate('TIGHT and DEEP bass are spectrally distinct',()=>{assert.ok(dbRatio(goertzel(deep.L,50),goertzel(tight.L,50))>=.7);assert.ok(dbRatio(goertzel(tight.L,140),goertzel(deep.L,140))>=.3)});
+gate('TIGHT and DEEP bass are spectrally distinct',()=>{assert.ok(dbRatio(goertzel(deep.L,50),goertzel(tight.L,50))>=2.0);assert.ok(dbRatio(goertzel(tight.L,140),goertzel(deep.L,140))>=2.0)});
 const claritySig=(i,sr)=>{const t=i/sr,x=.025*Math.sin(2*Math.PI*1000*t)+.02*Math.sin(2*Math.PI*9000*t);return[x,x]};
 const clearOff=render({mode:1,intensity:.8},claritySig),clearOn=render({mode:1,intensity:.8,clarity:true},claritySig);
-gate('Clarity restores high detail without broad mid boost',()=>{const c9=dbRatio(goertzel(clearOn.L,9000),goertzel(clearOff.L,9000)),c1=dbRatio(goertzel(clearOn.L,1000),goertzel(clearOff.L,1000));assert.ok(c9>=2.5,`${c9.toFixed(2)} dB`);assert.ok(Math.abs(c1)<=1.0,`${c1.toFixed(2)} dB`)});
+gate('Clarity restores high detail without broad mid boost',()=>{const c9=dbRatio(goertzel(clearOn.L,9000),goertzel(clearOff.L,9000)),c1=dbRatio(goertzel(clearOn.L,1000),goertzel(clearOff.L,1000));assert.ok(c9>=4.0,`${c9.toFixed(2)} dB`);assert.ok(Math.abs(c1)<=1.0,`${c1.toFixed(2)} dB`)});
 const pulse=(i,sr)=>{const t=i/sr,p=i%4800,a=p<220?.22:.065,x=a*Math.sin(2*Math.PI*180*t);return[x,x]};
 const impactOff=render({mode:1,intensity:.85},pulse),impactOn=render({mode:1,intensity:.85,impact:true},pulse);
-gate('Impact increases transient contrast',()=>assert.ok(onsetRatio(impactOn)/onsetRatio(impactOff)>=1.10));
+gate('Impact increases transient contrast',()=>assert.ok(onsetRatio(impactOn)/onsetRatio(impactOff)>=1.25));
 const stereo=(i,sr)=>{const t=i/sr;return[.07*Math.sin(2*Math.PI*500*t)+.055*Math.sin(2*Math.PI*3200*t),.07*Math.sin(2*Math.PI*500*t+.7)+.055*Math.sin(2*Math.PI*3200*t+1.4)]};
 const hpOff=render({mode:1,intensity:.8,profile:1},stereo),hpOn=render({mode:1,intensity:.8,profile:1,spatial:true},stereo);
-gate('Headphone IMMERSION is clearly audible',()=>assert.ok(sideMid(hpOn)/sideMid(hpOff)>=1.15));
+gate('Headphone IMMERSION is clearly audible',()=>assert.ok(sideMid(hpOn)/sideMid(hpOff)>=1.45));
 const btOff=render({mode:1,intensity:.8,profile:2},stereo),btOn=render({mode:1,intensity:.8,profile:2,spatial:true},stereo);
-gate('Bluetooth STAGE is clearly audible',()=>assert.ok(sideMid(btOn)/sideMid(btOff)>=1.25));
+gate('Bluetooth STAGE is clearly audible',()=>assert.ok(sideMid(btOn)/sideMid(btOff)>=1.55));
 const carStudio=render({mode:1,intensity:.8,profile:0,spatial:true,spaceMode:0},stereo),carLive=render({mode:1,intensity:.8,profile:0,spatial:true,spaceMode:1},stereo),carArena=render({mode:1,intensity:.8,profile:0,spatial:true,spaceMode:2},stereo);
 gate('Car SPACE Studio < Live < Arena',()=>{const a=sideMid(carStudio),b=sideMid(carLive),c=sideMid(carArena);assert.ok(b>a*1.05&&c>b*1.05,`${a.toFixed(3)} ${b.toFixed(3)} ${c.toFixed(3)}`)});
 const eqOff=render({mode:1,intensity:.5,eq:true},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*1000*i/sr);return[x,x]}),eqOn=render({mode:1,intensity:.5,eq:true,eqBands:[[17,6]]},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*1000*i/sr);return[x,x]});
 gate('31-band EQ remains fully audible',()=>assert.ok(dbRatio(goertzel(eqOn.L,1000),goertzel(eqOff.L,1000))>=4.5));
+
+// V5.1 real-device tuning contracts: controls must be unmistakable, bounded and profile-aware.
+for(const profile of [1,2]){
+  const label=profile===1?'Headphones':'Bluetooth';
+  const pOff=render({mode:1,intensity:.75,profile,personal:true,personalBass:-1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*65*i/sr);return[x,x]});
+  const pOn=render({mode:1,intensity:.75,profile,personal:true,personalBass:1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*65*i/sr);return[x,x]});
+  gate(`${label} Personal Bass has a real range`,()=>assert.ok(dbRatio(goertzel(pOn.L,65),goertzel(pOff.L,65))>=7.0));
+
+  const prOff=render({mode:1,intensity:.75,profile,personal:true,personalPresence:-1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*3200*i/sr);return[x,x]});
+  const prOn=render({mode:1,intensity:.75,profile,personal:true,personalPresence:1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*3200*i/sr);return[x,x]});
+  gate(`${label} Personal Presence has a real range`,()=>assert.ok(dbRatio(goertzel(prOn.L,3200),goertzel(prOff.L,3200))>=7.0));
+
+  const brOff=render({mode:1,intensity:.75,profile,personal:true,personalBrightness:-1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*10000*i/sr);return[x,x]});
+  const brOn=render({mode:1,intensity:.75,profile,personal:true,personalBrightness:1},(i,sr)=>{const x=.012*Math.sin(2*Math.PI*10000*i/sr);return[x,x]});
+  gate(`${label} Personal Brightness has a real range`,()=>assert.ok(dbRatio(goertzel(brOn.L,10000),goertzel(brOff.L,10000))>=8.0));
+
+  const safeImpact=render({mode:2,intensity:1,profile,impact:true},pulse);
+  gate(`${label} Impact boost is bounded`,()=>assert.ok(safeImpact.impact<=4.5,`${safeImpact.impact.toFixed(2)} dB`));
+}
+
+// Existing Enrich Library Master Prep must now be a real part of the V5.1 playback engine.
+const prepTone=(i,sr)=>{const t=i/sr;return[.012*Math.sin(2*Math.PI*320*t)+.012*Math.sin(2*Math.PI*3200*t)+.012*Math.sin(2*Math.PI*6500*t),.012*Math.sin(2*Math.PI*320*t+.1)+.012*Math.sin(2*Math.PI*3200*t+.25)+.012*Math.sin(2*Math.PI*6500*t+.4)]};
+const prepNeutral=render({mode:1,intensity:.6,profile:1},prepTone);
+const prepCorrected=render({mode:1,intensity:.6,profile:1,masterPrep:{sourceGainDb:1.2,highpassHz:26,lowMidDb:-1.5,presenceDb:.55,harshnessDb:-1.4,balanceDb:.8,widthScale:.9}},prepTone);
+gate('Master Prep low-mid correction is active',()=>assert.ok(dbRatio(goertzel(prepCorrected.L,320),goertzel(prepNeutral.L,320))<0.5));
+gate('Master Prep presence correction is active',()=>{const d=dbRatio(goertzel(prepCorrected.L,3200),goertzel(prepNeutral.L,3200));assert.ok(d>0.3,`${d.toFixed(2)} dB`)});
+gate('Master Prep harshness correction is active',()=>{const d=dbRatio(goertzel(prepCorrected.L,6500),goertzel(prepNeutral.L,6500));assert.ok(d<0.2,`${d.toFixed(2)} dB`)});
+gate('Master Prep width protection is active',()=>assert.ok(sideMid(prepCorrected)<sideMid(prepNeutral)));
+const prepRumbleOff=render({mode:1,intensity:.5,profile:1},(i,sr)=>{const x=.018*Math.sin(2*Math.PI*20*i/sr);return[x,x]});
+const prepRumbleOn=render({mode:1,intensity:.5,profile:1,masterPrep:{highpassHz:26}},(i,sr)=>{const x=.018*Math.sin(2*Math.PI*20*i/sr);return[x,x]});
+gate('Master Prep rumble high-pass is active',()=>assert.ok(dbRatio(goertzel(prepRumbleOn.L,20),goertzel(prepRumbleOff.L,20))<=-4.0));
+const prepGainOff=render({mode:1,intensity:.5,profile:1},(i,sr)=>{const x=.004*Math.sin(2*Math.PI*1000*i/sr);return[x,x]});
+const prepGainOn=render({mode:1,intensity:.5,profile:1,masterPrep:{sourceGainDb:1.5}},(i,sr)=>{const x=.004*Math.sin(2*Math.PI*1000*i/sr);return[x,x]});
+gate('Master Prep can recover clean source level',()=>assert.ok(dbRatio(rmsStereo(prepGainOn),rmsStereo(prepGainOff))>=0.5));
+
 
 // Independent 8x windowed-sinc interpolated true peak, separate from the V5 4x FIR meter.
 function makePhaseFir(up=8,taps=20){const fc=.475/up,N=up*taps,mid=(N-1)/2,h=new Float64Array(N);let sum=0;for(let n=0;n<N;n++){const x=n-mid;const sinc=Math.abs(x)<1e-12?2*fc:Math.sin(2*Math.PI*fc*x)/(Math.PI*x);const w=.42-.5*Math.cos(2*Math.PI*n/(N-1))+.08*Math.cos(4*Math.PI*n/(N-1));h[n]=sinc*w;sum+=h[n]}const scale=up/sum;for(let n=0;n<N;n++)h[n]*=scale;const ph=[];for(let p=0;p<up;p++){const a=[];for(let k=0;k<taps;k++)a.push(h[p+k*up]);ph.push(a)}return ph}
@@ -170,7 +212,7 @@ gate('Continuous mode stress has 0 clips / 0 NaNs',()=>{for(const x of cycle){as
 dsp.mvp_v2_set_mode(2);const intensityRuns=[];
 for(let c=0;c<5;c++) for(const v of [0,.5,1,.5,0]){dsp.mvp_v2_set_intensity(v);dsp.mvp_v2_reset_meters();const o=renderCurrent(program,.85);intensityRuns.push({c,v,r:rmsStereo(o)})}
 const avg=v=>{const x=intensityRuns.filter(q=>q.v===v).map(q=>q.r);return x.reduce((a,b)=>a+b,0)/x.length};
-gate('Continuous intensity 0 / 50 / 100 stays ordered',()=>assert.ok(avg(.5)>avg(0)*1.025&&avg(1)>avg(.5)*1.025));
+gate('Continuous intensity 0 / 50 / 100 stays clearly ordered',()=>{const a=dbRatio(avg(.5),avg(0)),b=dbRatio(avg(1),avg(.5));assert.ok(a>=1.5&&b>=0.8,`${a.toFixed(2)}, ${b.toFixed(2)} dB`)});
 gate('Continuous intensity returns to repeatable 0%',()=>{const x=intensityRuns.filter(q=>q.v===0).map(q=>q.r);assert.ok(spreadDb(x)<=.30,`${spreadDb(x).toFixed(3)} dB`)});
 gate('Continuous intensity returns to repeatable 50%',()=>{const x=intensityRuns.filter(q=>q.v===.5).map(q=>q.r);assert.ok(spreadDb(x)<=.30,`${spreadDb(x).toFixed(3)} dB`)});
 
@@ -203,4 +245,4 @@ console.log('\n=== V5 CORPUS ===');
 for(const x of corpusMetrics) console.log(`${x.genre.padEnd(10)} ${x.level.padEnd(12)} A ${x.adaptive.toFixed(2).padStart(6)} dB  P ${x.power.toFixed(2).padStart(6)} dB  P-A ${x.powerOverAdaptive.toFixed(2).padStart(6)} dB  meter ${x.tp.toFixed(2).padStart(6)} dBTP  lim ${x.limiter.toFixed(2).padStart(5)} dB`);
 console.log(`Independent 8x torture peak: ${extTp.toFixed(3)} dBTP`);
 console.log(`Performance: ${rt.toFixed(1)}x real time (${elapsed.toFixed(3)} s for 30 s audio)`);
-const passed=results.filter(x=>x.ok).length; console.log(`\nMVP Broadcast Engine V5 validation: ${passed}/${results.length} PASS`); if(passed!==results.length) process.exitCode=1;
+const passed=results.filter(x=>x.ok).length; console.log(`\nMVP Broadcast Engine V5.1 validation: ${passed}/${results.length} PASS`); if(passed!==results.length) process.exitCode=1;

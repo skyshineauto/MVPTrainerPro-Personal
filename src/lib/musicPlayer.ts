@@ -7,9 +7,11 @@ import {
   getMvpStudioTelemetry,
   repostMvpStudioState,
   resetMvpStudioLoudness,
+  setMvpStudioMasterPrep,
   setMvpStudioState,
   waitForMvpStudioRevision,
 } from "./audio/mvpStudioEngine";
+import { getMusicTrackIntelligence } from "./musicIntelligenceEnrichment";
 import {
   clearMusicUrlCache,
   getMusicArtworkSignedUrl,
@@ -3051,6 +3053,19 @@ async function assignTrackSource(track: MusicTrack, startAt: number, force: bool
   else audio.addEventListener("loadedmetadata", seekWhenReady, { once: true });
 }
 
+async function applyTrackMasterPrep(track: MusicTrack) {
+  setMvpStudioMasterPrep(null);
+  try {
+    const intelligence = await getMusicTrackIntelligence(track.id);
+    if (state.currentTrack?.id !== track.id) return;
+    const masterPrep = intelligence && intelligence.analysisVersion >= 5 ? intelligence.masterPrep : null;
+    setMvpStudioMasterPrep(masterPrep?.enabled ? masterPrep : null);
+    applyProcessingSettings();
+  } catch {
+    if (state.currentTrack?.id === track.id) { setMvpStudioMasterPrep(null); applyProcessingSettings(); }
+  }
+}
+
 async function loadTrack(track: MusicTrack, startAt = 0) {
   const shouldResetLoudness = state.currentTrack?.id !== track.id || startAt < 0.5;
   if (shouldResetLoudness) {
@@ -3060,6 +3075,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
   }
   loadingTrackId = track.id;
   emit({ loading: true, error: null, currentTrack: track });
+  void applyTrackMasterPrep(track);
   restoreSongDspMemory(track.id);
   savePlayerSetting(STORAGE_KEYS.currentTrackId, track.id);
   configureMediaSession();

@@ -1,5 +1,4 @@
 import type {
-  MusicAiAutoSoundProfiles,
   MusicAudioTechnicalAnalysis,
   MusicMasterPrepProfile,
 } from "./musicAudioIntelligence";
@@ -55,7 +54,6 @@ export type MusicTrackIntelligence = {
   providerPayload?: Record<string, unknown>;
   audioAnalysis?: MusicAudioTechnicalAnalysis | null;
   masterPrep?: MusicMasterPrepProfile | null;
-  aiAutoSound?: MusicAiAutoSoundProfiles | null;
   analyzedAt: string | null;
   updatedAt: string;
   error: string | null;
@@ -92,7 +90,6 @@ function normalizeCachedTrack(item: MusicTrackIntelligence): MusicTrackIntellige
     providerPayload: item.providerPayload && typeof item.providerPayload === "object" ? item.providerPayload : {},
     audioAnalysis: item.audioAnalysis ?? null,
     masterPrep: item.masterPrep ?? null,
-    aiAutoSound: item.aiAutoSound ?? null,
   };
 }
 

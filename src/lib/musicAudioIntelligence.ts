@@ -44,24 +44,6 @@ export type MusicMasterPrepProfile = {
   reasons: string[];
 };
 
-export type MusicAnalogRecommendation = "off" | "studio" | "warm";
-
-export type MusicAiAutoSoundRecommendation = {
-  clear: boolean;
-  neuralBass: boolean;
-  impactOrPunch: boolean;
-  hdXpanderLevel: 0 | 1 | 2 | 3;
-  analog: MusicAnalogRecommendation;
-  wide: boolean;
-  highOutput: boolean;
-  compatibilityNotes: string[];
-};
-
-export type MusicAiAutoSoundProfiles = {
-  headphones: MusicAiAutoSoundRecommendation;
-  speaker: MusicAiAutoSoundRecommendation;
-};
-
 export type LocalAudioIntelligence = {
   bpm: number | null;
   bpmConfidence: number;
@@ -78,7 +60,6 @@ export type LocalAudioIntelligence = {
   durationSeconds: number;
   technical: MusicAudioTechnicalAnalysis;
   masterPrep: MusicMasterPrepProfile;
-  autoSound: MusicAiAutoSoundProfiles;
   successfulFeatures: string[];
   failedFeatures: Array<{ feature: string; error: string }>;
 };

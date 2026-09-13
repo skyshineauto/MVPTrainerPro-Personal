@@ -2,7 +2,6 @@ import Essentia from "essentia.js/dist/essentia.js-core.es.js";
 import { EssentiaWASM } from "essentia.js/dist/essentia-wasm.es.js";
 import type {
   LocalAudioIntelligence,
-  MusicAiAutoSoundProfiles,
   MusicAudioSourceMeta,
   MusicAudioTechnicalAnalysis,
   MusicMasterPrepProfile,
@@ -399,61 +398,6 @@ function buildMasterPrep(technical: MusicAudioTechnicalAnalysis): MusicMasterPre
   };
 }
 
-function buildAutoSound(technical: MusicAudioTechnicalAnalysis, meta: MusicAudioSourceMeta): MusicAiAutoSoundProfiles {
-  const text = `${meta.genre || ""} ${meta.energyLevel || ""}`.toLowerCase();
-  const energetic = /high|rock|metal|punk|hardcore|industrial|edm|hip.?hop/.test(text);
-  const heavy = /metal|hard rock|hardcore|industrial|grunge|post-grunge/.test(text);
-  const cleanBase = technical.harshness < 74 && technical.sibilance < 78 && (technical.hfRolloff > 38 || technical.presenceBalance < 48);
-  const bassBase = technical.bassExtension < 60 || heavy;
-  const impactBase = energetic && technical.transientStrength < 72;
-  let xpander: 0 | 1 | 2 | 3 = technical.hfRolloff > 78 ? 3 : technical.hfRolloff > 58 || technical.sourceQuality === "low" ? 2 : technical.hfRolloff > 38 ? 1 : 0;
-  const analog: "off" | "studio" | "warm" = technical.harshness > 76 ? "warm" : technical.sourceQuality === "low" ? "studio" : "off";
-  const compatibilityNotes: string[] = [];
-  if (cleanBase && xpander > 2) {
-    xpander = 2;
-    compatibilityNotes.push("Clear + Xpander share the HF/detail budget");
-  }
-  if (impactBase && xpander > 2) {
-    xpander = 2;
-    compatibilityNotes.push("Impact/Punch + Xpander share the transient budget");
-  }
-  if (analog !== "off" && xpander > 2) {
-    xpander = 2;
-    compatibilityNotes.push("Analog + Xpander share the harmonic budget");
-  }
-  const safeWide = technical.correlation > 0.28 && !technical.phaseRisk && technical.stereoWidthPercent < 125;
-  // R78f: always request High/Max Output from the r77i clean-output controller.
-  // That controller measures the real post-effect true peak and grants only the
-  // clean gain that actually exists, so AI must not make hot masters artificially quiet.
-  const cleanOutput = true;
-
-  return {
-    headphones: {
-      clear: cleanBase,
-      neuralBass: bassBase,
-      impactOrPunch: impactBase,
-      hdXpanderLevel: xpander,
-      analog,
-      wide: safeWide && technical.stereoWidthPercent < 105,
-      highOutput: cleanOutput,
-      compatibilityNotes: [...compatibilityNotes],
-    },
-    speaker: {
-      clear: cleanBase && technical.harshness < 70,
-      neuralBass: bassBase || technical.bassExtension < 67,
-      impactOrPunch: energetic && technical.transientStrength < 78,
-      hdXpanderLevel: xpander > 0 ? (Math.min(2, xpander) as 1 | 2) : 0,
-      analog,
-      wide: safeWide && technical.stereoWidthPercent < 112,
-      highOutput: cleanOutput,
-      compatibilityNotes: [
-        ...compatibilityNotes,
-        ...(bassBase && safeWide ? ["Neural Bass + Wide keeps low bass centered"] : []),
-      ],
-    },
-  };
-}
-
 function analyze(message: AnalyzeRequest): LocalAudioIntelligence {
   const api = getEssentia();
   if (!(message.pcmLeft instanceof Float32Array) || message.pcmLeft.length < 4096) {
@@ -464,7 +408,6 @@ function analyze(message: AnalyzeRequest): LocalAudioIntelligence {
   const durationSeconds = message.pcmLeft.length / inputRate;
   const technical = buildTechnical(message.pcmLeft, right, inputRate, durationSeconds, message.sourceMeta || {});
   const masterPrep = buildMasterPrep(technical);
-  const autoSound = buildAutoSound(technical, message.sourceMeta || {});
   const mono = monoFromStereo(message.pcmLeft, right);
   const rmsDb = technical.rmsDb;
 
@@ -542,7 +485,6 @@ function analyze(message: AnalyzeRequest): LocalAudioIntelligence {
       durationSeconds,
       technical,
       masterPrep,
-      autoSound,
       successfulFeatures,
       failedFeatures,
     };

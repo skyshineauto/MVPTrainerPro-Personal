@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V3 production bridge.
+// MVP Trainer Pro Broadcast Engine V5.1 production bridge.
 // Compatibility surface for musicPlayer.ts, backed by the proven V3 AudioWorklet/WASM route.
 // AI Audio / venue runtime is intentionally removed.
 
@@ -110,6 +110,16 @@ export type MvpStudioState = {
   broadcastPersonalBass?: number;
   broadcastPersonalPresence?: number;
   broadcastPersonalBrightness?: number;
+
+  // V5.1 per-song Master Prep from Enrich Library / Music Intelligence.
+  masterPrepEnabled?: boolean;
+  masterSourceGainDb?: number;
+  masterHighpassHz?: number;
+  masterLowMidDb?: number;
+  masterPresenceDb?: number;
+  masterHarshnessDb?: number;
+  masterBalanceDb?: number;
+  masterWidthScale?: number;
 };
 
 export type MvpStudioVenueProfile = {
@@ -134,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const ASSET_VERSION = "10.0.1-broadcast-v3-r4-live-state";
+const ASSET_VERSION = "10.0.2-broadcast-v5-1-master-prep";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -175,6 +185,13 @@ let latestTelemetry: MvpStudioTelemetry = { ...EMPTY_TELEMETRY };
 let wasmBytesPromise: Promise<ArrayBuffer> | null = null;
 let nextRevision = 0;
 let activeNode: AudioWorkletNode | null = null;
+
+type MvpMasterPrepRuntime = {
+  enabled: boolean; sourceGainDb: number; highpassHz: number; lowMidDb: number;
+  presenceDb: number; harshnessDb: number; balanceDb: number; widthScale: number;
+};
+const DEFAULT_MASTER_PREP: MvpMasterPrepRuntime = { enabled:false, sourceGainDb:0, highpassHz:18, lowMidDb:0, presenceDb:0, harshnessDb:0, balanceDb:0, widthScale:1 };
+let currentMasterPrep: MvpMasterPrepRuntime = { ...DEFAULT_MASTER_PREP };
 
 const requestedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
 const appliedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
@@ -252,11 +269,11 @@ function updateTelemetry(data: Record<string, unknown>) {
 async function loadWasmBytes() {
   if (wasmBytesPromise) return wasmBytesPromise;
   wasmBytesPromise = (async () => {
-    if (typeof window === "undefined") throw new Error("Broadcast Engine V3 requires a browser runtime.");
+    if (typeof window === "undefined") throw new Error("Broadcast Engine V5.1 requires a browser runtime.");
     const url = new URL("/audioV2/mvpHdV2.wasm", window.location.origin);
     url.searchParams.set("v", ASSET_VERSION);
     const response = await fetch(url.href, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Broadcast V3 WASM download failed (${response.status}).`);
+    if (!response.ok) throw new Error(`Broadcast V5.1 WASM download failed (${response.status}).`);
     return response.arrayBuffer();
   })().catch((error) => {
     wasmBytesPromise = null;
@@ -290,6 +307,14 @@ function publicState(state: MvpStudioState) {
     personalBass: clamp(state.broadcastPersonalBass, -1, 1, 0),
     personalPresence: clamp(state.broadcastPersonalPresence, -1, 1, 0),
     personalBrightness: clamp(state.broadcastPersonalBrightness, -1, 1, 0),
+    masterPrepEnabled: currentMasterPrep.enabled,
+    masterSourceGainDb: currentMasterPrep.sourceGainDb,
+    masterHighpassHz: currentMasterPrep.highpassHz,
+    masterLowMidDb: currentMasterPrep.lowMidDb,
+    masterPresenceDb: currentMasterPrep.presenceDb,
+    masterHarshnessDb: currentMasterPrep.harshnessDb,
+    masterBalanceDb: currentMasterPrep.balanceDb,
+    masterWidthScale: currentMasterPrep.widthScale,
     eqEnabled: Boolean(state.eqEnabled),
     eqGains: state.eqGains.slice(0, 31),
   };
@@ -297,7 +322,20 @@ function publicState(state: MvpStudioState) {
 
 // AI Audio and AI venue DSP were intentionally removed in Broadcast V3.
 // These compatibility exports remain no-ops so older callers cannot reintroduce hidden processing.
-export function setMvpStudioMasterPrep(_profile: unknown) {}
+export function setMvpStudioMasterPrep(profile: unknown) {
+  const raw = profile && typeof profile === "object" ? profile as Record<string, unknown> : null;
+  currentMasterPrep = raw ? {
+    enabled: Boolean(raw.enabled),
+    sourceGainDb: clamp(raw.sourceGainDb, 0, 3, 0),
+    highpassHz: clamp(raw.highpassHz, 18, 40, 18),
+    lowMidDb: clamp(raw.lowMidDb, -3, 2, 0),
+    presenceDb: clamp(raw.presenceDb, -2, 2, 0),
+    harshnessDb: clamp(raw.harshnessDb, -3, 1, 0),
+    balanceDb: clamp(raw.channelBalanceDb ?? raw.balanceDb, -1.5, 1.5, 0),
+    widthScale: clamp(raw.widthScale, 0.75, 1.10, 1),
+  } : { ...DEFAULT_MASTER_PREP };
+  if (activeNode) repostMvpStudioState(activeNode);
+}
 export function setMvpStudioVenue(_profile: MvpStudioVenueProfile | null) {}
 
 export async function createMvpStudioNode(context: AudioContext) {

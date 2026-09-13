@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V3 R4 live-state AudioWorklet bridge.
+// MVP Trainer Pro Broadcast Engine V5.1 live-state AudioWorklet bridge.
 // Single audible route. Fixed WASM buffers. No heap allocation in the render loop.
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
@@ -113,7 +113,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
         "mvp_v2_set_bass_enabled","mvp_v2_set_bass_character","mvp_v2_set_impact_enabled",
         "mvp_v2_set_clarity_enabled","mvp_v2_set_spatial_enabled","mvp_v2_set_space_mode",
         "mvp_v2_set_personal_enabled","mvp_v2_set_personal_bass","mvp_v2_set_personal_presence",
-        "mvp_v2_set_personal_brightness","mvp_v2_set_eq_enabled","mvp_v2_set_eq_band","mvp_v2_process",
+        "mvp_v2_set_personal_brightness","mvp_v2_set_master_prep","mvp_v2_set_eq_enabled","mvp_v2_set_eq_band","mvp_v2_process",
         "mvp_v2_meter_true_peak_dbtp","mvp_v2_meter_limiter_gr_db","mvp_v2_meter_clip_count",
         "mvp_v2_meter_nan_count","mvp_v2_meter_multiband_gr_db","mvp_v2_meter_impact_boost_db",
         "mvp_v2_meter_bass_activity_db","mvp_v2_meter_clarity_activity_db","mvp_v2_meter_spatial_width_percent",
@@ -138,7 +138,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       this.port.postMessage({
         type: "READY",
         legacyType: "ready",
-        version: "broadcast-v3",
+        version: "broadcast-v5-1",
         sampleRate,
         maxFrames,
       });
@@ -193,6 +193,14 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       personalBass: this.clamp(raw.personalBass ?? raw.broadcastPersonalBass, -1, 1, 0),
       personalPresence: this.clamp(raw.personalPresence ?? raw.broadcastPersonalPresence, -1, 1, 0),
       personalBrightness: this.clamp(raw.personalBrightness ?? raw.broadcastPersonalBrightness, -1, 1, 0),
+      masterPrepEnabled: Boolean(raw.masterPrepEnabled),
+      masterSourceGainDb: this.clamp(raw.masterSourceGainDb, 0, 3, 0),
+      masterHighpassHz: this.clamp(raw.masterHighpassHz, 18, 40, 18),
+      masterLowMidDb: this.clamp(raw.masterLowMidDb, -3, 2, 0),
+      masterPresenceDb: this.clamp(raw.masterPresenceDb, -2, 2, 0),
+      masterHarshnessDb: this.clamp(raw.masterHarshnessDb, -3, 1, 0),
+      masterBalanceDb: this.clamp(raw.masterBalanceDb, -1.5, 1.5, 0),
+      masterWidthScale: this.clamp(raw.masterWidthScale, 0.75, 1.10, 1),
       eqEnabled: Boolean(raw.eqEnabled),
       eqGains: eqGains.map((value) => this.clamp(value, -12, 12, 0)),
     };
@@ -219,6 +227,11 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     ex.mvp_v2_set_personal_bass(next.personalBass);
     ex.mvp_v2_set_personal_presence(next.personalPresence);
     ex.mvp_v2_set_personal_brightness(next.personalBrightness);
+    ex.mvp_v2_set_master_prep(
+      next.masterPrepEnabled ? 1 : 0, next.masterSourceGainDb, next.masterHighpassHz,
+      next.masterLowMidDb, next.masterPresenceDb, next.masterHarshnessDb,
+      next.masterBalanceDb, next.masterWidthScale,
+    );
     ex.mvp_v2_set_eq_enabled(next.eqEnabled ? 1 : 0);
     for (let band = 0; band < 31; band += 1) ex.mvp_v2_set_eq_band(band, next.eqGains[band]);
 
