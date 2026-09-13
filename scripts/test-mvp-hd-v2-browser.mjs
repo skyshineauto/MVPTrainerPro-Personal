@@ -15,6 +15,7 @@ const mini=read("src","features","music","MusicMiniPlayer.tsx");
 const cpp=read("dsp","v2","mvp_hd_v2.cpp");
 const legacyTest=read("scripts","test-mvp-hd-v2.mjs");
 const strictTest=read("scripts","test-mvp-hd-v2-v5.mjs");
+const comboTest=read("scripts","test-v52-matrix.mjs");
 const enrichment=read("src","lib","musicIntelligenceEnrichment.ts");
 const audioIntelligence=read("src","lib","musicAudioIntelligence.ts");
 const intelligenceCache=read("src","lib","musicIntelligenceCache.ts");
@@ -26,10 +27,10 @@ for(const value of [
   "mvp_v2_set_clarity_enabled","mvp_v2_set_spatial_enabled","mvp_v2_set_space_mode",
   "mvp_v2_set_personal_enabled","mvp_v2_set_personal_bass","mvp_v2_set_personal_presence",
   "mvp_v2_set_personal_brightness","mvp_v2_set_master_prep","mvp_v2_meter_multiband_gr_db"
-]) if(!worklet.includes(value)) throw new Error(`V5.1 Worklet ABI missing ${value}`);
+]) if(!worklet.includes(value)) throw new Error(`V5.2 Worklet ABI missing ${value}`);
 
 const processStart=worklet.indexOf("process(inputs, outputs)");
-if(processStart<0) throw new Error("V5.1 Worklet process() missing");
+if(processStart<0) throw new Error("V5.2 Worklet process() missing");
 const processBody=worklet.slice(processStart);
 for(const forbidden of ["_malloc","_free","new AudioContext","createMediaElementSource"]) {
   if(processBody.includes(forbidden)) throw new Error(`Forbidden render-loop operation ${forbidden}`);
@@ -43,7 +44,7 @@ for(const value of ["SET_PROOF_MUTE","bassCharacter","spaceMode",'"STAGE"','"SPA
 }
 
 for(const value of [
-  "Broadcast Engine V5.1",
+  "Broadcast Engine V5.2",
   "struct ExactSplit",
   "struct TruePeak4x",
   "kTpFir",
@@ -54,34 +55,52 @@ for(const value of [
   "applyMasterPrep",
   "configureMasterPrep",
   "maxBoostDb",
-  "gLimiterCeiling = 0.9380f",
+  "gDensityPeakEnv",
+  "gPureFlushRemaining",
+  "cleanAllowance",
+  "No nonlinear pre-limiter ceiling",
+  "gLimiterCeiling = 0.9200f",
   "V5 deliberately preserves compressor/AGC/limiter memory"
-]) if(!cpp.includes(value)) throw new Error(`V5.1 C++ architecture missing ${value}`);
+]) if(!cpp.includes(value)) throw new Error(`V5.2 C++ architecture missing ${value}`);
 
-if(cpp.includes("resetTransitionMemory")) throw new Error("V5.1 must not reset mastering state on mode/profile changes");
+if(cpp.includes("resetTransitionMemory")) throw new Error("V5.2 must not reset mastering state on mode/profile changes");
+if(cpp.includes("softCeiling(")) throw new Error("V5.2 must not contain the retired nonlinear pre-limiter soft ceiling");
 for(const value of ["if (next == gMode) return;","if (next == gOutputProfile) return;"]) {
-  if(!cpp.includes(value)) throw new Error(`V5.1 state guard missing ${value}`);
+  if(!cpp.includes(value)) throw new Error(`V5.2 state guard missing ${value}`);
 }
 
 for(const value of [
   "this.exports.mvp_v2_reset_meters();",
   "this.totalClipCount",
   "liveLimiterGrDb",
-]) if(!worklet.includes(value)) throw new Error(`V5.1 live telemetry missing ${value}`);
+]) if(!worklet.includes(value)) throw new Error(`V5.2 live telemetry missing ${value}`);
 
-if(!(legacyTest.includes("results.length") && legacyTest.includes("MVP Broadcast Engine V5 validation"))) {
+if(!(legacyTest.includes("results.length") && legacyTest.includes("MVP Broadcast Engine V5.2 legacy validation"))) {
   throw new Error("Legacy 56-gate PCM validation is missing");
 }
 if(!legacyTest.includes("c<20") || !legacyTest.includes("Independent 8x") || !legacyTest.includes("clips")) {
   throw new Error("Legacy continuous-state/true-peak safety validation is incomplete");
 }
 for(const value of [
-  "MVP Broadcast Engine V5.1 validation",
+  "MVP Broadcast Engine V5.2 strict validation",
   "Personal Presence has a real range",
   "Master Prep can recover clean source level",
-  "Master Prep",
+  "Dense heavy-song POWER regression stays free of waveform crushing",
+  "POWER clean path does not reintroduce nonlinear waveshaping",
   "Impact boost is bounded",
-]) if(!strictTest.includes(value)) throw new Error(`V5.1 strict PCM validation missing ${value}`);
+  "Hot-master intensity still changes without forcing the ceiling",
+]) if(!strictTest.includes(value)) throw new Error(`V5.2 strict PCM validation missing ${value}`);
+for(const value of [
+  "mask<16",
+  "CARSPACE",
+  "PERSONAL",
+  "EQ ",
+  "PREP ",
+  "TRANSITION",
+  "[.1,.25,.5,.75,1]",
+  "ceiling occupancy",
+  "flatten",
+]) if(!comboTest.includes(value)) throw new Error(`V5.2 combination/distortion matrix missing ${value}`);
 
 if(bridge.includes("installMusicAiAudioRuntime") || bridge.includes("musicAiAudioRuntime")) {
   throw new Error("AI Audio runtime is still connected to production bridge");
@@ -89,7 +108,7 @@ if(bridge.includes("installMusicAiAudioRuntime") || bridge.includes("musicAiAudi
 for(const value of [
   "/audioV2/mvpHdV2.worklet.js","/audioV2/mvpHdV2.wasm","mvp-hd-v2-processor",
   "setMvpStudioMasterPrep","masterPrepEnabled","masterSourceGainDb","broadcast-v5-1"
-]) if(!bridge.includes(value)) throw new Error(`Production bridge missing V5.1 asset/state ${value}`);
+]) if(!bridge.includes(value)) throw new Error(`Production bridge missing V5.2 asset/state ${value}`);
 
 for(const value of [
   'MusicExperienceMode = "pure" | "adaptive" | "power"',
@@ -104,7 +123,7 @@ for(const value of [
   "getMusicTrackIntelligence",
   "setMvpStudioMasterPrep",
   "analysisVersion >= 5"
-]) if(!player.includes(value)) throw new Error(`musicPlayer V5.1 integration missing ${value}`);
+]) if(!player.includes(value)) throw new Error(`musicPlayer V5.2 integration missing ${value}`);
 
 for(const value of [
   'MVP_BROADCAST_V3_SIMPLE_UI',
@@ -122,7 +141,7 @@ for(const value of [
   '<span>SOUND</span>',
   '<strong>MVP SOUND</strong>',
   '<MusicTodayAi />'
-]) if(!mini.includes(value)) throw new Error(`MusicMiniPlayer V5.1 UI missing ${value}`);
+]) if(!mini.includes(value)) throw new Error(`MusicMiniPlayer V5.2 UI missing ${value}`);
 
 for(const value of [
   'aria-pressed={player.broadcastBassEnabled} disabled={player.experienceMode === "pure"}',
@@ -159,4 +178,4 @@ for(const kept of ["buildTechnical","buildMasterPrep","technical,","masterPrep,"
   if(!audioWorker.includes(kept)) throw new Error(`Technical/Master Prep analysis regressed: ${kept}`);
 }
 
-console.log("MVP Broadcast Engine V5.1 browser/production static validation: PASS");
+console.log("MVP Broadcast Engine V5.2 browser/production static validation: PASS");

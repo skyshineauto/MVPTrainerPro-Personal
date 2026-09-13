@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.1
+// MVP Trainer Pro Broadcast Engine V5.2 CLEAN POWER
 // One continuous-state broadcast/mastering processor for Headphones, Bluetooth Speaker and Car/Hi-Fi.
 // ABI intentionally remains mvp_v2_* so the existing production Worklet/player wiring does not change.
 // Real-time contract: no heap allocation, no locks, no I/O in mvp_v2_process().
@@ -37,15 +37,6 @@ inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi 
 inline double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 inline float dbToGain(float db) { return static_cast<float>(pow(10.0, static_cast<double>(db) / 20.0)); }
 inline float gainToDb(float gain) { return gain > 0.0000001f ? static_cast<float>(20.0 * log10(gain)) : -120.0f; }
-
-inline float softCeiling(float x, float knee, float asymptote) {
-  const float a = absf(x);
-  if (a <= knee) return x;
-  const float span = asymptote - knee;
-  const float excess = a - knee;
-  const float y = knee + excess / (1.0f + excess / span);
-  return x < 0.0f ? -y : y;
-}
 
 const double kEqFrequencies[kEqBands] = {
   20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0,
@@ -191,6 +182,8 @@ int gPersonalEnabled = 0;
 float gPersonalBass = 0.0f;
 float gPersonalPresence = 0.0f;
 float gPersonalBrightness = 0.0f;
+float gPersonalHeadroomGain = 1.0f;
+float gPersonalPositiveDb = 0.0f;
 
 // Per-song Master Prep from Enrich Library / Music Intelligence V5.
 int gMasterPrepEnabled = 0;
@@ -209,6 +202,7 @@ Biquad gMasterHarshL, gMasterHarshR;
 // Optional Advanced EQ.
 int gEqEnabled = 0;
 float gEqGainDb[kEqBands] = {};
+float gEqHeadroomGain = 1.0f;
 Biquad gEqL[kEqBands];
 Biquad gEqR[kEqBands];
 
@@ -216,6 +210,7 @@ Biquad gEqR[kEqBands];
 float gProgramPeak = 0.0f;
 float gProgramAvg = 0.0f;
 float gProgramDensity = 0.0f;
+unsigned int gProgramSamples = 0;
 float gPeakAttack = 0.0f, gPeakRelease = 0.0f;
 float gAvgAttack = 0.0f, gAvgRelease = 0.0f;
 float gAgcGain = 1.0f;
@@ -232,6 +227,8 @@ ExactSplit gSplit5200L, gSplit5200R;
 Biquad gPersonalBassL, gPersonalBassR;
 Biquad gPersonalPresenceL, gPersonalPresenceR;
 Biquad gPersonalBrightnessL, gPersonalBrightnessR;
+// Small clean post-density POWER contour. This preserves mode distinction on already
+// brickwalled masters where extra RMS cannot be created safely.
 BandDynamics gBandDynamics[kBands];
 float gBandAttackCoeff = 0.0f;
 float gBandReleaseCoeff = 0.0f;
@@ -270,6 +267,10 @@ float gSpatialWidthPercent = 100.0f;
 float gMasterEnv = 0.0f;
 float gMasterAttack = 0.0f;
 float gMasterRelease = 0.0f;
+float gDensityPeakEnv = 0.0f;
+float gDensityMakeupGain = 1.0f;
+float gMakeupDownCoeff = 0.0f;
+float gMakeupUpCoeff = 0.0f;
 
 // Lookahead limiter.
 float gLookL[kLookaheadMax] = {};
@@ -277,9 +278,10 @@ float gLookR[kLookaheadMax] = {};
 float gLookPeak[kLookaheadMax] = {};
 int gLookaheadSamples = 120;
 int gLookIndex = 0;
+int gPureFlushRemaining = 0;
 float gLimiterGain = 1.0f;
 float gLimiterReleaseCoeff = 0.0004f;
-const float gLimiterCeiling = 0.9380f;
+const float gLimiterCeiling = 0.9200f;
 
 // True-peak detectors and meters.
 TruePeak4x gLimiterTpL, gLimiterTpR;
@@ -293,6 +295,15 @@ void configureEqBand(int band) {
   if (band < 0 || band >= kEqBands) return;
   gEqL[band].peaking(gSampleRate, kEqFrequencies[band], 4.318473046963146, gEqGainDb[band]);
   gEqR[band].peaking(gSampleRate, kEqFrequencies[band], 4.318473046963146, gEqGainDb[band]);
+}
+
+void configureEqHeadroom() {
+  float positiveSumDb = 0.0f;
+  for (int i = 0; i < kEqBands; ++i) if (gEqGainDb[i] > 0.0f) positiveSumDb += gEqGainDb[i];
+  // Auto-headroom acts like the preamp compensation in high-end EQs: one boosted band
+  // stays almost full-strength, while many simultaneous boosts reserve enough clean room.
+  const float trimDb = clampf(positiveSumDb * 0.070f, 0.0f, 6.0f);
+  gEqHeadroomGain = dbToGain(-trimDb);
 }
 
 void resetLiveActivityMeters() {
@@ -338,11 +349,15 @@ void resetState() {
 
   gSpatialIndex = 0;
   gLookIndex = 0;
+  gPureFlushRemaining = 0;
   gProgramPeak = gProgramAvg = gProgramDensity = 0.0f;
+  gProgramSamples = 0;
   gAgcGain = 1.0f;
   gHarshEnv = 0.0f;
   gImpactFast = gImpactSlow = 0.0f;
   gMasterEnv = 0.0f;
+  gDensityPeakEnv = 0.0f;
+  gDensityMakeupGain = 1.0f;
   gLimiterGain = 1.0f;
   gIntensity = gIntensityTarget;
   gBassCharacter = gBassCharacterTarget;
@@ -377,7 +392,22 @@ inline void applyMasterPrep(float &l, float &r) {
   float pl = gMasterHarshL.process(gMasterPresenceL.process(gMasterLowMidL.process(gMasterHpL.process(l))));
   float pr = gMasterHarshR.process(gMasterPresenceR.process(gMasterLowMidR.process(gMasterHpR.process(r))));
   if (!gMasterPrepEnabled) return;
-  const float sourceGain = dbToGain(gMasterSourceGainDb);
+  // Live safety override: Enrich normally assigns source gain only to quiet masters, but
+  // stale/incorrect metadata must never add +3 dB to an already-hot track. Preserve the
+  // tonal Master Prep corrections while fading source gain out as live peak/density rises.
+  const float hotPeak = clampf((gProgramPeak - 0.52f) / 0.34f, 0.0f, 1.0f);
+  const float hotDensity = clampf((gProgramDensity - 0.58f) / 0.26f, 0.0f, 1.0f);
+  // Density alone is not a reason to reject gain: a quiet sustained/brickwalled source may
+  // genuinely need level recovery. Only treat density as risk when the live peak is also hot.
+  const float hotRisk = hotPeak * (0.45f + 0.55f * hotDensity);
+  // Ramp positive source gain in only after the live analyzer has seen enough of the new
+  // track to reject a stale "quiet" profile on a hot master. This also prevents a song-start
+  // blast before peak/density state has settled.
+  const float warmStart = gSampleRate * 0.050f;
+  const float warmSpan = gSampleRate * 0.250f;
+  const float analysisWarm = clampf((static_cast<float>(gProgramSamples) - warmStart) / warmSpan, 0.0f, 1.0f);
+  const float safeSourceGainDb = gMasterSourceGainDb * (1.0f - hotRisk) * analysisWarm;
+  const float sourceGain = dbToGain(safeSourceGainDb);
   pl *= sourceGain; pr *= sourceGain;
   if (gMasterBalanceDb > 0.0f) pr *= dbToGain(gMasterBalanceDb);
   else if (gMasterBalanceDb < 0.0f) pl *= dbToGain(-gMasterBalanceDb);
@@ -394,6 +424,7 @@ inline void updateProgramAnalysis(float l, float r) {
   gProgramAvg += (detector - gProgramAvg) * ac;
   const float denom = gProgramPeak > 0.00001f ? gProgramPeak : 0.00001f;
   gProgramDensity = clampf(gProgramAvg / denom, 0.0f, 1.0f);
+  if (gProgramSamples < 0x7fffffffu) gProgramSamples += 1;
 }
 
 inline void applyProgramAgc(float &l, float &r) {
@@ -468,9 +499,20 @@ inline void applyBroadcastDynamics(float &l, float &r) {
       deviceDb = d[band];
     }
 
+    // POWER has a small broadband contour so it remains perceptually stronger than ADAPTIVE
+    // even when an already-brickwalled master has almost no legal peak headroom left.
+    // This is linear tonal emphasis, not clipping or saturation.
+    if (power) {
+      const float powerContour[kBands] = {0.20f, 0.38f, 0.30f, 0.18f, 0.10f};
+      deviceDb += powerContour[band] * (0.55f + 0.45f * gIntensity);
+    }
+
     // Recover most compression reduction as density, instead of simply slamming a final limiter.
-    const float recovery = power ? (0.88f + 0.07f * gIntensity) : (0.93f + 0.03f * gIntensity);
-    const float baseMakeupDb = power ? (0.90f + 0.90f * gIntensity) : (0.30f + 0.45f * gIntensity);
+    // Keep real compression in the signal. V5.1 recovered almost all gain reduction,
+    // which forced the final maximizer/limiter to create density instead. V5.2 leaves
+    // meaningful crest reduction here so POWER can become louder without waveshaping.
+    const float recovery = power ? (0.80f + 0.08f * gIntensity) : (0.89f + 0.04f * gIntensity);
+    const float baseMakeupDb = power ? (0.96f + 0.92f * gIntensity) : (0.38f + 0.42f * gIntensity);
     const float bandGain = dynGain * dbToGain(deviceDb + baseMakeupDb + grDb * recovery);
     bl[band] *= bandGain;
     br[band] *= bandGain;
@@ -506,7 +548,9 @@ inline void applyBassEngine(float &l, float &r) {
   const float deepEnd = gOutputProfile == 1 ? 1.66f : (gOutputProfile == 2 ? 1.42f : 1.50f);
   const float deepGain = amount * (0.10f + (deepEnd - 0.10f) * c);
   const float bodyGain = amount * (1.38f - 1.10f * c);
-  const float harmonicMix = amount * ((gOutputProfile == 2 ? 0.24f : 0.14f) + 0.18f * c);
+  // High-fidelity bass is primarily linear. Keep only a trace of harmonic support for
+  // tiny Bluetooth speakers instead of using saturation as a loudness shortcut.
+  const float harmonicMix = amount * ((gOutputProfile == 2 ? 0.050f : 0.028f) + 0.030f * c);
 
   const float harmL = softBassHarmonics(deepL, amount);
   const float harmR = softBassHarmonics(deepR, amount);
@@ -523,26 +567,25 @@ inline void applyBassEngine(float &l, float &r) {
 }
 
 inline void applyClarityEngine(float &l, float &r) {
-  const float presenceL = gPresenceHpL.process(l);
-  const float presenceR = gPresenceHpR.process(r);
-  const float airL = gAirHpL.process(l);
-  const float airR = gAirHpR.process(r);
-
-  const float highDetector = absf(airL) > absf(airR) ? absf(airL) : absf(airR);
+  // Two linear bell stages give a clearly audible presence/air lift without duplicating
+  // the entire high-passed waveform. This keeps dense rock transients clean and leaves
+  // the final limiter as protection, not as an audible de-harsh workaround.
+  const float shapedL = gAirHpL.process(gPresenceHpL.process(l));
+  const float shapedR = gAirHpR.process(gPresenceHpR.process(r));
+  const float deltaL = shapedL - l;
+  const float deltaR = shapedR - r;
+  const float highDetector = absf(deltaL) > absf(deltaR) ? absf(deltaL) : absf(deltaR);
   const float hc = highDetector > gHarshEnv ? gHarshAttack : gHarshRelease;
   gHarshEnv += (highDetector - gHarshEnv) * hc;
   if (!gClarityEnabled) return;
 
-  const float harshReduction = clampf((gHarshEnv - 0.12f) * 2.5f, 0.0f, 0.42f);
-  const float scale = 1.0f - harshReduction;
-  const float profileScale = gOutputProfile == 1 ? 1.14f : (gOutputProfile == 2 ? 1.22f : 1.0f);
-  const float presenceMix = (0.27f + 0.31f * gIntensity) * scale * profileScale;
-  const float airMix = (0.23f + 0.34f * gIntensity) * scale * profileScale;
-  const float addL = presenceL * presenceMix + airL * airMix;
-  const float addR = presenceR * presenceMix + airR * airMix;
+  const float harshReduction = clampf((gHarshEnv - 0.055f) * 3.2f, 0.0f, 0.38f);
+  const float mix = 1.0f - harshReduction;
+  const float addL = deltaL * mix;
+  const float addR = deltaR * mix;
   l += addL; r += addR;
 
-  const float src = absf(presenceL) > absf(presenceR) ? absf(presenceL) : absf(presenceR);
+  const float src = absf(l) > absf(r) ? absf(l) : absf(r);
   const float add = absf(addL) > absf(addR) ? absf(addL) : absf(addR);
   if (src > 0.00001f) {
     const float activity = gainToDb(1.0f + add / src);
@@ -559,7 +602,7 @@ inline void applyImpactEngine(float &l, float &r) {
   if (!gImpactEnabled) return;
 
   // V5 could multiply the entire waveform by a very large linear transient factor. On real
-  // Bluetooth/headphone material that could sound crunchy before the limiter caught it. V5.1
+  // Bluetooth/headphone material that could sound crunchy before the limiter caught it. V5.2
   // converts the detector to a bounded dB lift and automatically backs off on already-hot peaks.
   const float transient = clampf(gImpactFast - gImpactSlow, 0.0f, 0.30f);
   const float transientNorm = clampf(transient / (gImpactSlow + 0.045f), 0.0f, 1.0f);
@@ -584,12 +627,12 @@ inline void applySpatialEngine(float &l, float &r) {
 
   float width = 1.0f, delayMix = 0.0f, delayMs = 7.0f;
   if (gOutputProfile == 1) {
-    width = 1.28f + 0.42f * gIntensity;
-    delayMix = 0.050f + 0.060f * gIntensity;
+    width = 1.20f + 0.30f * gIntensity;
+    delayMix = 0.040f + 0.045f * gIntensity;
     delayMs = 7.5f;
   } else if (gOutputProfile == 2) {
-    width = 1.48f + 0.50f * gIntensity;
-    delayMix = 0.090f + 0.085f * gIntensity;
+    width = 1.34f + 0.38f * gIntensity;
+    delayMix = 0.070f + 0.060f * gIntensity;
     delayMs = 10.5f;
   } else {
     const float modeWidth = gSpaceMode == 2 ? 0.48f : (gSpaceMode == 1 ? 0.31f : 0.14f);
@@ -630,48 +673,97 @@ inline void applyDensityMaximizer(float &l, float &r) {
     compGain = static_cast<float>(pow(over, (1.0f / ratio) - 1.0f));
   }
 
-  const float blend = power ? (0.62f + 0.28f * gIntensity) : (0.36f + 0.22f * gIntensity);
+  const float blend = power ? (0.68f + 0.24f * gIntensity) : (0.40f + 0.20f * gIntensity);
   const float densityL = l * ((1.0f - blend) + blend * compGain);
   const float densityR = r * ((1.0f - blend) + blend * compGain);
-  const float densePowerBonus = power ? 1.60f * clampf((gProgramDensity - 0.56f) / 0.27f, 0.0f, 1.0f) : 0.0f;
+  const float densePowerBonus = power ? 1.10f * clampf((gProgramDensity - 0.56f) / 0.27f, 0.0f, 1.0f) : 0.0f;
   const float makeupDb = power
-    ? (2.00f + 7.50f * gIntensity + 0.42f * gProgramDensity + densePowerBonus)
-    : (0.66f + 1.42f * gIntensity + 0.14f * gProgramDensity);
-  const float makeup = dbToGain(makeupDb);
-  l = densityL * makeup;
-  r = densityR * makeup;
+    ? (2.10f + 5.90f * gIntensity + 0.30f * gProgramDensity + densePowerBonus)
+    : (0.54f + 1.25f * gIntensity + 0.12f * gProgramDensity);
+  const float desiredMakeup = dbToGain(makeupDb);
 
-  // A smooth mastering ceiling absorbs only the tallest pre-limiter crests. Its derivative
-  // is unity at the knee, so it behaves as a soft peak shaper rather than a hard clipper.
-  // This lets POWER add density to already-loud masters without parking the true-peak
-  // limiter several dB down for the entire passage.
-  if (power) {
-    const float knee = 0.86f - 0.12f * gIntensity;
-    l = softCeiling(l, knee, 1.08f);
-    r = softCeiling(r, knee, 1.08f);
-  } else {
-    const float knee = 0.93f - 0.03f * gIntensity;
-    l = softCeiling(l, knee, 1.085f);
-    r = softCeiling(r, knee, 1.085f);
-  }
+  // V5.2 CLEAN POWER hot-master governor. Measure the already-compressed waveform before
+  // makeup, then grant only the gain that fits inside a small clean lookahead allowance.
+  // The final true-peak limiter catches exceptional crests; it is not allowed to carry
+  // 8-14 dB of sustained gain reduction on loudness-war masters.
+  const float densityPeak = absf(densityL) > absf(densityR) ? absf(densityL) : absf(densityR);
+  const float peakCoeff = densityPeak > gDensityPeakEnv ? clampf(gMasterAttack * 4.0f, 0.0f, 1.0f) : gMasterRelease;
+  gDensityPeakEnv += (densityPeak - gDensityPeakEnv) * peakCoeff;
+  const float cleanAllowance = power ? 0.995f : 0.975f;
+  float cleanCap = gDensityPeakEnv > 0.00001f ? cleanAllowance / gDensityPeakEnv : desiredMakeup;
+  cleanCap = clampf(cleanCap, 0.30f, desiredMakeup);
+  const float targetMakeup = desiredMakeup < cleanCap ? desiredMakeup : cleanCap;
+  const float makeupCoeff = targetMakeup < gDensityMakeupGain ? gMakeupDownCoeff : gMakeupUpCoeff;
+  gDensityMakeupGain += (targetMakeup - gDensityMakeupGain) * makeupCoeff;
+  gDensityMakeupGain = clampf(gDensityMakeupGain, 0.30f, desiredMakeup);
+
+  l = densityL * gDensityMakeupGain;
+  r = densityR * gDensityMakeupGain;
+
+  // No nonlinear pre-limiter ceiling. Loudness comes from controlled dynamics plus clean
+  // makeup, preserving waveform shape and high-frequency detail on dense/hot masters.
+}
+
+void configureClarity() {
+  const float i = clampf(gIntensityTarget, 0.0f, 1.0f);
+  const float profile = gOutputProfile == 1 ? 1.05f : (gOutputProfile == 2 ? 1.00f : 0.92f);
+  const float presenceDb = (1.20f + 1.55f * i) * profile;
+  const float airDb = (0.95f + 1.65f * i) * profile;
+  gPresenceHpL.peaking(gSampleRate, 3200.0, 0.82, presenceDb);
+  gPresenceHpR.peaking(gSampleRate, 3200.0, 0.82, presenceDb);
+  gAirHpL.peaking(gSampleRate, 9500.0, 0.70, airDb);
+  gAirHpR.peaking(gSampleRate, 9500.0, 0.70, airDb);
 }
 
 void configurePersonalSound() {
-  const float bassDb = gOutputProfile == 1 ? 5.8f : (gOutputProfile == 2 ? 5.0f : 4.4f);
-  const float presenceDb = gOutputProfile == 1 ? 5.2f : (gOutputProfile == 2 ? 4.7f : 4.2f);
-  const float brightnessDb = gOutputProfile == 1 ? 5.8f : (gOutputProfile == 2 ? 5.2f : 4.6f);
-  gPersonalBassL.peaking(gSampleRate, 90.0, 0.70, gPersonalBass * bassDb);
-  gPersonalBassR.peaking(gSampleRate, 90.0, 0.70, gPersonalBass * bassDb);
-  gPersonalPresenceL.peaking(gSampleRate, 3200.0, 0.78, gPersonalPresence * presenceDb);
-  gPersonalPresenceR.peaking(gSampleRate, 3200.0, 0.78, gPersonalPresence * presenceDb);
-  gPersonalBrightnessL.peaking(gSampleRate, 10000.0, 0.68, gPersonalBrightness * brightnessDb);
-  gPersonalBrightnessR.peaking(gSampleRate, 10000.0, 0.68, gPersonalBrightness * brightnessDb);
+  const float bassDb = gOutputProfile == 1 ? 4.8f : (gOutputProfile == 2 ? 4.8f : 4.0f);
+  const float presenceDb = gOutputProfile == 1 ? 4.2f : (gOutputProfile == 2 ? 4.0f : 3.8f);
+  const float brightnessDb = gOutputProfile == 1 ? 4.8f : (gOutputProfile == 2 ? 4.4f : 4.0f);
+  const float bassGainDb = gPersonalBass * bassDb;
+  const float presenceGainDb = gPersonalPresence * presenceDb;
+  const float brightnessGainDb = gPersonalBrightness * brightnessDb;
+  gPersonalBassL.peaking(gSampleRate, 90.0, 0.70, bassGainDb);
+  gPersonalBassR.peaking(gSampleRate, 90.0, 0.70, bassGainDb);
+  gPersonalPresenceL.peaking(gSampleRate, 3200.0, 0.78, presenceGainDb);
+  gPersonalPresenceR.peaking(gSampleRate, 3200.0, 0.78, presenceGainDb);
+  gPersonalBrightnessL.peaking(gSampleRate, 10000.0, 0.68, brightnessGainDb);
+  gPersonalBrightnessR.peaking(gSampleRate, 10000.0, 0.68, brightnessGainDb);
+
+  // Personal Sound can stack three broad boosts. Reserve headroom before those filters rather
+  // than asking the final limiter to absorb the combined boost. The density governor can then
+  // recover clean level when the actual song has room, while hot masters stay uncrushed.
+  const float positiveBassDb = bassGainDb > 0.0f ? bassGainDb : 0.0f;
+  const float positivePresenceDb = presenceGainDb > 0.0f ? presenceGainDb : 0.0f;
+  const float positiveBrightnessDb = brightnessGainDb > 0.0f ? brightnessGainDb : 0.0f;
+  const float positiveDb = positiveBassDb + positivePresenceDb + positiveBrightnessDb;
+  float maxPositiveDb = positiveBassDb;
+  if (positivePresenceDb > maxPositiveDb) maxPositiveDb = positivePresenceDb;
+  if (positiveBrightnessDb > maxPositiveDb) maxPositiveDb = positiveBrightnessDb;
+  // Preserve the dramatic range of a single Personal Sound control, but reserve progressively
+  // more headroom when two or three broad boosts are stacked together.
+  const float stackedDb = positiveDb - maxPositiveDb;
+  const float reserveDb = clampf(maxPositiveDb * 0.05f + stackedDb * 0.55f, 0.0f, 6.0f);
+  gPersonalPositiveDb = positiveDb;
+  gPersonalHeadroomGain = dbToGain(-reserveDb);
 }
 
 inline void applyPersonalSound(float &l, float &r) {
-  // Filter state stays warm while disabled; only the audible assignment is bypassed.
-  float pl = gPersonalBrightnessL.process(gPersonalPresenceL.process(gPersonalBassL.process(l)));
-  float pr = gPersonalBrightnessR.process(gPersonalPresenceR.process(gPersonalBassR.process(r)));
+  // Keep filters warm while disabled, but apply boost-aware headroom only when Personal Sound
+  // is actually audible so toggling it OFF remains a true bypass of the user tone curve.
+  float inputGain = 1.0f;
+  if (gPersonalEnabled) {
+    // When Personal boosts are combined with the main effect stack, reserve additional clean
+    // room only for the overlap. This keeps each Personal slider dramatic on its own while
+    // preventing Bass + Impact + Clarity + Spatial + Personal from becoming a limiter torture test.
+    const float effectStackDb = (gBassEnabled ? 0.40f : 0.0f)
+      + (gImpactEnabled ? 0.50f : 0.0f)
+      + (gClarityEnabled ? 0.60f : 0.0f)
+      + (gSpatialEnabled ? 0.25f : 0.0f);
+    const float positiveScale = clampf(gPersonalPositiveDb / 4.0f, 0.0f, 1.0f);
+    inputGain = gPersonalHeadroomGain * dbToGain(-effectStackDb * positiveScale);
+  }
+  float pl = gPersonalBrightnessL.process(gPersonalPresenceL.process(gPersonalBassL.process(l * inputGain)));
+  float pr = gPersonalBrightnessR.process(gPersonalPresenceR.process(gPersonalBassR.process(r * inputGain)));
   if (!gPersonalEnabled) return;
   l = pl; r = pr;
 }
@@ -700,8 +792,21 @@ inline void applyLimiterAndDelay(float currentL, float currentR, float &outL, fl
   if (gLookIndex >= gLookaheadSamples) gLookIndex = 0;
 
   if (!limitingEnabled) {
+    // When switching from ADAPTIVE/POWER into PURE, the lookahead ring still contains
+    // a few milliseconds of pre-limiter processed audio. Do not release those stale
+    // samples at unity or a mode switch can create a brief >0 dBFS spike. Flush only
+    // that old processed tail with its stored true-peak safety gain, then return to
+    // completely untouched PURE/reference playback.
+    if (gPureFlushRemaining > 0) {
+      float safe = 1.0f;
+      if (delayedPeak > gLimiterCeiling && delayedPeak > 0.000001f) safe = gLimiterCeiling / delayedPeak;
+      outL = delayedL * safe;
+      outR = delayedR * safe;
+      gPureFlushRemaining -= 1;
+    } else {
+      outL = delayedL; outR = delayedR;
+    }
     gLimiterGain = 1.0f;
-    outL = delayedL; outR = delayedR;
     return;
   }
 
@@ -766,7 +871,11 @@ int mvp_v2_init(float sampleRate) {
 
   gMasterAttack = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.0025)));
   gMasterRelease = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.120)));
-  gLimiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.022)));
+  // Clean-power governor reduces makeup quickly when a dense/hot passage has no headroom,
+  // then restores it slowly so the limiter remains an emergency catcher rather than a loudness stage.
+  gMakeupDownCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.0010)));
+  gMakeupUpCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.090)));
+  gLimiterReleaseCoeff = static_cast<float>(1.0 - exp(-1.0 / (sampleRate * 0.055)));
 
   gSplit90L.configure(sampleRate, 90.0); gSplit90R.configure(sampleRate, 90.0);
   gSplit320L.configure(sampleRate, 320.0); gSplit320R.configure(sampleRate, 320.0);
@@ -775,8 +884,7 @@ int mvp_v2_init(float sampleRate) {
 
   gBassDeepL.lowpass(sampleRate, 82.0); gBassDeepR.lowpass(sampleRate, 82.0);
   gBassBodyL.lowpass(sampleRate, 190.0); gBassBodyR.lowpass(sampleRate, 190.0);
-  gPresenceHpL.highpass(sampleRate, 3000.0); gPresenceHpR.highpass(sampleRate, 3000.0);
-  gAirHpL.highpass(sampleRate, 7600.0); gAirHpR.highpass(sampleRate, 7600.0);
+  configureClarity();
   gSpatialLowL.lowpass(sampleRate, 140.0); gSpatialLowR.lowpass(sampleRate, 140.0);
   configurePersonalSound();
   configureMasterPrep();
@@ -792,7 +900,10 @@ void mvp_v2_reset_meters() { resetMeters(); }
 void mvp_v2_set_mode(int mode) {
   const int next = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
   if (next == gMode) return;
+  const int previous = gMode;
   gMode = next;
+  if (next == 0 && previous != 0) gPureFlushRemaining = gLookaheadSamples;
+  else if (next != 0) gPureFlushRemaining = 0;
   // V5 deliberately preserves compressor/AGC/limiter memory. This is one continuous processor.
   resetLiveActivityMeters();
 }
@@ -801,9 +912,10 @@ void mvp_v2_set_output_profile(int profile) {
   if (next == gOutputProfile) return;
   gOutputProfile = next;
   configurePersonalSound();
+  configureClarity();
   resetLiveActivityMeters();
 }
-void mvp_v2_set_intensity(float amount) { gIntensityTarget = clampf(amount, 0.0f, 1.0f); }
+void mvp_v2_set_intensity(float amount) { gIntensityTarget = clampf(amount, 0.0f, 1.0f); configureClarity(); }
 void mvp_v2_set_bass_enabled(int enabled) { gBassEnabled = enabled ? 1 : 0; gBassActivityDb = 0.0f; }
 void mvp_v2_set_bass_character(float amount) { gBassCharacterTarget = clampf(amount, 0.0f, 1.0f); }
 void mvp_v2_set_impact_enabled(int enabled) { gImpactEnabled = enabled ? 1 : 0; gImpactBoostDb = 0.0f; }
@@ -831,12 +943,14 @@ void mvp_v2_set_eq_enabled(int enabled) {
   const int next = enabled ? 1 : 0;
   if (next == gEqEnabled) return;
   gEqEnabled = next;
+  configureEqHeadroom();
   for (int i = 0; i < kEqBands; ++i) { gEqL[i].reset(); gEqR[i].reset(); }
 }
 void mvp_v2_set_eq_band(int band, float gainDb) {
   if (band < 0 || band >= kEqBands) return;
   gEqGainDb[band] = clampf(gainDb, -12.0f, 12.0f);
   configureEqBand(band);
+  configureEqHeadroom();
 }
 
 // Backward-compatible ABI used by older adapters.
@@ -868,6 +982,8 @@ int mvp_v2_process(int frames) {
     const bool processed = gMode != 0;
     if (processed) {
       if (gEqEnabled) {
+        l *= gEqHeadroomGain;
+        r *= gEqHeadroomGain;
         for (int band = 0; band < kEqBands; ++band) {
           l = gEqL[band].process(l);
           r = gEqR[band].process(r);
@@ -881,8 +997,11 @@ int mvp_v2_process(int frames) {
       applyClarityEngine(l, r);
       applyImpactEngine(l, r);
       applySpatialEngine(l, r);
-      applyDensityMaximizer(l, r);
+      // Personal Sound is intentionally before the clean-density governor so even extreme
+      // Bass/Presence/Brightness combinations receive headroom management instead of
+      // forcing 8+ dB of final limiter reduction.
       applyPersonalSound(l, r);
+      applyDensityMaximizer(l, r);
     } else {
       // Keep effect analysis/state hot while PURE is selected, but output dry/reference audio.
       float shadowL = l, shadowR = r;
@@ -892,8 +1011,8 @@ int mvp_v2_process(int frames) {
       applyClarityEngine(shadowL, shadowR);
       applyImpactEngine(shadowL, shadowR);
       applySpatialEngine(shadowL, shadowR);
-      applyDensityMaximizer(shadowL, shadowR);
       applyPersonalSound(shadowL, shadowR);
+      applyDensityMaximizer(shadowL, shadowR);
     }
 
     float outL = 0.0f, outR = 0.0f;

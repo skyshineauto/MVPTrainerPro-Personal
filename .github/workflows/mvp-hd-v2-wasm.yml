@@ -1,4 +1,4 @@
-name: MVP Broadcast V5.1 WASM Build
+name: MVP Broadcast V5.2 WASM Build
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ on:
       - "scripts/build-mvp-hd-v2.sh"
       - "scripts/test-mvp-hd-v2.mjs"
       - "scripts/test-mvp-hd-v2-v5.mjs"
+      - "scripts/test-v52-matrix.mjs"
       - "public/audioV2/mvpHdV2.worklet.js"
       - "public/audioV2/test.html"
       - "public/audioV2/test.js"
@@ -28,7 +29,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mvp-broadcast-v5-1-wasm-main
+  group: mvp-broadcast-v5-2-wasm-main
   cancel-in-progress: false
 
 jobs:
@@ -59,7 +60,7 @@ jobs:
           ./.emsdk/emsdk install 3.1.64
           ./.emsdk/emsdk activate 3.1.64
 
-      - name: Build Broadcast V5.1 WASM
+      - name: Build Broadcast V5.2 WASM
         shell: bash
         run: |
           source ./.emsdk/emsdk_env.sh
@@ -68,10 +69,13 @@ jobs:
       - name: Run Broadcast V5 legacy regression validation
         run: node scripts/test-mvp-hd-v2.mjs
 
-      - name: Run Broadcast V5.1 strict PCM validation
+      - name: Run Broadcast V5.2 strict PCM validation
         run: node scripts/test-mvp-hd-v2-v5.mjs
 
-      - name: Run Broadcast V5.1 browser and production static validation
+      - name: Run Broadcast V5.2 full combination/distortion matrix
+        run: node scripts/test-v52-matrix.mjs
+
+      - name: Run Broadcast V5.2 browser and production static validation
         run: |
           node --check public/audioV2/mvpHdV2.worklet.js
           node --check public/audioV2/test.js
@@ -80,21 +84,21 @@ jobs:
       - name: Run production app build
         run: npm run build
 
-      - name: Upload validated Broadcast V5.1 WASM
+      - name: Upload validated Broadcast V5.2 WASM
         uses: actions/upload-artifact@v4
         with:
-          name: mvp-broadcast-v5-1-wasm
+          name: mvp-broadcast-v5-2-wasm
           path: public/audioV2/mvpHdV2.wasm
 
-      - name: Commit validated Broadcast V5.1 WASM only
+      - name: Commit validated Broadcast V5.2 WASM only
         shell: bash
         run: |
           git add public/audioV2/mvpHdV2.wasm
           if git diff --cached --quiet; then
-            echo "Broadcast V5.1 WASM binary is already current."
+            echo "Broadcast V5.2 WASM binary is already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Build MVP Broadcast V5.1 WASM"
+          git commit -m "Build MVP Broadcast V5.2 WASM"
           git push origin HEAD:main
