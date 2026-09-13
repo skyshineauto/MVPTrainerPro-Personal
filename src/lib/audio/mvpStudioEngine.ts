@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.1 production bridge.
+// MVP Trainer Pro Broadcast Engine V5.3 production bridge.
 // Compatibility surface for musicPlayer.ts, backed by the proven V3 AudioWorklet/WASM route.
 // AI Audio / venue runtime is intentionally removed.
 
@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: MvpStudioState | null;
 };
 
-const ASSET_VERSION = "10.0.2-broadcast-v5-1-master-prep";
+const ASSET_VERSION = "10.0.3-broadcast-v5-3-audible-clean-power";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -269,11 +269,11 @@ function updateTelemetry(data: Record<string, unknown>) {
 async function loadWasmBytes() {
   if (wasmBytesPromise) return wasmBytesPromise;
   wasmBytesPromise = (async () => {
-    if (typeof window === "undefined") throw new Error("Broadcast Engine V5.1 requires a browser runtime.");
+    if (typeof window === "undefined") throw new Error("Broadcast Engine V5.3 requires a browser runtime.");
     const url = new URL("/audioV2/mvpHdV2.wasm", window.location.origin);
     url.searchParams.set("v", ASSET_VERSION);
     const response = await fetch(url.href, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Broadcast V5.1 WASM download failed (${response.status}).`);
+    if (!response.ok) throw new Error(`Broadcast V5.3 WASM download failed (${response.status}).`);
     return response.arrayBuffer();
   })().catch((error) => {
     wasmBytesPromise = null;

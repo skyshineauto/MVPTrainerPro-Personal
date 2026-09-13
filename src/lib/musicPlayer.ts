@@ -1069,8 +1069,9 @@ function applyBroadcastProfileSettings(profile: MusicOutputProfile, settings: Mu
   savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, hdLoudnessMode);
   savePlayerSetting(STORAGE_KEYS.dspBypass, playbackMode === "device_direct" ? "true" : "false");
 
-  const headphoneMode: MusicHeadphoneMode =
-    profile === "headphones" && settings.broadcastSpatialEnabled ? "stage" : "off";
+  // MVP_V53_WASM_OWNS_SIMPLE_SPATIAL: the simplified MVP SOUND spatial control is owned by
+  // the Broadcast WASM on every profile. Do not silently layer the legacy HRTF mode on top.
+  const headphoneMode: MusicHeadphoneMode = "off";
   const headphoneValues = MUSIC_HEADPHONE_MODES[headphoneMode];
   if (profile === "headphones") {
     savePlayerSetting(STORAGE_KEYS.headphoneMode, headphoneMode);
@@ -1250,16 +1251,55 @@ function configureOutputFilters(now: number) {
   if (!audioContext) return;
   const tuning = currentOutputTuning();
   const highpass = tuning?.highpassHz ?? 10;
-  const lowShelfHz = tuning?.lowShelfHz ?? 100;
-  const lowShelfDb = tuning?.lowShelfDb ?? 0;
-  const presenceHz = tuning?.presenceHz ?? 320;
-  const presenceDb = tuning?.presenceDb ?? 0;
+  let lowShelfHz = tuning?.lowShelfHz ?? 100;
+  let lowShelfDb = tuning?.lowShelfDb ?? 0;
+  let presenceHz = tuning?.presenceHz ?? 320;
+  let presenceDb = tuning?.presenceDb ?? 0;
   const presenceQ = tuning?.presenceQ ?? 0.8;
   const clarityHz = tuning?.clarityHz ?? 2800;
-  const clarityDb = tuning?.clarityDb ?? 0;
+  let clarityDb = tuning?.clarityDb ?? 0;
   const clarityQ = tuning?.clarityQ ?? 0.9;
   const highShelfHz = tuning?.highShelfHz ?? 10000;
-  const highShelfDb = tuning?.highShelfDb ?? 0;
+  let highShelfDb = tuning?.highShelfDb ?? 0;
+
+  // MVP_V53_FALLBACK_PARITY: if the flagship Studio node is unavailable, every visible
+  // MVP SOUND control still changes the compatibility path instead of becoming a dead UI.
+  if (state.playbackMode === "mvp_hd" && state.outputProfile !== "reference") {
+    const i = Math.max(0, Math.min(1, state.hdIntensity / 100));
+    if (state.experienceMode === "power") {
+      lowShelfDb += 1.1 + 1.4 * i;
+      presenceDb += 0.9 + 1.4 * i;
+      highShelfDb += 0.5 + 1.1 * i;
+    } else if (state.experienceMode === "adaptive") {
+      lowShelfDb += 0.3 + 0.5 * i;
+      presenceDb += 0.25 + 0.5 * i;
+      highShelfDb += 0.15 + 0.35 * i;
+    }
+    if (state.broadcastBassEnabled) {
+      const c = Math.max(0, Math.min(1, state.broadcastBassCharacter / 100));
+      lowShelfHz = 72 - 24 * c;
+      lowShelfDb += 2.2 + 3.5 * c;
+    }
+    if (state.broadcastImpactEnabled) {
+      presenceDb += 1.2 + 0.9 * i;
+      lowShelfDb += 0.35;
+    }
+    if (state.broadcastClarityEnabled) {
+      presenceHz = 3300;
+      presenceDb += 1.7 + 1.4 * i;
+      clarityDb += 0.8 + 0.8 * i;
+      highShelfDb += 1.3 + 1.5 * i;
+    }
+    if (state.personalSoundEnabled) {
+      lowShelfDb += Math.max(-1, Math.min(1, state.personalBass / 100)) * 4.5;
+      presenceDb += Math.max(-1, Math.min(1, state.personalPresence / 100)) * 4.2;
+      highShelfDb += Math.max(-1, Math.min(1, state.personalBrightness / 100)) * 4.5;
+    }
+    lowShelfDb = Math.max(-8, Math.min(8, lowShelfDb));
+    presenceDb = Math.max(-8, Math.min(8, presenceDb));
+    clarityDb = Math.max(-8, Math.min(8, clarityDb));
+    highShelfDb = Math.max(-8, Math.min(8, highShelfDb));
+  }
   if (outputHighpass) {
     setAudioParam(outputHighpass.frequency, clampFilterFrequency(audioContext, highpass), now, 0.035);
     setAudioParam(outputHighpass.Q, 0.707, now, 0.035);
@@ -1372,6 +1412,23 @@ function simplifiedStudioAppliedStateMatches() {
   if (Boolean(applied.bypass) !== direct) return false;
   if (direct) return true;
 
+  // MVP_V53_BROADCAST_ACK_GUARD: a green UI state is not enough. Verify that the exact
+  // simplified control state reached the live Worklet before considering the DSP healthy.
+  const expectedBroadcastMode = state.experienceMode === "power" ? 2 : state.experienceMode === "adaptive" ? 1 : 0;
+  const expectedSpaceMode = state.spaceMode === "arena" ? 2 : state.spaceMode === "live" ? 1 : 0;
+  if (Number(applied.broadcastModeCode) !== expectedBroadcastMode) return false;
+  if (Math.abs((Number(applied.broadcastIntensity) || 0) - state.hdIntensity / 100) > 0.01) return false;
+  if (Boolean(applied.broadcastBassEnabled) !== Boolean(state.broadcastBassEnabled)) return false;
+  if (Math.abs((Number(applied.broadcastBassCharacter) || 0) - state.broadcastBassCharacter / 100) > 0.01) return false;
+  if (Boolean(applied.broadcastImpactEnabled) !== Boolean(state.broadcastImpactEnabled)) return false;
+  if (Boolean(applied.broadcastClarityEnabled) !== Boolean(state.broadcastClarityEnabled)) return false;
+  if (Boolean(applied.broadcastSpatialEnabled) !== Boolean(state.broadcastSpatialEnabled)) return false;
+  if (Number(applied.broadcastSpaceModeCode) !== expectedSpaceMode) return false;
+  if (Boolean(applied.broadcastPersonalEnabled) !== Boolean(state.personalSoundEnabled)) return false;
+  if (Math.abs((Number(applied.broadcastPersonalBass) || 0) - state.personalBass / 100) > 0.01) return false;
+  if (Math.abs((Number(applied.broadcastPersonalPresence) || 0) - state.personalPresence / 100) > 0.01) return false;
+  if (Math.abs((Number(applied.broadcastPersonalBrightness) || 0) - state.personalBrightness / 100) > 0.01) return false;
+
   const expectedReserve = state.hdLoudnessMode === "max" ? 18 : state.hdLoudnessMode === "loud" ? 9 : 0;
   const expectedMakeup = state.hdLoudnessMode !== "normal";
   const expectedPunch = Boolean(state.dynamicsRestoreEnabled);
@@ -1449,15 +1506,14 @@ function nativeImmersionAvailable() {
 }
 function applyNativeHeadphoneSettings(now: number, enabled: boolean) {
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
-  const width = enabled ? (proof ? 1 : state.headphoneWidth / 100) : 0;
-  const depth = enabled ? (proof ? 1 : state.headphoneDepth / 100) : 0;
-  const crossfeed = enabled ? (proof ? 0.58 : state.headphoneCrossfeed / 100) : 0;
-  const center = enabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5;
-  const bass = enabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0;
-
+  const simpleSpatial = state.playbackMode === "mvp_hd" && state.outputProfile !== "reference" && state.broadcastSpatialEnabled;
+  const intensity = Math.max(0, Math.min(1, state.hdIntensity / 100));
+  const width = enabled ? (simpleSpatial ? 0.72 + 0.28 * intensity : proof ? 1 : state.headphoneWidth / 100) : 0;
+  const depth = enabled ? (simpleSpatial ? 0.55 + 0.35 * intensity : proof ? 1 : state.headphoneDepth / 100) : 0;
+  const crossfeed = enabled ? (simpleSpatial ? (state.outputProfile === "headphones" ? 0.16 : 0.08) : proof ? 0.58 : state.headphoneCrossfeed / 100) : 0;
+  const center = enabled ? (simpleSpatial ? 0.5 : proof ? 0.5 : state.headphoneCenter / 100) : 0.5;
+  const bass = enabled ? (simpleSpatial ? 0 : proof ? 0 : state.headphoneBassImpact / 100) : 0;
   const widthScale = enabled ? (proof ? 1.85 : 1 + width * 0.42) : 1;
-  // Never turn the clean fallback signal down just because immersion is on.
-  // The final limiter owns exceptional peaks; width is an enhancement, not a trim.
   const direct = (1 + widthScale) / 2;
   const widthCross = (1 - widthScale) / 2;
   const crossMix = enabled ? (proof ? 0.62 : crossfeed * 0.50) : 0;
@@ -1466,7 +1522,6 @@ function applyNativeHeadphoneSettings(now: number, enabled: boolean) {
   const depthDelay = enabled ? (proof ? 0.016 : 0.003 + depth * 0.0135) : 0.0018;
   const centerGain = enabled ? Math.max(-0.14, Math.min(0.52, (center - 0.5) * 0.96)) : 0;
   const bassDb = enabled ? bass * 4.5 : 0;
-
   if (nativeHeadphoneLeftDirect) setAudioParam(nativeHeadphoneLeftDirect.gain, direct, now);
   if (nativeHeadphoneRightDirect) setAudioParam(nativeHeadphoneRightDirect.gain, direct, now);
   if (nativeHeadphoneLeftWidthCross) setAudioParam(nativeHeadphoneLeftWidthCross.gain, widthCross, now);
@@ -1484,20 +1539,22 @@ function applyNativeHeadphoneSettings(now: number, enabled: boolean) {
   if (nativeHeadphoneBassShelf) setAudioParam(nativeHeadphoneBassShelf.gain, bassDb, now, 0.035);
 }
 function applyHeadphoneSettings(now: number) {
-  const enabled =
-    !state.dspBypass &&
-    state.outputProfile === "headphones" &&
-    (state.headphoneMode !== "off" || state.dspVerificationMode === "spatial");
   const proof = state.dspVerificationMode === "spatial" && state.outputProfile === "headphones" && !state.dspBypass;
+  const simpleSpatial = state.playbackMode === "mvp_hd" && state.outputProfile !== "reference" && state.broadcastSpatialEnabled;
+  const enabled = !state.dspBypass && (simpleSpatial || (state.outputProfile === "headphones" && (state.headphoneMode !== "off" || proof)));
+  const intensity = Math.max(0, Math.min(1, state.hdIntensity / 100));
+  const widthValue = enabled ? (simpleSpatial ? 0.72 + 0.28 * intensity : proof ? 1 : state.headphoneWidth / 100) : 0;
+  const depthValue = enabled ? (simpleSpatial ? 0.55 + 0.35 * intensity : proof ? 1 : state.headphoneDepth / 100) : 0;
+  const crossValue = enabled ? (simpleSpatial ? (state.outputProfile === "headphones" ? 0.16 : 0.08) : proof ? 0.72 : state.headphoneCrossfeed / 100) : 0;
   const values: Array<[string, number]> = [
     ["enabled", enabled ? 1 : 0],
-    ["mode", enabled ? headphoneModeCode(state.headphoneMode) : 0],
+    ["mode", enabled ? (simpleSpatial ? 3 : headphoneModeCode(state.headphoneMode)) : 0],
     ["proof", proof ? 1 : 0],
-    ["width", enabled ? (proof ? 1 : state.headphoneWidth / 100) : 0],
-    ["depth", enabled ? (proof ? 1 : state.headphoneDepth / 100) : 0],
-    ["crossfeed", enabled ? (proof ? 0.72 : state.headphoneCrossfeed / 100) : 0],
-    ["center", enabled ? (proof ? 0.5 : state.headphoneCenter / 100) : 0.5],
-    ["bassImpact", enabled ? (proof ? 0 : state.headphoneBassImpact / 100) : 0],
+    ["width", widthValue],
+    ["depth", depthValue],
+    ["crossfeed", crossValue],
+    ["center", enabled ? (simpleSpatial ? 0.5 : proof ? 0.5 : state.headphoneCenter / 100) : 0.5],
+    ["bassImpact", enabled ? (simpleSpatial ? 0 : proof ? 0 : state.headphoneBassImpact / 100) : 0],
   ];
   values.forEach(([name, value]) => {
     const param = workletParam(headphoneProcessorNode, name);
@@ -1506,10 +1563,11 @@ function applyHeadphoneSettings(now: number) {
   if (!headphoneProcessorNode) applyNativeHeadphoneSettings(now, enabled);
 }
 function studioHrtfRequested() {
+  // MVP_V53_WASM_OWNS_SIMPLE_SPATIAL: MVP HD uses one spatial engine only.
+  if (state.playbackMode === "mvp_hd") return false;
   if (state.dspBypass || state.outputProfile !== "headphones") return false;
   return state.headphoneMode === "spatial" || state.headphoneMode === "deep" || state.headphoneMode === "stage";
 }
-
 function configureStudioHrtf(now: number) {
   if (!audioContext || !studioDirectInputGain || !studioHrtfInputGain) return;
   const active = studioHrtfRequested() && Boolean(studioHrtfLeftPanner && studioHrtfRightPanner && studioHrtfBassShelf);
@@ -1608,7 +1666,11 @@ function applyTransientSettings(now: number, active: boolean) {
   if (!transientProcessorNode) return;
   const enabled = workletParam(transientProcessorNode, "enabled");
   const amount = workletParam(transientProcessorNode, "amount");
-  const presetAmount = currentTransientAmount();
+  // MVP_V53_FALLBACK_PARITY: Impact remains audible even if Studio WASM falls back.
+  const simpleImpact = state.playbackMode === "mvp_hd" && state.outputProfile !== "reference" && state.broadcastImpactEnabled;
+  const presetAmount = simpleImpact
+    ? 0.58 + 0.42 * Math.max(0, Math.min(1, state.hdIntensity / 100))
+    : currentTransientAmount();
   if (enabled) setAudioParam(enabled, active && presetAmount > 0.001 ? 1 : 0, now, 0.02);
   if (amount) setAudioParam(amount, Math.max(0, Math.min(1, presetAmount * sourceTransientScale())), now, 0.035);
 }
@@ -1678,7 +1740,9 @@ function applyProcessingSettings() {
     state.playbackMode !== "mvp_hd" &&
     state.dspBypass;
   const processed = !pureReference && !abBypass;
-  const headphones = processed && state.outputProfile === "headphones" && Boolean(headphoneProcessorNode || nativeImmersionAvailable());
+  // MVP_V53_FALLBACK_PARITY: Spatial has a real compatibility route on every output profile.
+  const simpleSpatialFallback = processed && state.playbackMode === "mvp_hd" && state.broadcastSpatialEnabled;
+  const headphones = processed && (state.outputProfile === "headphones" || simpleSpatialFallback) && Boolean(headphoneProcessorNode || nativeImmersionAvailable());
   const standard = processed && !headphones;
 
   // Keep the DSP input at unity. User volume lives after the limiter so raising
@@ -1697,7 +1761,16 @@ function applyProcessingSettings() {
     processed && (state.outputProfile === "headphones" || state.outputProfile === "speaker")
       ? Math.min(2, Math.max(0, state.outputReserveDb))
       : 0;
-  if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb), now, 0.025);
+  const simpleIntensity = Math.max(0, Math.min(1, state.hdIntensity / 100));
+  const simpleModeDriveDb =
+    processed && state.playbackMode === "mvp_hd"
+      ? state.experienceMode === "power"
+        ? 2.6 + 1.4 * simpleIntensity
+        : state.experienceMode === "adaptive"
+          ? 0.8 + 0.6 * simpleIntensity
+          : 0
+      : 0;
+  if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb + simpleModeDriveDb), now, 0.025);
 
   applyTransientSettings(now, processed);
   applyMultibandSettings(now, processed);
@@ -4757,8 +4830,8 @@ export function setMusicBroadcastClarity(enabled: boolean) {
 }
 
 export function setMusicBroadcastSpatial(enabled: boolean) {
+  // MVP_V53_WASM_OWNS_SIMPLE_SPATIAL
   commitBroadcastProfilePatch({ broadcastSpatialEnabled: enabled });
-  if (state.outputProfile === "headphones") setMusicHeadphoneMode(enabled ? "stage" : "off");
 }
 
 export function setMusicSpaceMode(mode: MusicSpaceMode) {
