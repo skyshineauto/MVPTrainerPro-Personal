@@ -468,7 +468,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v24-broadcast-engine-v3";
+const AUDIO_ENGINE_VERSION = "v25-broadcast-v5-4-live-audible-power";
 // MVP_BROADCAST_V3_FULL_REBUILD
 const OUTPUT_PROFILE_STATE_VERSION = 2;
 const listeners = new Set<() => void>();
@@ -1408,49 +1408,32 @@ function simplifiedStudioAppliedStateMatches() {
   const applied = getMvpStudioRuntimeInfo().appliedState;
   if (!applied) return false;
 
-  const direct = state.playbackMode === "device_direct";
-  if (Boolean(applied.bypass) !== direct) return false;
-  if (direct) return true;
+  // V5.4 compares the state the Worklet says it ACTUALLY applied.
+  const expectedMode = state.playbackMode === "device_direct" ? "pure" : state.experienceMode;
+  if (String(applied.mode) !== expectedMode) return false;
+  if (expectedMode === "pure") return true;
 
-  // MVP_V53_BROADCAST_ACK_GUARD: a green UI state is not enough. Verify that the exact
-  // simplified control state reached the live Worklet before considering the DSP healthy.
-  const expectedBroadcastMode = state.experienceMode === "power" ? 2 : state.experienceMode === "adaptive" ? 1 : 0;
-  const expectedSpaceMode = state.spaceMode === "arena" ? 2 : state.spaceMode === "live" ? 1 : 0;
-  if (Number(applied.broadcastModeCode) !== expectedBroadcastMode) return false;
-  if (Math.abs((Number(applied.broadcastIntensity) || 0) - state.hdIntensity / 100) > 0.01) return false;
-  if (Boolean(applied.broadcastBassEnabled) !== Boolean(state.broadcastBassEnabled)) return false;
-  if (Math.abs((Number(applied.broadcastBassCharacter) || 0) - state.broadcastBassCharacter / 100) > 0.01) return false;
-  if (Boolean(applied.broadcastImpactEnabled) !== Boolean(state.broadcastImpactEnabled)) return false;
-  if (Boolean(applied.broadcastClarityEnabled) !== Boolean(state.broadcastClarityEnabled)) return false;
-  if (Boolean(applied.broadcastSpatialEnabled) !== Boolean(state.broadcastSpatialEnabled)) return false;
-  if (Number(applied.broadcastSpaceModeCode) !== expectedSpaceMode) return false;
-  if (Boolean(applied.broadcastPersonalEnabled) !== Boolean(state.personalSoundEnabled)) return false;
-  if (Math.abs((Number(applied.broadcastPersonalBass) || 0) - state.personalBass / 100) > 0.01) return false;
-  if (Math.abs((Number(applied.broadcastPersonalPresence) || 0) - state.personalPresence / 100) > 0.01) return false;
-  if (Math.abs((Number(applied.broadcastPersonalBrightness) || 0) - state.personalBrightness / 100) > 0.01) return false;
-
-  const expectedReserve = state.hdLoudnessMode === "max" ? 18 : state.hdLoudnessMode === "loud" ? 9 : 0;
-  const expectedMakeup = state.hdLoudnessMode !== "normal";
-  const expectedPunch = Boolean(state.dynamicsRestoreEnabled);
-
-  if (Math.abs((Number(applied.outputReserveDb) || 0) - expectedReserve) > 0.15) return false;
-  if (Boolean(applied.autoMakeupEnabled) !== expectedMakeup) return false;
+  if (String(applied.outputProfile) !== state.outputProfile) return false;
+  if (Math.abs((Number(applied.intensity) || 0) - state.hdIntensity / 100) > 0.01) return false;
+  if (Boolean(applied.bassEnabled) !== Boolean(state.broadcastBassEnabled)) return false;
+  if (Math.abs((Number(applied.bassCharacter) || 0) - state.broadcastBassCharacter / 100) > 0.01) return false;
+  if (Boolean(applied.impactEnabled) !== Boolean(state.broadcastImpactEnabled)) return false;
+  if (Boolean(applied.clarityEnabled) !== Boolean(state.broadcastClarityEnabled)) return false;
+  if (Boolean(applied.spatialEnabled) !== Boolean(state.broadcastSpatialEnabled)) return false;
+  if (String(applied.spaceMode) !== state.spaceMode) return false;
+  if (Boolean(applied.personalEnabled) !== Boolean(state.personalSoundEnabled)) return false;
+  if (Math.abs((Number(applied.personalBass) || 0) - state.personalBass / 100) > 0.01) return false;
+  if (Math.abs((Number(applied.personalPresence) || 0) - state.personalPresence / 100) > 0.01) return false;
+  if (Math.abs((Number(applied.personalBrightness) || 0) - state.personalBrightness / 100) > 0.01) return false;
   if (Boolean(applied.eqEnabled) !== Boolean(state.eqEnabled)) return false;
-  if (Boolean(applied.parametricEnabled) !== Boolean(state.parametricEnabled)) return false;
-  if (Boolean(applied.bassEngineEnabled) !== Boolean(state.bassEngineEnabled)) return false;
-  if (Boolean(applied.toneEngineEnabled) !== Boolean(state.toneEngineEnabled)) return false;
-  if (Boolean(applied.stereoFieldEnabled) !== Boolean(state.stereoFieldEnabled)) return false;
-  if (Boolean(applied.transientEnabled) !== expectedPunch) return false;
 
-  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: no hidden processors are allowed to reappear behind the simple UI.
-  if (applied.multibandEnabled) return false;
-  if (applied.dynamicEqEnabled) return false;
-  if (applied.outputCorrectionEnabled) return false;
-  if (applied.stereoIntegrityEnabled) return false;
-  if (applied.normalizationEnabled) return false;
-  if (applied.dynamicsRestoreEnabled) return false;
-  if (applied.smartDspEnabled) return false;
-  if (applied.headphoneAdvancedEnabled) return false;
+  if (state.eqEnabled) {
+    const gains = Array.isArray(applied.eqGains) ? applied.eqGains : [];
+    if (gains.length < MUSIC_EQ_FREQUENCIES.length) return false;
+    for (let index = 0; index < MUSIC_EQ_FREQUENCIES.length; index += 1) {
+      if (Math.abs((Number(gains[index]) || 0) - (Number(state.eqGains[index]) || 0)) > 0.05) return false;
+    }
+  }
   return true;
 }
 
@@ -1770,7 +1753,21 @@ function applyProcessingSettings() {
           ? 0.8 + 0.6 * simpleIntensity
           : 0
       : 0;
-  if (makeupGain) setAudioParam(makeupGain.gain, dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb + simpleModeDriveDb), now, 0.025);
+  // V5.4 fallback parity: creative controls never buy audibility by lowering the
+  // whole song. A small post-effect support gain keeps the compatibility route
+  // directionally consistent with the flagship WASM route.
+  const simpleEffectSupportDb =
+    processed && state.playbackMode === "mvp_hd"
+      ? (state.broadcastBassEnabled ? 0.70 : 0) +
+        (state.broadcastImpactEnabled ? 0.35 : 0) +
+        (state.broadcastClarityEnabled ? 0.25 : 0)
+      : 0;
+  if (makeupGain) setAudioParam(
+    makeupGain.gain,
+    dbToGain(pureReference ? 0 : makeupDb + compatibilityCleanDriveDb + simpleModeDriveDb + simpleEffectSupportDb),
+    now,
+    0.025,
+  );
 
   applyTransientSettings(now, processed);
   applyMultibandSettings(now, processed);

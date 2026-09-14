@@ -141,10 +141,10 @@ export type MvpStudioRuntimeInfo = {
   lastError: string | null;
   lastRequestedAt: number;
   lastAppliedAt: number;
-  appliedState: MvpStudioState | null;
+  appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.3-broadcast-v5-3-audible-clean-power";
+const ASSET_VERSION = "10.0.4-broadcast-v5-4-live-audible-power";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -437,8 +437,22 @@ export async function createMvpStudioNode(context: AudioContext) {
         const revision = Math.max(0, Math.floor(finite(data.revision)));
         appliedRevisionByNode.set(node, Math.max(appliedRevisionByNode.get(node) || 0, revision));
         faultedByNode.set(node, false);
+
+        // V5.4 LIVE ACK CONTRACT: trust only the normalized state returned by the
+        // audio thread. Never certify the state we merely requested.
+        const rawApplied = data.appliedState;
+        const appliedObject =
+          rawApplied && typeof rawApplied === "object"
+            ? rawApplied as Record<string, unknown>
+            : null;
+        const actualAppliedState = appliedObject
+          ? {
+              ...appliedObject,
+              eqGains: Array.isArray(appliedObject.eqGains) ? [...appliedObject.eqGains] : [],
+            }
+          : null;
+
         if (activeNode === node) {
-          const latest = latestStateByNode.get(node);
           runtimeInfo = {
             ...runtimeInfo,
             ready: true,
@@ -446,7 +460,7 @@ export async function createMvpStudioNode(context: AudioContext) {
             lastError: null,
             appliedRevision: Math.max(runtimeInfo.appliedRevision, revision),
             lastAppliedAt: Date.now(),
-            appliedState: latest && latest.revision <= revision ? cloneState(latest.state) : runtimeInfo.appliedState,
+            appliedState: actualAppliedState ?? runtimeInfo.appliedState,
           };
         }
         return;

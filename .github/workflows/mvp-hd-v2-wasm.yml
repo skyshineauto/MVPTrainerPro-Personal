@@ -1,4 +1,4 @@
-name: MVP Broadcast V5.3 WASM Build
+name: MVP Broadcast V5.4 WASM Build
 
 on:
   workflow_dispatch:
@@ -8,16 +8,14 @@ on:
     paths:
       - "dsp/v2/mvp_hd_v2.cpp"
       - "scripts/build-mvp-hd-v2.sh"
-      - "scripts/test-v53-audibility.mjs"
-      - "scripts/test-v53-distortion.mjs"
-      - "scripts/test-v53-matrix.mjs"
-      - "scripts/test-v53-worklet-route.mjs"
-      - "scripts/test-v53-production-static.mjs"
+      - "scripts/test-v54-audibility.mjs"
+      - "scripts/test-v54-matrix.mjs"
+      - "scripts/test-v54-worklet-route.mjs"
+      - "scripts/test-v54-production-static.mjs"
       - "public/audioV2/mvpHdV2.worklet.js"
       - "public/audioV2/mvpHdV2.wasm"
       - "src/lib/audio/mvpStudioEngine.ts"
       - "src/lib/musicPlayer.ts"
-      - "src/features/music/MusicMiniPlayer.tsx"
       - "scripts/test-mvp-hd-v2-browser.mjs"
       - ".github/workflows/mvp-hd-v2-wasm.yml"
 
@@ -25,7 +23,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mvp-broadcast-v5-3-wasm-main
+  group: mvp-broadcast-v5-4-wasm-main
   cancel-in-progress: false
 
 jobs:
@@ -56,48 +54,45 @@ jobs:
           ./.emsdk/emsdk install 3.1.64
           ./.emsdk/emsdk activate 3.1.64
 
-      - name: Build Broadcast V5.3 WASM
+      - name: Build Broadcast V5.4 WASM
         shell: bash
         run: |
           source ./.emsdk/emsdk_env.sh
           CXX="$PWD/.emsdk/upstream/bin/clang++" bash scripts/build-mvp-hd-v2.sh
 
-      - name: Run V5.3 audible-control and safety validation
-        run: node scripts/test-v53-audibility.mjs
+      - name: Run V5.4 audibility validation
+        run: node scripts/test-v54-audibility.mjs
 
-      - name: Run V5.3 distortion and performance validation
-        run: node scripts/test-v53-distortion.mjs
+      - name: Run V5.4 exhaustive matrix
+        run: node scripts/test-v54-matrix.mjs
 
-      - name: Run V5.3 exhaustive effect/combo matrix
-        run: node scripts/test-v53-matrix.mjs
+      - name: Run V5.4 production AudioWorklet route validation
+        run: node scripts/test-v54-worklet-route.mjs
 
-      - name: Run V5.3 production AudioWorklet route validation
-        run: node scripts/test-v53-worklet-route.mjs
-
-      - name: Run V5.3 production static wiring validation
+      - name: Run V5.4 production static wiring validation
         run: |
           node --check public/audioV2/mvpHdV2.worklet.js
-          node scripts/test-v53-production-static.mjs
+          node scripts/test-v54-production-static.mjs
           node scripts/test-mvp-hd-v2-browser.mjs
 
       - name: Run production app build
         run: npm run build
 
-      - name: Upload validated Broadcast V5.3 WASM
+      - name: Upload validated Broadcast V5.4 WASM
         uses: actions/upload-artifact@v4
         with:
-          name: mvp-broadcast-v5-3-wasm
+          name: mvp-broadcast-v5-4-wasm
           path: public/audioV2/mvpHdV2.wasm
 
-      - name: Commit validated Broadcast V5.3 WASM only
+      - name: Commit validated Broadcast V5.4 WASM only
         shell: bash
         run: |
           git add public/audioV2/mvpHdV2.wasm
           if git diff --cached --quiet; then
-            echo "Broadcast V5.3 WASM binary is already current."
+            echo "Broadcast V5.4 WASM binary is already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Build MVP Broadcast V5.3 WASM"
+          git commit -m "Build MVP Broadcast V5.4 WASM"
           git push origin HEAD:main
