@@ -8,7 +8,7 @@ const player=read('src/lib/musicPlayer.ts');
 const workflow=read('.github/workflows/mvp-hd-v2-wasm.yml');
 const routeTest=read('scripts/test-v54-worklet-route.mjs');
 const browserEntry=read('scripts/test-mvp-hd-v2-browser.mjs');
-assert.match(cpp,/V5\.5 LIVE CONTROLS/);
+assert.match(cpp,/V5\.5\.1 STABLE LIVE CONTROLS/);
 assert.match(cpp,/boundedDeltaScale/);
 assert.match(cpp,/gImpactFast-gImpactSlow\*1\.18f/,'Impact steady-state distortion guard missing');
 assert.match(cpp,/gImpactSlow\+\.050f/,'Impact detector floor missing');
@@ -22,7 +22,7 @@ assert.match(worklet,/STATE_APPLIED/);
 assert.match(worklet,/appliedState:next/);
 assert.match(worklet,/signature:this\.appliedSignature/);
 assert.match(worklet,/SET_PROOF_MUTE/,'Worklet route proof mute missing');
-assert.match(bridge,/10\.0\.5-broadcast-v5-5-live-controls/);
+assert.match(bridge,/10\.0\.6-broadcast-v5-5-1-stable-live-controls/);
 assert.match(bridge,/const rawApplied = data\.appliedState/);
 assert.match(bridge,/appliedState: actualAppliedState \?\? runtimeInfo\.appliedState/);
 assert.match(player,/v26-broadcast-v5-5-live-controls/);
@@ -62,4 +62,4 @@ assert.match(
   "Pure effect safety processing is missing"
 );
 
-console.log('V5.5 production static wiring: PASS');
+console.log('V5.5.1 production static wiring: PASS');

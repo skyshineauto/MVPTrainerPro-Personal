@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.5 LIVE CONTROLS
+// MVP Trainer Pro Broadcast Engine V5.5.1 STABLE LIVE CONTROLS
 // One clean route. Visible controls must change the sound in the intended direction.
 // ABI remains mvp_v2_* for the production AudioWorklet bridge.
 
@@ -87,69 +87,77 @@ inline void applyMaster(float &l,float &r){float pl=gMasterHarshL.process(gMaste
 inline void applyModeCore(float &l,float &r){
   if(gMode==0)return;
 
-  const bool power=gMode==2;
-  const float i=gIntensity;
+  bool power=gMode==2;
 
-  const float det=maxf(absf(l),absf(r));
-  const float ec=det>gCompEnv?gCompAttack:gCompRelease;
+  float i=gIntensity;
+  float det=maxf(absf(l),absf(r));
+  float ec=det>gCompEnv?gCompAttack:gCompRelease;
 
   gCompEnv+=(det-gCompEnv)*ec;
 
-  const float threshold=
+  float threshold=
     power
-      ? (.47f-.09f*i)
-      : (.68f-.06f*i);
+      ? (.50f-.10f*i)
+      : (.70f-.06f*i);
 
-  const float ratio=
+  float ratio=
     power
-      ? (2.45f+1.20f*i)
-      : (1.30f+.32f*i);
+      ? (2.25f+1.25f*i)
+      : (1.22f+.28f*i);
 
   float target=1;
 
   if(gCompEnv>threshold&&gCompEnv>1e-6f){
-    const float over=gCompEnv/threshold;
+    float over=gCompEnv/threshold;
+
     target=static_cast<float>(
       pow(over,(1.0f/ratio)-1.0f)
     );
   }
 
-  const float gc=
+  float gc=
     target<gCompGain
       ? gCompAttack
       : gCompRelease;
 
   gCompGain+=(target-gCompGain)*gc;
 
-  const float blend=
+  float blend=
     power
-      ? (.66f+.14f*i)
-      : (.28f+.10f*i);
+      ? (.62f+.14f*i)
+      : (.25f+.10f*i);
 
-  const float comp=
+  float comp=
     (1-blend)+blend*gCompGain;
 
+  /*
+   * This is the proven V5.4 loudness core.
+   *
+   * It already passed the exhaustive 1194-case matrix.
+   * Do NOT push Power harder here and make the limiter do
+   * 9.5+ dB of gain reduction.
+   */
   float makeupDb=
     power
-      ? (4.00f+2.50f*i)
-      : (1.05f+.90f*i);
+      ? (3.0f+2.35f*i)
+      : (.80f+.75f*i);
 
-  const float densityGuard=
+  float densityGuard=
     clampf(
-      (gProgramDensity-.70f)/.23f,
+      (gProgramDensity-.72f)/.22f,
       0,
       1
     );
 
   if(power){
     makeupDb-=
-      densityGuard*(1.00f+.80f*i);
+      densityGuard*(.85f+.65f*i);
   }else{
     makeupDb-=
-      densityGuard*.28f;
+      densityGuard*.25f;
   }
 
-  const float gain=
+  float gain=
     comp*dbToGain(makeupDb);
 
   l*=gain;
@@ -214,13 +222,15 @@ int mvp_v2_process(int frames){
       (gBassCharacterTarget-gBassCharacter)*gSmoothBass;
 
     /*
-     * User EQ works in every visible musical mode.
+     * The visible 31-band EQ works in every musical mode.
      */
     applyEq(l,r);
 
     /*
-     * Automatic Master Prep remains excluded from the clean Pure baseline.
-     * Run it on temporary samples in Pure so its filter state stays warm.
+     * Master Prep belongs to Adaptive / Power.
+     *
+     * In Pure we keep its filter state warm on disposable samples,
+     * but we do not alter the reference signal.
      */
     if(gMode!=0){
       applyMaster(l,r);
@@ -231,13 +241,16 @@ int mvp_v2_process(int frames){
     }
 
     /*
-     * Pure makes this a no-op.
-     * Adaptive and Power process the real output.
+     * Pure = no automatic mode coloration.
+     * Adaptive and Power process the live samples.
      */
     applyModeCore(l,r);
 
     /*
-     * Every visible effect operates on the real output whenever enabled.
+     * These are explicit controls.
+     * If the user turns one on, it must affect the actual output
+     * regardless of whether the baseline mode is Pure,
+     * Adaptive, or Power.
      */
     applyBass(l,r);
     applyImpact(l,r);
@@ -246,8 +259,8 @@ int mvp_v2_process(int frames){
     applyPersonal(l,r);
 
     /*
-     * Pure with all processing OFF remains the clean reference path.
-     * If any visible processor is enabled, true-peak protection is active.
+     * Pure with every control OFF remains reference-clean.
+     * Any explicitly selected processing receives limiter safety.
      */
     const bool processed=
       gMode!=0||
