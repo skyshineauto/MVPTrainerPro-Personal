@@ -131,7 +131,7 @@ inline void applyModeCore(float &l,float &r){
 
   float makeupDb=
     power
-      ? (4.10f+2.65f*i)
+      ? (4.00f+2.50f*i)
       : (1.05f+.90f*i);
 
   const float densityGuard=
