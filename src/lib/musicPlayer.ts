@@ -468,7 +468,7 @@ const STORAGE_KEYS = {
   custom3: "mvp_music_eq_custom_3",
 } as const;
 
-const AUDIO_ENGINE_VERSION = "v25-broadcast-v5-4-live-audible-power";
+const AUDIO_ENGINE_VERSION = "v26-broadcast-v5-5-live-controls";
 // MVP_BROADCAST_V3_FULL_REBUILD
 const OUTPUT_PROFILE_STATE_VERSION = 2;
 const listeners = new Set<() => void>();
@@ -784,7 +784,8 @@ function migrateAudioFidelitySettings() {
   savePlayerSetting(STORAGE_KEYS.dynamicEqEnabled, "false");
   savePlayerSetting(STORAGE_KEYS.limiterEnabled, "true");
   savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, "normal");
-  savePlayerSetting(STORAGE_KEYS.dspBypass, readPlaybackMode() === "device_direct" ? "true" : "false");
+  savePlayerSetting(STORAGE_KEYS.playbackMode, "mvp_hd");
+  savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
   savePlayerSetting(STORAGE_KEYS.audioEngineVersion, AUDIO_ENGINE_VERSION);
 }
 
@@ -1063,11 +1064,11 @@ function currentBroadcastProfileSettings(): MusicBroadcastProfileSettings {
 }
 
 function applyBroadcastProfileSettings(profile: MusicOutputProfile, settings: MusicBroadcastProfileSettings) {
-  const playbackMode: MusicPlaybackMode = settings.experienceMode === "pure" ? "device_direct" : "mvp_hd";
+  const playbackMode: MusicPlaybackMode = "mvp_hd";
   const hdLoudnessMode: MusicHdLoudnessMode = settings.experienceMode === "power" ? "max" : "normal";
   savePlayerSetting(STORAGE_KEYS.playbackMode, playbackMode);
   savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, hdLoudnessMode);
-  savePlayerSetting(STORAGE_KEYS.dspBypass, playbackMode === "device_direct" ? "true" : "false");
+  savePlayerSetting(STORAGE_KEYS.dspBypass, "false");
 
   // MVP_V53_WASM_OWNS_SIMPLE_SPATIAL: the simplified MVP SOUND spatial control is owned by
   // the Broadcast WASM on every profile. Do not silently layer the legacy HRTF mode on top.
@@ -1086,7 +1087,7 @@ function applyBroadcastProfileSettings(profile: MusicOutputProfile, settings: Mu
     ...settings,
     playbackMode,
     hdLoudnessMode,
-    dspBypass: playbackMode === "device_direct",
+    dspBypass: false,
     ...(profile === "headphones" ? {
       headphoneMode,
       headphoneWidth: headphoneValues.width,
@@ -1411,7 +1412,7 @@ function simplifiedStudioAppliedStateMatches() {
   // V5.4 compares the state the Worklet says it ACTUALLY applied.
   const expectedMode = state.playbackMode === "device_direct" ? "pure" : state.experienceMode;
   if (String(applied.mode) !== expectedMode) return false;
-  if (expectedMode === "pure") return true;
+  if (state.playbackMode === "device_direct") return true;
 
   if (String(applied.outputProfile) !== state.outputProfile) return false;
   if (Math.abs((Number(applied.intensity) || 0) - state.hdIntensity / 100) > 0.01) return false;
@@ -4791,7 +4792,7 @@ function commitBroadcastProfilePatch(patch: Partial<MusicBroadcastProfileSetting
 
 export async function setMusicExperienceMode(mode: MusicExperienceMode) {
   if (mode !== "pure" && mode !== "adaptive" && mode !== "power") return;
-  const targetPlayback: MusicPlaybackMode = mode === "pure" ? "device_direct" : "mvp_hd";
+  const targetPlayback: MusicPlaybackMode = "mvp_hd";
   const targetLoudness: MusicHdLoudnessMode = mode === "power" ? "max" : "normal";
   savePlayerSetting(STORAGE_KEYS.hdLoudnessMode, targetLoudness);
   emit({ experienceMode: mode, hdLoudnessMode: targetLoudness });

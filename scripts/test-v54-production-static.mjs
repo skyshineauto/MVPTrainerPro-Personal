@@ -8,7 +8,7 @@ const player=read('src/lib/musicPlayer.ts');
 const workflow=read('.github/workflows/mvp-hd-v2-wasm.yml');
 const routeTest=read('scripts/test-v54-worklet-route.mjs');
 const browserEntry=read('scripts/test-mvp-hd-v2-browser.mjs');
-assert.match(cpp,/V5\.4 LIVE AUDIBLE POWER/);
+assert.match(cpp,/V5\.5 LIVE CONTROLS/);
 assert.match(cpp,/boundedDeltaScale/);
 assert.match(cpp,/gImpactFast-gImpactSlow\*1\.18f/,'Impact steady-state distortion guard missing');
 assert.match(cpp,/gImpactSlow\+\.050f/,'Impact detector floor missing');
@@ -22,10 +22,10 @@ assert.match(worklet,/STATE_APPLIED/);
 assert.match(worklet,/appliedState:next/);
 assert.match(worklet,/signature:this\.appliedSignature/);
 assert.match(worklet,/SET_PROOF_MUTE/,'Worklet route proof mute missing');
-assert.match(bridge,/10\.0\.4-broadcast-v5-4-live-audible-power/);
+assert.match(bridge,/10\.0\.5-broadcast-v5-5-live-controls/);
 assert.match(bridge,/const rawApplied = data\.appliedState/);
 assert.match(bridge,/appliedState: actualAppliedState \?\? runtimeInfo\.appliedState/);
-assert.match(player,/v25-broadcast-v5-4-live-audible-power/);
+assert.match(player,/v26-broadcast-v5-5-live-controls/);
 assert.match(player,/String\(applied\.mode\) !== expectedMode/);
 assert.match(player,/Boolean\(applied\.bassEnabled\)/);
 assert.match(player,/simpleEffectSupportDb/);
@@ -38,4 +38,28 @@ assert.match(workflow,/test-v54-audibility\.mjs/);
 assert.match(workflow,/test-v54-distortion\.mjs/,'Distortion gate missing from workflow');
 assert.match(workflow,/test-v54-matrix\.mjs/);
 assert.match(workflow,/test-v54-worklet-route\.mjs/);
-console.log('V5.4 production static wiring: PASS');
+assert.doesNotMatch(
+  player,
+  /experienceMode === "pure" \? "device_direct" : "mvp_hd"/,
+  "Pure profile restore must not switch away from WASM"
+);
+
+assert.doesNotMatch(
+  player,
+  /mode === "pure" \? "device_direct" : "mvp_hd"/,
+  "Pure Adaptive Power must use one WASM route"
+);
+
+assert.doesNotMatch(
+  cpp,
+  /float sl=l,sr=r/,
+  "Pure must not discard enabled effects"
+);
+
+assert.match(
+  cpp,
+  /gEqEnabled\|\|/,
+  "Pure effect safety processing is missing"
+);
+
+console.log('V5.5 production static wiring: PASS');

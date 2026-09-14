@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.4-broadcast-v5-4-live-audible-power";
+const ASSET_VERSION = "10.0.5-broadcast-v5-5-live-controls";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
