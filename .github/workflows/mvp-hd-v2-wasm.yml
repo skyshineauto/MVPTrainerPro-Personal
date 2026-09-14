@@ -9,6 +9,7 @@ on:
       - "dsp/v2/mvp_hd_v2.cpp"
       - "scripts/build-mvp-hd-v2.sh"
       - "scripts/test-v54-audibility.mjs"
+      - "scripts/test-v54-distortion.mjs"
       - "scripts/test-v54-matrix.mjs"
       - "scripts/test-v54-worklet-route.mjs"
       - "scripts/test-v54-production-static.mjs"
@@ -62,6 +63,9 @@ jobs:
 
       - name: Run V5.4 audibility validation
         run: node scripts/test-v54-audibility.mjs
+
+      - name: Run V5.4 distortion, switching, and performance validation
+        run: node scripts/test-v54-distortion.mjs
 
       - name: Run V5.4 exhaustive matrix
         run: node scripts/test-v54-matrix.mjs
