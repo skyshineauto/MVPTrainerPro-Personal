@@ -84,7 +84,7 @@ const ready = p.port.messages.find(
 
 if (!ready) throw new Error("missing READY");
 
-if (Number(ready.engineBuildId) !== 5600) {
+if (Number(ready.engineBuildId) !== 5700) {
   throw new Error(
     "wrong engine build " + ready.engineBuildId,
   );
@@ -124,7 +124,7 @@ const ack = p.port.messages.find(
 
 if (!ack) throw new Error("missing native-state ACK");
 
-if (Number(ack.engineBuildId) !== 5600) {
+if (Number(ack.engineBuildId) !== 5700) {
   throw new Error(
     "ACK came from wrong engine build " +
       ack.engineBuildId,
@@ -239,7 +239,7 @@ if (!muteAck?.enabled) {
   );
 }
 
-if (Number(muteAck.engineBuildId) !== 5600) {
+if (Number(muteAck.engineBuildId) !== 5700) {
   throw new Error(
     "proof mute ACK came from wrong engine",
   );
@@ -300,7 +300,7 @@ const pong =
 if (
   !pong ||
   pong.signature !== ack.signature ||
-  Number(pong.engineBuildId) !== 5600
+  Number(pong.engineBuildId) !== 5700
 ) {
   throw new Error(
     "PING native-state proof mismatch",
@@ -360,7 +360,7 @@ for (const outputProfile of [
       }
 
       if (
-        Number(stateAck.engineBuildId) !== 5600 ||
+        Number(stateAck.engineBuildId) !== 5700 ||
         stateAck.appliedState.mode !== st.mode ||
         stateAck.appliedState.outputProfile !==
           st.outputProfile ||

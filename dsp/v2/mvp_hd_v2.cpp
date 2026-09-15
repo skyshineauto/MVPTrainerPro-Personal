@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.6 AUDIBLE CONTRACT
+// MVP Trainer Pro Broadcast Engine V5.7 PERCEPTUAL AUDIBILITY
 // One clean route. Visible controls must change the sound in the intended direction.
 // ABI remains mvp_v2_* for the production AudioWorklet bridge.
 
@@ -72,47 +72,359 @@ float gLimiterGain=1,gLimiterRelease=0;const float gCeiling=.925f;TruePeak4x gLi
 float gMeterTruePeak=0,gMeterLimiterGrDb=0,gMeterImpactBoostDb=0,gMeterBassActivityDb=0,gMeterClarityActivityDb=0,gMeterWidthPercent=100;unsigned int gMeterClipCount=0,gMeterNanCount=0;
 
 void configureEqBand(int i){if(i<0||i>=kEqBands)return;gEqL[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);gEqR[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);}
-void configureModeTone(){float i=clampf(gIntensityTarget,0,1),bass=0,body=0,mud=0,pres=0,air=0;if(gMode==1){bass=.35f+.65f*i;body=.20f+.45f*i;mud=-.15f-.20f*i;pres=.35f+.70f*i;air=.20f+.50f*i;}else if(gMode==2){bass=1.25f+2.15f*i;body=.85f+1.35f*i;mud=-.65f-.75f*i;pres=1.25f+2.10f*i;air=.75f+1.60f*i;}if(gProfile==2){bass*=1.10f;body*=1.07f;}if(gProfile==0){bass*=.94f;air*=.92f;}gModeBassL.lowshelf(gSampleRate,78,bass);gModeBassR.lowshelf(gSampleRate,78,bass);gModeBodyL.peaking(gSampleRate,155,.75,body);gModeBodyR.peaking(gSampleRate,155,.75,body);gModeMudL.peaking(gSampleRate,520,.72,mud);gModeMudR.peaking(gSampleRate,520,.72,mud);gModePresenceL.peaking(gSampleRate,2800,.85,pres);gModePresenceR.peaking(gSampleRate,2800,.85,pres);gModeAirL.highshelf(gSampleRate,8500,air);gModeAirR.highshelf(gSampleRate,8500,air);}
-void configureBass(){float c=clampf(gBassCharacterTarget,0,1),i=clampf(gIntensityTarget,0,1),profile=gProfile==1?1.10f:(gProfile==2?1.03f:.96f);float deepDb=(2.2f+4.5f*c)*(.78f+.42f*i)*profile,punchDb=(5.1f-3.5f*c)*(.78f+.42f*i)*profile;float deepHz=58-13*c,punchHz=132-30*c;gBassShelfL.lowshelf(gSampleRate,deepHz,deepDb);gBassShelfR.lowshelf(gSampleRate,deepHz,deepDb);gBassPunchL.peaking(gSampleRate,punchHz,.82,punchDb);gBassPunchR.peaking(gSampleRate,punchHz,.82,punchDb);}
-void configureImpact(){float i=clampf(gIntensityTarget,0,1),db=(1.35f+1.85f*i)*(gProfile==2?1.05f:1);gImpactToneL.peaking(gSampleRate,1900,.95,db);gImpactToneR.peaking(gSampleRate,1900,.95,db);}
-void configureClarity(){float i=clampf(gIntensityTarget,0,1),p=gProfile==1?1.08f:(gProfile==2?1.03f:.95f),presence=(1.7f+2.4f*i)*p,air=(1.4f+2.5f*i)*p;gClarityPresenceL.peaking(gSampleRate,3400,.82,presence);gClarityPresenceR.peaking(gSampleRate,3400,.82,presence);gClarityAirL.highshelf(gSampleRate,9000,air);gClarityAirR.highshelf(gSampleRate,9000,air);}
-void configurePersonal(){float pb=gPersonalBass*(gProfile==1?6.2f:(gProfile==2?6.0f:5.5f)),pp=gPersonalPresence*(gProfile==1?5.6f:5.2f),br=gPersonalBrightness*(gProfile==1?6.0f:(gProfile==2?5.6f:5.2f));gPersonalBassL.lowshelf(gSampleRate,95,pb);gPersonalBassR.lowshelf(gSampleRate,95,pb);gPersonalPresenceL.peaking(gSampleRate,3100,.78,pp);gPersonalPresenceR.peaking(gSampleRate,3100,.78,pp);gPersonalBrightL.highshelf(gSampleRate,8500,br);gPersonalBrightR.highshelf(gSampleRate,8500,br);}
+void configureModeTone(){
+  float i=clampf(gIntensityTarget,0,1);
+  float bass=0,body=0,mud=0,pres=0,air=0;
+
+  if(gMode==1){
+    // Adaptive is deliberately obvious, but still balanced.
+    bass=.95f+1.55f*i;
+    body=.55f+1.05f*i;
+    mud=-.35f-.45f*i;
+    pres=.90f+1.80f*i;
+    air=.55f+1.25f*i;
+  }else if(gMode==2){
+    // Power has a clearly different tonal signature.
+    bass=2.00f+3.20f*i;
+    body=1.20f+2.20f*i;
+    mud=-.90f-1.30f*i;
+    pres=2.00f+3.40f*i;
+    air=1.10f+2.50f*i;
+  }
+
+  if(gProfile==1){
+    bass*=1.05f;
+    pres*=1.06f;
+    air*=1.10f;
+  }else if(gProfile==2){
+    bass*=1.10f;
+    body*=1.08f;
+    pres*=1.03f;
+  }else{
+    bass*=.96f;
+    air*=.94f;
+  }
+
+  gModeBassL.lowshelf(gSampleRate,78,bass);
+  gModeBassR.lowshelf(gSampleRate,78,bass);
+
+  gModeBodyL.peaking(gSampleRate,155,.75,body);
+  gModeBodyR.peaking(gSampleRate,155,.75,body);
+
+  gModeMudL.peaking(gSampleRate,520,.72,mud);
+  gModeMudR.peaking(gSampleRate,520,.72,mud);
+
+  gModePresenceL.peaking(gSampleRate,2800,.85,pres);
+  gModePresenceR.peaking(gSampleRate,2800,.85,pres);
+
+  gModeAirL.highshelf(gSampleRate,8500,air);
+  gModeAirR.highshelf(gSampleRate,8500,air);
+}
+void configureBass(){
+  float c=
+    clampf(
+      gBassCharacterTarget,
+      0,
+      1
+    );
+
+  float i=
+    clampf(
+      gIntensityTarget,
+      0,
+      1
+    );
+
+  float profile=
+    gProfile==1
+      ? 1.12f
+      : (
+          gProfile==2
+            ? 1.08f
+            : 1.00f
+        );
+
+  float strength=
+    .70f+.55f*i;
+
+  float deepDb=
+    (2.60f+4.60f*c)*
+    strength*
+    profile;
+
+  float punchDb=
+    (6.00f-3.80f*c)*
+    strength*
+    profile;
+
+  float deepHz=
+    60-15*c;
+
+  float punchHz=
+    135-32*c;
+
+  gBassShelfL.lowshelf(
+    gSampleRate,
+    deepHz,
+    deepDb
+  );
+
+  gBassShelfR.lowshelf(
+    gSampleRate,
+    deepHz,
+    deepDb
+  );
+
+  gBassPunchL.peaking(
+    gSampleRate,
+    punchHz,
+    .82,
+    punchDb
+  );
+
+  gBassPunchR.peaking(
+    gSampleRate,
+    punchHz,
+    .82,
+    punchDb
+  );
+}
+void configureImpact(){
+  float i=
+    clampf(
+      gIntensityTarget,
+      0,
+      1
+    );
+
+  float profile=
+    gProfile==1
+      ? 1.10f
+      : (
+          gProfile==2
+            ? 1.06f
+            : 1.00f
+        );
+
+  float db=
+    (2.00f+2.80f*i)*
+    profile;
+
+  gImpactToneL.peaking(
+    gSampleRate,
+    1950,
+    .92,
+    db
+  );
+
+  gImpactToneR.peaking(
+    gSampleRate,
+    1950,
+    .92,
+    db
+  );
+}
+void configureClarity(){
+  float i=
+    clampf(
+      gIntensityTarget,
+      0,
+      1
+    );
+
+  float p=
+    gProfile==1
+      ? 1.12f
+      : (
+          gProfile==2
+            ? 1.06f
+            : 1.00f
+        );
+
+  float presence=
+    (2.20f+3.20f*i)*p;
+
+  float air=
+    (1.80f+3.30f*i)*p;
+
+  gClarityPresenceL.peaking(
+    gSampleRate,
+    3400,
+    .82,
+    presence
+  );
+
+  gClarityPresenceR.peaking(
+    gSampleRate,
+    3400,
+    .82,
+    presence
+  );
+
+  gClarityAirL.highshelf(
+    gSampleRate,
+    9000,
+    air
+  );
+
+  gClarityAirR.highshelf(
+    gSampleRate,
+    9000,
+    air
+  );
+}
+void configurePersonal(){
+  float pb=
+    gPersonalBass*
+    (
+      gProfile==1
+        ? 8.2f
+        : (
+            gProfile==2
+              ? 7.8f
+              : 7.2f
+          )
+    );
+
+  float pp=
+    gPersonalPresence*
+    (
+      gProfile==1
+        ? 7.6f
+        : 7.2f
+    );
+
+  float br=
+    gPersonalBrightness*
+    (
+      gProfile==1
+        ? 8.0f
+        : (
+            gProfile==2
+              ? 7.5f
+              : 7.0f
+          )
+    );
+
+  gPersonalBassL.lowshelf(
+    gSampleRate,
+    95,
+    pb
+  );
+
+  gPersonalBassR.lowshelf(
+    gSampleRate,
+    95,
+    pb
+  );
+
+  gPersonalPresenceL.peaking(
+    gSampleRate,
+    3100,
+    .78,
+    pp
+  );
+
+  gPersonalPresenceR.peaking(
+    gSampleRate,
+    3100,
+    .78,
+    pp
+  );
+
+  gPersonalBrightL.highshelf(
+    gSampleRate,
+    8500,
+    br
+  );
+
+  gPersonalBrightR.highshelf(
+    gSampleRate,
+    8500,
+    br
+  );
+}
 void configureMaster(){gMasterHpL.highpass(gSampleRate,gMasterHighpassHz);gMasterHpR.highpass(gSampleRate,gMasterHighpassHz);gMasterLowMidL.peaking(gSampleRate,260,.72,gMasterLowMidDb);gMasterLowMidR.peaking(gSampleRate,260,.72,gMasterLowMidDb);gMasterPresenceL.peaking(gSampleRate,3000,.85,gMasterPresenceDb);gMasterPresenceR.peaking(gSampleRate,3000,.85,gMasterPresenceDb);gMasterHarshL.peaking(gSampleRate,6200,1,gMasterHarshnessDb);gMasterHarshR.peaking(gSampleRate,6200,1,gMasterHarshnessDb);}
 void resetMeters(){gMeterTruePeak=0;gMeterLimiterGrDb=0;gMeterImpactBoostDb=0;gMeterBassActivityDb=0;gMeterClarityActivityDb=0;gMeterWidthPercent=100;gMeterClipCount=0;gMeterNanCount=0;gMeterTpL.reset();gMeterTpR.reset();}
 void resetState(){for(int i=0;i<kEqBands;++i){gEqL[i].reset();gEqR[i].reset();}Biquad* fs[]={&gModeBassL,&gModeBassR,&gModeBodyL,&gModeBodyR,&gModeMudL,&gModeMudR,&gModePresenceL,&gModePresenceR,&gModeAirL,&gModeAirR,&gBassShelfL,&gBassShelfR,&gBassPunchL,&gBassPunchR,&gImpactToneL,&gImpactToneR,&gClarityPresenceL,&gClarityPresenceR,&gClarityAirL,&gClarityAirR,&gSpatialDecorHp,&gPersonalBassL,&gPersonalBassR,&gPersonalPresenceL,&gPersonalPresenceR,&gPersonalBrightL,&gPersonalBrightR,&gMasterHpL,&gMasterHpR,&gMasterLowMidL,&gMasterLowMidR,&gMasterPresenceL,&gMasterPresenceR,&gMasterHarshL,&gMasterHarshR};for(unsigned int i=0;i<sizeof(fs)/sizeof(fs[0]);++i)fs[i]->reset();for(int i=0;i<kLookaheadMax;++i){gLookL[i]=gLookR[i]=gLookPeak[i]=0;}for(int i=0;i<4096;++i)gSpatialDelay[i]=0;gSpatialIndex=0;gLookIndex=0;gPureFlushRemaining=0;gLimiterGain=1;gLimiterTpL.reset();gLimiterTpR.reset();gProgramPeak=gProgramAvg=gProgramDensity=0;gProgramSamples=0;gCompEnv=0;gCompGain=1;gImpactFast=gImpactSlow=0;gIntensity=gIntensityTarget;gBassCharacter=gBassCharacterTarget;resetMeters();}
 inline void updateAnalysis(float l,float r){float d=maxf(absf(l),absf(r)),pc=d>gProgramPeak?gPeakAttack:gPeakRelease;gProgramPeak+=(d-gProgramPeak)*pc;float ac=d>gProgramAvg?gAvgAttack:gAvgRelease;gProgramAvg+=(d-gProgramAvg)*ac;gProgramDensity=clampf(gProgramAvg/(gProgramPeak>1e-6f?gProgramPeak:1e-6f),0,1);if(gProgramSamples<0x7fffffffu)++gProgramSamples;}
-inline float boundedDeltaScale(float l,float r,float dl,float dr,float cap){float base=maxf(absf(l),absf(r));if(base>=cap)return 0;float delta=maxf(absf(dl),absf(dr));if(delta<1e-7f)return 1;return clampf((cap-base)/delta,0,1);}
+inline float boundedDeltaScale(
+  float l,
+  float r,
+  float dl,
+  float dr,
+  float cap
+){
+  float base=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  float delta=
+    maxf(
+      absf(dl),
+      absf(dr)
+    );
+
+  if(delta<1e-7f)
+    return 1;
+
+  // Never silently turn an enabled control into zero effect.
+  // At very hot internal levels retain at least 35% of the
+  // requested delta; final peak safety is handled downstream.
+  if(base>=cap)
+    return .35f;
+
+  return clampf(
+    (cap-base)/delta,
+    .35f,
+    1
+  );
+}
 inline void applyEq(float &l,float &r){if(!gEqEnabled){for(int i=0;i<kEqBands;++i){(void)gEqL[i].process(l);(void)gEqR[i].process(r);}return;}for(int i=0;i<kEqBands;++i){l=gEqL[i].process(l);r=gEqR[i].process(r);}}
 inline void applyMaster(float &l,float &r){float pl=gMasterHarshL.process(gMasterPresenceL.process(gMasterLowMidL.process(gMasterHpL.process(l)))),pr=gMasterHarshR.process(gMasterPresenceR.process(gMasterLowMidR.process(gMasterHpR.process(r))));if(!gMasterPrepEnabled)return;float warm=clampf((static_cast<float>(gProgramSamples)-gSampleRate*.05f)/(gSampleRate*.20f),0,1),hot=clampf((gProgramPeak-.68f)/.25f,0,1),gainDb=gMasterSourceGainDb*warm*(1-.85f*hot);pl*=dbToGain(gainDb);pr*=dbToGain(gainDb);if(gMasterBalanceDb>0)pr*=dbToGain(gMasterBalanceDb);else if(gMasterBalanceDb<0)pl*=dbToGain(-gMasterBalanceDb);float mid=.5f*(pl+pr),side=.5f*(pl-pr)*gMasterWidthScale;l=mid+side;r=mid-side;}
 inline void applyModeCore(float &l,float &r){
   if(gMode==0)return;
 
   bool power=gMode==2;
-
   float i=gIntensity;
+
   float det=maxf(absf(l),absf(r));
-  float ec=det>gCompEnv?gCompAttack:gCompRelease;
+
+  float ec=
+    det>gCompEnv
+      ? gCompAttack
+      : gCompRelease;
 
   gCompEnv+=(det-gCompEnv)*ec;
 
   float threshold=
     power
-      ? (.50f-.10f*i)
-      : (.70f-.06f*i);
+      ? (.40f-.08f*i)
+      : (.62f-.08f*i);
 
   float ratio=
     power
-      ? (2.25f+1.25f*i)
-      : (1.22f+.28f*i);
+      ? (3.20f+1.80f*i)
+      : (1.45f+.55f*i);
 
   float target=1;
 
-  if(gCompEnv>threshold&&gCompEnv>1e-6f){
-    float over=gCompEnv/threshold;
+  if(
+    gCompEnv>threshold &&
+    gCompEnv>1e-6f
+  ){
+    float over=
+      gCompEnv/threshold;
 
-    target=static_cast<float>(
-      pow(over,(1.0f/ratio)-1.0f)
-    );
+    target=
+      static_cast<float>(
+        pow(
+          over,
+          (1.0f/ratio)-1.0f
+        )
+      );
   }
 
   float gc=
@@ -120,80 +432,446 @@ inline void applyModeCore(float &l,float &r){
       ? gCompAttack
       : gCompRelease;
 
-  gCompGain+=(target-gCompGain)*gc;
+  gCompGain+=
+    (target-gCompGain)*gc;
 
   float blend=
     power
-      ? (.62f+.14f*i)
-      : (.25f+.10f*i);
+      ? (.78f+.10f*i)
+      : (.38f+.10f*i);
 
   float comp=
-    (1-blend)+blend*gCompGain;
+    (1-blend)+
+    blend*gCompGain;
 
-  /*
-   * This is the proven V5.4 loudness core.
-   *
-   * It already passed the exhaustive 1194-case matrix.
-   * Do NOT push Power harder here and make the limiter do
-   * 9.5+ dB of gain reduction.
-   */
+  // More density without simply smashing peaks into the limiter.
   float makeupDb=
     power
-      ? (3.0f+2.35f*i)
-      : (.80f+.75f*i);
+      ? (4.20f+2.30f*i)
+      : (1.20f+1.20f*i);
 
   float densityGuard=
     clampf(
-      (gProgramDensity-.72f)/.22f,
+      (gProgramDensity-.76f)/.18f,
       0,
       1
     );
 
   if(power){
     makeupDb-=
-      densityGuard*(.85f+.65f*i);
+      densityGuard*
+      (.45f+.45f*i);
   }else{
     makeupDb-=
-      densityGuard*.25f;
+      densityGuard*.18f;
   }
 
   float gain=
-    comp*dbToGain(makeupDb);
+    comp*
+    dbToGain(makeupDb);
 
   l*=gain;
   r*=gain;
 
-  l=gModeAirL.process(
-    gModePresenceL.process(
-      gModeMudL.process(
-        gModeBodyL.process(
-          gModeBassL.process(l)
+  l=
+    gModeAirL.process(
+      gModePresenceL.process(
+        gModeMudL.process(
+          gModeBodyL.process(
+            gModeBassL.process(l)
+          )
         )
       )
-    )
-  );
+    );
 
-  r=gModeAirR.process(
-    gModePresenceR.process(
-      gModeMudR.process(
-        gModeBodyR.process(
-          gModeBassR.process(r)
+  r=
+    gModeAirR.process(
+      gModePresenceR.process(
+        gModeMudR.process(
+          gModeBodyR.process(
+            gModeBassR.process(r)
+          )
         )
       )
-    )
-  );
+    );
 }
-inline void applyBass(float &l,float &r){float bl=gBassPunchL.process(gBassShelfL.process(l)),br=gBassPunchR.process(gBassShelfR.process(r));if(!gBassEnabled)return;float dl=bl-l,dr=br-r,s=boundedDeltaScale(l,r,dl,dr,1.08f);float src=maxf(absf(l),absf(r));l+=dl*s;r+=dr*s;float out=maxf(absf(l),absf(r));if(src>1e-5f)gMeterBassActivityDb=maxf(gMeterBassActivityDb,gainToDb(out/src));}
-inline void applyImpact(float &l,float &r){float toneL=gImpactToneL.process(l),toneR=gImpactToneR.process(r),d=maxf(absf(l),absf(r)),fc=d>gImpactFast?gImpactFastAttack:gImpactFastRelease;gImpactFast+=(d-gImpactFast)*fc;float sc=d>gImpactSlow?gImpactSlowAttack:gImpactSlowRelease;gImpactSlow+=(d-gImpactSlow)*sc;if(!gImpactEnabled)return;float transient=clampf((gImpactFast-gImpactSlow*1.18f)/(gImpactSlow+.050f),0,1),boostDb=transient*(1.5f+2.65f*gIntensity),dynamic=dbToGain(boostDb),mix=.68f+.22f*gIntensity,candL=((1-mix)*l+mix*toneL)*dynamic,candR=((1-mix)*r+mix*toneR)*dynamic,dl=candL-l,dr=candR-r,s=boundedDeltaScale(l,r,dl,dr,1.10f);l+=dl*s;r+=dr*s;gMeterImpactBoostDb=maxf(gMeterImpactBoostDb,boostDb*s);}
-inline void applyClarity(float &l,float &r){float cl=gClarityAirL.process(gClarityPresenceL.process(l)),cr=gClarityAirR.process(gClarityPresenceR.process(r));if(!gClarityEnabled)return;float dl=cl-l,dr=cr-r,s=boundedDeltaScale(l,r,dl,dr,1.08f),src=maxf(absf(l),absf(r));l+=dl*s;r+=dr*s;float out=maxf(absf(l),absf(r));if(src>1e-5f)gMeterClarityActivityDb=maxf(gMeterClarityActivityDb,gainToDb(out/src));}
-inline void applySpatial(float &l,float &r){float mid=.5f*(l+r),side=.5f*(l-r);int ds=static_cast<int>(gSampleRate*(gProfile==1?.010f:(gProfile==2?.012f:(gSpaceMode==2?.017f:(gSpaceMode==1?.012f:.008f)))));if(ds<1)ds=1;if(ds>4095)ds=4095;int ri=gSpatialIndex-ds;if(ri<0)ri+=4096;float delayed=gSpatialDelay[ri];gSpatialDelay[gSpatialIndex]=mid;gSpatialIndex=(gSpatialIndex+1)&4095;float decor=gSpatialDecorHp.process(delayed);if(!gSpatialEnabled){gMeterWidthPercent=100;return;}float width=1,dm=0;if(gProfile==1){width=1.30f+.42f*gIntensity;dm=.055f+.070f*gIntensity;}else if(gProfile==2){width=1.38f+.46f*gIntensity;dm=.065f+.080f*gIntensity;}else{float x=gSpaceMode==2?.68f:(gSpaceMode==1?.44f:.22f);width=1+x*(.58f+.42f*gIntensity);dm=(gSpaceMode==2?.12f:(gSpaceMode==1?.085f:.045f))*(.65f+.35f*gIntensity);}float sside=side*width+decor*dm,candL=mid+sside,candR=mid-sside,dl=candL-l,dr=candR-r,s=boundedDeltaScale(l,r,dl,dr,1.10f);l+=dl*s;r+=dr*s;gMeterWidthPercent=100+(width-1)*100*s;}
-inline void applyPersonal(float &l,float &r){float pl=gPersonalBrightL.process(gPersonalPresenceL.process(gPersonalBassL.process(l))),pr=gPersonalBrightR.process(gPersonalPresenceR.process(gPersonalBassR.process(r)));if(!gPersonalEnabled)return;float dl=pl-l,dr=pr-r;bool positive=gPersonalBass>0||gPersonalPresence>0||gPersonalBrightness>0;float s=positive?boundedDeltaScale(l,r,dl,dr,1.08f):1;l+=dl*s;r+=dr*s;}
+inline void applyBass(float &l,float &r){
+  float bl=
+    gBassPunchL.process(
+      gBassShelfL.process(l)
+    );
+
+  float br=
+    gBassPunchR.process(
+      gBassShelfR.process(r)
+    );
+
+  if(!gBassEnabled)
+    return;
+
+  float dl=bl-l;
+  float dr=br-r;
+
+  float s=
+    boundedDeltaScale(
+      l,r,
+      dl,dr,
+      1.38f
+    );
+
+  float src=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  l+=dl*s;
+  r+=dr*s;
+
+  float out=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  if(src>1e-5f){
+    gMeterBassActivityDb=
+      maxf(
+        gMeterBassActivityDb,
+        gainToDb(out/src)
+      );
+  }
+}
+inline void applyImpact(float &l,float &r){
+  float toneL=
+    gImpactToneL.process(l);
+
+  float toneR=
+    gImpactToneR.process(r);
+
+  float d=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  float fc=
+    d>gImpactFast
+      ? gImpactFastAttack
+      : gImpactFastRelease;
+
+  gImpactFast+=
+    (d-gImpactFast)*fc;
+
+  float sc=
+    d>gImpactSlow
+      ? gImpactSlowAttack
+      : gImpactSlowRelease;
+
+  gImpactSlow+=
+    (d-gImpactSlow)*sc;
+
+  if(!gImpactEnabled)
+    return;
+
+  // Keep the stable transient detector that avoided steady-state
+  // distortion, but make detected attacks substantially stronger.
+  float transient=
+    clampf(
+      (
+        gImpactFast-
+        gImpactSlow*1.18f
+      )/
+      (
+        gImpactSlow+.050f
+      ),
+      0,
+      1
+    );
+
+  float boostDb=
+    transient*
+    (2.40f+4.80f*gIntensity);
+
+  float dynamic=
+    dbToGain(boostDb);
+
+  float mix=
+    .76f+
+    .18f*gIntensity;
+
+  float candL=
+    (
+      (1-mix)*l+
+      mix*toneL
+    )*
+    dynamic;
+
+  float candR=
+    (
+      (1-mix)*r+
+      mix*toneR
+    )*
+    dynamic;
+
+  float dl=
+    candL-l;
+
+  float dr=
+    candR-r;
+
+  float s=
+    boundedDeltaScale(
+      l,r,
+      dl,dr,
+      1.30f
+    );
+
+  l+=dl*s;
+  r+=dr*s;
+
+  gMeterImpactBoostDb=
+    maxf(
+      gMeterImpactBoostDb,
+      boostDb*s
+    );
+}
+inline void applyClarity(float &l,float &r){
+  float cl=
+    gClarityAirL.process(
+      gClarityPresenceL.process(l)
+    );
+
+  float cr=
+    gClarityAirR.process(
+      gClarityPresenceR.process(r)
+    );
+
+  if(!gClarityEnabled)
+    return;
+
+  float dl=cl-l;
+  float dr=cr-r;
+
+  float s=
+    boundedDeltaScale(
+      l,r,
+      dl,dr,
+      1.34f
+    );
+
+  float src=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  l+=dl*s;
+  r+=dr*s;
+
+  float out=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  if(src>1e-5f){
+    gMeterClarityActivityDb=
+      maxf(
+        gMeterClarityActivityDb,
+        gainToDb(out/src)
+      );
+  }
+}
+inline void applySpatial(float &l,float &r){
+  float mid=.5f*(l+r);
+  float side=.5f*(l-r);
+
+  float delaySec=.007f;
+  float width=1;
+  float dm=0;
+
+  if(gProfile==1){
+    // HEADPHONES
+    if(gSpaceMode==2){
+      delaySec=.0185f;
+      width=1.78f+.45f*gIntensity;
+      dm=.110f+.100f*gIntensity;
+    }else if(gSpaceMode==1){
+      delaySec=.0115f;
+      width=1.55f+.38f*gIntensity;
+      dm=.070f+.085f*gIntensity;
+    }else{
+      delaySec=.0065f;
+      width=1.35f+.30f*gIntensity;
+      dm=.032f+.050f*gIntensity;
+    }
+  }else if(gProfile==2){
+    // BLUETOOTH SPEAKER
+    if(gSpaceMode==2){
+      delaySec=.0145f;
+      width=1.66f+.36f*gIntensity;
+      dm=.080f+.080f*gIntensity;
+    }else if(gSpaceMode==1){
+      delaySec=.0095f;
+      width=1.48f+.32f*gIntensity;
+      dm=.050f+.065f*gIntensity;
+    }else{
+      delaySec=.0055f;
+      width=1.30f+.24f*gIntensity;
+      dm=.025f+.035f*gIntensity;
+    }
+  }else{
+    // CAR / HI-FI
+    if(gSpaceMode==2){
+      delaySec=.0170f;
+      width=1.58f+.42f*gIntensity;
+      dm=.095f+.085f*gIntensity;
+    }else if(gSpaceMode==1){
+      delaySec=.0120f;
+      width=1.40f+.32f*gIntensity;
+      dm=.060f+.065f*gIntensity;
+    }else{
+      delaySec=.0070f;
+      width=1.22f+.22f*gIntensity;
+      dm=.030f+.035f*gIntensity;
+    }
+  }
+
+  int ds=
+    static_cast<int>(
+      gSampleRate*
+      delaySec
+    );
+
+  if(ds<1)ds=1;
+  if(ds>4095)ds=4095;
+
+  int ri=
+    gSpatialIndex-ds;
+
+  if(ri<0)
+    ri+=4096;
+
+  float delayed=
+    gSpatialDelay[ri];
+
+  gSpatialDelay[
+    gSpatialIndex
+  ]=mid;
+
+  gSpatialIndex=
+    (gSpatialIndex+1)&4095;
+
+  float decor=
+    gSpatialDecorHp.process(
+      delayed
+    );
+
+  if(!gSpatialEnabled){
+    gMeterWidthPercent=100;
+    return;
+  }
+
+  float sside=
+    side*width+
+    decor*dm;
+
+  float candL=
+    mid+sside;
+
+  float candR=
+    mid-sside;
+
+  float dl=
+    candL-l;
+
+  float dr=
+    candR-r;
+
+  float scale=
+    boundedDeltaScale(
+      l,r,
+      dl,dr,
+      1.30f
+    );
+
+  l+=dl*scale;
+  r+=dr*scale;
+
+  gMeterWidthPercent=
+    100+
+    (width-1)*
+    100*
+    scale;
+}
+inline void applyPersonal(float &l,float &r){
+  float pl=
+    gPersonalBrightL.process(
+      gPersonalPresenceL.process(
+        gPersonalBassL.process(l)
+      )
+    );
+
+  float pr=
+    gPersonalBrightR.process(
+      gPersonalPresenceR.process(
+        gPersonalBassR.process(r)
+      )
+    );
+
+  if(!gPersonalEnabled)
+    return;
+
+  float dl=pl-l;
+  float dr=pr-r;
+
+  bool positive=
+    gPersonalBass>0 ||
+    gPersonalPresence>0 ||
+    gPersonalBrightness>0;
+
+  float s=
+    positive
+      ? boundedDeltaScale(
+          l,r,
+          dl,dr,
+          1.36f
+        )
+      : 1;
+
+  l+=dl*s;
+  r+=dr*s;
+}
+
+inline void applyEmergencyPeakGuard(
+  float &l,
+  float &r
+){
+  float peak=
+    maxf(
+      absf(l),
+      absf(r)
+    );
+
+  // Normal program material should never touch this.
+  // 2.20 leaves substantial room for the final true-peak
+  // lookahead limiter while allowing the actual effects through.
+  if(peak>2.20f){
+    float g=
+      2.20f/peak;
+
+    l*=g;
+    r*=g;
+  }
+}
+
 inline void limiter(float inL,float inR,float &outL,float &outR,bool enabled){float dL=gLookL[gLookIndex],dR=gLookR[gLookIndex],dP=gLookPeak[gLookIndex],p=maxf(absf(inL),absf(inR));p=maxf(p,gLimiterTpL.update(inL));p=maxf(p,gLimiterTpR.update(inR));gLookL[gLookIndex]=inL;gLookR[gLookIndex]=inR;gLookPeak[gLookIndex]=p;gLookIndex=(gLookIndex+1)%gLookahead;if(!enabled){if(gPureFlushRemaining>0){float safe=1;if(dP>gCeiling&&dP>1e-6f)safe=gCeiling/dP;outL=dL*safe;outR=dR*safe;--gPureFlushRemaining;}else{outL=dL;outR=dR;}gLimiterGain=1;return;}float future=0;for(int i=0;i<gLookahead;++i)future=maxf(future,gLookPeak[i]);float req=future>gCeiling?gCeiling/future:1;if(req<gLimiterGain)gLimiterGain=req;else gLimiterGain+=(1-gLimiterGain)*gLimiterRelease;gLimiterGain=clampf(gLimiterGain,.12f,1);outL=dL*gLimiterGain;outR=dR*gLimiterGain;gMeterLimiterGrDb=maxf(gMeterLimiterGrDb,-gainToDb(gLimiterGain));}
 inline void meter(float l,float r){float tp=maxf(gMeterTpL.update(l),gMeterTpR.update(r));gMeterTruePeak=maxf(gMeterTruePeak,tp);if(absf(l)>1||absf(r)>1)++gMeterClipCount;if(l!=l||r!=r||absf(l)>1000000||absf(r)>1000000)++gMeterNanCount;}
 }
 
 extern "C" {
-unsigned int mvp_v2_build_id(){return 5600u;}
+unsigned int mvp_v2_build_id(){return 5700u;}
 int mvp_v2_get_mode(){return gMode;}
 int mvp_v2_get_output_profile(){return gProfile;}
 float mvp_v2_get_intensity(){return gIntensityTarget;}
@@ -290,13 +968,7 @@ int mvp_v2_process(int frames){
     float ol=0;
     float orr=0;
 
-    limiter(
-      l,
-      r,
-      ol,
-      orr,
-      processed
-    );
+    if(processed)applyEmergencyPeakGuard(l,r);limiter(l,r,ol,orr,processed);
 
     gOutputL[i]=ol;
     gOutputR[i]=orr;

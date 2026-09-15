@@ -1,6 +1,6 @@
-// MVP Trainer Pro Broadcast Engine V5.6 AUDIBLE CONTRACT.
+// MVP Trainer Pro Broadcast Engine V5.7 PERCEPTUAL AUDIBILITY.
 // STATE_APPLIED is emitted only after the actual C++ WASM state reads back correctly.
-const MVP_V56_ENGINE_BUILD_ID = 5600;
+const MVP_V57_ENGINE_BUILD_ID = 5700;
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
   constructor() {
@@ -60,7 +60,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           enabled: this.proofMute,
           requestId: Number(message.requestId) || 0,
           revision: this.appliedRevision,
-          engineBuildId: MVP_V56_ENGINE_BUILD_ID,
+          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
         });
         return;
       }
@@ -89,7 +89,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           appliedState: this.appliedState,
           signature: this.appliedSignature,
           proofMute: this.proofMute,
-          engineBuildId: MVP_V56_ENGINE_BUILD_ID,
+          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
         });
       }
     };
@@ -252,7 +252,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     const space =
       next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0;
 
-    if (Number(ex.mvp_v2_build_id()) !== MVP_V56_ENGINE_BUILD_ID)
+    if (Number(ex.mvp_v2_build_id()) !== MVP_V57_ENGINE_BUILD_ID)
       return "engine build id";
     if (Number(ex.mvp_v2_get_mode()) !== mode) return "mode";
     if (Number(ex.mvp_v2_get_output_profile()) !== profile)
@@ -381,10 +381,10 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       }
 
       const buildId = Number(ex.mvp_v2_build_id());
-      if (buildId !== MVP_V56_ENGINE_BUILD_ID) {
+      if (buildId !== MVP_V57_ENGINE_BUILD_ID) {
         throw new Error(
           "Wrong Broadcast WASM binary. Expected build " +
-            MVP_V56_ENGINE_BUILD_ID +
+            MVP_V57_ENGINE_BUILD_ID +
             ", received " +
             buildId,
         );
@@ -432,8 +432,8 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       this.port.postMessage({
         type: "READY",
         legacyType: "ready",
-        version: "broadcast-v5-6-audible-contract",
-        engineBuildId: MVP_V56_ENGINE_BUILD_ID,
+        version: "broadcast-v5-7-perceptual-audibility",
+        engineBuildId: MVP_V57_ENGINE_BUILD_ID,
         sampleRate,
         maxFrames,
       });
@@ -515,7 +515,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       appliedState: next,
       state: next,
       signature: this.appliedSignature,
-      engineBuildId: MVP_V56_ENGINE_BUILD_ID,
+      engineBuildId: MVP_V57_ENGINE_BUILD_ID,
     });
   }
 
@@ -641,7 +641,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           state: this.appliedState,
           signature: this.appliedSignature,
           proofMute: this.proofMute,
-          engineBuildId: MVP_V56_ENGINE_BUILD_ID,
+          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
           inputRms,
           outputRms,
           inputPeak: this.inputPeak,

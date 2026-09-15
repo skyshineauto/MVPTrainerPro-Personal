@@ -27,4 +27,248 @@ for(const [name,key,f] of [['personal bass','pb',50],['personal presence','pp',3
 const eq0=await render({mode:1,signal:'dynamic'}),eq1=await render({mode:1,eq:[[17,6]],signal:'dynamic'});add('31band eq audible',db(mag(eq1,1000)/mag(eq0,1000))>2.5,{d:db(mag(eq1,1000)/mag(eq0,1000)),lim:eq1.lim});
 const m0=await render({mode:1,signal:'dynamic'}),m1=await render({mode:1,master:{presenceDb:1.5,lowMidDb:-1},signal:'dynamic'});add('master prep audible',Math.abs(db(mag(m1,3400)/mag(m0,3400)))>.5,{d:db(mag(m1,3400)/mag(m0,3400))});
 const stack=await render({mode:2,intensity:1,bass:true,bassChar:.7,impact:true,clarity:true,spatial:true,personal:true,pb:.5,pp:.5,pbr:.5,signal:'hot'});add('full stack safe',stack.clips===0&&stack.nans===0&&stack.tp<=-.35&&stack.lim<8,{tp:stack.tp,lim:stack.lim});
+
+// V5.7 perceptual contrast
+const v57Pure=await render({
+  mode:0,
+  signal:'hot'
+});
+
+const v57Adaptive=await render({
+  mode:1,
+  intensity:1,
+  signal:'hot'
+});
+
+const v57Power=await render({
+  mode:2,
+  intensity:1,
+  signal:'hot'
+});
+
+add(
+  'V5.7 Adaptive clearly differs from Pure',
+  Math.abs(db(rms(v57Adaptive)/rms(v57Pure)))>.55 ||
+  Math.abs(db(mag(v57Adaptive,3400)/mag(v57Pure,3400)))>1.0,
+  {
+    rms:db(rms(v57Adaptive)/rms(v57Pure)),
+    presence:db(mag(v57Adaptive,3400)/mag(v57Pure,3400))
+  }
+);
+
+add(
+  'V5.7 Power clearly differs from Adaptive',
+  Math.abs(db(rms(v57Power)/rms(v57Adaptive)))>.75 ||
+  Math.abs(db(mag(v57Power,3400)/mag(v57Adaptive,3400)))>1.20,
+  {
+    rms:db(rms(v57Power)/rms(v57Adaptive)),
+    presence:db(mag(v57Power,3400)/mag(v57Adaptive,3400)),
+    limiter:v57Power.lim
+  }
+);
+
+const v57Bass0=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  signal:'dynamic'
+});
+
+const v57Bass1=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  bass:true,
+  bassChar:.7,
+  signal:'dynamic'
+});
+
+add(
+  'V5.7 Headphone Bass unmistakable',
+  db(
+    (
+      mag(v57Bass1,50)+
+      mag(v57Bass1,110)
+    )/
+    (
+      mag(v57Bass0,50)+
+      mag(v57Bass0,110)
+    )
+  )>1.20,
+  {
+    delta:db(
+      (
+        mag(v57Bass1,50)+
+        mag(v57Bass1,110)
+      )/
+      (
+        mag(v57Bass0,50)+
+        mag(v57Bass0,110)
+      )
+    )
+  }
+);
+
+const v57Clear0=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  signal:'dynamic'
+});
+
+const v57Clear1=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  clarity:true,
+  signal:'dynamic'
+});
+
+add(
+  'V5.7 Headphone Clarity unmistakable',
+  db(
+    (
+      mag(v57Clear1,3400)+
+      mag(v57Clear1,9000)
+    )/
+    (
+      mag(v57Clear0,3400)+
+      mag(v57Clear0,9000)
+    )
+  )>1.20,
+  {
+    delta:db(
+      (
+        mag(v57Clear1,3400)+
+        mag(v57Clear1,9000)
+      )/
+      (
+        mag(v57Clear0,3400)+
+        mag(v57Clear0,9000)
+      )
+    )
+  }
+);
+
+const v57Impact0=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  signal:'dynamic'
+});
+
+const v57Impact1=await render({
+  mode:1,
+  intensity:1,
+  profile:1,
+  impact:true,
+  signal:'dynamic'
+});
+
+add(
+  'V5.7 Impact obvious',
+  db(
+    transientRatio(v57Impact1)/
+    transientRatio(v57Impact0)
+  )>.40,
+  {
+    delta:db(
+      transientRatio(v57Impact1)/
+      transientRatio(v57Impact0)
+    )
+  }
+);
+
+for(const profile of [1,2]){
+  const studio=await render({
+    mode:1,
+    intensity:1,
+    profile,
+    spatial:true,
+    spaceMode:0,
+    signal:'dynamic'
+  });
+
+  const live=await render({
+    mode:1,
+    intensity:1,
+    profile,
+    spatial:true,
+    spaceMode:1,
+    signal:'dynamic'
+  });
+
+  const arena=await render({
+    mode:1,
+    intensity:1,
+    profile,
+    spatial:true,
+    spaceMode:2,
+    signal:'dynamic'
+  });
+
+  const liveDelta=
+    db(
+      mag(live,1000,true)/
+      mag(studio,1000,true)
+    );
+
+  const arenaDelta=
+    db(
+      mag(arena,1000,true)/
+      mag(live,1000,true)
+    );
+
+  add(
+    profile===1
+      ? 'V5.7 Headphone Studio Live Arena distinct'
+      : 'V5.7 Bluetooth Studio Live Arena distinct',
+    liveDelta>.50 &&
+    arenaDelta>.50,
+    {
+      liveDelta,
+      arenaDelta
+    }
+  );
+}
+
+const v57Personal0=await render({
+  mode:1,
+  profile:1,
+  personal:true,
+  signal:'dynamic'
+});
+
+const v57Personal1=await render({
+  mode:1,
+  profile:1,
+  personal:true,
+  pb:1,
+  pp:1,
+  pbr:1,
+  signal:'dynamic'
+});
+
+add(
+  'V5.7 Personal Sound unmistakable',
+  db(
+    mag(v57Personal1,3400)/
+    mag(v57Personal0,3400)
+  )>1.80 &&
+  db(
+    mag(v57Personal1,9000)/
+    mag(v57Personal0,9000)
+  )>1.80,
+  {
+    presence:db(
+      mag(v57Personal1,3400)/
+      mag(v57Personal0,3400)
+    ),
+    brightness:db(
+      mag(v57Personal1,9000)/
+      mag(v57Personal0,9000)
+    )
+  }
+);
+
 console.log(`\n${cases.filter(x=>x.pass).length}/${cases.length} PASS`);if(cases.some(x=>!x.pass))process.exit(1);

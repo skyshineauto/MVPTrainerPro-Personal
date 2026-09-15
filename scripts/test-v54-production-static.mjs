@@ -13,8 +13,8 @@ const workflow = read(".github/workflows/mvp-hd-v2-wasm.yml");
 const routeTest = read("scripts/test-v54-worklet-route.mjs");
 const browserEntry = read("scripts/test-mvp-hd-v2-browser.mjs");
 
-assert.match(cpp, /V5\.6 AUDIBLE CONTRACT/);
-assert.match(cpp, /mvp_v2_build_id\(\)\{return 5600u;\}/);
+assert.match(cpp,/V5\.7 PERCEPTUAL AUDIBILITY/);
+assert.match(cpp, /mvp_v2_build_id\(\)\{return 5700u;\}/);
 assert.match(cpp, /mvp_v2_get_mode/);
 assert.match(cpp, /mvp_v2_get_intensity/);
 assert.match(cpp, /mvp_v2_get_bass_enabled/);
@@ -24,12 +24,12 @@ assert.match(cpp, /mvp_v2_get_eq_band/);
 assert.match(cpp, /boundedDeltaScale/);
 assert.match(
   cpp,
-  /gImpactFast-gImpactSlow\*1\.18f/,
+  /gImpactFast\s*-\s*gImpactSlow\s*\*\s*1\.18f/,
   "Impact steady-state distortion guard missing",
 );
 assert.match(
   cpp,
-  /gImpactSlow\+\.050f/,
+  /gImpactSlow\s*\+\s*\.050f/,
   "Impact detector floor missing",
 );
 assert.doesNotMatch(
@@ -45,21 +45,21 @@ assert.match(buildScript, /--export=mvp_v2_build_id/);
 assert.match(buildScript, /--export=mvp_v2_get_mode/);
 assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
-assert.match(worklet, /broadcast-v5-6-audible-contract/);
-assert.match(worklet, /MVP_V56_ENGINE_BUILD_ID = 5600/);
+assert.match(worklet, /broadcast-v5-7-perceptual-audibility/);
+assert.match(worklet, /MVP_V57_ENGINE_BUILD_ID = 5700/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
 assert.match(worklet, /STATE_APPLIED/);
-assert.match(worklet, /engineBuildId: MVP_V56_ENGINE_BUILD_ID/);
+assert.match(worklet, /engineBuildId: MVP_V57_ENGINE_BUILD_ID/);
 assert.match(worklet, /SET_PROOF_MUTE/);
 assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.8-broadcast-v5-6-audible-contract/,
+  /10\.0\.9-broadcast-v5-7-perceptual-audibility/,
 );
-assert.match(bridge, /EXPECTED_ENGINE_BUILD_ID = 5600/);
+assert.match(bridge, /EXPECTED_ENGINE_BUILD_ID = 5700/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);
@@ -271,3 +271,14 @@ assert.match(
 console.log(
   "V5.6.1 single-writer live-control wiring: PASS",
 );
+
+
+/* V5.7 perceptual DSP guards */
+assert.match(cpp,/V5\.7 PERCEPTUAL AUDIBILITY/);
+assert.match(cpp,/applyEmergencyPeakGuard/);
+assert.match(cpp,/base>=cap\)\s*return \.35f/);
+assert.match(cpp,/gSpaceMode==2/);
+assert.match(cpp,/1\.78f\+\.45f\*gIntensity/);
+assert.match(cpp,/1\.66f\+\.36f\*gIntensity/);
+assert.match(cpp,/2\.40f\+4\.80f\*gIntensity/);
+console.log("V5.7 perceptual DSP guards: PASS");
