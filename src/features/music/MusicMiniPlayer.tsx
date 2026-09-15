@@ -33,7 +33,6 @@ import {
   playMusic,
   playMusicPlaylist,
   previousMusicTrack,
-  recoverMusicDsp,
   saveMusicEqCustomPreset,
   seekMusic,
   setMusicDspBypass,
@@ -1815,18 +1814,40 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   function runDspMutation(action: () => void, ensureEq = false) {
     try {
-      // IMPORTANT: every UI mutation is applied synchronously first. Never wait on
-      // AudioContext recovery before changing state, because a suspended browser
-      // context can otherwise make selects, checkboxes and sliders appear frozen.
-      if (player.dspBypass) setMusicDspBypass(false);
-      if (ensureEq && !player.eqEnabled) setMusicEqEnabled(true);
-      action();
+      if (player.dspBypass) {
+        setMusicDspBypass(false);
+      }
 
-      // The V13.8 engine already applies the live graph inside each setter. Recovery
-      // is only a silent fallback when the browser reports DSP as inactive.
-      if (player.dspStatus !== "active") void recoverMusicDsp();
+      if (
+        ensureEq &&
+        !player.eqEnabled
+      ) {
+        setMusicEqEnabled(true);
+      }
+
+      // V5.6.1 SINGLE WRITER:
+      // the requested UI action is the only live DSP mutation.
+      // Never launch asynchronous recovery from a stale React snapshot.
+      action();
     } catch {
-      // The player engine owns the useful error state.
+      // musicPlayer owns runtime/error state.
+    }
+  }
+
+  function runBroadcastMutation(
+    action: () => void,
+    _legacyEnsureEq = false,
+  ) {
+    try {
+      if (player.dspBypass) {
+        setMusicDspBypass(false);
+      }
+
+      // Broadcast mode/effects are independent of the 31-band EQ.
+      // One click = one Broadcast state mutation.
+      action();
+    } catch {
+      // musicPlayer owns runtime/error state.
     }
   }
 
@@ -2374,7 +2395,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                       type="button"
                       className={`${player.experienceMode === mode ? "is-active" : ""} ${mode === "power" ? "is-power" : ""}`}
                       aria-pressed={player.experienceMode === mode}
-                      onClick={() => void runDspMutation(() => setMusicExperienceMode(mode), true)}
+                      onClick={() => void runBroadcastMutation(() => setMusicExperienceMode(mode), true)}
                     >{mode.toUpperCase()}</button>
                   ))}
                 </div>
@@ -2383,24 +2404,24 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <div className="tr-v24Section">
                 <span className="tr-v24Label">SOUND</span>
                 <div className="tr-v24Sound">
-                  <button type="button" className={player.broadcastBassEnabled ? "is-active" : ""} aria-pressed={player.broadcastBassEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastBassEnabled(!player.broadcastBassEnabled), true)}>BASS</button>
-                  <button type="button" className={player.broadcastImpactEnabled ? "is-active" : ""} aria-pressed={player.broadcastImpactEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastImpact(!player.broadcastImpactEnabled), true)}>IMPACT</button>
-                  <button type="button" className={player.broadcastClarityEnabled ? "is-active" : ""} aria-pressed={player.broadcastClarityEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastClarity(!player.broadcastClarityEnabled), true)}>CLARITY</button>
-                  <button type="button" className={player.broadcastSpatialEnabled ? "is-active" : ""} aria-pressed={player.broadcastSpatialEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicBroadcastSpatial(!player.broadcastSpatialEnabled), true)}>
+                  <button type="button" className={player.broadcastBassEnabled ? "is-active" : ""} aria-pressed={player.broadcastBassEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicBroadcastBassEnabled(!player.broadcastBassEnabled), true)}>BASS</button>
+                  <button type="button" className={player.broadcastImpactEnabled ? "is-active" : ""} aria-pressed={player.broadcastImpactEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicBroadcastImpact(!player.broadcastImpactEnabled), true)}>IMPACT</button>
+                  <button type="button" className={player.broadcastClarityEnabled ? "is-active" : ""} aria-pressed={player.broadcastClarityEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicBroadcastClarity(!player.broadcastClarityEnabled), true)}>CLARITY</button>
+                  <button type="button" className={player.broadcastSpatialEnabled ? "is-active" : ""} aria-pressed={player.broadcastSpatialEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicBroadcastSpatial(!player.broadcastSpatialEnabled), true)}>
                     {player.outputProfile === "headphones" ? "IMMERSION" : player.outputProfile === "speaker" ? "STAGE" : "SPACE"}
                   </button>
                 </div>
 
                 <label className="tr-v24Range">
                   <span>INTENSITY</span>
-                  <input type="range" min="0" max="100" value={player.hdIntensity} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicHdIntensity(Number(event.target.value)), true)} />
+                  <input type="range" min="0" max="100" value={player.hdIntensity} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicHdIntensity(Number(event.target.value)), true)} />
                   <b>{Math.round(player.hdIntensity)}%</b>
                 </label>
 
                 {player.broadcastBassEnabled ? (
                   <label className="tr-v24Range tr-v24Character">
                     <span>TIGHT</span>
-                    <input type="range" min="0" max="100" value={player.broadcastBassCharacter} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicBroadcastBassCharacter(Number(event.target.value)), true)} />
+                    <input type="range" min="0" max="100" value={player.broadcastBassCharacter} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicBroadcastBassCharacter(Number(event.target.value)), true)} />
                     <span>DEEP</span>
                   </label>
                 ) : null}
@@ -2408,7 +2429,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 {player.outputProfile === "car_hifi" && player.broadcastSpatialEnabled ? (
                   <div className="tr-v24Space" role="group" aria-label="Car space">
                     {(["studio","live","arena"] as const).map((mode) => (
-                      <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} disabled={player.experienceMode === "pure"} onClick={() => void runDspMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>
+                      <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>
                     ))}
                   </div>
                 ) : null}
@@ -2416,14 +2437,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
               <div className="tr-v24Section">
                 <div className="tr-v24Extras">
-                  <button type="button" className={player.personalSoundEnabled ? "is-active" : ""} aria-pressed={player.personalSoundEnabled} onClick={() => void runDspMutation(() => setMusicPersonalSoundEnabled(!player.personalSoundEnabled), true)}>PERSONAL SOUND</button>
+                  <button type="button" className={player.personalSoundEnabled ? "is-active" : ""} aria-pressed={player.personalSoundEnabled} onClick={() => void runBroadcastMutation(() => setMusicPersonalSoundEnabled(!player.personalSoundEnabled), true)}>PERSONAL SOUND</button>
                   <button type="button" onClick={() => setDspTab("eq")}>ADVANCED EQ</button>
                 </div>
                 {player.personalSoundEnabled ? (
                   <div className="tr-v24Personal">
-                    <label className="tr-v24Range"><span>BASS</span><input type="range" min="-100" max="100" value={player.personalBass} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ bass: Number(event.target.value) }), true)} /><b>{player.personalBass > 0 ? "+" : ""}{Math.round(player.personalBass)}</b></label>
-                    <label className="tr-v24Range"><span>PRESENCE</span><input type="range" min="-100" max="100" value={player.personalPresence} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ presence: Number(event.target.value) }), true)} /><b>{player.personalPresence > 0 ? "+" : ""}{Math.round(player.personalPresence)}</b></label>
-                    <label className="tr-v24Range"><span>BRIGHT</span><input type="range" min="-100" max="100" value={player.personalBrightness} onChange={(event: ChangeEvent<HTMLInputElement>) => void runDspMutation(() => setMusicPersonalSoundTargets({ brightness: Number(event.target.value) }), true)} /><b>{player.personalBrightness > 0 ? "+" : ""}{Math.round(player.personalBrightness)}</b></label>
+                    <label className="tr-v24Range"><span>BASS</span><input type="range" min="-100" max="100" value={player.personalBass} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ bass: Number(event.target.value) }), true)} /><b>{player.personalBass > 0 ? "+" : ""}{Math.round(player.personalBass)}</b></label>
+                    <label className="tr-v24Range"><span>PRESENCE</span><input type="range" min="-100" max="100" value={player.personalPresence} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ presence: Number(event.target.value) }), true)} /><b>{player.personalPresence > 0 ? "+" : ""}{Math.round(player.personalPresence)}</b></label>
+                    <label className="tr-v24Range"><span>BRIGHT</span><input type="range" min="-100" max="100" value={player.personalBrightness} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ brightness: Number(event.target.value) }), true)} /><b>{player.personalBrightness > 0 ? "+" : ""}{Math.round(player.personalBrightness)}</b></label>
                   </div>
                 ) : null}
               </div>

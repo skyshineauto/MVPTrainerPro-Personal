@@ -121,7 +121,7 @@ assert.doesNotMatch(
   "Flagship route still contains unnecessary parallel mix bus",
 );
 
-assert.match(player, /currentStateIsLive/);
+assert.match(player, /alreadyLive/);
 assert.match(player, /broadcastBassEnabled: true/);
 assert.match(player, /Boolean\(applied\.bassEnabled\)/);
 
@@ -162,6 +162,112 @@ assert.doesNotMatch(
   /mode === "pure" \? "device_direct" : "mvp_hd"/,
 );
 
+assert.match(
+  player,
+  /MVP_V561_SINGLE_WRITER_CONTROLS/,
+  "V5.6.1 single-writer marker missing",
+);
+
+assert.match(
+  ui,
+  /function runBroadcastMutation/,
+  "Broadcast controls do not have an isolated single writer",
+);
+
+assert.doesNotMatch(
+  ui,
+  /if \(player\.dspStatus !== "active"\) void recoverMusicDsp\(\)/,
+  "UI still launches asynchronous recovery from stale React state",
+);
+
+const broadcastStartV561 =
+  ui.indexOf(
+    "{/* MVP_BROADCAST_V3_SIMPLE_UI */}",
+  );
+
+const broadcastEndV561 =
+  ui.indexOf(
+    '{player.outputProfile === "headphones" ? (',
+    broadcastStartV561,
+  );
+
+assert.ok(
+  broadcastStartV561 >= 0 &&
+  broadcastEndV561 >
+    broadcastStartV561,
+  "Broadcast panel boundaries missing",
+);
+
+const broadcastV561 =
+  ui.slice(
+    broadcastStartV561,
+    broadcastEndV561,
+  );
+
+assert.doesNotMatch(
+  broadcastV561,
+  /runDspMutation\(/,
+  "Broadcast controls still share the EQ/recovery mutation wrapper",
+);
+
+assert.match(
+  broadcastV561,
+  /runBroadcastMutation\(/,
+  "Broadcast controls are not using the single-writer wrapper",
+);
+
+const settleStartV561 =
+  player.indexOf(
+    "function scheduleProcessingSettle",
+  );
+
+const settleEndV561 =
+  player.indexOf(
+    "function setDspTelemetry",
+    settleStartV561,
+  );
+
+const settleV561 =
+  player.slice(
+    settleStartV561,
+    settleEndV561,
+  );
+
+assert.doesNotMatch(
+  settleV561,
+  /verifyOrRecoverStudioLiveState/,
+  "Normal control settling still starts recovery",
+);
+
+const verifyStartV561 =
+  player.indexOf(
+    "async function verifyOrRecoverStudioLiveState",
+  );
+
+const verifyEndV561 =
+  player.indexOf(
+    "let cleanHdRouteRecoveryTimer",
+    verifyStartV561,
+  );
+
+const verifyV561 =
+  player.slice(
+    verifyStartV561,
+    verifyEndV561,
+  );
+
+assert.doesNotMatch(
+  verifyV561,
+  /hotSwapStudioProcessor/,
+  "State verification can still replace the audible processor",
+);
+
+assert.match(
+  player,
+  /studioAudibleRouteVerified = true;[\s\S]{0,120}studioAudibleRouteProofFailures = 0;/,
+  "Initial verified single route is not locked",
+);
+
 console.log(
-  "V5.6 audible-route + native-state production static wiring: PASS",
+  "V5.6.1 single-writer live-control wiring: PASS",
 );

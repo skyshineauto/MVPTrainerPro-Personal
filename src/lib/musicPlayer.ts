@@ -1022,6 +1022,7 @@ let studioRecoveryInFlight = false;
 let lastStudioRecoveryAt = 0;
 
 // MVP_V56_AUDIBLE_ROUTE_CONTRACT
+// MVP_V561_SINGLE_WRITER_CONTROLS
 // A Worklet is not considered ACTIVE until its hard mute is observed downstream
 // while the upstream media source is still producing real audio.
 let studioAudibleRouteVerified = false;
@@ -1451,17 +1452,68 @@ function scheduleProcessingSettle() {
   if (typeof window === "undefined") return;
 
   if (processingSettleTimer) {
-    window.clearTimeout(processingSettleTimer);
+    window.clearTimeout(
+      processingSettleTimer,
+    );
   }
 
-  processingSettleTimer = window.setTimeout(() => {
-    processingSettleTimer = 0;
+  processingSettleTimer =
+    window.setTimeout(() => {
+      processingSettleTimer = 0;
 
-    if (state.outputProfile === "reference") return;
-    if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
+      if (
+        state.outputProfile ===
+          "reference"
+      ) {
+        return;
+      }
 
-    void verifyOrRecoverStudioLiveState();
-  }, 260);
+      if (
+        !studioProcessorNode ||
+        state.dspEngineMode !==
+          "studio_wasm"
+      ) {
+        return;
+      }
+
+      const runtime =
+        getMvpStudioRuntimeInfo();
+
+      const verified =
+        runtime.ready &&
+        !runtime.faulted &&
+        runtime.requestedRevision <=
+          runtime.appliedRevision &&
+        simplifiedStudioAppliedStateMatches();
+
+      // Verification only.
+      // Never replay, hot-swap or rebuild because a normal
+      // button/slider just changed state.
+      if (!verified) {
+        if (
+          state.dspStatus === "active"
+        ) {
+          emit({
+            dspStatus: "recovering",
+          });
+        }
+
+        return;
+      }
+
+      if (
+        state.dspStatus ===
+          "recovering" &&
+        audioContext?.state ===
+          "running"
+      ) {
+        setDspTelemetry(
+          "active",
+          state.effectivePreampDb,
+          state.autoHeadroomDb,
+        );
+      }
+    }, 260);
 }
 function setDspTelemetry(status: MusicDspStatus, effectivePreampDb: number, autoHeadroomDb: number) {
   const roundedPreamp = Math.round(effectivePreampDb * 10) / 10;
@@ -2149,11 +2201,17 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     runtime.ready &&
     !runtime.faulted &&
     runtime.requestedRevision <= runtime.appliedRevision &&
-    simplifiedStudioAppliedStateMatches() &&
-    studioAudibleRouteVerified;
-  const status: MusicDspStatus = audioContext.state === "running"
-    ? (deviceDirect || pureReference ? "bypassed" : stateVerified ? "active" : "recovering")
-    : "recovering";
+    simplifiedStudioAppliedStateMatches();
+  const status: MusicDspStatus =
+    audioContext.state !== "running"
+      ? "recovering"
+      : deviceDirect || pureReference
+        ? "bypassed"
+        : runtime.faulted
+          ? "recovering"
+          : stateVerified || state.dspStatus === "active"
+            ? "active"
+            : "recovering";
   setDspTelemetry(status, effectivePreampDb, autoHeadroomDb);
   const immersionStatus = currentImmersionStatus();
   if (state.immersionStatus !== immersionStatus) emit({ immersionStatus });
@@ -2274,6 +2332,13 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
         "MVP Studio V5.6 did not verify its initial C++ state.",
       );
     }
+
+    // V5.6.1 SINGLE WRITER:
+    // the graph is physically a single Studio route and the
+    // actual C++ state has ACKed. From here normal playback
+    // never runs a background proof mute or processor swap.
+    studioAudibleRouteVerified = true;
+    studioAudibleRouteProofFailures = 0;
 
     scheduleProcessingSettle();
     return true;
@@ -2830,20 +2895,25 @@ function startLevelMeter() {
         runtime.ready &&
         !stateVerified &&
         runtime.lastRequestedAt > 0 &&
-        Date.now() - runtime.lastRequestedAt > 1600;
-      if (revisionStale) {
-        const now = Date.now();
-        if (!studioRecoveryInFlight && now - lastStudioRecoveryAt > 4000) {
-          studioRecoveryInFlight = true;
-          lastStudioRecoveryAt = now;
-          void rebuildMusicAudioEngine()
-            .catch(() => emit({ dspStatus: "unavailable" }))
-            .finally(() => { studioRecoveryInFlight = false; });
-        }
+        Date.now() -
+            runtime.lastRequestedAt >
+          1600;
+
+      // V5.6.1: a delayed ACK changes STATUS only.
+      // Never destroy/rebuild the live graph behind a user's
+      // next button or slider action.
+      if (
+        revisionStale &&
+        state.dspStatus === "active"
+      ) {
+        emit({
+          dspStatus: "recovering",
+        });
       }
+
       const verifiedStatus: MusicDspStatus = pureReference || abBypass
         ? "bypassed"
-        : stateVerified && studioAudibleRouteVerified
+        : stateVerified
           ? "active"
           : "recovering";
       setDspTelemetry(verifiedStatus, state.effectivePreampDb, state.autoHeadroomDb);
@@ -5281,40 +5351,82 @@ async function hotSwapStudioProcessor(reason = "state-ack-timeout") {
 }
 
 async function verifyOrRecoverStudioLiveState() {
-  const node = studioProcessorNode;
-  if (!node || state.dspEngineMode !== "studio_wasm") return;
+  const node =
+    studioProcessorNode;
 
-  let runtime = getMvpStudioRuntimeInfo();
+  if (
+    !node ||
+    state.dspEngineMode !==
+      "studio_wasm"
+  ) {
+    return;
+  }
 
-  const currentStateIsLive =
+  let runtime =
+    getMvpStudioRuntimeInfo();
+
+  const alreadyLive =
     !runtime.faulted &&
     runtime.ready &&
-    runtime.appliedRevision >= runtime.requestedRevision &&
+    runtime.appliedRevision >=
+      runtime.requestedRevision &&
     simplifiedStudioAppliedStateMatches();
 
-  if (currentStateIsLive) return;
+  if (alreadyLive) return;
 
-  // Replay the complete last state using a FRESH revision. The bridge must receive
-  // a fresh STATE_APPLIED ACK before this can succeed.
-  const revision = repostMvpStudioState(node);
+  // V5.6.1:
+  // one complete replay to the SAME audible processor.
+  // Do not create competing Worklet nodes for a state mismatch.
+  const revision =
+    repostMvpStudioState(node);
+
+  if (revision <= 0) {
+    emit({
+      dspStatus: "recovering",
+    });
+    return;
+  }
+
   const acknowledged =
-    revision > 0 &&
-    await waitForMvpStudioRevision(node, revision, 520);
+    await waitForMvpStudioRevision(
+      node,
+      revision,
+      600,
+    );
 
-  runtime = getMvpStudioRuntimeInfo();
+  runtime =
+    getMvpStudioRuntimeInfo();
 
-  const replayIsLive =
+  const replayLive =
     acknowledged &&
+    node === studioProcessorNode &&
     !runtime.faulted &&
     runtime.ready &&
-    runtime.appliedRevision >= revision &&
+    runtime.appliedRevision >=
+      revision &&
     simplifiedStudioAppliedStateMatches();
 
-  if (replayIsLive) return;
+  if (replayLive) {
+    if (
+      audioContext?.state ===
+      "running"
+    ) {
+      setDspTelemetry(
+        "active",
+        state.effectivePreampDb,
+        state.autoHeadroomDb,
+      );
+    }
 
-  await hotSwapStudioProcessor(
-    runtime.lastError || "state-or-applied-state-mismatch",
-  );
+    return;
+  }
+
+  // A failed state verification is reported.
+  // It does NOT silently replace the processor underneath
+  // the user's next click.
+  emit({
+    dspStatus: "recovering",
+  });
 }
 
 let cleanHdRouteRecoveryTimer: number | null = null;
@@ -5350,7 +5462,21 @@ function installCleanHdRouteRecovery() {
 
   window.addEventListener("mvp-studio-runtime-fault", () => {
     if (state.dspEngineMode !== "studio_wasm") return;
-    void hotSwapStudioProcessor("processor-fault");
+    if (studioRecoveryInFlight) return;
+
+    studioRecoveryInFlight = true;
+    lastStudioRecoveryAt = Date.now();
+    emit({ dspStatus: "recovering" });
+
+    // A real AudioWorklet processor fault gets one clean,
+    // whole-engine rebuild. Ordinary controls never come here.
+    void rebuildMusicAudioEngine()
+      .catch(() => {
+        emit({ dspStatus: "unavailable" });
+      })
+      .finally(() => {
+        studioRecoveryInFlight = false;
+      });
   });
 
   try {
