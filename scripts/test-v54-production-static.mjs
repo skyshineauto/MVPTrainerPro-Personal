@@ -22,7 +22,7 @@ assert.match(worklet,/STATE_APPLIED/);
 assert.match(worklet,/appliedState:next/);
 assert.match(worklet,/signature:this\.appliedSignature/);
 assert.match(worklet,/SET_PROOF_MUTE/,'Worklet route proof mute missing');
-assert.match(bridge,/10\.0\.6-broadcast-v5-5-1-stable-live-controls/);
+assert.match(bridge,/10\.0\.7-broadcast-v5-5-4-exact-state-lock/);
 assert.match(bridge,/const rawApplied = data\.appliedState/);
 assert.match(bridge,/appliedState: actualAppliedState \?\? runtimeInfo\.appliedState/);
 assert.match(player,/v26-broadcast-v5-5-live-controls/);
@@ -62,4 +62,11 @@ assert.match(
   "Pure effect safety processing is missing"
 );
 
-console.log('V5.5.1 production static wiring: PASS');
+// V5.5.4 exact-state-lock guards.
+assert.match(bridge,/loadedWorkletContexts/,'Per-context Worklet ownership guard missing');
+assert.match(bridge,/lastRequestedAtByNode/,'Per-node request timing guard missing');
+assert.match(player,/activateMvpStudioNode\(studioProcessorNode\)/,'Initial audible Studio node is not activated');
+assert.match(player,/currentStateIsLive/,'Applied-state verification guard missing');
+assert.match(player,/broadcastBassEnabled: mode !== "off"|broadcastBassEnabled: true/,'Simple Bass is not mapped to Broadcast state');
+
+console.log('V5.5.4 exact state-lock production static wiring: PASS');

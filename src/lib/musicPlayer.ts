@@ -1440,24 +1440,19 @@ function simplifiedStudioAppliedStateMatches() {
 
 function scheduleProcessingSettle() {
   if (typeof window === "undefined") return;
-  if (processingSettleTimer) window.clearTimeout(processingSettleTimer);
+
+  if (processingSettleTimer) {
+    window.clearTimeout(processingSettleTimer);
+  }
+
   processingSettleTimer = window.setTimeout(() => {
     processingSettleTimer = 0;
-    applyProcessingSettings();
-    window.setTimeout(() => {
-      if (state.outputProfile === "reference") return;
-      if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
-      const runtime = getMvpStudioRuntimeInfo();
-      if (
-        runtime.faulted ||
-        !runtime.ready ||
-        runtime.appliedRevision < runtime.requestedRevision ||
-        !simplifiedStudioAppliedStateMatches()
-      ) {
-        void verifyOrRecoverStudioLiveState();
-      }
-    }, 220);
-  }, 140);
+
+    if (state.outputProfile === "reference") return;
+    if (!studioProcessorNode || state.dspEngineMode !== "studio_wasm") return;
+
+    void verifyOrRecoverStudioLiveState();
+  }, 260);
 }
 function setDspTelemetry(status: MusicDspStatus, effectivePreampDb: number, autoHeadroomDb: number) {
   const roundedPreamp = Math.round(effectivePreampDb * 10) / 10;
@@ -2288,6 +2283,10 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
 
     mediaSourceConnected = true;
     audio.volume = 1;
+
+    // V5.5.4: only now is this processor connected to the audible graph.
+    activateMvpStudioNode(studioProcessorNode);
+
     emit({
       dspEngineMode: "studio_wasm",
       loudnessGainDb: 0,
@@ -4523,13 +4522,19 @@ export function setMusicHeadphoneHighOutput(enabled: boolean) {
 
 export function setMusicHeadphoneClear(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
+
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
   next.presenceDb = enabled ? 2.8 : 0;
   next.clarityDb = enabled ? 4.5 : 0;
   next.airDb = enabled ? 5.5 : 0;
   next.deharshAmount = 0;
+
   applyOutputProfileSnapshot("headphones", next);
+
+  commitBroadcastProfilePatch({
+    broadcastClarityEnabled: enabled,
+  });
 }
 
 export function applyMusicSpeakerHdSound() {
@@ -4550,34 +4555,49 @@ export function setMusicSpeakerMaxOutput(enabled: boolean) {
 
 export function setMusicSpeakerClear(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
+
   const next = currentOutputProfileSnapshot();
   next.toneEngineEnabled = enabled;
   next.presenceDb = enabled ? 2.6 : 0;
   next.clarityDb = enabled ? 4.2 : 0;
   next.airDb = enabled ? 5.0 : 0;
   next.deharshAmount = 0;
+
   applyOutputProfileSnapshot("speaker", next);
+
+  commitBroadcastProfilePatch({
+    broadcastClarityEnabled: enabled,
+  });
 }
 
 export function setMusicSpeakerPunch(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
+
   const next = currentOutputProfileSnapshot();
-  // R75: this state is consumed by the Studio transient shaper on clean-HD profiles.
   next.dynamicsRestoreEnabled = enabled;
   next.dynamicsRestoreAmount = enabled ? 100 : 0;
+
   applyOutputProfileSnapshot("speaker", next);
+
+  commitBroadcastProfilePatch({
+    broadcastImpactEnabled: enabled,
+  });
 }
 
 export function setMusicSpeakerWide(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
+
   const next = currentOutputProfileSnapshot();
-  // Universal speaker WIDE is intentionally geometry-agnostic Mid/Side width,
-  // not crosstalk cancellation. True CTC requires known driver/listener geometry.
   next.stereoFieldEnabled = enabled;
   next.stereoUserWidth = enabled ? 152 : 100;
   next.stereoCenterFocus = 100;
   next.bassMonoHz = enabled ? 105 : 90;
+
   applyOutputProfileSnapshot("speaker", next);
+
+  commitBroadcastProfilePatch({
+    broadcastSpatialEnabled: enabled,
+  });
 }
 
 export type MusicAnalogMode = "off" | "studio" | "warm";
@@ -4607,32 +4627,52 @@ function applyAnalogModeToSnapshot(next: OutputProfileSnapshot, mode: MusicAnalo
 
 export function setMusicHeadphoneNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
+
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
   next.bassSubDb = enabled ? 5.5 : 0;
   next.bassPunchDb = enabled ? 3.2 : 0;
   next.bassBodyDb = enabled ? 1.8 : 0;
   next.bassTightness = enabled ? 82 : 55;
+
   applyOutputProfileSnapshot("headphones", next);
+
+  commitBroadcastProfilePatch({
+    broadcastBassEnabled: enabled,
+    broadcastBassCharacter: enabled ? 18 : state.broadcastBassCharacter,
+  });
 }
 
 export function setMusicSpeakerNeuralBass(enabled: boolean) {
   if (state.outputProfile !== "speaker") return;
+
   const next = currentOutputProfileSnapshot();
   next.bassEngineEnabled = enabled;
   next.bassSubDb = enabled ? 5.8 : 0;
   next.bassPunchDb = enabled ? 3.4 : 0;
   next.bassBodyDb = enabled ? 2.0 : 0;
   next.bassTightness = enabled ? 84 : 55;
+
   applyOutputProfileSnapshot("speaker", next);
+
+  commitBroadcastProfilePatch({
+    broadcastBassEnabled: enabled,
+    broadcastBassCharacter: enabled ? 16 : state.broadcastBassCharacter,
+  });
 }
 
 export function setMusicHeadphoneImpact(enabled: boolean) {
   if (state.outputProfile !== "headphones") return;
+
   const next = currentOutputProfileSnapshot();
   next.dynamicsRestoreEnabled = enabled;
   next.dynamicsRestoreAmount = enabled ? 100 : 0;
+
   applyOutputProfileSnapshot("headphones", next);
+
+  commitBroadcastProfilePatch({
+    broadcastImpactEnabled: enabled,
+  });
 }
 
 export function setMusicHeadphoneAnalog(mode: MusicAnalogMode) {
@@ -4696,6 +4736,22 @@ function applyHeadphoneModeValues(mode: MusicHeadphoneMode) {
 }
 export function setMusicHeadphoneMode(mode: MusicHeadphoneMode) {
   applyHeadphoneModeValues(mode);
+
+  // MVP HD deliberately owns one spatial processor. Map the older headphone-mode
+  // UI onto that authoritative processor rather than leaving a second dead state.
+  if (state.playbackMode === "mvp_hd") {
+    const nextSpaceMode: MusicSpaceMode =
+      mode === "deep" || mode === "stage"
+        ? "arena"
+        : mode === "spatial"
+          ? "live"
+          : "studio";
+
+    commitBroadcastProfilePatch({
+      broadcastSpatialEnabled: mode !== "off",
+      spaceMode: nextSpaceMode,
+    });
+  }
 }
 function setHeadphoneValue(
   key: keyof Pick<
@@ -4851,12 +4907,17 @@ export function setMusicPersonalSoundTargets(values: { bass?: number; presence?:
 
 export function setMusicHdBassMode(mode: MusicHdBassMode) {
   if (mode !== "off" && mode !== "strong" && mode !== "deep") return;
+
   if (mode === "off") {
     setMusicBassEngineEnabled(false);
-    scheduleProcessingSettle();
+    commitBroadcastProfilePatch({
+      broadcastBassEnabled: false,
+    });
     return;
   }
+
   setMusicBassEngineEnabled(true);
+
   if (mode === "deep") {
     setMusicBassSub(6.5);
     setMusicBassPunch(3.4);
@@ -4868,46 +4929,60 @@ export function setMusicHdBassMode(mode: MusicHdBassMode) {
     setMusicBassBody(3.6);
     setMusicBassTightness(60);
   }
-  scheduleProcessingSettle();
+
+  commitBroadcastProfilePatch({
+    broadcastBassEnabled: true,
+    // Mirrors 1 - legacy tightness so Strong stays tighter and Deep stays deeper.
+    broadcastBassCharacter: mode === "deep" ? 65 : 40,
+  });
 }
 
 export function setMusicHdClarity(enabled: boolean) {
-  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: clarity is a gentle tonal lift, not a hidden exciter/saturation stack.
+  // Keep fallback/native state aligned with the authoritative Broadcast control.
   setMusicToneEngineEnabled(enabled);
   setMusicExciterEnabled(false);
   setMusicSaturationLow(0);
   setMusicSaturationMid(0);
   setMusicSaturationHigh(0);
+
   if (enabled) {
     setMusicPresence(1.0);
     setMusicClarity(1.8);
     setMusicAir(1.2);
     setMusicDeharsh(0);
   }
-  scheduleProcessingSettle();
+
+  commitBroadcastProfilePatch({
+    broadcastClarityEnabled: enabled,
+  });
 }
 
 export function setMusicHdPunch(enabled: boolean) {
-  // PUNCH maps to one transient stage only.
   setMusicDynamicsRestoreEnabled(enabled);
   if (enabled) setMusicDynamicsRestoreAmount(82);
-  scheduleProcessingSettle();
+
+  commitBroadcastProfilePatch({
+    broadcastImpactEnabled: enabled,
+  });
 }
 
 export function setMusicHdWide(enabled: boolean) {
-  // MVP_R83_R3_BIG_GUYS_CLEAN_MASTERING: simple Wide uses one M/S stage on every output profile. No HRTF,
-  // crossfeed or reflections are silently stacked behind this button.
   if (state.outputProfile === "headphones" && enabled) {
     setMusicHeadphoneAdvancedEnabled(false);
     setMusicHeadphoneMode("off");
   }
+
   setMusicStereoFieldEnabled(enabled);
+
   if (enabled) {
     setMusicStereoWidth(125);
     setMusicCenterFocus(100);
     setMusicBassMonoHz(70);
   }
-  scheduleProcessingSettle();
+
+  commitBroadcastProfilePatch({
+    broadcastSpatialEnabled: enabled,
+  });
 }
 
 export function setMusicOutputProfile(profile: MusicOutputProfile) {
@@ -5067,19 +5142,38 @@ async function hotSwapStudioProcessor(reason = "state-ack-timeout") {
 async function verifyOrRecoverStudioLiveState() {
   const node = studioProcessorNode;
   if (!node || state.dspEngineMode !== "studio_wasm") return;
-  let runtime = getMvpStudioRuntimeInfo();
-  if (!runtime.faulted && runtime.ready && runtime.appliedRevision >= runtime.requestedRevision) return;
 
-  // First recovery step is deliberately cheap: replay the COMPLETE latest state
-  // with the same revision. If that ACKs, audio never changes route at all.
+  let runtime = getMvpStudioRuntimeInfo();
+
+  const currentStateIsLive =
+    !runtime.faulted &&
+    runtime.ready &&
+    runtime.appliedRevision >= runtime.requestedRevision &&
+    simplifiedStudioAppliedStateMatches();
+
+  if (currentStateIsLive) return;
+
+  // Replay the complete last state using a FRESH revision. The bridge must receive
+  // a fresh STATE_APPLIED ACK before this can succeed.
   const revision = repostMvpStudioState(node);
-  if (revision > 0 && await waitForMvpStudioRevision(node, revision, 240)) {
-    applyProcessingSettings();
-    return;
-  }
+  const acknowledged =
+    revision > 0 &&
+    await waitForMvpStudioRevision(node, revision, 520);
 
   runtime = getMvpStudioRuntimeInfo();
-  await hotSwapStudioProcessor(runtime.lastError || "state-ack-timeout");
+
+  const replayIsLive =
+    acknowledged &&
+    !runtime.faulted &&
+    runtime.ready &&
+    runtime.appliedRevision >= revision &&
+    simplifiedStudioAppliedStateMatches();
+
+  if (replayIsLive) return;
+
+  await hotSwapStudioProcessor(
+    runtime.lastError || "state-or-applied-state-mismatch",
+  );
 }
 
 let cleanHdRouteRecoveryTimer: number | null = null;

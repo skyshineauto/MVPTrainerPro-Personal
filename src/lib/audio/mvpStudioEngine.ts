@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.6-broadcast-v5-5-1-stable-live-controls";
+const ASSET_VERSION = "10.0.7-broadcast-v5-5-4-exact-state-lock";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -197,6 +197,13 @@ const requestedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
 const appliedRevisionByNode = new WeakMap<AudioWorkletNode, number>();
 const faultedByNode = new WeakMap<AudioWorkletNode, boolean>();
 const latestStateByNode = new WeakMap<AudioWorkletNode, { revision: number; state: MvpStudioState }>();
+const readyByNode = new WeakMap<AudioWorkletNode, boolean>();
+const processorVersionByNode = new WeakMap<AudioWorkletNode, string>();
+const appliedStateByNode = new WeakMap<AudioWorkletNode, Record<string, unknown> | null>();
+const lastErrorByNode = new WeakMap<AudioWorkletNode, string | null>();
+const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
+const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
+const loadedWorkletContexts = new WeakSet<AudioContext>();
 
 let runtimeInfo: MvpStudioRuntimeInfo = {
   assetVersion: ASSET_VERSION,
@@ -341,23 +348,35 @@ export function setMvpStudioVenue(_profile: MvpStudioVenueProfile | null) {}
 export async function createMvpStudioNode(context: AudioContext) {
   if (!context.audioWorklet) throw new Error("AudioWorklet is unavailable.");
 
-  runtimeInfo = {
-    assetVersion: ASSET_VERSION,
-    processorVersion: "loading",
-    ready: false,
-    faulted: false,
-    requestedRevision: 0,
-    appliedRevision: 0,
-    lastError: null,
-    lastRequestedAt: 0,
-    lastAppliedAt: 0,
-    appliedState: null,
-  };
-  latestTelemetry = { ...EMPTY_TELEMETRY };
+  // V5.5.4 EXACT STATE LOCK:
+  // Creating a replacement processor must never steal runtime ownership from the
+  // processor that is still connected to the speakers.
+  if (!activeNode) {
+    runtimeInfo = {
+      assetVersion: ASSET_VERSION,
+      processorVersion: "loading",
+      ready: false,
+      faulted: false,
+      requestedRevision: 0,
+      appliedRevision: 0,
+      lastError: null,
+      lastRequestedAt: 0,
+      lastAppliedAt: 0,
+      appliedState: null,
+    };
+    latestTelemetry = { ...EMPTY_TELEMETRY };
+  }
 
   const workletUrl = new URL("/audioV2/mvpHdV2.worklet.js", window.location.origin);
   workletUrl.searchParams.set("v", ASSET_VERSION);
-  await context.audioWorklet.addModule(workletUrl.href);
+
+  // addModule() only needs to run once for a given AudioContext. Hot swaps create
+  // processor nodes, not duplicate registrations of the same processor module.
+  if (!loadedWorkletContexts.has(context)) {
+    await context.audioWorklet.addModule(workletUrl.href);
+    loadedWorkletContexts.add(context);
+  }
+
   const wasmBytes = await loadWasmBytes();
 
   const node = new AudioWorkletNode(context, "mvp-hd-v2-processor", {
@@ -369,37 +388,59 @@ export async function createMvpStudioNode(context: AudioContext) {
     channelInterpretation: "speakers",
   });
 
-  activeNode = node;
   requestedRevisionByNode.set(node, 0);
   appliedRevisionByNode.set(node, 0);
   faultedByNode.set(node, false);
+  readyByNode.set(node, false);
+  processorVersionByNode.set(node, "loading");
+  appliedStateByNode.set(node, null);
+  lastErrorByNode.set(node, null);
+  lastRequestedAtByNode.set(node, 0);
+  lastAppliedAtByNode.set(node, 0);
 
   return new Promise<AudioWorkletNode>((resolve, reject) => {
     let settled = false;
+
+    const publishFault = (message: string) => {
+      faultedByNode.set(node, true);
+      readyByNode.set(node, false);
+      lastErrorByNode.set(node, message);
+
+      // Initial startup has no active node yet. During a hot swap, however, the
+      // old audible node remains authoritative until the replacement is promoted.
+      if (!activeNode || activeNode === node) {
+        runtimeInfo = {
+          ...runtimeInfo,
+          ready: false,
+          faulted: true,
+          lastError: message,
+        };
+      }
+    };
+
     const timeout = window.setTimeout(() => {
       if (settled) return;
       settled = true;
-      runtimeInfo = {
-        ...runtimeInfo,
-        ready: false,
-        faulted: true,
-        lastError: "Broadcast V3 processor timed out during startup.",
-      };
-      if (activeNode === node) activeNode = null;
+
+      const message = "Broadcast V3 processor timed out during startup.";
+      publishFault(message);
+
       try { node.port.close(); } catch { /* closed */ }
-      reject(new Error(runtimeInfo.lastError || "Broadcast V3 startup timeout."));
+      reject(new Error(message));
     }, READY_TIMEOUT_MS);
 
     const fail = (message: string) => {
-      faultedByNode.set(node, true);
-      runtimeInfo = { ...runtimeInfo, ready: false, faulted: true, lastError: message };
+      publishFault(message);
+
       if (!settled) {
         settled = true;
         window.clearTimeout(timeout);
-        if (activeNode === node) activeNode = null;
         try { node.port.close(); } catch { /* closed */ }
         reject(new Error(message));
-      } else if (activeNode === node && typeof window !== "undefined") {
+        return;
+      }
+
+      if (activeNode === node && typeof window !== "undefined") {
         window.dispatchEvent(new Event("mvp-studio-runtime-fault"));
       }
     };
@@ -409,17 +450,25 @@ export async function createMvpStudioNode(context: AudioContext) {
       if (!data || typeof data !== "object") return;
 
       if (data.type === "READY") {
+        const processorVersion = String(data.version || "broadcast-v3");
+
         faultedByNode.set(node, false);
+        readyByNode.set(node, true);
+        processorVersionByNode.set(node, processorVersion);
+        lastErrorByNode.set(node, null);
+
         node.port.postMessage({ type: "SET_TELEMETRY", enabled: true });
-        if (activeNode === node) {
+
+        if (!activeNode || activeNode === node) {
           runtimeInfo = {
             ...runtimeInfo,
-            processorVersion: String(data.version || "broadcast-v3"),
+            processorVersion,
             ready: true,
             faulted: false,
             lastError: null,
           };
         }
+
         if (!settled) {
           settled = true;
           window.clearTimeout(timeout);
@@ -435,8 +484,16 @@ export async function createMvpStudioNode(context: AudioContext) {
 
       if (data.type === "STATE_APPLIED") {
         const revision = Math.max(0, Math.floor(finite(data.revision)));
-        appliedRevisionByNode.set(node, Math.max(appliedRevisionByNode.get(node) || 0, revision));
+        const appliedAt = Date.now();
+
+        appliedRevisionByNode.set(
+          node,
+          Math.max(appliedRevisionByNode.get(node) || 0, revision),
+        );
         faultedByNode.set(node, false);
+        readyByNode.set(node, true);
+        lastErrorByNode.set(node, null);
+        lastAppliedAtByNode.set(node, appliedAt);
 
         // V5.4 LIVE ACK CONTRACT: trust only the normalized state returned by the
         // audio thread. Never certify the state we merely requested.
@@ -452,6 +509,8 @@ export async function createMvpStudioNode(context: AudioContext) {
             }
           : null;
 
+        appliedStateByNode.set(node, actualAppliedState);
+
         if (activeNode === node) {
           runtimeInfo = {
             ...runtimeInfo,
@@ -459,43 +518,91 @@ export async function createMvpStudioNode(context: AudioContext) {
             faulted: false,
             lastError: null,
             appliedRevision: Math.max(runtimeInfo.appliedRevision, revision),
-            lastAppliedAt: Date.now(),
+            lastAppliedAt: appliedAt,
             appliedState: actualAppliedState ?? runtimeInfo.appliedState,
           };
         }
         return;
       }
 
-      if (data.type === "ERROR") fail(String(data.message || "Broadcast V3 processor error."));
+      if (data.type === "ERROR") {
+        fail(String(data.message || "Broadcast V3 processor error."));
+      }
     };
 
-    node.addEventListener("processorerror", () => fail("Broadcast V3 AudioWorklet stopped unexpectedly."));
+    node.addEventListener(
+      "processorerror",
+      () => fail("Broadcast V3 AudioWorklet stopped unexpectedly."),
+    );
 
     const initBytes = wasmBytes.slice(0);
-    node.port.postMessage({ type: "INIT_WASM", wasmBytes: initBytes }, [initBytes]);
+    node.port.postMessage(
+      { type: "INIT_WASM", wasmBytes: initBytes },
+      [initBytes],
+    );
   });
 }
 
 export function setMvpStudioState(node: AudioWorkletNode | null, state: MvpStudioState) {
   if (!node) return 0;
+
   const revision = ++nextRevision;
   const snapshot = cloneState(state);
+  const requestedAt = Date.now();
+
   requestedRevisionByNode.set(node, revision);
   latestStateByNode.set(node, { revision, state: snapshot });
+  lastRequestedAtByNode.set(node, requestedAt);
+
   if (activeNode === node) {
-    runtimeInfo = { ...runtimeInfo, requestedRevision: revision, lastRequestedAt: Date.now() };
+    runtimeInfo = {
+      ...runtimeInfo,
+      requestedRevision: revision,
+      lastRequestedAt: requestedAt,
+    };
   }
-  node.port.postMessage({ type: "SET_STATE", revision, state: publicState(snapshot) });
+
+  node.port.postMessage({
+    type: "SET_STATE",
+    revision,
+    state: publicState(snapshot),
+  });
+
   return revision;
 }
 
 export function repostMvpStudioState(node: AudioWorkletNode | null) {
   if (!node) return 0;
+
   const latest = latestStateByNode.get(node);
   if (!latest) return 0;
-  if (activeNode === node) runtimeInfo = { ...runtimeInfo, lastRequestedAt: Date.now() };
-  node.port.postMessage({ type: "SET_STATE", revision: latest.revision, state: publicState(latest.state) });
-  return latest.revision;
+
+  // V5.5.4: a replay is a NEW request and therefore gets a NEW revision.
+  // Reusing an already-applied revision lets waitForMvpStudioRevision() return
+  // before the Worklet has acknowledged the replay.
+  const revision = ++nextRevision;
+  const snapshot = cloneState(latest.state);
+  const requestedAt = Date.now();
+
+  requestedRevisionByNode.set(node, revision);
+  latestStateByNode.set(node, { revision, state: snapshot });
+  lastRequestedAtByNode.set(node, requestedAt);
+
+  if (activeNode === node) {
+    runtimeInfo = {
+      ...runtimeInfo,
+      requestedRevision: revision,
+      lastRequestedAt: requestedAt,
+    };
+  }
+
+  node.port.postMessage({
+    type: "SET_STATE",
+    revision,
+    state: publicState(snapshot),
+  });
+
+  return revision;
 }
 
 export async function waitForMvpStudioRevision(node: AudioWorkletNode | null, revision: number, timeoutMs = 360) {
@@ -514,28 +621,64 @@ export async function waitForMvpStudioRevision(node: AudioWorkletNode | null, re
 
 export function activateMvpStudioNode(node: AudioWorkletNode | null) {
   activeNode = node;
+
   if (!node) {
-    runtimeInfo = { ...runtimeInfo, ready: false };
+    runtimeInfo = {
+      ...runtimeInfo,
+      ready: false,
+    };
     return;
   }
+
   const requestedRevision = requestedRevisionByNode.get(node) || 0;
   const appliedRevision = appliedRevisionByNode.get(node) || 0;
   const faulted = Boolean(faultedByNode.get(node));
+  const ready = Boolean(readyByNode.get(node));
+  const processorVersion =
+    processorVersionByNode.get(node) || "broadcast-v3";
+  const appliedState =
+    appliedStateByNode.get(node) ?? null;
+  const lastError =
+    lastErrorByNode.get(node) ?? null;
+
   runtimeInfo = {
-    ...runtimeInfo,
-    ready: !faulted,
+    assetVersion: ASSET_VERSION,
+    processorVersion,
+    ready: ready && !faulted,
     faulted,
     requestedRevision,
     appliedRevision,
-    lastError: faulted ? runtimeInfo.lastError : null,
+    lastError: faulted ? lastError : null,
+    lastRequestedAt: lastRequestedAtByNode.get(node) || 0,
+    lastAppliedAt: lastAppliedAtByNode.get(node) || 0,
+    appliedState,
   };
 }
 
 export function disposeMvpStudioNode(node: AudioWorkletNode | null) {
   if (!node) return;
-  if (activeNode === node) activeNode = null;
+
+  if (activeNode === node) {
+    activeNode = null;
+    runtimeInfo = {
+      ...runtimeInfo,
+      ready: false,
+    };
+  }
+
   try { node.disconnect(); } catch { /* already disconnected */ }
   try { node.port.close(); } catch { /* already closed */ }
+
+  requestedRevisionByNode.delete(node);
+  appliedRevisionByNode.delete(node);
+  faultedByNode.delete(node);
+  latestStateByNode.delete(node);
+  readyByNode.delete(node);
+  processorVersionByNode.delete(node);
+  appliedStateByNode.delete(node);
+  lastErrorByNode.delete(node);
+  lastRequestedAtByNode.delete(node);
+  lastAppliedAtByNode.delete(node);
 }
 
 export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
