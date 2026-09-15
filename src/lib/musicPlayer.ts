@@ -8,6 +8,7 @@ import {
   repostMvpStudioState,
   resetMvpStudioLoudness,
   setMvpStudioMasterPrep,
+  setMvpStudioProofMute,
   setMvpStudioState,
   waitForMvpStudioRevision,
 } from "./audio/mvpStudioEngine";
@@ -1019,6 +1020,14 @@ let transitionPreloadTrackId: string | null = null;
 let transitionPreloadUrl: string | null = null;
 let studioRecoveryInFlight = false;
 let lastStudioRecoveryAt = 0;
+
+// MVP_V56_AUDIBLE_ROUTE_CONTRACT
+// A Worklet is not considered ACTIVE until its hard mute is observed downstream
+// while the upstream media source is still producing real audio.
+let studioAudibleRouteVerified = false;
+let studioAudibleRouteProofInFlight = false;
+let studioAudibleRouteProofFailures = 0;
+let lastStudioAudibleRouteProofAt = 0;
 let timeSaveTimer = 0;
 let recordedPlayToken = "";
 let transportQueue: Promise<void> = Promise.resolve();
@@ -1868,6 +1877,10 @@ function releaseGraph() {
   try { studioProcessorNode?.port.close(); } catch { /* already closed */ }
   studioProcessorNode = null;
   studioProcessorRouteGain = null;
+  studioAudibleRouteVerified = false;
+  studioAudibleRouteProofInFlight = false;
+  studioAudibleRouteProofFailures = 0;
+  lastStudioAudibleRouteProofAt = 0;
   transientProcessorNode = null;
   loudnessNormalizerNode = null;
   multibandProcessorNode = null;
@@ -2132,7 +2145,12 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
   });
 
   const runtime = getMvpStudioRuntimeInfo();
-  const stateVerified = runtime.ready && !runtime.faulted && runtime.requestedRevision <= runtime.appliedRevision;
+  const stateVerified =
+    runtime.ready &&
+    !runtime.faulted &&
+    runtime.requestedRevision <= runtime.appliedRevision &&
+    simplifiedStudioAppliedStateMatches() &&
+    studioAudibleRouteVerified;
   const status: MusicDspStatus = audioContext.state === "running"
     ? (deviceDirect || pureReference ? "bypassed" : stateVerified ? "active" : "recovering")
     : "recovering";
@@ -2142,139 +2160,77 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
   return requestedRevision;
 }
 async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElement) {
-  // V3 Phase 3: Minimum Phase and Linear Phase are both flagship Studio WASM modes.
+  // MVP_V56_AUDIBLE_ROUTE_CONTRACT:
+  // exactly one flagship audible route:
+  // MediaElement -> Studio WASM -> analyser -> listener volume -> destination.
+  // No dry/reference/HRTF branch is allowed to join the audible signal.
   if (!context.audioWorklet) return false;
+
   let sourceCreated = false;
+
   try {
     studioProcessorNode = await createMvpStudioNode(context);
   } catch (error) {
     studioProcessorNode = null;
-    console.warn("MVP Studio WASM unavailable; trying Compatibility Engine.", error);
+    console.warn("MVP Studio V5.6 WASM unavailable; trying Compatibility Engine.", error);
     return false;
   }
+
   try {
     mediaSource = context.createMediaElementSource(audio);
     sourceCreated = true;
+
     masterVolumeGain = context.createGain();
+    masterVolumeGain.gain.value = 1;
+
     referenceRouteGain = context.createGain();
     referenceRouteGain.gain.value = 0;
-    standardRouteGain = context.createGain();
-    // R78N: exactly one audible Studio route. Reference/A-B is internal bypass.
-    standardRouteGain.gain.value = 1;
-    studioProcessorRouteGain = context.createGain();
-    studioProcessorRouteGain.gain.value = 1;
-    studioInputBus = context.createGain();
+
     studioDirectInputGain = context.createGain();
     studioDirectInputGain.gain.value = 1;
-    studioHrtfInputGain = context.createGain();
-    studioHrtfInputGain.gain.value = 0;
-    studioHrtfSplitter = context.createChannelSplitter(2);
-    // Spatial receives SIDE information only. Mono/center material (lead vocal,
-    // kick, snare, bass) therefore remains 100% on the dry Studio HD path and
-    // cannot be hollowed out by HRTF phase interaction.
-    studioHrtfLeftBus = context.createGain();
-    studioHrtfRightBus = context.createGain();
-    studioHrtfLeftToLeft = context.createGain();
-    studioHrtfRightToLeft = context.createGain();
-    studioHrtfRightToRight = context.createGain();
-    studioHrtfLeftToRight = context.createGain();
-    studioHrtfLeftToLeft.gain.value = 0.5;
-    studioHrtfRightToLeft.gain.value = -0.5;
-    studioHrtfRightToRight.gain.value = 0.5;
-    studioHrtfLeftToRight.gain.value = -0.5;
-    studioHrtfLeftPanner = context.createPanner();
-    studioHrtfRightPanner = context.createPanner();
-    for (const panner of [studioHrtfLeftPanner, studioHrtfRightPanner]) {
-      panner.panningModel = "HRTF";
-      panner.distanceModel = "inverse";
-      panner.refDistance = 1;
-      panner.maxDistance = 10000;
-      panner.rolloffFactor = 0;
-    }
-    studioHrtfSum = context.createGain();
-    studioHrtfSum.gain.value = 1;
-    studioHrtfBassShelf = context.createBiquadFilter();
-    // Bass remains 100% on the dry Studio HD path. HRTF carries spatial cues,
-    // not low-frequency energy that can smear or weaken punch.
-    studioHrtfBassShelf.type = "highpass";
-    studioHrtfBassShelf.frequency.value = 135;
-    studioHrtfBassShelf.Q.value = 0.60;
-    studioHrtfReflectionDelayA = context.createDelay(0.06);
-    studioHrtfReflectionDelayB = context.createDelay(0.06);
-    studioHrtfReflectionGainA = context.createGain();
-    studioHrtfReflectionGainB = context.createGain();
-    studioHrtfReflectionGainA.gain.value = 0;
-    studioHrtfReflectionGainB.gain.value = 0;
-    virtualAmpGainNode = context.createGain();
-    virtualAmpGainNode.gain.value = 1;
-    loudnessCompressorNode = context.createDynamicsCompressor();
-    loudnessCompressorNode.threshold.value = 0;
-    loudnessCompressorNode.knee.value = 0;
-    loudnessCompressorNode.ratio.value = 1;
-    loudnessCompressorNode.attack.value = 0.003;
-    loudnessCompressorNode.release.value = 0.12;
-    mixBus = context.createGain();
+
+    studioInputBus = context.createGain();
+
+    studioProcessorRouteGain = context.createGain();
+    studioProcessorRouteGain.gain.value = 1;
+
+    standardRouteGain = context.createGain();
+    standardRouteGain.gain.value = 1;
+
     analyserNode = context.createAnalyser();
     analyserNode.fftSize = 4096;
     analyserNode.smoothingTimeConstant = 0.38;
     analyserNode.minDecibels = -92;
     analyserNode.maxDecibels = -10;
+
     postLimiterVolumeGain = context.createGain();
     postLimiterVolumeGain.gain.value = volumeToGain(state.volume);
+
     musicGain = context.createGain();
     musicGain.gain.value = 1;
+
     referenceLevelAnalyser = context.createAnalyser();
     processedLevelAnalyser = context.createAnalyser();
     referenceLevelAnalyser.fftSize = 2048;
     processedLevelAnalyser.fftSize = 2048;
+
     levelMeterSink = context.createGain();
     levelMeterSink.gain.value = 0;
 
     mediaSource.connect(masterVolumeGain);
-    // R78N SINGLE AUDIBLE ROUTE:
-    // The dry/reference feed is deliberately NOT connected to the destination
-    // mix. Reference and A/B use bypass inside the same AudioWorklet instead.
     masterVolumeGain.connect(studioDirectInputGain);
     studioDirectInputGain.connect(studioInputBus);
 
-    // Headphones: split the stereo master into two mono virtual loudspeakers and
-    // let the browser HRTF renderer convolve each source with measured head-related
-    // impulse responses. The resulting binaural stereo is then mastered/limited by WASM.
-    masterVolumeGain.connect(studioHrtfSplitter);
-    studioHrtfSplitter.connect(studioHrtfLeftToLeft, 0);
-    studioHrtfSplitter.connect(studioHrtfLeftToRight, 0);
-    studioHrtfSplitter.connect(studioHrtfRightToRight, 1);
-    studioHrtfSplitter.connect(studioHrtfRightToLeft, 1);
-    studioHrtfLeftToLeft.connect(studioHrtfLeftBus);
-    studioHrtfRightToLeft.connect(studioHrtfLeftBus);
-    studioHrtfRightToRight.connect(studioHrtfRightBus);
-    studioHrtfLeftToRight.connect(studioHrtfRightBus);
-    studioHrtfLeftBus.connect(studioHrtfLeftPanner);
-    studioHrtfRightBus.connect(studioHrtfRightPanner);
-    studioHrtfLeftPanner.connect(studioHrtfSum);
-    studioHrtfRightPanner.connect(studioHrtfSum);
-    studioHrtfSum.connect(studioHrtfBassShelf);
-    studioHrtfBassShelf.connect(studioHrtfInputGain);
-    studioHrtfInputGain.connect(studioInputBus);
-    studioHrtfBassShelf.connect(studioHrtfReflectionDelayA);
-    studioHrtfBassShelf.connect(studioHrtfReflectionDelayB);
-    studioHrtfReflectionDelayA.connect(studioHrtfReflectionGainA);
-    studioHrtfReflectionDelayB.connect(studioHrtfReflectionGainB);
-    studioHrtfReflectionGainA.connect(studioInputBus);
-    studioHrtfReflectionGainB.connect(studioInputBus);
-
-    // R75: the flagship WASM now owns the final linked compressor AFTER EQ and
-    // effects. The browser compressor is not allowed to pre-compress the raw
-    // source and then let later EQ boosts create fresh peaks.
     studioInputBus.connect(studioProcessorNode);
     studioProcessorNode.connect(studioProcessorRouteGain);
     studioProcessorRouteGain.connect(standardRouteGain);
-    standardRouteGain.connect(mixBus);
-    mixBus.connect(analyserNode);
+    standardRouteGain.connect(analyserNode);
     analyserNode.connect(postLimiterVolumeGain);
     postLimiterVolumeGain.connect(musicGain);
     musicGain.connect(context.destination);
 
+    // Meter-only taps. levelMeterSink is hard-zero and cannot become an audible
+    // parallel path.
     masterVolumeGain.connect(referenceLevelAnalyser);
     referenceLevelAnalyser.connect(levelMeterSink);
     studioProcessorNode.connect(processedLevelAnalyser);
@@ -2284,11 +2240,17 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     mediaSourceConnected = true;
     audio.volume = 1;
 
-    // V5.5.4: only now is this processor connected to the audible graph.
+    studioAudibleRouteVerified = false;
+    studioAudibleRouteProofInFlight = false;
+    studioAudibleRouteProofFailures = 0;
+
+    // Only a processor that is actually connected to the destination owns
+    // runtime state.
     activateMvpStudioNode(studioProcessorNode);
 
     emit({
       dspEngineMode: "studio_wasm",
+      dspStatus: "recovering",
       loudnessGainDb: 0,
       loudnessMomentaryLufs: -70,
       truePeakDbtp: -120,
@@ -2299,11 +2261,28 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
       stereoWidthPercent: 100,
       stereoGuardReductionDb: 0,
     });
-    applyProcessingSettings();
+
+    // Initial startup is not accepted on faith. The audio thread must ACK the
+    // current state before the graph is considered usable.
+    const revision = applyStudioProcessingSettings(context.currentTime);
+    const acknowledged =
+      revision > 0 &&
+      await waitForMvpStudioRevision(studioProcessorNode, revision, 800);
+
+    if (!acknowledged || !simplifiedStudioAppliedStateMatches()) {
+      throw new Error(
+        "MVP Studio V5.6 did not verify its initial C++ state.",
+      );
+    }
+
+    scheduleProcessingSettle();
     return true;
   } catch (error) {
-    if (sourceCreated) throw error;
-    try { studioProcessorNode?.disconnect(); } catch { /* no-op */ }
+    if (sourceCreated) {
+      throw error;
+    }
+
+    disposeMvpStudioNode(studioProcessorNode);
     studioProcessorNode = null;
     return false;
   }
@@ -2662,12 +2641,166 @@ function rmsDbFromAnalyser(analyser: AnalyserNode) {
   for (let index = 0; index < values.length; index += 1) sum += values[index] * values[index];
   return gainToDb(Math.sqrt(sum / Math.max(1, values.length)));
 }
+function waitForMusicMilliseconds(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, Math.max(0, milliseconds));
+  });
+}
+
+async function runStudioAudibleRouteProof() {
+  const node = studioProcessorNode;
+
+  if (
+    !node ||
+    state.dspEngineMode !== "studio_wasm" ||
+    studioAudibleRouteVerified ||
+    studioAudibleRouteProofInFlight ||
+    studioAudibleRouteProofFailures >= 2 ||
+    !referenceLevelAnalyser ||
+    !analyserNode
+  ) {
+    return false;
+  }
+
+  // Do not test over silence. We need real upstream and downstream program
+  // material so a successful mute proves route ownership.
+  const beforeInputDb = rmsDbFromAnalyser(referenceLevelAnalyser);
+  const beforeOutputDb = rmsDbFromAnalyser(analyserNode);
+
+  if (beforeInputDb < -48 || beforeOutputDb < -65) {
+    return false;
+  }
+
+  studioAudibleRouteProofInFlight = true;
+  lastStudioAudibleRouteProofAt = Date.now();
+
+  if (state.dspStatus !== "recovering") {
+    emit({ dspStatus: "recovering" });
+  }
+
+  let muteApplied = false;
+
+  try {
+    const muted = await setMvpStudioProofMute(node, true, 700);
+    if (!muted) {
+      throw new Error("AudioWorklet did not acknowledge hard route mute.");
+    }
+
+    muteApplied = true;
+
+    // analyserNode holds roughly 85 ms at 48 kHz. Waiting longer guarantees
+    // its time-domain buffer contains only post-mute samples.
+    await waitForMusicMilliseconds(180);
+
+    if (node !== studioProcessorNode) {
+      throw new Error("Studio processor changed during route proof.");
+    }
+
+    const duringInputDb = rmsDbFromAnalyser(referenceLevelAnalyser);
+    const duringOutputDb = rmsDbFromAnalyser(analyserNode);
+
+    // If the song itself entered a silence, abort without counting it as a
+    // failure. The meter will retry on the next strong section.
+    if (duringInputDb < -62) {
+      const restored = await setMvpStudioProofMute(node, false, 700);
+      muteApplied = false;
+
+      if (!restored) {
+        throw new Error("Could not restore Worklet after silent proof window.");
+      }
+
+      return false;
+    }
+
+    // Upstream is still playing. Therefore any signal here means some route
+    // bypassed the Worklet.
+    if (duringOutputDb > -88) {
+      throw new Error(
+        "Hard Worklet mute did not silence the audible graph (" +
+          duringOutputDb.toFixed(1) +
+          " dB RMS).",
+      );
+    }
+
+    const restored = await setMvpStudioProofMute(node, false, 700);
+    muteApplied = false;
+
+    if (!restored) {
+      throw new Error("AudioWorklet did not acknowledge route unmute.");
+    }
+
+    await waitForMusicMilliseconds(90);
+
+    const recoveredOutputDb = rmsDbFromAnalyser(analyserNode);
+
+    if (recoveredOutputDb < -75) {
+      throw new Error("Studio route did not recover after hard mute proof.");
+    }
+
+    studioAudibleRouteVerified = true;
+    studioAudibleRouteProofFailures = 0;
+
+    // Re-send current state immediately after the proof. From this point every
+    // visible control is protected by both C++ readback and fresh revision ACK.
+    applyProcessingSettings();
+
+    return true;
+  } catch (error) {
+    if (muteApplied) {
+      try {
+        await setMvpStudioProofMute(node, false, 500);
+      } catch {
+        /* best effort recovery */
+      }
+    }
+
+    studioAudibleRouteVerified = false;
+    studioAudibleRouteProofFailures += 1;
+
+    console.warn("MVP Studio audible-route proof failed.", error);
+    emit({ dspStatus: "recovering" });
+
+    // One processor replacement is allowed. If a second independently created
+    // processor cannot own the audible route, stop claiming the DSP is active.
+    if (
+      studioAudibleRouteProofFailures === 1 &&
+      studioProcessorNode === node
+    ) {
+      await hotSwapStudioProcessor("audible-route-proof-failed");
+    } else if (studioAudibleRouteProofFailures >= 2) {
+      emit({ dspStatus: "unavailable" });
+    }
+
+    return false;
+  } finally {
+    studioAudibleRouteProofInFlight = false;
+  }
+}
+
 function startLevelMeter() {
   if (typeof window === "undefined" || levelMeterTimer) return;
   levelMeterTimer = window.setInterval(() => {
     normalizeMusicPostGainIfStale();
     if (!state.playing || !referenceLevelAnalyser || !processedLevelAnalyser) return;
     if (state.dspEngineMode === "studio_wasm") {
+      if (
+        !studioAudibleRouteVerified &&
+        !studioAudibleRouteProofInFlight &&
+        studioAudibleRouteProofFailures < 2 &&
+        analyserNode
+      ) {
+        const routeInputDb = rmsDbFromAnalyser(referenceLevelAnalyser);
+        const routeOutputDb = rmsDbFromAnalyser(analyserNode);
+
+        if (
+          routeInputDb > -48 &&
+          routeOutputDb > -65 &&
+          Date.now() - lastStudioAudibleRouteProofAt > 500
+        ) {
+          void runStudioAudibleRouteProof();
+        }
+      }
+
       const runtime = getMvpStudioRuntimeInfo();
       if (runtime.faulted) {
         if (state.dspStatus !== "recovering") emit({ dspStatus: "recovering" });
@@ -2684,7 +2817,11 @@ function startLevelMeter() {
     !pureReference &&
     state.playbackMode !== "mvp_hd" &&
     state.dspBypass;
-      const stateVerified = runtime.ready && runtime.requestedRevision <= runtime.appliedRevision;
+      const stateVerified =
+        runtime.ready &&
+        !runtime.faulted &&
+        runtime.requestedRevision <= runtime.appliedRevision &&
+        simplifiedStudioAppliedStateMatches();
       // If a control change (EQ/preset/effect) has been requested but the AudioWorklet
       // has not acknowledged it after a real settling window, rebuild the graph instead
       // of leaving a button/slider that only *looks* active. Normal revisions settle in
@@ -2706,7 +2843,7 @@ function startLevelMeter() {
       }
       const verifiedStatus: MusicDspStatus = pureReference || abBypass
         ? "bypassed"
-        : stateVerified
+        : stateVerified && studioAudibleRouteVerified
           ? "active"
           : "recovering";
       setDspTelemetry(verifiedStatus, state.effectivePreampDb, state.autoHeadroomDb);
@@ -5112,6 +5249,10 @@ async function hotSwapStudioProcessor(reason = "state-ack-timeout") {
 
     studioProcessorNode = replacementNode;
     studioProcessorRouteGain = replacementRouteGain;
+
+    // A replacement processor must independently prove the audible route.
+    studioAudibleRouteVerified = false;
+
     activateMvpStudioNode(replacementNode);
     try { inputBus.disconnect(oldNode); } catch { /* already disconnected */ }
     try { oldNode.disconnect(); } catch { /* already disconnected */ }

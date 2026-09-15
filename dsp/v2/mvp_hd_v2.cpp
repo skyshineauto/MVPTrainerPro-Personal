@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.5.1 STABLE LIVE CONTROLS
+// MVP Trainer Pro Broadcast Engine V5.6 AUDIBLE CONTRACT
 // One clean route. Visible controls must change the sound in the intended direction.
 // ABI remains mvp_v2_* for the production AudioWorklet bridge.
 
@@ -193,6 +193,22 @@ inline void meter(float l,float r){float tp=maxf(gMeterTpL.update(l),gMeterTpR.u
 }
 
 extern "C" {
+unsigned int mvp_v2_build_id(){return 5600u;}
+int mvp_v2_get_mode(){return gMode;}
+int mvp_v2_get_output_profile(){return gProfile;}
+float mvp_v2_get_intensity(){return gIntensityTarget;}
+int mvp_v2_get_bass_enabled(){return gBassEnabled;}
+float mvp_v2_get_bass_character(){return gBassCharacterTarget;}
+int mvp_v2_get_impact_enabled(){return gImpactEnabled;}
+int mvp_v2_get_clarity_enabled(){return gClarityEnabled;}
+int mvp_v2_get_spatial_enabled(){return gSpatialEnabled;}
+int mvp_v2_get_space_mode(){return gSpaceMode;}
+int mvp_v2_get_personal_enabled(){return gPersonalEnabled;}
+float mvp_v2_get_personal_bass(){return gPersonalBass;}
+float mvp_v2_get_personal_presence(){return gPersonalPresence;}
+float mvp_v2_get_personal_brightness(){return gPersonalBrightness;}
+int mvp_v2_get_eq_enabled(){return gEqEnabled;}
+float mvp_v2_get_eq_band(int i){return i>=0&&i<kEqBands?gEqGainDb[i]:0.0f;}
 unsigned int mvp_v2_input_l(){return reinterpret_cast<unsigned int>(gInputL);}unsigned int mvp_v2_input_r(){return reinterpret_cast<unsigned int>(gInputR);}unsigned int mvp_v2_output_l(){return reinterpret_cast<unsigned int>(gOutputL);}unsigned int mvp_v2_output_r(){return reinterpret_cast<unsigned int>(gOutputR);}int mvp_v2_max_frames(){return kFrames;}
 int mvp_v2_init(float sr){if(sr<32000||sr>96000)return 0;gSampleRate=sr;gLookahead=static_cast<int>(sr*.0025f+.5f);if(gLookahead<64)gLookahead=64;if(gLookahead>kLookaheadMax)gLookahead=kLookaheadMax;gPeakAttack=1-static_cast<float>(exp(-1.0/(sr*.001)));gPeakRelease=1-static_cast<float>(exp(-1.0/(sr*.180)));gAvgAttack=1-static_cast<float>(exp(-1.0/(sr*.025)));gAvgRelease=1-static_cast<float>(exp(-1.0/(sr*.300)));gCompAttack=1-static_cast<float>(exp(-1.0/(sr*.004)));gCompRelease=1-static_cast<float>(exp(-1.0/(sr*.110)));gImpactFastAttack=1-static_cast<float>(exp(-1.0/(sr*.0012)));gImpactFastRelease=1-static_cast<float>(exp(-1.0/(sr*.014)));gImpactSlowAttack=1-static_cast<float>(exp(-1.0/(sr*.030)));gImpactSlowRelease=1-static_cast<float>(exp(-1.0/(sr*.160)));gSmoothIntensity=1-static_cast<float>(exp(-1.0/(sr*.018)));gSmoothBass=1-static_cast<float>(exp(-1.0/(sr*.020)));gLimiterRelease=1-static_cast<float>(exp(-1.0/(sr*.070)));for(int i=0;i<kEqBands;++i)configureEqBand(i);gSpatialDecorHp.highpass(sr,260);configureModeTone();configureBass();configureImpact();configureClarity();configurePersonal();configureMaster();resetState();return 1;}
 void mvp_v2_reset(){resetState();}void mvp_v2_reset_meters(){resetMeters();}

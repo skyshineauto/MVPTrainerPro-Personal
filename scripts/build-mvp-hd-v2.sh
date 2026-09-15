@@ -15,6 +15,10 @@ mkdir -p "$(dirname "$OUT")"
   -Wl,--export=mvp_v2_set_personal_enabled -Wl,--export=mvp_v2_set_personal_bass -Wl,--export=mvp_v2_set_personal_presence \
   -Wl,--export=mvp_v2_set_personal_brightness -Wl,--export=mvp_v2_set_master_prep -Wl,--export=mvp_v2_set_bypass -Wl,--export=mvp_v2_set_loudness_mode \
   -Wl,--export=mvp_v2_set_bass -Wl,--export=mvp_v2_set_clarity -Wl,--export=mvp_v2_set_punch -Wl,--export=mvp_v2_set_wide \
+  -Wl,--export=mvp_v2_build_id -Wl,--export=mvp_v2_get_mode -Wl,--export=mvp_v2_get_output_profile -Wl,--export=mvp_v2_get_intensity \
+  -Wl,--export=mvp_v2_get_bass_enabled -Wl,--export=mvp_v2_get_bass_character -Wl,--export=mvp_v2_get_impact_enabled -Wl,--export=mvp_v2_get_clarity_enabled \
+  -Wl,--export=mvp_v2_get_spatial_enabled -Wl,--export=mvp_v2_get_space_mode -Wl,--export=mvp_v2_get_personal_enabled -Wl,--export=mvp_v2_get_personal_bass \
+  -Wl,--export=mvp_v2_get_personal_presence -Wl,--export=mvp_v2_get_personal_brightness -Wl,--export=mvp_v2_get_eq_enabled -Wl,--export=mvp_v2_get_eq_band \
   -Wl,--export=mvp_v2_set_eq_enabled -Wl,--export=mvp_v2_set_eq_band -Wl,--export=mvp_v2_process \
   -Wl,--export=mvp_v2_meter_true_peak_dbtp -Wl,--export=mvp_v2_meter_limiter_gr_db -Wl,--export=mvp_v2_meter_clip_count \
   -Wl,--export=mvp_v2_meter_nan_count -Wl,--export=mvp_v2_meter_multiband_gr_db -Wl,--export=mvp_v2_meter_impact_boost_db \

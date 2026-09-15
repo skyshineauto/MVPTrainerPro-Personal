@@ -2255,7 +2255,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
             }}
           >
             <header className="tr-dspControlCenterHeader">
-              <div><small>MVP AUDIO</small><strong>MVP SOUND</strong><span>{player.dspEngineMode === "studio_wasm" ? "WASM ACTIVE" : player.dspEngineMode === "advanced_worklet" ? "WORKLET ACTIVE" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "DSP UNAVAILABLE"} • {MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span></div>
+              <div><small>MVP AUDIO</small><strong>MVP SOUND</strong><span>{player.dspEngineMode === "studio_wasm" ? (player.dspStatus === "active" || player.dspStatus === "bypassed" ? "WASM ACTIVE" : player.dspStatus === "recovering" ? "WASM VERIFYING" : "DSP UNAVAILABLE") : player.dspEngineMode === "advanced_worklet" ? "WORKLET ACTIVE" : player.dspEngineMode === "native_fallback" ? "NATIVE FALLBACK" : "DSP UNAVAILABLE"} • {MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel}</span></div>
               <button type="button" onClick={() => setEqOpen(false)} aria-label="Close MVP Sound">×</button>
             </header>
           <div className="tr-mobileDspWorkspace" aria-label="Mobile Studio DSP workspace">

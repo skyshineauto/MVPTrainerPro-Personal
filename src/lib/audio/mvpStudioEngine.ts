@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.7-broadcast-v5-5-4-exact-state-lock";
+const ASSET_VERSION = "10.0.8-broadcast-v5-6-audible-contract";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -204,6 +204,9 @@ const lastErrorByNode = new WeakMap<AudioWorkletNode, string | null>();
 const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const loadedWorkletContexts = new WeakSet<AudioContext>();
+const EXPECTED_ENGINE_BUILD_ID = 5600;
+const proofAckByNode = new WeakMap<AudioWorkletNode, { requestId: number; enabled: boolean }>();
+let nextProofRequest = 0;
 
 let runtimeInfo: MvpStudioRuntimeInfo = {
   assetVersion: ASSET_VERSION,
@@ -290,26 +293,33 @@ async function loadWasmBytes() {
 }
 
 function publicState(state: MvpStudioState) {
+  // V5.6: Broadcast fields are authoritative. Legacy compatibility fields may
+  // not silently override a visible MVP SOUND control.
   const explicitMode = state.broadcastModeCode;
   const mode =
     explicitMode === 2 ? "power" :
-    explicitMode === 1 ? "adaptive" :
-    explicitMode === 0 ? "pure" :
-    state.bypass ? "pure" :
-    state.autoMakeupEnabled && state.outputReserveDb >= 10 ? "power" : "adaptive";
+    explicitMode === 1 ? "adaptive" : "pure";
 
   return {
     mode,
-    outputProfile: state.outputProfileCode === 2 ? "speaker" : state.outputProfileCode === 1 ? "headphones" : "car_hifi",
+    outputProfile:
+      state.outputProfileCode === 2
+        ? "speaker"
+        : state.outputProfileCode === 1
+          ? "headphones"
+          : "car_hifi",
     intensity: clamp(state.broadcastIntensity, 0, 1, 0.72),
-    bassEnabled: Boolean(state.broadcastBassEnabled ?? state.bassEngineEnabled),
-    bassCharacter: clamp(state.broadcastBassCharacter, 0, 1, 1 - clamp(state.bassTightness, 0, 1, 0.5)),
-    impactEnabled: Boolean(state.broadcastImpactEnabled ?? state.transientEnabled),
-    clarityEnabled: Boolean(state.broadcastClarityEnabled ?? state.toneEngineEnabled),
-    spatialEnabled: Boolean(state.broadcastSpatialEnabled ?? state.stereoFieldEnabled ?? state.headphoneEnabled),
+    bassEnabled: Boolean(state.broadcastBassEnabled),
+    bassCharacter: clamp(state.broadcastBassCharacter, 0, 1, 0.5),
+    impactEnabled: Boolean(state.broadcastImpactEnabled),
+    clarityEnabled: Boolean(state.broadcastClarityEnabled),
+    spatialEnabled: Boolean(state.broadcastSpatialEnabled),
     spaceMode:
-      state.broadcastSpaceModeCode === 2 ? "arena" :
-      state.broadcastSpaceModeCode === 1 ? "live" : "studio",
+      state.broadcastSpaceModeCode === 2
+        ? "arena"
+        : state.broadcastSpaceModeCode === 1
+          ? "live"
+          : "studio",
     personalEnabled: Boolean(state.broadcastPersonalEnabled),
     personalBass: clamp(state.broadcastPersonalBass, -1, 1, 0),
     personalPresence: clamp(state.broadcastPersonalPresence, -1, 1, 0),
@@ -397,6 +407,7 @@ export async function createMvpStudioNode(context: AudioContext) {
   lastErrorByNode.set(node, null);
   lastRequestedAtByNode.set(node, 0);
   lastAppliedAtByNode.set(node, 0);
+  proofAckByNode.set(node, { requestId: 0, enabled: false });
 
   return new Promise<AudioWorkletNode>((resolve, reject) => {
     let settled = false;
@@ -451,6 +462,17 @@ export async function createMvpStudioNode(context: AudioContext) {
 
       if (data.type === "READY") {
         const processorVersion = String(data.version || "broadcast-v3");
+        const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
+        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+          fail(
+            "Wrong MVP Broadcast WASM binary. Expected build " +
+              EXPECTED_ENGINE_BUILD_ID +
+              ", received " +
+              engineBuildId +
+              ".",
+          );
+          return;
+        }
 
         faultedByNode.set(node, false);
         readyByNode.set(node, true);
@@ -483,6 +505,16 @@ export async function createMvpStudioNode(context: AudioContext) {
       }
 
       if (data.type === "STATE_APPLIED") {
+        const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
+        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+          fail(
+            "MVP Broadcast state ACK came from the wrong WASM build (" +
+              engineBuildId +
+              ").",
+          );
+          return;
+        }
+
         const revision = Math.max(0, Math.floor(finite(data.revision)));
         const appliedAt = Date.now();
 
@@ -522,6 +554,20 @@ export async function createMvpStudioNode(context: AudioContext) {
             appliedState: actualAppliedState ?? runtimeInfo.appliedState,
           };
         }
+        return;
+      }
+
+      if (data.type === "PROOF_MUTE_APPLIED") {
+        const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
+        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+          fail("Route proof ACK came from the wrong WASM build.");
+          return;
+        }
+
+        proofAckByNode.set(node, {
+          requestId: Math.max(0, Math.floor(finite(data.requestId))),
+          enabled: Boolean(data.enabled),
+        });
         return;
       }
 
@@ -679,6 +725,54 @@ export function disposeMvpStudioNode(node: AudioWorkletNode | null) {
   lastErrorByNode.delete(node);
   lastRequestedAtByNode.delete(node);
   lastAppliedAtByNode.delete(node);
+  proofAckByNode.delete(node);
+}
+
+export async function setMvpStudioProofMute(
+  node: AudioWorkletNode | null,
+  enabled: boolean,
+  timeoutMs = 700,
+) {
+  if (!node) return false;
+
+  const requestId = ++nextProofRequest;
+
+  node.port.postMessage({
+    type: "SET_PROOF_MUTE",
+    enabled,
+    requestId,
+  });
+
+  const started = Date.now();
+
+  return new Promise<boolean>((resolve) => {
+    const poll = () => {
+      const ack = proofAckByNode.get(node);
+
+      if (
+        ack &&
+        ack.requestId === requestId &&
+        ack.enabled === enabled
+      ) {
+        resolve(true);
+        return;
+      }
+
+      if (faultedByNode.get(node)) {
+        resolve(false);
+        return;
+      }
+
+      if (Date.now() - started >= Math.max(100, timeoutMs)) {
+        resolve(false);
+        return;
+      }
+
+      window.setTimeout(poll, 8);
+    };
+
+    poll();
+  });
 }
 
 export function resetMvpStudioLoudness(node: AudioWorkletNode | null) {
