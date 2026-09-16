@@ -13,8 +13,8 @@ const workflow = read(".github/workflows/mvp-hd-v2-wasm.yml");
 const routeTest = read("scripts/test-v54-worklet-route.mjs");
 const browserEntry = read("scripts/test-mvp-hd-v2-browser.mjs");
 
-assert.match(cpp,/V5\.9 CONTROL AUTHORITY/);
-assert.match(cpp, /mvp_v2_build_id\(\)\{return 5900u;\}/);
+assert.match(cpp,/V6\.2 DIRECT STEREO AUTHORITY/);
+assert.match(cpp, /mvp_v2_build_id\(\)\{return 6200u;\}/);
 assert.match(cpp, /mvp_v2_get_mode/);
 assert.match(cpp, /mvp_v2_get_intensity/);
 assert.match(cpp, /mvp_v2_get_bass_enabled/);
@@ -24,12 +24,12 @@ assert.match(cpp, /mvp_v2_get_eq_band/);
 assert.match(cpp, /boundedDeltaScale/);
 assert.match(
   cpp,
-  /gImpactFast\s*-\s*gImpactSlow\s*\*\s*1\.10f/,
+  /gImpactFast\s*-\s*gImpactSlow\s*\*\s*\.92f/,
   "Impact steady-state distortion guard missing",
 );
 assert.match(
   cpp,
-  /gImpactSlow\s*\+\s*\.035f/,
+  /gImpactSlow\s*\+\s*\.020f/,
   "Impact detector floor missing",
 );
 assert.doesNotMatch(
@@ -45,9 +45,9 @@ assert.match(buildScript, /--export=mvp_v2_build_id/);
 assert.match(buildScript, /--export=mvp_v2_get_mode/);
 assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
-assert.match(worklet, /broadcast-v5-9-control-authority/);
-assert.match(worklet,/MVP_V59_ENGINE_BUILD_ID = 5900/);
-assert.match(worklet,/MVP_V59_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5900\]\)/);
+assert.match(worklet, /broadcast-v6-2-direct-stereo-authority/);
+assert.match(worklet,/MVP_V62_ENGINE_BUILD_ID = 6200/);
+assert.match(worklet,/MVP_V62_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[6200\]\)/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
@@ -58,10 +58,10 @@ assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.14-broadcast-v5-9-control-authority/,
+  /10\.0\.15-broadcast-v6-2-direct-stereo-authority/,
 );
-assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5900/);
-assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5900\]\)/);
+assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 6200/);
+assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[6200\]\)/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);
@@ -275,19 +275,19 @@ console.log(
 );
 
 
-/* V5.9 control authority DSP guards */
-assert.match(cpp,/V5\.9 CONTROL AUTHORITY/);
+/* V6.2 control authority DSP guards */
+assert.match(cpp,/V6\.2 DIRECT STEREO AUTHORITY/);
 assert.match(cpp,/applyEmergencyPeakGuard/);
 assert.match(cpp,/base>=cap\)\s*return \.35f/);
-assert.match(cpp,/gSpaceMode==2/);
-assert.match(cpp,/2\.30f\+\.72f\*gIntensity/);
+assert.match(cpp,/mode==2/);
+assert.match(cpp,/maxWidth=2\.48f/);
 assert.match(cpp,/monoDepthMix/);
-assert.match(cpp,/4\.00f\+5\.00f\*gIntensity/);
-console.log("V5.9 control authority DSP guards: PASS");
+assert.match(cpp,/3\.00f\+4\.50f\*gIntensity/);
+console.log("V6.2 control authority DSP guards: PASS");
 
 
 //
-// V5.9 Pure UI truthfulness
+// V6.2 Pure UI truthfulness
 //
 assert.match(
   ui,
@@ -304,4 +304,11 @@ assert.match(
   /const bool pure=gMode==0;/,
   "C++ Pure reference gate missing",
 );
-console.log("V5.9 Pure UI truthfulness: PASS");
+console.log("V6.2 Pure UI truthfulness: PASS");
+
+assert.match(player,/function stemObjectRouteRequested\(\)[\s\S]{0,220}return false;/,"Stem backend can still intercept Broadcast spatial");
+assert.match(player,/broadcastSpatialEnabled: state\.broadcastSpatialEnabled,/,"Broadcast spatial is not direct to WASM");
+assert.doesNotMatch(ui,/SERVICE NOT READY|PREPARING STEMS|STEMS ACTIVE/,"UI still exposes abandoned stem backend");
+assert.match(ui,/IMMERSION • \$\{player\.spaceMode\.toUpperCase\(\)\} • ACTIVE/,"Immediate Immersion state missing");
+console.log("V6.2 direct stereo runtime: PASS");
+

@@ -1134,13 +1134,8 @@ function getAudioContext() {
   return audioContext;
 }
 function stemObjectRouteRequested() {
-  return Boolean(
-    state.playbackMode === "mvp_hd" &&
-    state.experienceMode !== "pure" &&
-    state.outputProfile !== "reference" &&
-    state.broadcastSpatialEnabled &&
-    state.currentTrack,
-  );
+  // V6.2: immediate live stereo DSP. No network stem job may intercept audio.
+  return false;
 }
 
 function setStemObjectDirectRoute(active: boolean) {
@@ -2319,7 +2314,7 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     broadcastBassCharacter: state.broadcastBassCharacter / 100,
     broadcastImpactEnabled: state.broadcastImpactEnabled,
     broadcastClarityEnabled: state.broadcastClarityEnabled,
-    broadcastSpatialEnabled: state.broadcastSpatialEnabled && !stemObjectRouteRequested(),
+    broadcastSpatialEnabled: state.broadcastSpatialEnabled,
     broadcastSpaceModeCode:
       state.outputProfile === "headphones" &&
       state.headphoneMode === "stage"

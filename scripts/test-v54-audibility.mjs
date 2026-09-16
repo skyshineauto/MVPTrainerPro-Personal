@@ -647,8 +647,8 @@ const buildProbe =
   });
 
 add(
-  "V5.9 correct WASM build",
-  buildProbe.buildId === 5900,
+  "V6.2 correct WASM build",
+  buildProbe.buildId === 6200,
   {
     buildId:
       buildProbe.buildId,

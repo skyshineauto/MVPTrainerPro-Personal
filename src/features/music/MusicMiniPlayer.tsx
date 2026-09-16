@@ -2413,12 +2413,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 </div>
 
                 {player.broadcastSpatialEnabled ? (
-                  <div className={`tr-headphoneCleanStatus ${player.immersionStatus === "active" ? "is-clean" : ""}`}>
-                    {player.immersionStatus === "active"
-                      ? "OBJECT AUDIO • STEMS ACTIVE"
-                      : player.immersionStatus === "unavailable"
-                        ? "OBJECT AUDIO • SERVICE NOT READY"
-                        : "OBJECT AUDIO • PREPARING STEMS"}
+                  <div className="tr-headphoneCleanStatus is-clean">
+                    {`IMMERSION • ${player.spaceMode.toUpperCase()} • ACTIVE`}
                   </div>
                 ) : null}
 
