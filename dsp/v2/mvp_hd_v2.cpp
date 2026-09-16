@@ -226,7 +226,19 @@ inline void applyModeCore(float &l,float &r){
   if(gMode==0)return;
   const bool power=gMode==2;
   const float i=gIntensity;
-  const float det=maxf(absf(l),absf(r));
+
+  // MODE PREAMP: Pure = 0 dB, Adaptive = up to +4.5 dB,
+  // Power = up to +10 dB. Dense/hot masters retain headroom automatically.
+  const float hotGuard=clampf((gProgramPeak-.70f)/.22f,0,1);
+  float preampDb=power?(7.50f+2.50f*i):(2.75f+1.75f*i);
+  preampDb-=power?hotGuard*4.50f:hotGuard*1.50f;
+  const float preamp=dbToGain(preampDb);
+  l*=preamp;
+  r*=preamp;
+
+  // Drive compression from the slower program envelope, not the raw waveform.
+  // This preserves clean THD while Power produces far greater density.
+  const float det=maxf(gProgramAvg*preamp,1e-6f);
   const float ec=det>gCompEnv?gCompAttack:gCompRelease;
   gCompEnv+=(det-gCompEnv)*ec;
   const float threshold=power?(.48f-.11f*i):(.70f-.08f*i);
