@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.13-broadcast-v5-8-audible-route-proof";
+const ASSET_VERSION = "10.0.14-broadcast-v5-9-control-authority";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -204,8 +204,8 @@ const lastErrorByNode = new WeakMap<AudioWorkletNode, string | null>();
 const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const loadedWorkletContexts = new WeakSet<AudioContext>();
-const EXPECTED_ENGINE_BUILD_ID = 5800;
-const SUPPORTED_ENGINE_BUILD_IDS = new Set([5800]);
+const EXPECTED_ENGINE_BUILD_ID = 5900;
+const SUPPORTED_ENGINE_BUILD_IDS = new Set([5900]);
 const proofAckByNode = new WeakMap<AudioWorkletNode, { requestId: number; enabled: boolean }>();
 let nextProofRequest = 0;
 

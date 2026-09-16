@@ -13,8 +13,8 @@ const workflow = read(".github/workflows/mvp-hd-v2-wasm.yml");
 const routeTest = read("scripts/test-v54-worklet-route.mjs");
 const browserEntry = read("scripts/test-mvp-hd-v2-browser.mjs");
 
-assert.match(cpp,/V5\.8 PRO STUDIO SEPARATION/);
-assert.match(cpp, /mvp_v2_build_id\(\)\{return 5800u;\}/);
+assert.match(cpp,/V5\.9 CONTROL AUTHORITY/);
+assert.match(cpp, /mvp_v2_build_id\(\)\{return 5900u;\}/);
 assert.match(cpp, /mvp_v2_get_mode/);
 assert.match(cpp, /mvp_v2_get_intensity/);
 assert.match(cpp, /mvp_v2_get_bass_enabled/);
@@ -24,12 +24,12 @@ assert.match(cpp, /mvp_v2_get_eq_band/);
 assert.match(cpp, /boundedDeltaScale/);
 assert.match(
   cpp,
-  /gImpactFast\s*-\s*gImpactSlow\s*\*\s*1\.18f/,
+  /gImpactFast\s*-\s*gImpactSlow\s*\*\s*1\.10f/,
   "Impact steady-state distortion guard missing",
 );
 assert.match(
   cpp,
-  /gImpactSlow\s*\+\s*\.050f/,
+  /gImpactSlow\s*\+\s*\.035f/,
   "Impact detector floor missing",
 );
 assert.doesNotMatch(
@@ -45,9 +45,9 @@ assert.match(buildScript, /--export=mvp_v2_build_id/);
 assert.match(buildScript, /--export=mvp_v2_get_mode/);
 assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
-assert.match(worklet, /broadcast-v5-8-pro-studio-separation/);
-assert.match(worklet,/MVP_V58_ENGINE_BUILD_ID = 5800/);
-assert.match(worklet,/MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5800\]\)/);
+assert.match(worklet, /broadcast-v5-9-control-authority/);
+assert.match(worklet,/MVP_V59_ENGINE_BUILD_ID = 5900/);
+assert.match(worklet,/MVP_V59_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5900\]\)/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
@@ -58,10 +58,10 @@ assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.13-broadcast-v5-8-audible-route-proof/,
+  /10\.0\.14-broadcast-v5-9-control-authority/,
 );
-assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5800/);
-assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5800\]\)/);
+assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5900/);
+assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5900\]\)/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);
@@ -275,12 +275,33 @@ console.log(
 );
 
 
-/* V5.8 pro studio DSP guards */
-assert.match(cpp,/V5\.8 PRO STUDIO SEPARATION/);
+/* V5.9 control authority DSP guards */
+assert.match(cpp,/V5\.9 CONTROL AUTHORITY/);
 assert.match(cpp,/applyEmergencyPeakGuard/);
 assert.match(cpp,/base>=cap\)\s*return \.35f/);
 assert.match(cpp,/gSpaceMode==2/);
-assert.match(cpp,/2\.20f\+\.65f\*gIntensity/);
-assert.match(cpp,/1\.55f\+\.35f\*gIntensity/);
-assert.match(cpp,/3\.00f\+5\.20f\*gIntensity/);
-console.log("V5.8 pro studio DSP guards: PASS");
+assert.match(cpp,/2\.30f\+\.72f\*gIntensity/);
+assert.match(cpp,/monoDepthMix/);
+assert.match(cpp,/4\.00f\+5\.00f\*gIntensity/);
+console.log("V5.9 control authority DSP guards: PASS");
+
+
+//
+// V5.9 Pure UI truthfulness
+//
+assert.match(
+  ui,
+  /player\.experienceMode === "pure"[\s\S]{0,220}PERSONAL SOUND|PERSONAL SOUND[\s\S]{0,220}player\.experienceMode === "pure"/,
+  "Personal Sound must be disabled while Pure is the reference",
+);
+assert.match(
+  ui,
+  /player\.headphoneMode === value[\s\S]{0,220}disabled=\{player\.experienceMode === "pure"\}/,
+  "Headphone Immersion buttons must be disabled while Pure is the reference",
+);
+assert.match(
+  cpp,
+  /const bool pure=gMode==0;/,
+  "C++ Pure reference gate missing",
+);
+console.log("V5.9 Pure UI truthfulness: PASS");

@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.8 PRO STUDIO SEPARATION
+// MVP Trainer Pro Broadcast Engine V5.9 CONTROL AUTHORITY
 // One clean route. Visible controls must change the sound in the intended direction.
 // ABI remains mvp_v2_* for the production AudioWorklet bridge.
 
@@ -82,34 +82,31 @@ void configureModeTone(){
   float air=0;
 
   if(gMode==1){
-    // ADAPTIVE:
-    // polished mastering, larger than Pure but still clean.
-    bass=1.10f+1.60f*i;
-    body=.55f+1.00f*i;
-    mud=-.45f-.50f*i;
-    pres=1.00f+1.80f*i;
-    air=.70f+1.50f*i;
+    // ADAPTIVE: polished, fuller and more open than Pure without becoming hyped.
+    bass=.85f+1.85f*i;
+    body=.35f+1.00f*i;
+    mud=-.35f-.60f*i;
+    pres=.90f+2.15f*i;
+    air=.70f+1.95f*i;
   }else if(gMode==2){
-    // POWER:
-    // intentionally a different master, not simply "more Adaptive".
-    bass=2.40f+3.40f*i;
-    body=1.25f+2.15f*i;
-    mud=-1.00f-1.35f*i;
-    pres=2.20f+3.40f*i;
-    air=1.40f+2.60f*i;
+    // POWER: a genuinely different high-energy master, not a renamed Adaptive.
+    bass=2.20f+4.15f*i;
+    body=.95f+2.55f*i;
+    mud=-.95f-1.65f*i;
+    pres=2.15f+4.45f*i;
+    air=1.35f+3.65f*i;
   }
 
-  // Explicit controls own their frequency regions.
-  // Back the mode voicing away when the user deliberately selects another
-  // processor so multiple boosts do not fight each other.
+  // Explicit controls own their regions. Back automatic voicing away rather
+  // than letting Power + Bass + Clarity + Personal all pile onto one band.
   if(gBassEnabled){
-    bass*=.58f;
-    body*=.78f;
+    bass*=.52f;
+    body*=.72f;
   }
 
   if(gClarityEnabled){
-    pres*=.60f;
-    air*=.64f;
+    pres*=.52f;
+    air*=.56f;
   }
 
   if(gPersonalEnabled){
@@ -117,25 +114,22 @@ void configureModeTone(){
     const float pp=maxf(0,gPersonalPresence);
     const float br=maxf(0,gPersonalBrightness);
 
-    bass*=1-.38f*pb;
-    pres*=1-.42f*pp;
-    air*=1-.42f*br;
+    bass*=1-.44f*pb;
+    pres*=1-.48f*pp;
+    air*=1-.48f*br;
   }
 
   if(gProfile==1){
-    // Headphones: full-range, open and detailed.
     bass*=1.04f;
-    pres*=1.08f;
-    air*=1.12f;
+    pres*=1.10f;
+    air*=1.14f;
   }else if(gProfile==2){
-    // Bluetooth: retain authority without excessive upper-bass buildup.
-    bass*=1.08f;
-    body*=1.04f;
-    pres*=1.04f;
+    bass*=1.10f;
+    body*=1.05f;
+    pres*=1.06f;
   }else{
-    // Car / Hi-Fi.
-    bass*=.98f;
-    air*=.97f;
+    bass*=.99f;
+    air*=.98f;
   }
 
   gModeBassL.lowshelf(gSampleRate,76,bass);
@@ -147,11 +141,11 @@ void configureModeTone(){
   gModeMudL.peaking(gSampleRate,500,.72,mud);
   gModeMudR.peaking(gSampleRate,500,.72,mud);
 
-  gModePresenceL.peaking(gSampleRate,2850,.84,pres);
-  gModePresenceR.peaking(gSampleRate,2850,.84,pres);
+  gModePresenceL.peaking(gSampleRate,3000,.82,pres);
+  gModePresenceR.peaking(gSampleRate,3000,.82,pres);
 
-  gModeAirL.highshelf(gSampleRate,8500,air);
-  gModeAirR.highshelf(gSampleRate,8500,air);
+  gModeAirL.highshelf(gSampleRate,9000,air);
+  gModeAirR.highshelf(gSampleRate,9000,air);
 }
 void configureBass(){
   const float c=clampf(gBassCharacterTarget,0,1);
@@ -190,17 +184,19 @@ void configureImpact(){
 
   const float profile=
     gProfile==1
-      ? 1.08f
+      ? 1.06f
       : (
           gProfile==2
-            ? 1.05f
+            ? 1.03f
             : 1.00f
         );
 
-  const float db=(2.40f+3.60f*i)*profile;
+  // Impact is not a permanent 2 kHz presence boost. Keep the static tone broad
+  // and modest; the actual effect comes from transient-only dynamic attack.
+  const float db=(.70f+1.35f*i)*profile;
 
-  gImpactToneL.peaking(gSampleRate,2050,.92,db);
-  gImpactToneR.peaking(gSampleRate,2050,.92,db);
+  gImpactToneL.peaking(gSampleRate,3600,.72,db);
+  gImpactToneR.peaking(gSampleRate,3600,.72,db);
 }
 void configureClarity(){
   const float i=clampf(gIntensityTarget,0,1);
@@ -214,14 +210,16 @@ void configureClarity(){
             : 1.00f
         );
 
-  const float presence=(2.60f+3.20f*i)*profile;
-  const float air=(2.20f+3.30f*i)*profile;
+  // Broad articulation + air. Strong enough to identify immediately, but the
+  // center of gravity is above the nasal / tinny 2 kHz region.
+  const float presence=(3.20f+3.10f*i)*profile;
+  const float air=(2.80f+3.35f*i)*profile;
 
-  gClarityPresenceL.peaking(gSampleRate,3350,.84,presence);
-  gClarityPresenceR.peaking(gSampleRate,3350,.84,presence);
+  gClarityPresenceL.peaking(gSampleRate,3600,.76,presence);
+  gClarityPresenceR.peaking(gSampleRate,3600,.76,presence);
 
-  gClarityAirL.highshelf(gSampleRate,9200,air);
-  gClarityAirR.highshelf(gSampleRate,9200,air);
+  gClarityAirL.highshelf(gSampleRate,9800,air);
+  gClarityAirR.highshelf(gSampleRate,9800,air);
 }
 void configurePersonal(){
   const float bassRange=
@@ -321,29 +319,21 @@ inline void applyModeCore(float &l,float &r){
 
   const float threshold=
     power
-      ? (.38f-.07f*i)
-      : (.64f-.08f*i);
+      ? (.43f-.10f*i)
+      : (.66f-.09f*i);
 
   const float ratio=
     power
-      ? (3.40f+2.00f*i)
-      : (1.55f+.75f*i);
+      ? (3.00f+1.80f*i)
+      : (1.50f+.85f*i);
 
   float target=1;
 
-  if(
-    gCompEnv>threshold &&
-    gCompEnv>1e-6f
-  ){
+  if(gCompEnv>threshold && gCompEnv>1e-6f){
     const float over=gCompEnv/threshold;
-
-    target=
-      static_cast<float>(
-        pow(
-          over,
-          (1.0f/ratio)-1.0f
-        )
-      );
+    target=static_cast<float>(
+      pow(over,(1.0f/ratio)-1.0f)
+    );
   }
 
   const float gc=
@@ -355,33 +345,29 @@ inline void applyModeCore(float &l,float &r){
 
   const float blend=
     power
-      ? (.80f+.10f*i)
-      : (.38f+.12f*i);
+      ? (.74f+.14f*i)
+      : (.34f+.16f*i);
 
   const float comp=
     (1-blend)+
     blend*gCompGain;
 
-  // Perceived loudness ladder:
-  // Pure     = reference
-  // Adaptive = approximately +1.5..3 dB mastering density
-  // Power    = maximum clean density / roughly +5..7 dB drive where source permits
   float makeupDb=
     power
-      ? (5.00f+2.00f*i)
-      : (1.35f+1.55f*i);
+      ? (5.35f+2.45f*i)
+      : (1.55f+1.80f*i);
 
   const float densityGuard=
     clampf(
-      (gProgramDensity-.78f)/.16f,
+      (gProgramDensity-.80f)/.15f,
       0,
       1
     );
 
   if(power){
-    makeupDb-=densityGuard*(.45f+.35f*i);
+    makeupDb-=densityGuard*(.35f+.30f*i);
   }else{
-    makeupDb-=densityGuard*.16f;
+    makeupDb-=densityGuard*.12f;
   }
 
   const float gain=
@@ -529,16 +515,14 @@ inline void applyImpact(float &l,float &r){
 
   if(!gImpactEnabled)return;
 
-  // Transient-only attack enhancement.
-  // Sustained program material is deliberately left much closer to unity.
   const float transient=
     clampf(
       (
         gImpactFast-
-        gImpactSlow*1.18f
+        gImpactSlow*1.10f
       )/
       (
-        gImpactSlow+.050f
+        gImpactSlow+.035f
       ),
       0,
       1
@@ -546,23 +530,25 @@ inline void applyImpact(float &l,float &r){
 
   const float boostDb=
     transient*
-    (3.00f+5.20f*gIntensity);
+    (4.00f+5.00f*gIntensity);
 
   const float dynamic=dbToGain(boostDb);
 
-  const float mix=.78f+.18f*gIntensity;
+  // Mostly preserve the original tone. The audible event is attack contrast,
+  // not a permanent upper-mid EQ that makes the whole song thin.
+  const float toneMix=.28f+.22f*gIntensity;
 
   const float candL=
     (
-      (1-mix)*l+
-      mix*toneL
+      (1-toneMix)*l+
+      toneMix*toneL
     )*
     dynamic;
 
   const float candR=
     (
-      (1-mix)*r+
-      mix*toneR
+      (1-toneMix)*r+
+      toneMix*toneR
     )*
     dynamic;
 
@@ -571,11 +557,11 @@ inline void applyImpact(float &l,float &r){
 
   const float s=
     maxf(
-      .65f,
+      .72f,
       boundedDeltaScale(
         l,r,
         dl,dr,
-        1.48f
+        1.52f
       )
     );
 
@@ -634,7 +620,6 @@ inline void applySpatial(float &l,float &r){
   const float side=.5f*(l-r);
 
   if(!gSpatialEnabled){
-    // Keep filter/delay state alive without modifying the signal.
     (void)gSpatialSideHp.process(side);
     gSpatialDelay[gSpatialIndex]=mid;
     gSpatialIndex=(gSpatialIndex+1)&4095;
@@ -648,102 +633,98 @@ inline void applySpatial(float &l,float &r){
   float decorMix=.030f;
   float decorSecond=.48f;
   float lowWidth=1.00f;
+  float monoDepthMix=0;
 
   if(gProfile==1){
-    // HEADPHONES
-    //
-    // 0 WIDE    : front-stage width, minimal synthetic depth
-    // 1 SPATIAL : larger image + clear externalization cue
-    // 2 DEEP    : greater front/back depth
-    // 3 3D      : maximum premium externalized presentation
+    // Headphones: Wide, Spatial, Deep, 3D are four genuinely different spaces.
     if(gSpaceMode==3){
       delayA=.0065f;
       delayB=.0170f;
-      width=2.20f+.65f*gIntensity;
-      decorMix=.170f+.150f*gIntensity;
+      width=2.30f+.72f*gIntensity;
+      decorMix=.190f+.165f*gIntensity;
       decorSecond=.62f;
       lowWidth=1.02f;
+      monoDepthMix=.055f+.055f*gIntensity;
     }else if(gSpaceMode==2){
       delayA=.0105f;
       delayB=.0210f;
-      width=2.00f+.55f*gIntensity;
-      decorMix=.125f+.125f*gIntensity;
+      width=2.08f+.62f*gIntensity;
+      decorMix=.145f+.140f*gIntensity;
       decorSecond=.58f;
       lowWidth=1.015f;
+      monoDepthMix=.040f+.040f*gIntensity;
     }else if(gSpaceMode==1){
       delayA=.0068f;
       delayB=.0130f;
-      width=1.82f+.46f*gIntensity;
-      decorMix=.075f+.105f*gIntensity;
+      width=1.88f+.52f*gIntensity;
+      decorMix=.090f+.115f*gIntensity;
       decorSecond=.54f;
       lowWidth=1.01f;
+      monoDepthMix=.025f+.030f*gIntensity;
     }else{
       delayA=.0038f;
       delayB=.0082f;
-      width=1.65f+.35f*gIntensity;
-      decorMix=.020f+.040f*gIntensity;
+      width=1.68f+.40f*gIntensity;
+      decorMix=.025f+.050f*gIntensity;
       decorSecond=.45f;
       lowWidth=1.00f;
+      monoDepthMix=.010f+.015f*gIntensity;
     }
   }else if(gProfile==2){
-    // BLUETOOTH SPEAKER:
-    // Stage must remain extremely obvious without destroying the center.
+    // Bluetooth Stage needs a mono-resilient depth cue. Width alone can vanish
+    // when a portable speaker acoustically collapses L/R toward mono.
     if(gSpaceMode==2){
       delayA=.0090f;
       delayB=.0170f;
-      width=1.95f+.45f*gIntensity;
-      decorMix=.095f+.090f*gIntensity;
+      width=2.02f+.52f*gIntensity;
+      decorMix=.115f+.110f*gIntensity;
       decorSecond=.56f;
+      monoDepthMix=.095f+.115f*gIntensity;
     }else if(gSpaceMode==1){
       delayA=.0065f;
       delayB=.0120f;
-      width=1.75f+.40f*gIntensity;
-      decorMix=.060f+.070f*gIntensity;
+      width=1.82f+.46f*gIntensity;
+      decorMix=.075f+.085f*gIntensity;
       decorSecond=.52f;
+      monoDepthMix=.060f+.080f*gIntensity;
     }else{
       delayA=.0045f;
       delayB=.0090f;
-      width=1.55f+.35f*gIntensity;
-      decorMix=.035f+.045f*gIntensity;
+      width=1.62f+.40f*gIntensity;
+      decorMix=.045f+.055f*gIntensity;
       decorSecond=.48f;
+      monoDepthMix=.035f+.045f*gIntensity;
     }
   }else{
-    // CAR / HI-FI:
-    // Large stage while keeping center vocals/kick/bass stable.
     if(gSpaceMode==2){
       delayA=.0085f;
       delayB=.0165f;
-      width=1.80f+.42f*gIntensity;
-      decorMix=.085f+.080f*gIntensity;
+      width=1.88f+.48f*gIntensity;
+      decorMix=.100f+.095f*gIntensity;
       decorSecond=.56f;
+      monoDepthMix=.040f+.045f*gIntensity;
     }else if(gSpaceMode==1){
       delayA=.0060f;
       delayB=.0115f;
-      width=1.62f+.36f*gIntensity;
-      decorMix=.055f+.060f*gIntensity;
+      width=1.68f+.42f*gIntensity;
+      decorMix=.068f+.075f*gIntensity;
       decorSecond=.52f;
+      monoDepthMix=.025f+.035f*gIntensity;
     }else{
       delayA=.0040f;
       delayB=.0080f;
-      width=1.42f+.28f*gIntensity;
-      decorMix=.025f+.040f*gIntensity;
+      width=1.46f+.34f*gIntensity;
+      decorMix=.032f+.050f*gIntensity;
       decorSecond=.46f;
+      monoDepthMix=.012f+.022f*gIntensity;
     }
   }
 
-  int dsA=
-    static_cast<int>(
-      gSampleRate*delayA
-    );
-
-  int dsB=
-    static_cast<int>(
-      gSampleRate*delayB
-    );
+  int dsA=static_cast<int>(gSampleRate*delayA);
+  int dsB=static_cast<int>(gSampleRate*delayB);
 
   if(dsA<1)dsA=1;
   if(dsA>4095)dsA=4095;
-
   if(dsB<1)dsB=1;
   if(dsB>4095)dsB=4095;
 
@@ -759,12 +740,9 @@ inline void applySpatial(float &l,float &r){
   gSpatialDelay[gSpatialIndex]=mid;
   gSpatialIndex=(gSpatialIndex+1)&4095;
 
-  // Frequency-dependent widening:
-  // bass remains nearly centered while localization/ambience bands spread wide.
   const float sideHi=gSpatialSideHp.process(side);
   const float sideLo=side-sideHi;
 
-  // Two non-identical early cues create depth without replacing the direct feed.
   const float decor=
     gSpatialDecorHp.process(
       delayedA-
@@ -776,8 +754,12 @@ inline void applySpatial(float &l,float &r){
     sideHi*width+
     decor*decorMix;
 
-  const float candL=mid+sside;
-  const float candR=mid-sside;
+  // Same-sign delayed ambience survives partial mono collapse while the normal
+  // side component creates width. Bass and the direct center remain dominant.
+  const float centerDepth=decor*monoDepthMix;
+
+  const float candL=mid+centerDepth+sside;
+  const float candR=mid+centerDepth-sside;
 
   const float dl=candL-l;
   const float dr=candR-r;
@@ -789,13 +771,12 @@ inline void applySpatial(float &l,float &r){
       1.55f
     );
 
-  // Spatial controls are deliberately perceptual, not analyzer-only.
   if(gProfile==1){
-    scale=maxf(scale,.72f);
+    scale=maxf(scale,.74f);
   }else if(gProfile==2){
-    scale=maxf(scale,.66f);
+    scale=maxf(scale,.70f);
   }else{
-    scale=maxf(scale,.60f);
+    scale=maxf(scale,.62f);
   }
 
   l+=dl*scale;
@@ -857,7 +838,7 @@ inline void meter(float l,float r){float tp=maxf(gMeterTpL.update(l),gMeterTpR.u
 }
 
 extern "C" {
-unsigned int mvp_v2_build_id(){return 5800u;}
+unsigned int mvp_v2_build_id(){return 5900u;}
 int mvp_v2_get_mode(){return gMode;}
 int mvp_v2_get_output_profile(){return gProfile;}
 float mvp_v2_get_intensity(){return gIntensityTarget;}
@@ -903,69 +884,31 @@ int mvp_v2_process(int frames){
       (gBassCharacterTarget-gBassCharacter)*
       gSmoothBass;
 
-    /*
-     * Master Prep and automatic mode character first.
-     * Pure keeps Master Prep filters warm without coloring the reference.
-     */
-    if(gMode!=0){
+    const bool pure=gMode==0;
+
+    if(!pure){
+      // One authoritative processed chain.
       applyMaster(l,r);
-    }else{
-      float ml=l;
-      float mr=r;
-      applyMaster(ml,mr);
+      applyModeCore(l,r);
+      applyMixReserve(l,r);
+      applyBass(l,r);
+      applyImpact(l,r);
+      applyClarity(l,r);
+      applySpatial(l,r);
+      applyPersonal(l,r);
+      applyEq(l,r);
+      applyEmergencyPeakGuard(l,r);
     }
-
-    applyModeCore(l,r);
-
-    /*
-     * Cooperative reserve prevents Power + Bass + Clarity + Personal + EQ
-     * from fighting for the same limiter headroom.
-     */
-    applyMixReserve(l,r);
-
-    /*
-     * Explicit musical controls.
-     */
-    applyBass(l,r);
-    applyImpact(l,r);
-    applyClarity(l,r);
-
-    /*
-     * Stage / Immersion:
-     * width and depth are independent from tonal processing.
-     */
-    applySpatial(l,r);
-
-    /*
-     * Personal Sound is the final broad tonal preference.
-     */
-    applyPersonal(l,r);
-
-    /*
-     * 31-band EQ is final precision correction.
-     */
-    applyEq(l,r);
-
-    const bool processed=
-      gMode!=0||
-      gEqEnabled||
-      gBassEnabled||
-      gImpactEnabled||
-      gClarityEnabled||
-      gSpatialEnabled||
-      gPersonalEnabled;
 
     float ol=0;
     float orr=0;
 
-    if(processed){
-      applyEmergencyPeakGuard(l,r);
-    }
-
+    // PURE is a true reference. Latent Bass/Impact/Clarity/Spatial/Personal/EQ
+    // state is remembered for Adaptive/Power but cannot color Pure.
     limiter(
       l,r,
       ol,orr,
-      processed
+      !pure
     );
 
     gOutputL[i]=ol;

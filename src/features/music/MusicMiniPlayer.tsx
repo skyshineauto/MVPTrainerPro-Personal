@@ -1978,7 +1978,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     : "Built-in music preset";
   const dspOutputStatus = MUSIC_OUTPUT_PROFILES[player.outputProfile].shortLabel;
   const activeBuiltInEq = (MUSIC_EQ_PRESETS as Record<string, { label: string }>)[player.eqPreset]?.label;
-  const dspEqStatus = player.outputProfile === "reference" || player.dspBypass
+  const dspEqStatus = player.outputProfile === "reference" || player.dspBypass || player.experienceMode === "pure"
     ? "REFERENCE"
     : !player.eqEnabled
       ? "FLAT"
@@ -2437,14 +2437,14 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
               <div className="tr-v24Section">
                 <div className="tr-v24Extras">
-                  <button type="button" className={player.personalSoundEnabled ? "is-active" : ""} aria-pressed={player.personalSoundEnabled} onClick={() => void runBroadcastMutation(() => setMusicPersonalSoundEnabled(!player.personalSoundEnabled), true)}>PERSONAL SOUND</button>
+                  <button type="button" className={player.personalSoundEnabled ? "is-active" : ""} aria-pressed={player.personalSoundEnabled} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicPersonalSoundEnabled(!player.personalSoundEnabled), true)}>PERSONAL SOUND</button>
                   <button type="button" onClick={() => setDspTab("eq")}>ADVANCED EQ</button>
                 </div>
                 {player.personalSoundEnabled ? (
                   <div className="tr-v24Personal">
-                    <label className="tr-v24Range"><span>BASS</span><input type="range" min="-100" max="100" value={player.personalBass} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ bass: Number(event.target.value) }), true)} /><b>{player.personalBass > 0 ? "+" : ""}{Math.round(player.personalBass)}</b></label>
-                    <label className="tr-v24Range"><span>PRESENCE</span><input type="range" min="-100" max="100" value={player.personalPresence} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ presence: Number(event.target.value) }), true)} /><b>{player.personalPresence > 0 ? "+" : ""}{Math.round(player.personalPresence)}</b></label>
-                    <label className="tr-v24Range"><span>BRIGHT</span><input type="range" min="-100" max="100" value={player.personalBrightness} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ brightness: Number(event.target.value) }), true)} /><b>{player.personalBrightness > 0 ? "+" : ""}{Math.round(player.personalBrightness)}</b></label>
+                    <label className="tr-v24Range"><span>BASS</span><input type="range" min="-100" max="100" value={player.personalBass} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ bass: Number(event.target.value) }), true)} /><b>{player.personalBass > 0 ? "+" : ""}{Math.round(player.personalBass)}</b></label>
+                    <label className="tr-v24Range"><span>PRESENCE</span><input type="range" min="-100" max="100" value={player.personalPresence} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ presence: Number(event.target.value) }), true)} /><b>{player.personalPresence > 0 ? "+" : ""}{Math.round(player.personalPresence)}</b></label>
+                    <label className="tr-v24Range"><span>BRIGHT</span><input type="range" min="-100" max="100" value={player.personalBrightness} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicPersonalSoundTargets({ brightness: Number(event.target.value) }), true)} /><b>{player.personalBrightness > 0 ? "+" : ""}{Math.round(player.personalBrightness)}</b></label>
                   </div>
                 ) : null}
               </div>
@@ -2606,6 +2606,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                       type="button"
                       className={player.headphoneMode === value ? "is-active" : ""}
                       aria-pressed={player.headphoneMode === value}
+                      disabled={player.experienceMode === "pure"}
                       onClick={() => void runDspMutation(() => setMusicHeadphoneMode(value))}
                     >
                       {label}

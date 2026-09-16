@@ -647,11 +647,66 @@ const buildProbe =
   });
 
 add(
-  "V5.8 correct WASM build",
-  buildProbe.buildId === 5800,
+  "V5.9 correct WASM build",
+  buildProbe.buildId === 5900,
   {
     buildId:
       buildProbe.buildId,
+  },
+);
+
+//
+// PURE REFERENCE ISOLATION
+//
+
+const pureClean =
+  await render({
+    mode: 0,
+    signal: "dynamic",
+  });
+
+const pureLatent =
+  await render({
+    mode: 0,
+    intensity: 1,
+    bass: true,
+    bassChar: 1,
+    impact: true,
+    clarity: true,
+    spatial: true,
+    spaceMode: 2,
+    personal: true,
+    pb: 1,
+    pp: 1,
+    pbr: 1,
+    eq: [[17, 12]],
+    signal: "dynamic",
+  });
+
+const pureRmsDelta =
+  Math.abs(
+    db(
+      rms(pureLatent) /
+      rms(pureClean),
+    ),
+  );
+
+const purePresenceDelta =
+  Math.abs(
+    db(
+      mag(pureLatent, 3400) /
+      mag(pureClean, 3400),
+    ),
+  );
+
+add(
+  "Pure ignores latent effects",
+  pureRmsDelta < 0.05 &&
+    purePresenceDelta < 0.05,
+  {
+    rmsDelta: pureRmsDelta,
+    presenceDelta: purePresenceDelta,
+    tp: pureLatent.tp,
   },
 );
 
@@ -935,7 +990,7 @@ for (
 
   add(
     sig + ' clarity audible',
-    clarityDelta > 0.55 &&
+    clarityDelta > 1.50 &&
       safety(on),
     {
       clarityDelta,
@@ -980,8 +1035,8 @@ const impactDelta =
 
 add(
   "Impact obvious",
-  impactDelta > 0.25 &&
-    impactOn.impact > 0.35 &&
+  impactDelta > 0.90 &&
+    impactOn.impact > 2.0 &&
     safety(impactOn),
   {
     transientDelta:
@@ -1026,7 +1081,7 @@ add(
     sideRms(
       spatialOff,
     ),
-  ) > 0.60 &&
+  ) > 2.00 &&
     spatialOn.width >
       115,
   {
@@ -1614,7 +1669,7 @@ console.log(
 if (failed.length) {
   console.error("");
   console.error(
-    "FAILED V5.7 AUDIBILITY CASES:",
+    "FAILED V5.9 AUDIBILITY CASES:",
   );
 
   for (
@@ -1634,5 +1689,5 @@ if (failed.length) {
 }
 
 console.log(
-  "V5.7 perceptual audibility gate: PASS",
+  "V5.9 control-authority audibility gate: PASS",
 );

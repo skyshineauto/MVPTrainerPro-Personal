@@ -1,7 +1,7 @@
 // MVP Trainer Pro Broadcast Engine V5.8 PRO STUDIO SEPARATION.
 // STATE_APPLIED is emitted only after the actual C++ WASM state reads back correctly.
-const MVP_V58_ENGINE_BUILD_ID = 5800;
-const MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set([5800]);
+const MVP_V59_ENGINE_BUILD_ID = 5900;
+const MVP_V59_SUPPORTED_ENGINE_BUILD_IDS = new Set([5900]);
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
   constructor() {
@@ -257,7 +257,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     const space =
       next.spaceMode === "stage3d" ? 3 : next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0;
 
-    if (!MVP_V58_SUPPORTED_ENGINE_BUILD_IDS.has(Number(ex.mvp_v2_build_id())))
+    if (!MVP_V59_SUPPORTED_ENGINE_BUILD_IDS.has(Number(ex.mvp_v2_build_id())))
       return "engine build id";
     if (Number(ex.mvp_v2_get_mode()) !== mode) return "mode";
     if (Number(ex.mvp_v2_get_output_profile()) !== profile)
@@ -386,10 +386,10 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       }
 
       const buildId = Number(ex.mvp_v2_build_id());
-      if (!MVP_V58_SUPPORTED_ENGINE_BUILD_IDS.has(buildId)) {
+      if (!MVP_V59_SUPPORTED_ENGINE_BUILD_IDS.has(buildId)) {
         throw new Error(
           "Wrong Broadcast WASM binary. Expected build " +
-            MVP_V58_ENGINE_BUILD_ID +
+            MVP_V59_ENGINE_BUILD_ID +
             ", received " +
             buildId,
         );
@@ -439,7 +439,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       this.port.postMessage({
         type: "READY",
         legacyType: "ready",
-        version: "broadcast-v5-8-pro-studio-separation",
+        version: "broadcast-v5-9-control-authority",
         engineBuildId: this.engineBuildId,
         sampleRate,
         maxFrames,
