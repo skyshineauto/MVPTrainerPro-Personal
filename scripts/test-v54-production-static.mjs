@@ -58,7 +58,7 @@ assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.12-broadcast-v5-8-strict-5800-live/,
+  /10\.0\.13-broadcast-v5-8-audible-route-proof/,
 );
 assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5800/);
 assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5800\]\)/);
@@ -266,8 +266,8 @@ assert.doesNotMatch(
 
 assert.match(
   player,
-  /studioAudibleRouteVerified = true;[\s\S]{0,120}studioAudibleRouteProofFailures = 0;/,
-  "Initial verified single route is not locked",
+  /studioAudibleRouteVerified = false;[\s\S]{0,120}studioAudibleRouteProofFailures = 0;/,
+  "Startup must wait for live audible-route proof",
 );
 
 console.log(

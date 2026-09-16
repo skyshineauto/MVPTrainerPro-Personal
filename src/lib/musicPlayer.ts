@@ -2350,7 +2350,7 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     // the graph is physically a single Studio route and the
     // actual C++ state has ACKed. From here normal playback
     // never runs a background proof mute or processor swap.
-    studioAudibleRouteVerified = true;
+    studioAudibleRouteVerified = false;
     studioAudibleRouteProofFailures = 0;
 
     scheduleProcessingSettle();
