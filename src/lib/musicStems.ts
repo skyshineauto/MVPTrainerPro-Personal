@@ -156,8 +156,8 @@ export function ensureMusicStemBundle(
       writePrediction(track.id, predictionId);
     }
 
-    for (let attempt = 0; attempt < 180; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 700 : 4000));
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 1200 : 5000));
       onStatus?.("processing");
 
       const status = await callStemApi({
@@ -182,7 +182,7 @@ export function ensureMusicStemBundle(
       }
     }
 
-    throw new Error("Object Audio separation timed out.");
+    throw new Error("Object Audio is still processing in the background. Try Immersion again in a few minutes.");
   })()
     .catch((error) => {
       onStatus?.("error", error instanceof Error ? error.message : String(error));
