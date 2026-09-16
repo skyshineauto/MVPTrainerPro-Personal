@@ -68,7 +68,7 @@ float gProgramPeak=0,gProgramAvg=0,gProgramDensity=0;unsigned int gProgramSample
 float gPeakAttack=0,gPeakRelease=0,gAvgAttack=0,gAvgRelease=0,gCompEnv=0,gCompGain=1,gCompAttack=0,gCompRelease=0;
 float gImpactFast=0,gImpactSlow=0,gImpactFastAttack=0,gImpactFastRelease=0,gImpactSlowAttack=0,gImpactSlowRelease=0,gSmoothIntensity=0,gSmoothBass=0;
 float gLookL[kLookaheadMax]={},gLookR[kLookaheadMax]={},gLookPeak[kLookaheadMax]={};int gLookahead=144,gLookIndex=0,gPureFlushRemaining=0;
-float gLimiterGain=1,gLimiterRelease=0;const float gCeiling=.925f;TruePeak4x gLimiterTpL,gLimiterTpR,gMeterTpL,gMeterTpR;
+float gLimiterGain=1,gLimiterRelease=0;const float gCeiling=.912f;TruePeak4x gLimiterTpL,gLimiterTpR,gMeterTpL,gMeterTpR;
 float gMeterTruePeak=0,gMeterLimiterGrDb=0,gMeterImpactBoostDb=0,gMeterBassActivityDb=0,gMeterClarityActivityDb=0,gMeterWidthPercent=100;unsigned int gMeterClipCount=0,gMeterNanCount=0;
 
 void configureEqBand(int i){if(i<0||i>=kEqBands)return;gEqL[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);gEqR[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);}
