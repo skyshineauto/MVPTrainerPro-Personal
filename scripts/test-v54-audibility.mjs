@@ -647,8 +647,8 @@ const buildProbe =
   });
 
 add(
-  "V5.7 correct WASM build",
-  buildProbe.buildId === 5700,
+  "V5.8 correct WASM build",
+  buildProbe.buildId === 5800,
   {
     buildId:
       buildProbe.buildId,
@@ -1108,7 +1108,7 @@ for (
         liveSide,
       ) > 0.50 &&
       Math.abs(
-        liveSide + arenaSide,
+        arenaSide,
       ) > 0.50 &&
       safety(studio) &&
       safety(live) &&
