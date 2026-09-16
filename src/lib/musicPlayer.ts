@@ -11,7 +11,7 @@ import {
   setMvpStudioProofMute,
   setMvpStudioState,
   waitForMvpStudioRevision,
-} from "./audio/mvpStudioEngine";
+} from "./audio/mvpSoundV7Engine";
 import { getMusicTrackIntelligence } from "./musicIntelligenceEnrichment";
 import {
   clearMusicUrlCache,
@@ -2364,7 +2364,7 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
     studioProcessorNode = await createMvpStudioNode(context);
   } catch (error) {
     studioProcessorNode = null;
-    console.warn("MVP Studio V5.6 WASM unavailable; trying Compatibility Engine.", error);
+    console.warn("MVP Sound V7 unavailable; trying compatibility route.", error);
     return false;
   }
 
@@ -2463,7 +2463,7 @@ async function tryConnectStudioGraph(context: AudioContext, audio: HTMLAudioElem
 
     if (!acknowledged || !simplifiedStudioAppliedStateMatches()) {
       throw new Error(
-        "MVP Studio V5.6 did not verify its initial C++ state.",
+        "MVP Sound V7 did not verify its initial state.",
       );
     }
 

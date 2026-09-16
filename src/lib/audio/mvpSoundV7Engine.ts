@@ -257,7 +257,10 @@ export async function createMvpStudioNode(context:AudioContext){
         ready:true,
         appliedRevision:revision,
         lastAppliedAt:Date.now(),
-        appliedState:data.state||runtime.appliedState
+        // Keep the authoritative PUBLIC state written by setMvpStudioState().
+        // The Worklet ACK contains its internal numeric representation and must
+        // never overwrite the public state used by musicPlayer verification.
+        appliedState:runtime.appliedState
       };
       return;
     }
