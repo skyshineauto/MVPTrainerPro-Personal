@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.11-broadcast-v5-8-pro-studio-separation";
+const ASSET_VERSION = "10.0.12-broadcast-v5-8-strict-5800-live";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -205,7 +205,7 @@ const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const loadedWorkletContexts = new WeakSet<AudioContext>();
 const EXPECTED_ENGINE_BUILD_ID = 5800;
-const SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700, 5800]);
+const SUPPORTED_ENGINE_BUILD_IDS = new Set([5800]);
 const proofAckByNode = new WeakMap<AudioWorkletNode, { requestId: number; enabled: boolean }>();
 let nextProofRequest = 0;
 

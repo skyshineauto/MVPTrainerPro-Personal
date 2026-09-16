@@ -47,7 +47,7 @@ assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
 assert.match(worklet, /broadcast-v5-8-pro-studio-separation/);
 assert.match(worklet,/MVP_V58_ENGINE_BUILD_ID = 5800/);
-assert.match(worklet,/MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700, 5800\]\)/);
+assert.match(worklet,/MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5800\]\)/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
@@ -58,10 +58,10 @@ assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.11-broadcast-v5-8-pro-studio-separation/,
+  /10\.0\.12-broadcast-v5-8-strict-5800-live/,
 );
 assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5800/);
-assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700, 5800\]\)/);
+assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5800\]\)/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);

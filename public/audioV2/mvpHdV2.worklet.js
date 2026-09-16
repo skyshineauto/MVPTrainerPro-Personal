@@ -1,7 +1,7 @@
 // MVP Trainer Pro Broadcast Engine V5.8 PRO STUDIO SEPARATION.
 // STATE_APPLIED is emitted only after the actual C++ WASM state reads back correctly.
 const MVP_V58_ENGINE_BUILD_ID = 5800;
-const MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700, 5800]);
+const MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set([5800]);
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
   constructor() {
