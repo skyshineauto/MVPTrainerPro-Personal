@@ -1,11 +1,13 @@
 // MVP Trainer Pro Broadcast Engine V5.7 PERCEPTUAL AUDIBILITY.
 // STATE_APPLIED is emitted only after the actual C++ WASM state reads back correctly.
 const MVP_V57_ENGINE_BUILD_ID = 5700;
+const MVP_V57_SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700]);
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.exports = null;
+    this.engineBuildId = 0;
     this.maxFrames = 0;
     this.inputL = null;
     this.inputR = null;
@@ -60,7 +62,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           enabled: this.proofMute,
           requestId: Number(message.requestId) || 0,
           revision: this.appliedRevision,
-          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
+          engineBuildId: this.engineBuildId,
         });
         return;
       }
@@ -89,7 +91,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           appliedState: this.appliedState,
           signature: this.appliedSignature,
           proofMute: this.proofMute,
-          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
+          engineBuildId: this.engineBuildId,
         });
       }
     };
@@ -252,7 +254,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     const space =
       next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0;
 
-    if (Number(ex.mvp_v2_build_id()) !== MVP_V57_ENGINE_BUILD_ID)
+    if (!MVP_V57_SUPPORTED_ENGINE_BUILD_IDS.has(Number(ex.mvp_v2_build_id())))
       return "engine build id";
     if (Number(ex.mvp_v2_get_mode()) !== mode) return "mode";
     if (Number(ex.mvp_v2_get_output_profile()) !== profile)
@@ -381,7 +383,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       }
 
       const buildId = Number(ex.mvp_v2_build_id());
-      if (buildId !== MVP_V57_ENGINE_BUILD_ID) {
+      if (!MVP_V57_SUPPORTED_ENGINE_BUILD_IDS.has(buildId)) {
         throw new Error(
           "Wrong Broadcast WASM binary. Expected build " +
             MVP_V57_ENGINE_BUILD_ID +
@@ -389,6 +391,8 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
             buildId,
         );
       }
+
+      this.engineBuildId = buildId;
 
       const maxFrames = Number(ex.mvp_v2_max_frames());
       if (!Number.isFinite(maxFrames) || maxFrames < 128) {
@@ -433,7 +437,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
         type: "READY",
         legacyType: "ready",
         version: "broadcast-v5-7-perceptual-audibility",
-        engineBuildId: MVP_V57_ENGINE_BUILD_ID,
+        engineBuildId: this.engineBuildId,
         sampleRate,
         maxFrames,
       });
@@ -515,7 +519,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       appliedState: next,
       state: next,
       signature: this.appliedSignature,
-      engineBuildId: MVP_V57_ENGINE_BUILD_ID,
+      engineBuildId: this.engineBuildId,
     });
   }
 
@@ -641,7 +645,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           state: this.appliedState,
           signature: this.appliedSignature,
           proofMute: this.proofMute,
-          engineBuildId: MVP_V57_ENGINE_BUILD_ID,
+          engineBuildId: this.engineBuildId,
           inputRms,
           outputRms,
           inputPeak: this.inputPeak,

@@ -46,20 +46,22 @@ assert.match(buildScript, /--export=mvp_v2_get_mode/);
 assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
 assert.match(worklet, /broadcast-v5-7-perceptual-audibility/);
-assert.match(worklet, /MVP_V57_ENGINE_BUILD_ID = 5700/);
+assert.match(worklet,/MVP_V57_ENGINE_BUILD_ID = 5700/);
+assert.match(worklet,/MVP_V57_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700\]\)/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
 assert.match(worklet, /STATE_APPLIED/);
-assert.match(worklet, /engineBuildId: MVP_V57_ENGINE_BUILD_ID/);
+assert.match(worklet,/engineBuildId: this\.engineBuildId/);
 assert.match(worklet, /SET_PROOF_MUTE/);
 assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.9-broadcast-v5-7-perceptual-audibility/,
+  /10\.0\.10-broadcast-v5-7-rollout-compat/,
 );
-assert.match(bridge, /EXPECTED_ENGINE_BUILD_ID = 5700/);
+assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5700/);
+assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700\]\)/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);

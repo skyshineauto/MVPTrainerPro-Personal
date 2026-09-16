@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.9-broadcast-v5-7-perceptual-audibility";
+const ASSET_VERSION = "10.0.10-broadcast-v5-7-rollout-compat";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -205,6 +205,7 @@ const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const loadedWorkletContexts = new WeakSet<AudioContext>();
 const EXPECTED_ENGINE_BUILD_ID = 5700;
+const SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700]);
 const proofAckByNode = new WeakMap<AudioWorkletNode, { requestId: number; enabled: boolean }>();
 let nextProofRequest = 0;
 
@@ -463,7 +464,7 @@ export async function createMvpStudioNode(context: AudioContext) {
       if (data.type === "READY") {
         const processorVersion = String(data.version || "broadcast-v3");
         const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
-        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+        if (!SUPPORTED_ENGINE_BUILD_IDS.has(engineBuildId)) {
           fail(
             "Wrong MVP Broadcast WASM binary. Expected build " +
               EXPECTED_ENGINE_BUILD_ID +
@@ -506,7 +507,7 @@ export async function createMvpStudioNode(context: AudioContext) {
 
       if (data.type === "STATE_APPLIED") {
         const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
-        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+        if (!SUPPORTED_ENGINE_BUILD_IDS.has(engineBuildId)) {
           fail(
             "MVP Broadcast state ACK came from the wrong WASM build (" +
               engineBuildId +
@@ -559,7 +560,7 @@ export async function createMvpStudioNode(context: AudioContext) {
 
       if (data.type === "PROOF_MUTE_APPLIED") {
         const engineBuildId = Math.max(0, Math.floor(finite(data.engineBuildId)));
-        if (engineBuildId !== EXPECTED_ENGINE_BUILD_ID) {
+        if (!SUPPORTED_ENGINE_BUILD_IDS.has(engineBuildId)) {
           fail("Route proof ACK came from the wrong WASM build.");
           return;
         }
