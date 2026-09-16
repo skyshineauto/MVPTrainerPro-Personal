@@ -1102,14 +1102,14 @@ for (
     profile === 1
       ? "Headphone Studio Live Arena distinct"
       : "Bluetooth Studio Live Arena distinct",
-    widthStep1 > 6 &&
-      widthStep2 > 6 &&
+    widthStep1 > 10 &&
+      widthStep2 > 10 &&
       Math.abs(
         liveSide,
-      ) > 0.15 &&
+      ) > 0.50 &&
       Math.abs(
-        arenaSide,
-      ) > 0.15 &&
+        liveSide + arenaSide,
+      ) > 0.50 &&
       safety(studio) &&
       safety(live) &&
       safety(arena),
