@@ -101,9 +101,9 @@ void configureModeTone(){
     const float pb=maxf(0,gPersonalBass);
     const float pp=maxf(0,gPersonalPresence);
     const float br=maxf(0,gPersonalBrightness);
-    bass*=1-.30f*pb;
-    pres*=1-.34f*pp;
-    air*=1-.34f*br;
+    bass*=1-.10f*pb;
+    pres*=1-.10f*pp;
+    air*=1-.06f*br;
   }
 
   if(gProfile==1){bass*=1.03f;pres*=1.08f;air*=1.12f;}
@@ -304,7 +304,7 @@ inline void applyMixReserve(float &l,float &r){
       gPersonalEnabled
     )
   ){
-    reserveDb+=.35f;
+    reserveDb+=.95f;
   }
 
   reserveDb=clampf(reserveDb,0,3.20f);
@@ -367,6 +367,12 @@ inline void applyImpact(float &l,float &r){
   gImpactSlow+=(d-gImpactSlow)*sc;
   if(!gImpactEnabled)return;
   const float transient=clampf((gImpactFast-gImpactSlow*.92f)/(gImpactSlow+.020f),0,1);
+  // Make Impact physically obvious by increasing transient-to-sustain contrast
+  // instead of adding nonlinear distortion or excessive peak gain.
+  const float sustainCutDb=(1-transient)*(.45f+1.05f*gIntensity);
+  const float sustainGain=dbToGain(-sustainCutDb);
+  l*=sustainGain;
+  r*=sustainGain;
   const float boostDb=transient*(3.00f+4.50f*gIntensity);
   const float dynamic=dbToGain(boostDb);
   const float dl=l*(dynamic-1);
