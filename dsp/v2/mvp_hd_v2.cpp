@@ -250,9 +250,6 @@ inline void applyModeCore(float &l,float &r){
   r*=gain;
   l=gModeAirL.process(gModePresenceL.process(gModeMudL.process(gModeBodyL.process(gModeBassL.process(l)))));
   r=gModeAirR.process(gModePresenceR.process(gModeMudR.process(gModeBodyR.process(gModeBassR.process(r)))));
-  const float sat=power?(.12f+.18f*i):(.035f+.055f*i);
-  l=l*(1+sat)/(1+sat*absf(l));
-  r=r*(1+sat)/(1+sat*absf(r));
 }
 inline void applyMixReserve(float &l,float &r){
   float reserveDb=0;
