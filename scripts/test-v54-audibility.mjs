@@ -1669,7 +1669,7 @@ console.log(
 if (failed.length) {
   console.error("");
   console.error(
-    "FAILED V5.9 AUDIBILITY CASES:",
+    "FAILED V6.2 AUDIBILITY CASES:",
   );
 
   for (

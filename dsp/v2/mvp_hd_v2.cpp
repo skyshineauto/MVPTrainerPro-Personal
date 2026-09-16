@@ -419,7 +419,10 @@ inline void applySpatial(float &l,float &r){
   const float sideHi=gSpatialSideHp.process(side);
   const float sideLo=side-sideHi;
   const float decor=gSpatialDecorHp.process(delayedA-delayedB*decorSecond);
-  const float sside=sideLo*lowWidth+sideHi*width+decor*decorMix;
+  float sside=sideLo*lowWidth+sideHi*width+decor*decorMix;
+  // Headphone Arena must create materially more REAL side energy than Live,
+  // not merely report a larger target width.
+  if(gProfile==1&&mode==2) sside*=1.30f;
   const float center=mid*midGain+decor*monoDepthMix;
   const float candL=center+sside,candR=center-sside;
   const float dl=candL-l,dr=candR-r;
