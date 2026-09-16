@@ -1,7 +1,7 @@
-// MVP Trainer Pro Broadcast Engine V5.7 PERCEPTUAL AUDIBILITY.
+// MVP Trainer Pro Broadcast Engine V5.8 PRO STUDIO SEPARATION.
 // STATE_APPLIED is emitted only after the actual C++ WASM state reads back correctly.
-const MVP_V57_ENGINE_BUILD_ID = 5700;
-const MVP_V57_SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700]);
+const MVP_V58_ENGINE_BUILD_ID = 5800;
+const MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700, 5800]);
 
 class MvpHdV2Processor extends AudioWorkletProcessor {
   constructor() {
@@ -166,15 +166,18 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           raw.headphoneEnabled,
       ),
       spaceMode:
+        raw.spaceMode === "stage3d" ||
         raw.spaceMode === "arena" ||
         raw.spaceMode === "live" ||
         raw.spaceMode === "studio"
           ? raw.spaceMode
-          : Number(raw.broadcastSpaceModeCode) === 2
-            ? "arena"
-            : Number(raw.broadcastSpaceModeCode) === 1
-              ? "live"
-              : "studio",
+          : Number(raw.broadcastSpaceModeCode) === 3
+            ? "stage3d"
+            : Number(raw.broadcastSpaceModeCode) === 2
+              ? "arena"
+              : Number(raw.broadcastSpaceModeCode) === 1
+                ? "live"
+                : "studio",
       personalEnabled: Boolean(
         raw.personalEnabled ?? raw.broadcastPersonalEnabled,
       ),
@@ -252,9 +255,9 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
           ? 1
           : 0;
     const space =
-      next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0;
+      next.spaceMode === "stage3d" ? 3 : next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0;
 
-    if (!MVP_V57_SUPPORTED_ENGINE_BUILD_IDS.has(Number(ex.mvp_v2_build_id())))
+    if (!MVP_V58_SUPPORTED_ENGINE_BUILD_IDS.has(Number(ex.mvp_v2_build_id())))
       return "engine build id";
     if (Number(ex.mvp_v2_get_mode()) !== mode) return "mode";
     if (Number(ex.mvp_v2_get_output_profile()) !== profile)
@@ -383,10 +386,10 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       }
 
       const buildId = Number(ex.mvp_v2_build_id());
-      if (!MVP_V57_SUPPORTED_ENGINE_BUILD_IDS.has(buildId)) {
+      if (!MVP_V58_SUPPORTED_ENGINE_BUILD_IDS.has(buildId)) {
         throw new Error(
           "Wrong Broadcast WASM binary. Expected build " +
-            MVP_V57_ENGINE_BUILD_ID +
+            MVP_V58_ENGINE_BUILD_ID +
             ", received " +
             buildId,
         );
@@ -436,7 +439,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
       this.port.postMessage({
         type: "READY",
         legacyType: "ready",
-        version: "broadcast-v5-7-perceptual-audibility",
+        version: "broadcast-v5-8-pro-studio-separation",
         engineBuildId: this.engineBuildId,
         sampleRate,
         maxFrames,
@@ -474,7 +477,7 @@ class MvpHdV2Processor extends AudioWorkletProcessor {
     ex.mvp_v2_set_clarity_enabled(next.clarityEnabled ? 1 : 0);
     ex.mvp_v2_set_spatial_enabled(next.spatialEnabled ? 1 : 0);
     ex.mvp_v2_set_space_mode(
-      next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0,
+      next.spaceMode === "stage3d" ? 3 : next.spaceMode === "arena" ? 2 : next.spaceMode === "live" ? 1 : 0,
     );
     ex.mvp_v2_set_personal_enabled(next.personalEnabled ? 1 : 0);
     ex.mvp_v2_set_personal_bass(next.personalBass);

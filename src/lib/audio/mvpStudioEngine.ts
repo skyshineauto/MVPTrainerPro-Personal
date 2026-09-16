@@ -105,7 +105,7 @@ export type MvpStudioState = {
   broadcastImpactEnabled?: boolean;
   broadcastClarityEnabled?: boolean;
   broadcastSpatialEnabled?: boolean;
-  broadcastSpaceModeCode?: 0 | 1 | 2;
+  broadcastSpaceModeCode?: 0 | 1 | 2 | 3;
   broadcastPersonalEnabled?: boolean;
   broadcastPersonalBass?: number;
   broadcastPersonalPresence?: number;
@@ -144,7 +144,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string, unknown> | null;
 };
 
-const ASSET_VERSION = "10.0.10-broadcast-v5-7-rollout-compat";
+const ASSET_VERSION = "10.0.11-broadcast-v5-8-pro-studio-separation";
 const READY_TIMEOUT_MS = 7000;
 
 const EMPTY_TELEMETRY: MvpStudioTelemetry = {
@@ -204,8 +204,8 @@ const lastErrorByNode = new WeakMap<AudioWorkletNode, string | null>();
 const lastRequestedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const lastAppliedAtByNode = new WeakMap<AudioWorkletNode, number>();
 const loadedWorkletContexts = new WeakSet<AudioContext>();
-const EXPECTED_ENGINE_BUILD_ID = 5700;
-const SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700]);
+const EXPECTED_ENGINE_BUILD_ID = 5800;
+const SUPPORTED_ENGINE_BUILD_IDS = new Set([5600, 5700, 5800]);
 const proofAckByNode = new WeakMap<AudioWorkletNode, { requestId: number; enabled: boolean }>();
 let nextProofRequest = 0;
 
@@ -316,11 +316,13 @@ function publicState(state: MvpStudioState) {
     clarityEnabled: Boolean(state.broadcastClarityEnabled),
     spatialEnabled: Boolean(state.broadcastSpatialEnabled),
     spaceMode:
-      state.broadcastSpaceModeCode === 2
-        ? "arena"
-        : state.broadcastSpaceModeCode === 1
-          ? "live"
-          : "studio",
+      state.broadcastSpaceModeCode === 3
+        ? "stage3d"
+        : state.broadcastSpaceModeCode === 2
+          ? "arena"
+          : state.broadcastSpaceModeCode === 1
+            ? "live"
+            : "studio",
     personalEnabled: Boolean(state.broadcastPersonalEnabled),
     personalBass: clamp(state.broadcastPersonalBass, -1, 1, 0),
     personalPresence: clamp(state.broadcastPersonalPresence, -1, 1, 0),

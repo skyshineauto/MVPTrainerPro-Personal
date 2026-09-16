@@ -13,8 +13,8 @@ const workflow = read(".github/workflows/mvp-hd-v2-wasm.yml");
 const routeTest = read("scripts/test-v54-worklet-route.mjs");
 const browserEntry = read("scripts/test-mvp-hd-v2-browser.mjs");
 
-assert.match(cpp,/V5\.7 PERCEPTUAL AUDIBILITY/);
-assert.match(cpp, /mvp_v2_build_id\(\)\{return 5700u;\}/);
+assert.match(cpp,/V5\.8 PRO STUDIO SEPARATION/);
+assert.match(cpp, /mvp_v2_build_id\(\)\{return 5800u;\}/);
 assert.match(cpp, /mvp_v2_get_mode/);
 assert.match(cpp, /mvp_v2_get_intensity/);
 assert.match(cpp, /mvp_v2_get_bass_enabled/);
@@ -45,9 +45,9 @@ assert.match(buildScript, /--export=mvp_v2_build_id/);
 assert.match(buildScript, /--export=mvp_v2_get_mode/);
 assert.match(buildScript, /--export=mvp_v2_get_eq_band/);
 
-assert.match(worklet, /broadcast-v5-7-perceptual-audibility/);
-assert.match(worklet,/MVP_V57_ENGINE_BUILD_ID = 5700/);
-assert.match(worklet,/MVP_V57_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700\]\)/);
+assert.match(worklet, /broadcast-v5-8-pro-studio-separation/);
+assert.match(worklet,/MVP_V58_ENGINE_BUILD_ID = 5800/);
+assert.match(worklet,/MVP_V58_SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700, 5800\]\)/);
 assert.match(worklet, /nativeStateMismatch/);
 assert.match(worklet, /mvp_v2_get_mode/);
 assert.match(worklet, /mvp_v2_get_eq_band/);
@@ -58,10 +58,10 @@ assert.match(worklet, /requestId/);
 
 assert.match(
   bridge,
-  /10\.0\.10-broadcast-v5-7-rollout-compat/,
+  /10\.0\.11-broadcast-v5-8-pro-studio-separation/,
 );
-assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5700/);
-assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700\]\)/);
+assert.match(bridge,/EXPECTED_ENGINE_BUILD_ID = 5800/);
+assert.match(bridge,/SUPPORTED_ENGINE_BUILD_IDS = new Set\(\[5600, 5700, 5800\]\)/);
 assert.match(bridge, /setMvpStudioProofMute/);
 assert.match(bridge, /PROOF_MUTE_APPLIED/);
 assert.match(bridge, /proofAckByNode/);
@@ -275,12 +275,12 @@ console.log(
 );
 
 
-/* V5.7 perceptual DSP guards */
-assert.match(cpp,/V5\.7 PERCEPTUAL AUDIBILITY/);
+/* V5.8 pro studio DSP guards */
+assert.match(cpp,/V5\.8 PRO STUDIO SEPARATION/);
 assert.match(cpp,/applyEmergencyPeakGuard/);
 assert.match(cpp,/base>=cap\)\s*return \.35f/);
 assert.match(cpp,/gSpaceMode==2/);
-assert.match(cpp,/1\.78f\+\.45f\*gIntensity/);
-assert.match(cpp,/1\.66f\+\.36f\*gIntensity/);
-assert.match(cpp,/2\.40f\+4\.80f\*gIntensity/);
-console.log("V5.7 perceptual DSP guards: PASS");
+assert.match(cpp,/2\.20f\+\.65f\*gIntensity/);
+assert.match(cpp,/1\.55f\+\.35f\*gIntensity/);
+assert.match(cpp,/3\.00f\+5\.20f\*gIntensity/);
+console.log("V5.8 pro studio DSP guards: PASS");

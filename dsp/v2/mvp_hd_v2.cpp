@@ -1,4 +1,4 @@
-// MVP Trainer Pro Broadcast Engine V5.7 PERCEPTUAL AUDIBILITY
+// MVP Trainer Pro Broadcast Engine V5.8 PRO STUDIO SEPARATION
 // One clean route. Visible controls must change the sound in the intended direction.
 // ABI remains mvp_v2_* for the production AudioWorklet bridge.
 
@@ -62,7 +62,7 @@ float gIntensityTarget=.72f,gIntensity=.72f,gBassCharacterTarget=.5f,gBassCharac
 float gMasterSourceGainDb=0,gMasterHighpassHz=18,gMasterLowMidDb=0,gMasterPresenceDb=0,gMasterHarshnessDb=0,gMasterBalanceDb=0,gMasterWidthScale=1,gEqGainDb[kEqBands]={};
 Biquad gEqL[kEqBands],gEqR[kEqBands],gModeBassL,gModeBassR,gModeBodyL,gModeBodyR,gModeMudL,gModeMudR,gModePresenceL,gModePresenceR,gModeAirL,gModeAirR;
 Biquad gBassShelfL,gBassShelfR,gBassPunchL,gBassPunchR,gImpactToneL,gImpactToneR,gClarityPresenceL,gClarityPresenceR,gClarityAirL,gClarityAirR;
-Biquad gSpatialDecorHp,gPersonalBassL,gPersonalBassR,gPersonalPresenceL,gPersonalPresenceR,gPersonalBrightL,gPersonalBrightR,gMasterHpL,gMasterHpR,gMasterLowMidL,gMasterLowMidR,gMasterPresenceL,gMasterPresenceR,gMasterHarshL,gMasterHarshR;
+Biquad gSpatialDecorHp,gSpatialSideHp,gPersonalBassL,gPersonalBassR,gPersonalPresenceL,gPersonalPresenceR,gPersonalBrightL,gPersonalBrightR,gMasterHpL,gMasterHpR,gMasterLowMidL,gMasterLowMidR,gMasterPresenceL,gMasterPresenceR,gMasterHarshL,gMasterHarshR;
 float gSpatialDelay[4096]={};int gSpatialIndex=0;
 float gProgramPeak=0,gProgramAvg=0,gProgramDensity=0;unsigned int gProgramSamples=0;
 float gPeakAttack=0,gPeakRelease=0,gAvgAttack=0,gAvgRelease=0,gCompEnv=0,gCompGain=1,gCompAttack=0,gCompRelease=0;
@@ -73,131 +73,91 @@ float gMeterTruePeak=0,gMeterLimiterGrDb=0,gMeterImpactBoostDb=0,gMeterBassActiv
 
 void configureEqBand(int i){if(i<0||i>=kEqBands)return;gEqL[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);gEqR[i].peaking(gSampleRate,kEqFrequencies[i],4.3184730469,gEqGainDb[i]);}
 void configureModeTone(){
-  float i=clampf(gIntensityTarget,0,1);
-  float bass=0,body=0,mud=0,pres=0,air=0;
+  const float i=clampf(gIntensityTarget,0,1);
+
+  float bass=0;
+  float body=0;
+  float mud=0;
+  float pres=0;
+  float air=0;
 
   if(gMode==1){
-    // Adaptive is deliberately obvious, but still balanced.
-    bass=.95f+1.55f*i;
-    body=.55f+1.05f*i;
-    mud=-.35f-.45f*i;
-    pres=.90f+1.80f*i;
-    air=.55f+1.25f*i;
+    // ADAPTIVE:
+    // polished mastering, larger than Pure but still clean.
+    bass=1.10f+1.60f*i;
+    body=.55f+1.00f*i;
+    mud=-.45f-.50f*i;
+    pres=1.00f+1.80f*i;
+    air=.70f+1.50f*i;
   }else if(gMode==2){
-    // Power has a clearly different tonal signature.
-    bass=2.00f+3.20f*i;
-    body=1.20f+2.20f*i;
-    mud=-.90f-1.30f*i;
-    pres=2.00f+3.40f*i;
-    air=1.10f+2.50f*i;
+    // POWER:
+    // intentionally a different master, not simply "more Adaptive".
+    bass=2.40f+3.40f*i;
+    body=1.25f+2.15f*i;
+    mud=-1.00f-1.35f*i;
+    pres=2.20f+3.40f*i;
+    air=1.40f+2.60f*i;
+  }
+
+  // Explicit controls own their frequency regions.
+  // Back the mode voicing away when the user deliberately selects another
+  // processor so multiple boosts do not fight each other.
+  if(gBassEnabled){
+    bass*=.58f;
+    body*=.78f;
+  }
+
+  if(gClarityEnabled){
+    pres*=.60f;
+    air*=.64f;
+  }
+
+  if(gPersonalEnabled){
+    const float pb=maxf(0,gPersonalBass);
+    const float pp=maxf(0,gPersonalPresence);
+    const float br=maxf(0,gPersonalBrightness);
+
+    bass*=1-.38f*pb;
+    pres*=1-.42f*pp;
+    air*=1-.42f*br;
   }
 
   if(gProfile==1){
-    bass*=1.05f;
-    pres*=1.06f;
-    air*=1.10f;
+    // Headphones: full-range, open and detailed.
+    bass*=1.04f;
+    pres*=1.08f;
+    air*=1.12f;
   }else if(gProfile==2){
-    bass*=1.10f;
-    body*=1.08f;
-    pres*=1.03f;
+    // Bluetooth: retain authority without excessive upper-bass buildup.
+    bass*=1.08f;
+    body*=1.04f;
+    pres*=1.04f;
   }else{
-    bass*=.96f;
-    air*=.94f;
+    // Car / Hi-Fi.
+    bass*=.98f;
+    air*=.97f;
   }
 
-  gModeBassL.lowshelf(gSampleRate,78,bass);
-  gModeBassR.lowshelf(gSampleRate,78,bass);
+  gModeBassL.lowshelf(gSampleRate,76,bass);
+  gModeBassR.lowshelf(gSampleRate,76,bass);
 
-  gModeBodyL.peaking(gSampleRate,155,.75,body);
-  gModeBodyR.peaking(gSampleRate,155,.75,body);
+  gModeBodyL.peaking(gSampleRate,150,.74,body);
+  gModeBodyR.peaking(gSampleRate,150,.74,body);
 
-  gModeMudL.peaking(gSampleRate,520,.72,mud);
-  gModeMudR.peaking(gSampleRate,520,.72,mud);
+  gModeMudL.peaking(gSampleRate,500,.72,mud);
+  gModeMudR.peaking(gSampleRate,500,.72,mud);
 
-  gModePresenceL.peaking(gSampleRate,2800,.85,pres);
-  gModePresenceR.peaking(gSampleRate,2800,.85,pres);
+  gModePresenceL.peaking(gSampleRate,2850,.84,pres);
+  gModePresenceR.peaking(gSampleRate,2850,.84,pres);
 
   gModeAirL.highshelf(gSampleRate,8500,air);
   gModeAirR.highshelf(gSampleRate,8500,air);
 }
 void configureBass(){
-  float c=
-    clampf(
-      gBassCharacterTarget,
-      0,
-      1
-    );
+  const float c=clampf(gBassCharacterTarget,0,1);
+  const float i=clampf(gIntensityTarget,0,1);
 
-  float i=
-    clampf(
-      gIntensityTarget,
-      0,
-      1
-    );
-
-  float profile=
-    gProfile==1
-      ? 1.12f
-      : (
-          gProfile==2
-            ? 1.08f
-            : 1.00f
-        );
-
-  float strength=
-    .70f+.55f*i;
-
-  float deepDb=
-    (2.60f+4.60f*c)*
-    strength*
-    profile;
-
-  float punchDb=
-    (6.00f-3.80f*c)*
-    strength*
-    profile;
-
-  float deepHz=
-    60-15*c;
-
-  float punchHz=
-    135-32*c;
-
-  gBassShelfL.lowshelf(
-    gSampleRate,
-    deepHz,
-    deepDb
-  );
-
-  gBassShelfR.lowshelf(
-    gSampleRate,
-    deepHz,
-    deepDb
-  );
-
-  gBassPunchL.peaking(
-    gSampleRate,
-    punchHz,
-    .82,
-    punchDb
-  );
-
-  gBassPunchR.peaking(
-    gSampleRate,
-    punchHz,
-    .82,
-    punchDb
-  );
-}
-void configureImpact(){
-  float i=
-    clampf(
-      gIntensityTarget,
-      0,
-      1
-    );
-
-  float profile=
+  const float profile=
     gProfile==1
       ? 1.10f
       : (
@@ -206,147 +166,107 @@ void configureImpact(){
             : 1.00f
         );
 
-  float db=
-    (2.00f+2.80f*i)*
-    profile;
+  const float strength=.82f+.36f*i;
 
-  gImpactToneL.peaking(
-    gSampleRate,
-    1950,
-    .92,
-    db
-  );
+  // Tight -> more punch around 125 Hz.
+  // Deep  -> more true sub / low-bass authority.
+  float deepDb=(3.00f+4.90f*c)*strength*profile;
+  float punchDb=(6.40f-3.70f*c)*strength*profile;
 
-  gImpactToneR.peaking(
-    gSampleRate,
-    1950,
-    .92,
-    db
-  );
+  deepDb=clampf(deepDb,0,9.5f);
+  punchDb=clampf(punchDb,0,7.5f);
+
+  const float deepHz=60-16*c;
+  const float punchHz=136-34*c;
+
+  gBassShelfL.lowshelf(gSampleRate,deepHz,deepDb);
+  gBassShelfR.lowshelf(gSampleRate,deepHz,deepDb);
+
+  gBassPunchL.peaking(gSampleRate,punchHz,.80,punchDb);
+  gBassPunchR.peaking(gSampleRate,punchHz,.80,punchDb);
 }
-void configureClarity(){
-  float i=
-    clampf(
-      gIntensityTarget,
-      0,
-      1
-    );
+void configureImpact(){
+  const float i=clampf(gIntensityTarget,0,1);
 
-  float p=
+  const float profile=
     gProfile==1
-      ? 1.12f
+      ? 1.08f
       : (
           gProfile==2
-            ? 1.06f
+            ? 1.05f
             : 1.00f
         );
 
-  float presence=
-    (2.20f+3.20f*i)*p;
+  const float db=(2.40f+3.60f*i)*profile;
 
-  float air=
-    (1.80f+3.30f*i)*p;
+  gImpactToneL.peaking(gSampleRate,2050,.92,db);
+  gImpactToneR.peaking(gSampleRate,2050,.92,db);
+}
+void configureClarity(){
+  const float i=clampf(gIntensityTarget,0,1);
 
-  gClarityPresenceL.peaking(
-    gSampleRate,
-    3400,
-    .82,
-    presence
-  );
+  const float profile=
+    gProfile==1
+      ? 1.10f
+      : (
+          gProfile==2
+            ? 1.05f
+            : 1.00f
+        );
 
-  gClarityPresenceR.peaking(
-    gSampleRate,
-    3400,
-    .82,
-    presence
-  );
+  const float presence=(2.60f+3.20f*i)*profile;
+  const float air=(2.20f+3.30f*i)*profile;
 
-  gClarityAirL.highshelf(
-    gSampleRate,
-    9000,
-    air
-  );
+  gClarityPresenceL.peaking(gSampleRate,3350,.84,presence);
+  gClarityPresenceR.peaking(gSampleRate,3350,.84,presence);
 
-  gClarityAirR.highshelf(
-    gSampleRate,
-    9000,
-    air
-  );
+  gClarityAirL.highshelf(gSampleRate,9200,air);
+  gClarityAirR.highshelf(gSampleRate,9200,air);
 }
 void configurePersonal(){
-  float pb=
-    gPersonalBass*
-    (
-      gProfile==1
-        ? 8.2f
-        : (
-            gProfile==2
-              ? 7.8f
-              : 7.2f
-          )
-    );
+  const float bassRange=
+    gProfile==1
+      ? 9.0f
+      : (
+          gProfile==2
+            ? 8.4f
+            : 8.0f
+        );
 
-  float pp=
-    gPersonalPresence*
-    (
-      gProfile==1
-        ? 7.6f
-        : 7.2f
-    );
+  const float presenceRange=
+    gProfile==1
+      ? 8.2f
+      : (
+          gProfile==2
+            ? 7.8f
+            : 7.6f
+        );
 
-  float br=
-    gPersonalBrightness*
-    (
-      gProfile==1
-        ? 8.0f
-        : (
-            gProfile==2
-              ? 7.5f
-              : 7.0f
-          )
-    );
+  const float brightRange=
+    gProfile==1
+      ? 8.8f
+      : (
+          gProfile==2
+            ? 8.0f
+            : 7.8f
+        );
 
-  gPersonalBassL.lowshelf(
-    gSampleRate,
-    95,
-    pb
-  );
+  const float pb=gPersonalBass*bassRange;
+  const float pp=gPersonalPresence*presenceRange;
+  const float br=gPersonalBrightness*brightRange;
 
-  gPersonalBassR.lowshelf(
-    gSampleRate,
-    95,
-    pb
-  );
+  gPersonalBassL.lowshelf(gSampleRate,92,pb);
+  gPersonalBassR.lowshelf(gSampleRate,92,pb);
 
-  gPersonalPresenceL.peaking(
-    gSampleRate,
-    3100,
-    .78,
-    pp
-  );
+  gPersonalPresenceL.peaking(gSampleRate,3050,.78,pp);
+  gPersonalPresenceR.peaking(gSampleRate,3050,.78,pp);
 
-  gPersonalPresenceR.peaking(
-    gSampleRate,
-    3100,
-    .78,
-    pp
-  );
-
-  gPersonalBrightL.highshelf(
-    gSampleRate,
-    8500,
-    br
-  );
-
-  gPersonalBrightR.highshelf(
-    gSampleRate,
-    8500,
-    br
-  );
+  gPersonalBrightL.highshelf(gSampleRate,8600,br);
+  gPersonalBrightR.highshelf(gSampleRate,8600,br);
 }
 void configureMaster(){gMasterHpL.highpass(gSampleRate,gMasterHighpassHz);gMasterHpR.highpass(gSampleRate,gMasterHighpassHz);gMasterLowMidL.peaking(gSampleRate,260,.72,gMasterLowMidDb);gMasterLowMidR.peaking(gSampleRate,260,.72,gMasterLowMidDb);gMasterPresenceL.peaking(gSampleRate,3000,.85,gMasterPresenceDb);gMasterPresenceR.peaking(gSampleRate,3000,.85,gMasterPresenceDb);gMasterHarshL.peaking(gSampleRate,6200,1,gMasterHarshnessDb);gMasterHarshR.peaking(gSampleRate,6200,1,gMasterHarshnessDb);}
 void resetMeters(){gMeterTruePeak=0;gMeterLimiterGrDb=0;gMeterImpactBoostDb=0;gMeterBassActivityDb=0;gMeterClarityActivityDb=0;gMeterWidthPercent=100;gMeterClipCount=0;gMeterNanCount=0;gMeterTpL.reset();gMeterTpR.reset();}
-void resetState(){for(int i=0;i<kEqBands;++i){gEqL[i].reset();gEqR[i].reset();}Biquad* fs[]={&gModeBassL,&gModeBassR,&gModeBodyL,&gModeBodyR,&gModeMudL,&gModeMudR,&gModePresenceL,&gModePresenceR,&gModeAirL,&gModeAirR,&gBassShelfL,&gBassShelfR,&gBassPunchL,&gBassPunchR,&gImpactToneL,&gImpactToneR,&gClarityPresenceL,&gClarityPresenceR,&gClarityAirL,&gClarityAirR,&gSpatialDecorHp,&gPersonalBassL,&gPersonalBassR,&gPersonalPresenceL,&gPersonalPresenceR,&gPersonalBrightL,&gPersonalBrightR,&gMasterHpL,&gMasterHpR,&gMasterLowMidL,&gMasterLowMidR,&gMasterPresenceL,&gMasterPresenceR,&gMasterHarshL,&gMasterHarshR};for(unsigned int i=0;i<sizeof(fs)/sizeof(fs[0]);++i)fs[i]->reset();for(int i=0;i<kLookaheadMax;++i){gLookL[i]=gLookR[i]=gLookPeak[i]=0;}for(int i=0;i<4096;++i)gSpatialDelay[i]=0;gSpatialIndex=0;gLookIndex=0;gPureFlushRemaining=0;gLimiterGain=1;gLimiterTpL.reset();gLimiterTpR.reset();gProgramPeak=gProgramAvg=gProgramDensity=0;gProgramSamples=0;gCompEnv=0;gCompGain=1;gImpactFast=gImpactSlow=0;gIntensity=gIntensityTarget;gBassCharacter=gBassCharacterTarget;resetMeters();}
+void resetState(){for(int i=0;i<kEqBands;++i){gEqL[i].reset();gEqR[i].reset();}Biquad* fs[]={&gModeBassL,&gModeBassR,&gModeBodyL,&gModeBodyR,&gModeMudL,&gModeMudR,&gModePresenceL,&gModePresenceR,&gModeAirL,&gModeAirR,&gBassShelfL,&gBassShelfR,&gBassPunchL,&gBassPunchR,&gImpactToneL,&gImpactToneR,&gClarityPresenceL,&gClarityPresenceR,&gClarityAirL,&gClarityAirR,&gSpatialDecorHp,&gSpatialSideHp,&gPersonalBassL,&gPersonalBassR,&gPersonalPresenceL,&gPersonalPresenceR,&gPersonalBrightL,&gPersonalBrightR,&gMasterHpL,&gMasterHpR,&gMasterLowMidL,&gMasterLowMidR,&gMasterPresenceL,&gMasterPresenceR,&gMasterHarshL,&gMasterHarshR};for(unsigned int i=0;i<sizeof(fs)/sizeof(fs[0]);++i)fs[i]->reset();for(int i=0;i<kLookaheadMax;++i){gLookL[i]=gLookR[i]=gLookPeak[i]=0;}for(int i=0;i<4096;++i)gSpatialDelay[i]=0;gSpatialIndex=0;gLookIndex=0;gPureFlushRemaining=0;gLimiterGain=1;gLimiterTpL.reset();gLimiterTpR.reset();gProgramPeak=gProgramAvg=gProgramDensity=0;gProgramSamples=0;gCompEnv=0;gCompGain=1;gImpactFast=gImpactSlow=0;gIntensity=gIntensityTarget;gBassCharacter=gBassCharacterTarget;resetMeters();}
 inline void updateAnalysis(float l,float r){float d=maxf(absf(l),absf(r)),pc=d>gProgramPeak?gPeakAttack:gPeakRelease;gProgramPeak+=(d-gProgramPeak)*pc;float ac=d>gProgramAvg?gAvgAttack:gAvgRelease;gProgramAvg+=(d-gProgramAvg)*ac;gProgramDensity=clampf(gProgramAvg/(gProgramPeak>1e-6f?gProgramPeak:1e-6f),0,1);if(gProgramSamples<0x7fffffffu)++gProgramSamples;}
 inline float boundedDeltaScale(
   float l,
@@ -387,27 +307,27 @@ inline void applyMaster(float &l,float &r){float pl=gMasterHarshL.process(gMaste
 inline void applyModeCore(float &l,float &r){
   if(gMode==0)return;
 
-  bool power=gMode==2;
-  float i=gIntensity;
+  const bool power=gMode==2;
+  const float i=gIntensity;
 
-  float det=maxf(absf(l),absf(r));
+  const float det=maxf(absf(l),absf(r));
 
-  float ec=
+  const float ec=
     det>gCompEnv
       ? gCompAttack
       : gCompRelease;
 
   gCompEnv+=(det-gCompEnv)*ec;
 
-  float threshold=
+  const float threshold=
     power
-      ? (.40f-.08f*i)
-      : (.62f-.08f*i);
+      ? (.38f-.07f*i)
+      : (.64f-.08f*i);
 
-  float ratio=
+  const float ratio=
     power
-      ? (3.20f+1.80f*i)
-      : (1.45f+.55f*i);
+      ? (3.40f+2.00f*i)
+      : (1.55f+.75f*i);
 
   float target=1;
 
@@ -415,8 +335,7 @@ inline void applyModeCore(float &l,float &r){
     gCompEnv>threshold &&
     gCompEnv>1e-6f
   ){
-    float over=
-      gCompEnv/threshold;
+    const float over=gCompEnv/threshold;
 
     target=
       static_cast<float>(
@@ -427,46 +346,45 @@ inline void applyModeCore(float &l,float &r){
       );
   }
 
-  float gc=
+  const float gc=
     target<gCompGain
       ? gCompAttack
       : gCompRelease;
 
-  gCompGain+=
-    (target-gCompGain)*gc;
+  gCompGain+=(target-gCompGain)*gc;
 
-  float blend=
+  const float blend=
     power
-      ? (.78f+.10f*i)
-      : (.38f+.10f*i);
+      ? (.80f+.10f*i)
+      : (.38f+.12f*i);
 
-  float comp=
+  const float comp=
     (1-blend)+
     blend*gCompGain;
 
-  // More density without simply smashing peaks into the limiter.
+  // Perceived loudness ladder:
+  // Pure     = reference
+  // Adaptive = approximately +1.5..3 dB mastering density
+  // Power    = maximum clean density / roughly +5..7 dB drive where source permits
   float makeupDb=
     power
-      ? (4.20f+2.30f*i)
-      : (1.20f+1.20f*i);
+      ? (5.00f+2.00f*i)
+      : (1.35f+1.55f*i);
 
-  float densityGuard=
+  const float densityGuard=
     clampf(
-      (gProgramDensity-.76f)/.18f,
+      (gProgramDensity-.78f)/.16f,
       0,
       1
     );
 
   if(power){
-    makeupDb-=
-      densityGuard*
-      (.45f+.45f*i);
+    makeupDb-=densityGuard*(.45f+.35f*i);
   }else{
-    makeupDb-=
-      densityGuard*.18f;
+    makeupDb-=densityGuard*.16f;
   }
 
-  float gain=
+  const float gain=
     comp*
     dbToGain(makeupDb);
 
@@ -495,44 +413,91 @@ inline void applyModeCore(float &l,float &r){
       )
     );
 }
+inline void applyMixReserve(float &l,float &r){
+  float reserveDb=0;
+
+  if(gBassEnabled)reserveDb+=.55f;
+  if(gImpactEnabled)reserveDb+=.20f;
+  if(gClarityEnabled)reserveDb+=.42f;
+
+  if(gPersonalEnabled){
+    const float personalPositive=
+      maxf(
+        0,
+        maxf(
+          gPersonalBass,
+          maxf(
+            gPersonalPresence,
+            gPersonalBrightness
+          )
+        )
+      );
+
+    reserveDb+=.30f+1.30f*personalPositive;
+  }
+
+  if(gEqEnabled){
+    float eqBoost=0;
+
+    for(int i=0;i<kEqBands;++i){
+      eqBoost=maxf(eqBoost,gEqGainDb[i]);
+    }
+
+    reserveDb+=clampf(eqBoost*.12f,0,1.35f);
+  }
+
+  if(
+    gMode==2 &&
+    (
+      gBassEnabled ||
+      gClarityEnabled ||
+      gPersonalEnabled
+    )
+  ){
+    reserveDb+=.35f;
+  }
+
+  reserveDb=clampf(reserveDb,0,3.20f);
+
+  if(reserveDb>0){
+    const float g=dbToGain(-reserveDb);
+    l*=g;
+    r*=g;
+  }
+}
 inline void applyBass(float &l,float &r){
-  float bl=
+  const float bl=
     gBassPunchL.process(
       gBassShelfL.process(l)
     );
 
-  float br=
+  const float br=
     gBassPunchR.process(
       gBassShelfR.process(r)
     );
 
-  if(!gBassEnabled)
-    return;
+  if(!gBassEnabled)return;
 
-  float dl=bl-l;
-  float dr=br-r;
+  const float dl=bl-l;
+  const float dr=br-r;
 
-  float s=
-    boundedDeltaScale(
-      l,r,
-      dl,dr,
-      1.38f
-    );
-
-  float src=
+  // Explicit Bass must remain unmistakable even on hot mastered material.
+  const float s=
     maxf(
-      absf(l),
-      absf(r)
+      .70f,
+      boundedDeltaScale(
+        l,r,
+        dl,dr,
+        1.55f
+      )
     );
+
+  const float src=maxf(absf(l),absf(r));
 
   l+=dl*s;
   r+=dr*s;
 
-  float out=
-    maxf(
-      absf(l),
-      absf(r)
-    );
+  const float out=maxf(absf(l),absf(r));
 
   if(src>1e-5f){
     gMeterBassActivityDb=
@@ -543,40 +508,30 @@ inline void applyBass(float &l,float &r){
   }
 }
 inline void applyImpact(float &l,float &r){
-  float toneL=
-    gImpactToneL.process(l);
+  const float toneL=gImpactToneL.process(l);
+  const float toneR=gImpactToneR.process(r);
 
-  float toneR=
-    gImpactToneR.process(r);
+  const float d=maxf(absf(l),absf(r));
 
-  float d=
-    maxf(
-      absf(l),
-      absf(r)
-    );
-
-  float fc=
+  const float fc=
     d>gImpactFast
       ? gImpactFastAttack
       : gImpactFastRelease;
 
-  gImpactFast+=
-    (d-gImpactFast)*fc;
+  gImpactFast+=(d-gImpactFast)*fc;
 
-  float sc=
+  const float sc=
     d>gImpactSlow
       ? gImpactSlowAttack
       : gImpactSlowRelease;
 
-  gImpactSlow+=
-    (d-gImpactSlow)*sc;
+  gImpactSlow+=(d-gImpactSlow)*sc;
 
-  if(!gImpactEnabled)
-    return;
+  if(!gImpactEnabled)return;
 
-  // Keep the stable transient detector that avoided steady-state
-  // distortion, but make detected attacks substantially stronger.
-  float transient=
+  // Transient-only attack enhancement.
+  // Sustained program material is deliberately left much closer to unity.
+  const float transient=
     clampf(
       (
         gImpactFast-
@@ -589,42 +544,39 @@ inline void applyImpact(float &l,float &r){
       1
     );
 
-  float boostDb=
+  const float boostDb=
     transient*
-    (2.40f+4.80f*gIntensity);
+    (3.00f+5.20f*gIntensity);
 
-  float dynamic=
-    dbToGain(boostDb);
+  const float dynamic=dbToGain(boostDb);
 
-  float mix=
-    .76f+
-    .18f*gIntensity;
+  const float mix=.78f+.18f*gIntensity;
 
-  float candL=
+  const float candL=
     (
       (1-mix)*l+
       mix*toneL
     )*
     dynamic;
 
-  float candR=
+  const float candR=
     (
       (1-mix)*r+
       mix*toneR
     )*
     dynamic;
 
-  float dl=
-    candL-l;
+  const float dl=candL-l;
+  const float dr=candR-r;
 
-  float dr=
-    candR-r;
-
-  float s=
-    boundedDeltaScale(
-      l,r,
-      dl,dr,
-      1.30f
+  const float s=
+    maxf(
+      .65f,
+      boundedDeltaScale(
+        l,r,
+        dl,dr,
+        1.48f
+      )
     );
 
   l+=dl*s;
@@ -637,43 +589,37 @@ inline void applyImpact(float &l,float &r){
     );
 }
 inline void applyClarity(float &l,float &r){
-  float cl=
+  const float cl=
     gClarityAirL.process(
       gClarityPresenceL.process(l)
     );
 
-  float cr=
+  const float cr=
     gClarityAirR.process(
       gClarityPresenceR.process(r)
     );
 
-  if(!gClarityEnabled)
-    return;
+  if(!gClarityEnabled)return;
 
-  float dl=cl-l;
-  float dr=cr-r;
+  const float dl=cl-l;
+  const float dr=cr-r;
 
-  float s=
-    boundedDeltaScale(
-      l,r,
-      dl,dr,
-      1.34f
-    );
-
-  float src=
+  const float s=
     maxf(
-      absf(l),
-      absf(r)
+      .72f,
+      boundedDeltaScale(
+        l,r,
+        dl,dr,
+        1.48f
+      )
     );
+
+  const float src=maxf(absf(l),absf(r));
 
   l+=dl*s;
   r+=dr*s;
 
-  float out=
-    maxf(
-      absf(l),
-      absf(r)
-    );
+  const float out=maxf(absf(l),absf(r));
 
   if(src>1e-5f){
     gMeterClarityActivityDb=
@@ -684,117 +630,173 @@ inline void applyClarity(float &l,float &r){
   }
 }
 inline void applySpatial(float &l,float &r){
-  float mid=.5f*(l+r);
-  float side=.5f*(l-r);
-
-  float delaySec=.007f;
-  float width=1;
-  float dm=0;
-
-  if(gProfile==1){
-    // HEADPHONES
-    if(gSpaceMode==2){
-      delaySec=.0185f;
-      width=1.78f+.45f*gIntensity;
-      dm=.110f+.100f*gIntensity;
-    }else if(gSpaceMode==1){
-      delaySec=.0115f;
-      width=1.55f+.38f*gIntensity;
-      dm=.070f+.085f*gIntensity;
-    }else{
-      delaySec=.0065f;
-      width=1.35f+.30f*gIntensity;
-      dm=.032f+.050f*gIntensity;
-    }
-  }else if(gProfile==2){
-    // BLUETOOTH SPEAKER
-    if(gSpaceMode==2){
-      delaySec=.0145f;
-      width=1.66f+.36f*gIntensity;
-      dm=.080f+.080f*gIntensity;
-    }else if(gSpaceMode==1){
-      delaySec=.0095f;
-      width=1.48f+.32f*gIntensity;
-      dm=.050f+.065f*gIntensity;
-    }else{
-      delaySec=.0055f;
-      width=1.30f+.24f*gIntensity;
-      dm=.025f+.035f*gIntensity;
-    }
-  }else{
-    // CAR / HI-FI
-    if(gSpaceMode==2){
-      delaySec=.0170f;
-      width=1.58f+.42f*gIntensity;
-      dm=.095f+.085f*gIntensity;
-    }else if(gSpaceMode==1){
-      delaySec=.0120f;
-      width=1.40f+.32f*gIntensity;
-      dm=.060f+.065f*gIntensity;
-    }else{
-      delaySec=.0070f;
-      width=1.22f+.22f*gIntensity;
-      dm=.030f+.035f*gIntensity;
-    }
-  }
-
-  int ds=
-    static_cast<int>(
-      gSampleRate*
-      delaySec
-    );
-
-  if(ds<1)ds=1;
-  if(ds>4095)ds=4095;
-
-  int ri=
-    gSpatialIndex-ds;
-
-  if(ri<0)
-    ri+=4096;
-
-  float delayed=
-    gSpatialDelay[ri];
-
-  gSpatialDelay[
-    gSpatialIndex
-  ]=mid;
-
-  gSpatialIndex=
-    (gSpatialIndex+1)&4095;
-
-  float decor=
-    gSpatialDecorHp.process(
-      delayed
-    );
+  const float mid=.5f*(l+r);
+  const float side=.5f*(l-r);
 
   if(!gSpatialEnabled){
+    // Keep filter/delay state alive without modifying the signal.
+    (void)gSpatialSideHp.process(side);
+    gSpatialDelay[gSpatialIndex]=mid;
+    gSpatialIndex=(gSpatialIndex+1)&4095;
     gMeterWidthPercent=100;
     return;
   }
 
-  float sside=
-    side*width+
-    decor*dm;
+  float delayA=.0040f;
+  float delayB=.0090f;
+  float width=1.45f;
+  float decorMix=.030f;
+  float decorSecond=.48f;
+  float lowWidth=1.00f;
 
-  float candL=
-    mid+sside;
+  if(gProfile==1){
+    // HEADPHONES
+    //
+    // 0 WIDE    : front-stage width, minimal synthetic depth
+    // 1 SPATIAL : larger image + clear externalization cue
+    // 2 DEEP    : greater front/back depth
+    // 3 3D      : maximum premium externalized presentation
+    if(gSpaceMode==3){
+      delayA=.0065f;
+      delayB=.0170f;
+      width=2.20f+.65f*gIntensity;
+      decorMix=.170f+.150f*gIntensity;
+      decorSecond=.62f;
+      lowWidth=1.02f;
+    }else if(gSpaceMode==2){
+      delayA=.0105f;
+      delayB=.0210f;
+      width=2.00f+.55f*gIntensity;
+      decorMix=.125f+.125f*gIntensity;
+      decorSecond=.58f;
+      lowWidth=1.015f;
+    }else if(gSpaceMode==1){
+      delayA=.0068f;
+      delayB=.0130f;
+      width=1.82f+.46f*gIntensity;
+      decorMix=.075f+.105f*gIntensity;
+      decorSecond=.54f;
+      lowWidth=1.01f;
+    }else{
+      delayA=.0038f;
+      delayB=.0082f;
+      width=1.65f+.35f*gIntensity;
+      decorMix=.020f+.040f*gIntensity;
+      decorSecond=.45f;
+      lowWidth=1.00f;
+    }
+  }else if(gProfile==2){
+    // BLUETOOTH SPEAKER:
+    // Stage must remain extremely obvious without destroying the center.
+    if(gSpaceMode==2){
+      delayA=.0090f;
+      delayB=.0170f;
+      width=1.95f+.45f*gIntensity;
+      decorMix=.095f+.090f*gIntensity;
+      decorSecond=.56f;
+    }else if(gSpaceMode==1){
+      delayA=.0065f;
+      delayB=.0120f;
+      width=1.75f+.40f*gIntensity;
+      decorMix=.060f+.070f*gIntensity;
+      decorSecond=.52f;
+    }else{
+      delayA=.0045f;
+      delayB=.0090f;
+      width=1.55f+.35f*gIntensity;
+      decorMix=.035f+.045f*gIntensity;
+      decorSecond=.48f;
+    }
+  }else{
+    // CAR / HI-FI:
+    // Large stage while keeping center vocals/kick/bass stable.
+    if(gSpaceMode==2){
+      delayA=.0085f;
+      delayB=.0165f;
+      width=1.80f+.42f*gIntensity;
+      decorMix=.085f+.080f*gIntensity;
+      decorSecond=.56f;
+    }else if(gSpaceMode==1){
+      delayA=.0060f;
+      delayB=.0115f;
+      width=1.62f+.36f*gIntensity;
+      decorMix=.055f+.060f*gIntensity;
+      decorSecond=.52f;
+    }else{
+      delayA=.0040f;
+      delayB=.0080f;
+      width=1.42f+.28f*gIntensity;
+      decorMix=.025f+.040f*gIntensity;
+      decorSecond=.46f;
+    }
+  }
 
-  float candR=
-    mid-sside;
+  int dsA=
+    static_cast<int>(
+      gSampleRate*delayA
+    );
 
-  float dl=
-    candL-l;
+  int dsB=
+    static_cast<int>(
+      gSampleRate*delayB
+    );
 
-  float dr=
-    candR-r;
+  if(dsA<1)dsA=1;
+  if(dsA>4095)dsA=4095;
+
+  if(dsB<1)dsB=1;
+  if(dsB>4095)dsB=4095;
+
+  int riA=gSpatialIndex-dsA;
+  int riB=gSpatialIndex-dsB;
+
+  if(riA<0)riA+=4096;
+  if(riB<0)riB+=4096;
+
+  const float delayedA=gSpatialDelay[riA];
+  const float delayedB=gSpatialDelay[riB];
+
+  gSpatialDelay[gSpatialIndex]=mid;
+  gSpatialIndex=(gSpatialIndex+1)&4095;
+
+  // Frequency-dependent widening:
+  // bass remains nearly centered while localization/ambience bands spread wide.
+  const float sideHi=gSpatialSideHp.process(side);
+  const float sideLo=side-sideHi;
+
+  // Two non-identical early cues create depth without replacing the direct feed.
+  const float decor=
+    gSpatialDecorHp.process(
+      delayedA-
+      delayedB*decorSecond
+    );
+
+  const float sside=
+    sideLo*lowWidth+
+    sideHi*width+
+    decor*decorMix;
+
+  const float candL=mid+sside;
+  const float candR=mid-sside;
+
+  const float dl=candL-l;
+  const float dr=candR-r;
 
   float scale=
     boundedDeltaScale(
       l,r,
       dl,dr,
-      1.30f
+      1.55f
     );
+
+  // Spatial controls are deliberately perceptual, not analyzer-only.
+  if(gProfile==1){
+    scale=maxf(scale,.72f);
+  }else if(gProfile==2){
+    scale=maxf(scale,.66f);
+  }else{
+    scale=maxf(scale,.60f);
+  }
 
   l+=dl*scale;
   r+=dr*scale;
@@ -806,42 +808,26 @@ inline void applySpatial(float &l,float &r){
     scale;
 }
 inline void applyPersonal(float &l,float &r){
-  float pl=
+  const float pl=
     gPersonalBrightL.process(
       gPersonalPresenceL.process(
         gPersonalBassL.process(l)
       )
     );
 
-  float pr=
+  const float pr=
     gPersonalBrightR.process(
       gPersonalPresenceR.process(
         gPersonalBassR.process(r)
       )
     );
 
-  if(!gPersonalEnabled)
-    return;
+  if(!gPersonalEnabled)return;
 
-  float dl=pl-l;
-  float dr=pr-r;
-
-  bool positive=
-    gPersonalBass>0 ||
-    gPersonalPresence>0 ||
-    gPersonalBrightness>0;
-
-  float s=
-    positive
-      ? boundedDeltaScale(
-          l,r,
-          dl,dr,
-          1.36f
-        )
-      : 1;
-
-  l+=dl*s;
-  r+=dr*s;
+  // Personal Sound is the user's final tonal authority.
+  // Do not silently shrink it to 35% on hot masters.
+  l=pl;
+  r=pr;
 }
 
 inline void applyEmergencyPeakGuard(
@@ -871,7 +857,7 @@ inline void meter(float l,float r){float tp=maxf(gMeterTpL.update(l),gMeterTpR.u
 }
 
 extern "C" {
-unsigned int mvp_v2_build_id(){return 5700u;}
+unsigned int mvp_v2_build_id(){return 5800u;}
 int mvp_v2_get_mode(){return gMode;}
 int mvp_v2_get_output_profile(){return gProfile;}
 float mvp_v2_get_intensity(){return gIntensityTarget;}
@@ -888,14 +874,14 @@ float mvp_v2_get_personal_brightness(){return gPersonalBrightness;}
 int mvp_v2_get_eq_enabled(){return gEqEnabled;}
 float mvp_v2_get_eq_band(int i){return i>=0&&i<kEqBands?gEqGainDb[i]:0.0f;}
 unsigned int mvp_v2_input_l(){return reinterpret_cast<unsigned int>(gInputL);}unsigned int mvp_v2_input_r(){return reinterpret_cast<unsigned int>(gInputR);}unsigned int mvp_v2_output_l(){return reinterpret_cast<unsigned int>(gOutputL);}unsigned int mvp_v2_output_r(){return reinterpret_cast<unsigned int>(gOutputR);}int mvp_v2_max_frames(){return kFrames;}
-int mvp_v2_init(float sr){if(sr<32000||sr>96000)return 0;gSampleRate=sr;gLookahead=static_cast<int>(sr*.0025f+.5f);if(gLookahead<64)gLookahead=64;if(gLookahead>kLookaheadMax)gLookahead=kLookaheadMax;gPeakAttack=1-static_cast<float>(exp(-1.0/(sr*.001)));gPeakRelease=1-static_cast<float>(exp(-1.0/(sr*.180)));gAvgAttack=1-static_cast<float>(exp(-1.0/(sr*.025)));gAvgRelease=1-static_cast<float>(exp(-1.0/(sr*.300)));gCompAttack=1-static_cast<float>(exp(-1.0/(sr*.004)));gCompRelease=1-static_cast<float>(exp(-1.0/(sr*.110)));gImpactFastAttack=1-static_cast<float>(exp(-1.0/(sr*.0012)));gImpactFastRelease=1-static_cast<float>(exp(-1.0/(sr*.014)));gImpactSlowAttack=1-static_cast<float>(exp(-1.0/(sr*.030)));gImpactSlowRelease=1-static_cast<float>(exp(-1.0/(sr*.160)));gSmoothIntensity=1-static_cast<float>(exp(-1.0/(sr*.018)));gSmoothBass=1-static_cast<float>(exp(-1.0/(sr*.020)));gLimiterRelease=1-static_cast<float>(exp(-1.0/(sr*.070)));for(int i=0;i<kEqBands;++i)configureEqBand(i);gSpatialDecorHp.highpass(sr,260);configureModeTone();configureBass();configureImpact();configureClarity();configurePersonal();configureMaster();resetState();return 1;}
+int mvp_v2_init(float sr){if(sr<32000||sr>96000)return 0;gSampleRate=sr;gLookahead=static_cast<int>(sr*.0025f+.5f);if(gLookahead<64)gLookahead=64;if(gLookahead>kLookaheadMax)gLookahead=kLookaheadMax;gPeakAttack=1-static_cast<float>(exp(-1.0/(sr*.001)));gPeakRelease=1-static_cast<float>(exp(-1.0/(sr*.180)));gAvgAttack=1-static_cast<float>(exp(-1.0/(sr*.025)));gAvgRelease=1-static_cast<float>(exp(-1.0/(sr*.300)));gCompAttack=1-static_cast<float>(exp(-1.0/(sr*.004)));gCompRelease=1-static_cast<float>(exp(-1.0/(sr*.110)));gImpactFastAttack=1-static_cast<float>(exp(-1.0/(sr*.0012)));gImpactFastRelease=1-static_cast<float>(exp(-1.0/(sr*.014)));gImpactSlowAttack=1-static_cast<float>(exp(-1.0/(sr*.030)));gImpactSlowRelease=1-static_cast<float>(exp(-1.0/(sr*.160)));gSmoothIntensity=1-static_cast<float>(exp(-1.0/(sr*.018)));gSmoothBass=1-static_cast<float>(exp(-1.0/(sr*.020)));gLimiterRelease=1-static_cast<float>(exp(-1.0/(sr*.070)));for(int i=0;i<kEqBands;++i)configureEqBand(i);gSpatialDecorHp.highpass(sr,260);gSpatialSideHp.highpass(sr,135);configureModeTone();configureBass();configureImpact();configureClarity();configurePersonal();configureMaster();resetState();return 1;}
 void mvp_v2_reset(){resetState();}void mvp_v2_reset_meters(){resetMeters();}
 void mvp_v2_set_mode(int m){int next=m<0?0:(m>2?2:m);if(next==gMode)return;int prev=gMode;gMode=next;if(next==0&&prev!=0)gPureFlushRemaining=gLookahead;else if(next!=0)gPureFlushRemaining=0;configureModeTone();}
 void mvp_v2_set_output_profile(int p){gProfile=p<0?0:(p>2?2:p);configureModeTone();configureBass();configureImpact();configureClarity();configurePersonal();}
 void mvp_v2_set_intensity(float x){gIntensityTarget=clampf(x,0,1);configureModeTone();configureBass();configureImpact();configureClarity();}
-void mvp_v2_set_bass_enabled(int e){gBassEnabled=e?1:0;}void mvp_v2_set_bass_character(float x){gBassCharacterTarget=clampf(x,0,1);configureBass();}
-void mvp_v2_set_impact_enabled(int e){gImpactEnabled=e?1:0;}void mvp_v2_set_clarity_enabled(int e){gClarityEnabled=e?1:0;}void mvp_v2_set_spatial_enabled(int e){gSpatialEnabled=e?1:0;}void mvp_v2_set_space_mode(int m){gSpaceMode=m<0?0:(m>2?2:m);}
-void mvp_v2_set_personal_enabled(int e){gPersonalEnabled=e?1:0;}void mvp_v2_set_personal_bass(float x){gPersonalBass=clampf(x,-1,1);configurePersonal();}void mvp_v2_set_personal_presence(float x){gPersonalPresence=clampf(x,-1,1);configurePersonal();}void mvp_v2_set_personal_brightness(float x){gPersonalBrightness=clampf(x,-1,1);configurePersonal();}
+void mvp_v2_set_bass_enabled(int e){gBassEnabled=e?1:0;configureModeTone();}void mvp_v2_set_bass_character(float x){gBassCharacterTarget=clampf(x,0,1);configureBass();}
+void mvp_v2_set_impact_enabled(int e){gImpactEnabled=e?1:0;}void mvp_v2_set_clarity_enabled(int e){gClarityEnabled=e?1:0;configureModeTone();}void mvp_v2_set_spatial_enabled(int e){gSpatialEnabled=e?1:0;}void mvp_v2_set_space_mode(int m){gSpaceMode=m<0?0:(m>3?3:m);}
+void mvp_v2_set_personal_enabled(int e){gPersonalEnabled=e?1:0;configureModeTone();}void mvp_v2_set_personal_bass(float x){gPersonalBass=clampf(x,-1,1);configurePersonal();configureModeTone();}void mvp_v2_set_personal_presence(float x){gPersonalPresence=clampf(x,-1,1);configurePersonal();configureModeTone();}void mvp_v2_set_personal_brightness(float x){gPersonalBrightness=clampf(x,-1,1);configurePersonal();configureModeTone();}
 void mvp_v2_set_master_prep(int e,float sourceGainDb,float highpassHz,float lowMidDb,float presenceDb,float harshnessDb,float balanceDb,float widthScale){gMasterPrepEnabled=e?1:0;gMasterSourceGainDb=clampf(sourceGainDb,0,3);gMasterHighpassHz=clampf(highpassHz,18,40);gMasterLowMidDb=clampf(lowMidDb,-3,2);gMasterPresenceDb=clampf(presenceDb,-2,2);gMasterHarshnessDb=clampf(harshnessDb,-3,1);gMasterBalanceDb=clampf(balanceDb,-1.5f,1.5f);gMasterWidthScale=clampf(widthScale,.75f,1.10f);configureMaster();}
 void mvp_v2_set_eq_enabled(int e){gEqEnabled=e?1:0;}void mvp_v2_set_eq_band(int i,float db){if(i<0||i>=kEqBands)return;gEqGainDb[i]=clampf(db,-12,12);configureEqBand(i);}
 void mvp_v2_set_bypass(int e){if(e)mvp_v2_set_mode(0);else if(gMode==0)mvp_v2_set_mode(1);}void mvp_v2_set_loudness_mode(int m){mvp_v2_set_mode(m>=2?2:(m>=0?1:0));}
@@ -910,21 +896,16 @@ int mvp_v2_process(int frames){
     updateAnalysis(l,r);
 
     gIntensity+=
-      (gIntensityTarget-gIntensity)*gSmoothIntensity;
+      (gIntensityTarget-gIntensity)*
+      gSmoothIntensity;
 
     gBassCharacter+=
-      (gBassCharacterTarget-gBassCharacter)*gSmoothBass;
+      (gBassCharacterTarget-gBassCharacter)*
+      gSmoothBass;
 
     /*
-     * The visible 31-band EQ works in every musical mode.
-     */
-    applyEq(l,r);
-
-    /*
-     * Master Prep belongs to Adaptive / Power.
-     *
-     * In Pure we keep its filter state warm on disposable samples,
-     * but we do not alter the reference signal.
+     * Master Prep and automatic mode character first.
+     * Pure keeps Master Prep filters warm without coloring the reference.
      */
     if(gMode!=0){
       applyMaster(l,r);
@@ -934,28 +915,37 @@ int mvp_v2_process(int frames){
       applyMaster(ml,mr);
     }
 
-    /*
-     * Pure = no automatic mode coloration.
-     * Adaptive and Power process the live samples.
-     */
     applyModeCore(l,r);
 
     /*
-     * These are explicit controls.
-     * If the user turns one on, it must affect the actual output
-     * regardless of whether the baseline mode is Pure,
-     * Adaptive, or Power.
+     * Cooperative reserve prevents Power + Bass + Clarity + Personal + EQ
+     * from fighting for the same limiter headroom.
+     */
+    applyMixReserve(l,r);
+
+    /*
+     * Explicit musical controls.
      */
     applyBass(l,r);
     applyImpact(l,r);
     applyClarity(l,r);
+
+    /*
+     * Stage / Immersion:
+     * width and depth are independent from tonal processing.
+     */
     applySpatial(l,r);
+
+    /*
+     * Personal Sound is the final broad tonal preference.
+     */
     applyPersonal(l,r);
 
     /*
-     * Pure with every control OFF remains reference-clean.
-     * Any explicitly selected processing receives limiter safety.
+     * 31-band EQ is final precision correction.
      */
+    applyEq(l,r);
+
     const bool processed=
       gMode!=0||
       gEqEnabled||
@@ -968,7 +958,15 @@ int mvp_v2_process(int frames){
     float ol=0;
     float orr=0;
 
-    if(processed)applyEmergencyPeakGuard(l,r);limiter(l,r,ol,orr,processed);
+    if(processed){
+      applyEmergencyPeakGuard(l,r);
+    }
+
+    limiter(
+      l,r,
+      ol,orr,
+      processed
+    );
 
     gOutputL[i]=ol;
     gOutputR[i]=orr;
