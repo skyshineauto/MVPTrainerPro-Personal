@@ -57,7 +57,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string,unknown> | null;
 };
 
-const ASSET_VERSION="7.0.0-clean-audio";
+const ASSET_VERSION="7.1.0-authority";
 
 const EMPTY:MvpStudioTelemetry={
   inputPeak:0,
@@ -105,7 +105,7 @@ const proofAckByNode=new WeakMap<AudioWorkletNode,{id:number;enabled:boolean}>()
 
 let runtime:MvpStudioRuntimeInfo={
   assetVersion:ASSET_VERSION,
-  processorVersion:"mvp-sound-v7-clean",
+  processorVersion:"mvp-sound-v7-1-authority",
   ready:false,
   faulted:false,
   requestedRevision:0,
@@ -190,7 +190,7 @@ function processorState(state:MvpStudioState){
     spatial:Boolean(state.broadcastSpatialEnabled),
 
     spaceMode:
-      state.broadcastSpaceModeCode===2
+      Number(state.broadcastSpaceModeCode)>=2
         ?2
         :state.broadcastSpaceModeCode===1
           ?1
@@ -242,7 +242,7 @@ export async function createMvpStudioNode(context:AudioContext){
         ...runtime,
         ready:true,
         faulted:false,
-        processorVersion:String(data.version||"mvp-sound-v7-clean"),
+        processorVersion:String(data.version||"mvp-sound-v7-1-authority"),
         lastError:null
       };
       return;
