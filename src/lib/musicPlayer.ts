@@ -11,7 +11,7 @@ import {
   setMvpStudioProofMute,
   setMvpStudioState,
   waitForMvpStudioRevision,
-} from "./audio/mvpStudioEngine";
+} from "./audio/mvpSoundV7Engine";
 import { getMusicTrackIntelligence } from "./musicIntelligenceEnrichment";
 import {
   clearMusicUrlCache,
