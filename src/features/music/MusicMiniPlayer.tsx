@@ -2412,6 +2412,16 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   </button>
                 </div>
 
+                {player.broadcastSpatialEnabled ? (
+                  <div className={`tr-headphoneCleanStatus ${player.immersionStatus === "active" ? "is-clean" : ""}`}>
+                    {player.immersionStatus === "active"
+                      ? "OBJECT AUDIO • STEMS ACTIVE"
+                      : player.immersionStatus === "unavailable"
+                        ? "OBJECT AUDIO • SERVICE NOT READY"
+                        : "OBJECT AUDIO • PREPARING STEMS"}
+                  </div>
+                ) : null}
+
                 <label className="tr-v24Range">
                   <span>INTENSITY</span>
                   <input type="range" min="0" max="100" value={player.hdIntensity} disabled={player.experienceMode === "pure"} onChange={(event: ChangeEvent<HTMLInputElement>) => void runBroadcastMutation(() => setMusicHdIntensity(Number(event.target.value)), true)} />
@@ -2426,7 +2436,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                   </label>
                 ) : null}
 
-                {player.outputProfile === "car_hifi" && player.broadcastSpatialEnabled ? (
+                {player.broadcastSpatialEnabled ? (
                   <div className="tr-v24Space" role="group" aria-label="Car space">
                     {(["studio","live","arena"] as const).map((mode) => (
                       <button key={mode} type="button" className={player.spaceMode === mode ? "is-active" : ""} aria-pressed={player.spaceMode === mode} disabled={player.experienceMode === "pure"} onClick={() => void runBroadcastMutation(() => setMusicSpaceMode(mode), true)}>{mode.toUpperCase()}</button>

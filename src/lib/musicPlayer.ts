@@ -24,6 +24,8 @@ import {
   setMusicTrackPreference,
   type MusicTrack,
 } from "./musicStorage";
+import { ensureMusicStemBundle } from "./musicStems";
+import { createMvpStemObjectEngine, type MvpStemObjectEngine } from "./audio/mvpStemObjectEngine";
 import {
   getMusicPlaylist,
   listMusicPlaylistTrackLinks,
@@ -972,6 +974,11 @@ let studioHrtfReflectionGainA: GainNode | null = null;
 let studioHrtfReflectionGainB: GainNode | null = null;
 let studioHrtfInputGain: GainNode | null = null;
 let studioInputBus: GainNode | null = null;
+// MVP_V6_STEM_OBJECT_AUDIO
+let stemObjectEngine: MvpStemObjectEngine | null = null;
+let stemObjectTrackId: string | null = null;
+let stemObjectActive = false;
+let stemObjectGeneration = 0;
 // R74 Max-HD loudness stage. Headphones/Bluetooth use ONE coordinated loudness
 // system: the native compressor gently creates crest-factor room at unity input,
 // then the WASM adaptive makeup stage fills only the clean room that actually
@@ -1126,6 +1133,124 @@ function getAudioContext() {
   if (!audioContext) audioContext = new Context();
   return audioContext;
 }
+function stemObjectRouteRequested() {
+  return Boolean(
+    state.playbackMode === "mvp_hd" &&
+    state.experienceMode !== "pure" &&
+    state.outputProfile !== "reference" &&
+    state.broadcastSpatialEnabled &&
+    state.currentTrack,
+  );
+}
+
+function setStemObjectDirectRoute(active: boolean) {
+  if (!audioContext || !studioDirectInputGain) return;
+  const now = audioContext.currentTime;
+  studioDirectInputGain.gain.cancelScheduledValues(now);
+  studioDirectInputGain.gain.setValueAtTime(studioDirectInputGain.gain.value, now);
+  studioDirectInputGain.gain.linearRampToValueAtTime(active ? 0 : 1, now + 0.045);
+}
+
+function disposeMvpStemObjectRoute(restoreDirect = true) {
+  stemObjectGeneration += 1;
+  stemObjectActive = false;
+  stemObjectTrackId = null;
+  if (restoreDirect) setStemObjectDirectRoute(false);
+  if (stemObjectEngine) {
+    stemObjectEngine.dispose();
+    stemObjectEngine = null;
+  }
+}
+
+async function syncMvpStemObjectRoute(reason = "state-change") {
+  const requested = stemObjectRouteRequested();
+  const track = state.currentTrack;
+  const context = audioContext;
+  const reference = audioElement;
+  const destination = studioInputBus;
+
+  if (!requested || !track) {
+    if (stemObjectEngine || stemObjectActive) disposeMvpStemObjectRoute(true);
+    if (!state.broadcastSpatialEnabled || state.experienceMode === "pure") {
+      if (state.immersionStatus !== "bypassed") emit({ immersionStatus: "bypassed" });
+    }
+    return false;
+  }
+
+  if (!context || !reference || !destination || state.dspEngineMode !== "studio_wasm") {
+    setStemObjectDirectRoute(false);
+    stemObjectActive = false;
+    if (state.immersionStatus !== "native_fallback") emit({ immersionStatus: "native_fallback" });
+    return false;
+  }
+
+  if (stemObjectEngine && stemObjectTrackId === track.id) {
+    stemObjectEngine.setStage(
+      state.outputProfile === "headphones" ? "headphones" : state.outputProfile === "speaker" ? "speaker" : "car_hifi",
+      state.spaceMode,
+      state.hdIntensity / 100,
+    );
+    await stemObjectEngine.setEnabled(true);
+    stemObjectActive = true;
+    setStemObjectDirectRoute(true);
+    if (state.immersionStatus !== "active") emit({ immersionStatus: "active" });
+    return true;
+  }
+
+  const generation = ++stemObjectGeneration;
+  stemObjectActive = false;
+  setStemObjectDirectRoute(false);
+  if (stemObjectEngine) {
+    stemObjectEngine.dispose();
+    stemObjectEngine = null;
+    stemObjectTrackId = null;
+  }
+  if (state.immersionStatus !== "native_fallback") emit({ immersionStatus: "native_fallback" });
+
+  try {
+    const bundle = await ensureMusicStemBundle(track, (status) => {
+      if (generation !== stemObjectGeneration) return;
+      if (status === "ready") return;
+      if (state.immersionStatus !== "native_fallback") emit({ immersionStatus: "native_fallback" });
+    });
+
+    if (generation !== stemObjectGeneration || !stemObjectRouteRequested() || state.currentTrack?.id !== track.id) return false;
+
+    const engine = createMvpStemObjectEngine(context, reference, destination, bundle);
+    engine.setStage(
+      state.outputProfile === "headphones" ? "headphones" : state.outputProfile === "speaker" ? "speaker" : "car_hifi",
+      state.spaceMode,
+      state.hdIntensity / 100,
+    );
+    await engine.prepare();
+
+    if (generation !== stemObjectGeneration || !stemObjectRouteRequested() || state.currentTrack?.id !== track.id) {
+      engine.dispose();
+      return false;
+    }
+
+    stemObjectEngine = engine;
+    stemObjectTrackId = track.id;
+    await engine.setEnabled(true);
+    stemObjectActive = true;
+    setStemObjectDirectRoute(true);
+    emit({ immersionStatus: "active" });
+    return true;
+  } catch (error) {
+    if (generation !== stemObjectGeneration) return false;
+    stemObjectActive = false;
+    setStemObjectDirectRoute(false);
+    if (stemObjectEngine) {
+      stemObjectEngine.dispose();
+      stemObjectEngine = null;
+      stemObjectTrackId = null;
+    }
+    console.warn("MVP V6 Object Audio unavailable; using original stereo source.", reason, error);
+    emit({ immersionStatus: "unavailable" });
+    return false;
+  }
+}
+
 function dbToGain(db: number) {
   return Math.pow(10, db / 20);
 }
@@ -1852,6 +1977,7 @@ function disconnectNode(node: AudioNode | null) {
   }
 }
 function releaseGraph() {
+  disposeMvpStemObjectRoute(false);
   clearTransitionPreload();
   [
     mediaSource,
@@ -2193,7 +2319,7 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     broadcastBassCharacter: state.broadcastBassCharacter / 100,
     broadcastImpactEnabled: state.broadcastImpactEnabled,
     broadcastClarityEnabled: state.broadcastClarityEnabled,
-    broadcastSpatialEnabled: state.broadcastSpatialEnabled,
+    broadcastSpatialEnabled: state.broadcastSpatialEnabled && !stemObjectRouteRequested(),
     broadcastSpaceModeCode:
       state.outputProfile === "headphones" &&
       state.headphoneMode === "stage"
@@ -3377,6 +3503,7 @@ async function loadTrack(track: MusicTrack, startAt = 0) {
     }
     if (loadingTrackId !== track.id) return;
     emit({ loading: false, currentTime: startAt, error: null });
+    void syncMvpStemObjectRoute("track-loaded");
     void preloadNextTransitionTrack();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load this song.";
@@ -5064,6 +5191,7 @@ function commitBroadcastProfilePatch(patch: Partial<MusicBroadcastProfileSetting
   writeBroadcastProfileSettings(state.outputProfile, next);
   applyProcessingSettings();
   scheduleProcessingSettle();
+  void syncMvpStemObjectRoute("broadcast-control");
 }
 
 export async function setMusicExperienceMode(mode: MusicExperienceMode) {
@@ -5079,6 +5207,7 @@ export async function setMusicExperienceMode(mode: MusicExperienceMode) {
     applyProcessingSettings();
     scheduleProcessingSettle();
   }
+  void syncMvpStemObjectRoute("experience-mode");
 }
 
 export function setMusicHdIntensity(value: number) {
@@ -5228,12 +5357,14 @@ export function setMusicOutputProfile(profile: MusicOutputProfile) {
       dspVerificationMode: "off",
     });
     applyProcessingSettings();
+    void syncMvpStemObjectRoute("output-profile");
     return;
   }
 
   const target = readOutputProfileSnapshot(profile) ?? cleanOutputProfileSnapshot(profile);
   applyOutputProfileSnapshot(profile, target);
   applyBroadcastProfileSettings(profile, readBroadcastProfileSettings(profile));
+  void syncMvpStemObjectRoute("output-profile");
 }
 
 export function setMusicDspBypass(bypassed: boolean) {

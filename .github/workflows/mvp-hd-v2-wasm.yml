@@ -17,6 +17,10 @@ on:
       - "public/audioV2/mvpHdV2.wasm"
       - "src/lib/audio/mvpStudioEngine.ts"
       - "src/lib/musicPlayer.ts"
+      - "src/lib/musicStems.ts"
+      - "src/lib/audio/mvpStemObjectEngine.ts"
+      - "functions/api/music-stems.js"
+      - "scripts/test-v6-stem-object.mjs"
       - "scripts/test-mvp-hd-v2-browser.mjs"
       - ".github/workflows/mvp-hd-v2-wasm.yml"
 
@@ -78,6 +82,11 @@ jobs:
           node --check public/audioV2/mvpHdV2.worklet.js
           node scripts/test-v54-production-static.mjs
           node scripts/test-mvp-hd-v2-browser.mjs
+
+      - name: Run V6 stem/object audio contract
+        run: |
+          node --check functions/api/music-stems.js
+          node scripts/test-v6-stem-object.mjs
 
       - name: Run production app build
         run: npm run build
