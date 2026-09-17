@@ -1551,11 +1551,7 @@ function simplifiedStudioAppliedStateMatches() {
   if (Boolean(applied.impactEnabled) !== Boolean(state.broadcastImpactEnabled)) return false;
   if (Boolean(applied.clarityEnabled) !== Boolean(state.broadcastClarityEnabled)) return false;
   if (Boolean(applied.spatialEnabled) !== Boolean(state.broadcastSpatialEnabled)) return false;
-  const expectedSpaceMode =
-    state.outputProfile === "headphones" &&
-    state.headphoneMode === "stage"
-      ? "stage3d"
-      : state.spaceMode;
+  const expectedSpaceMode = state.spaceMode;
   if (String(applied.spaceMode) !== expectedSpaceMode) return false;
   if (Boolean(applied.personalEnabled) !== Boolean(state.personalSoundEnabled)) return false;
   if (Math.abs((Number(applied.personalBass) || 0) - state.personalBass / 100) > 0.01) return false;
@@ -1803,7 +1799,7 @@ function configureStudioHrtf(now: number) {
 
 function currentImmersionStatus(): MusicImmersionStatus {
   if (state.outputProfile !== "headphones" || state.dspBypass) return "bypassed";
-  const requested = state.headphoneMode !== "off" || state.dspVerificationMode === "spatial";
+  const requested = state.broadcastSpatialEnabled || state.dspVerificationMode === "spatial";
   if (!requested) return "bypassed";
   if (studioHrtfRequested() && studioHrtfLeftPanner && studioHrtfRightPanner) return "active";
   if (studioProcessorNode && state.dspEngineMode === "studio_wasm") return "active";
@@ -2316,14 +2312,11 @@ function applyStudioProcessingSettings(now: number, targetNode: AudioWorkletNode
     broadcastClarityEnabled: state.broadcastClarityEnabled,
     broadcastSpatialEnabled: state.broadcastSpatialEnabled,
     broadcastSpaceModeCode:
-      state.outputProfile === "headphones" &&
-      state.headphoneMode === "stage"
-        ? 3
-        : state.spaceMode === "arena"
-          ? 2
-          : state.spaceMode === "live"
-            ? 1
-            : 0,
+      state.spaceMode === "arena"
+        ? 2
+        : state.spaceMode === "live"
+          ? 1
+          : 0,
     broadcastPersonalEnabled: state.personalSoundEnabled,
     broadcastPersonalBass: state.personalBass / 100,
     broadcastPersonalPresence: state.personalPresence / 100,
