@@ -594,6 +594,12 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         });
         if (queueError) throw queueError;
 
+        const { error: rotationGuardError } = await supabase.rpc(
+          "rpc_enforce_active_program_rotation_v1",
+          { p_program_block_id: active.id }
+        );
+        if (rotationGuardError) throw rotationGuardError;
+
         const { data, error } = await supabase
           .from("scheduled_sessions")
           .select("id,template_id,date,session_type,status,program_block_id,queue_index")

@@ -556,43 +556,42 @@ export function PlannedSessionEditor({
     setSaving(true);
     setError(null);
 
+    let newTemplateId: string | null = null;
+    let applied = false;
+
     try {
-      const { newTemplateId, userId } = await createTemplateFromDraft(
+      const created = await createTemplateFromDraft(
         `${session.session_type} • future`
       );
+      newTemplateId = created.newTemplateId;
 
-      const { data: futureRows, error: futureError } = await supabase
-        .from("scheduled_sessions")
-        .select("id,status")
-        .eq("user_id", userId)
-        .eq("session_type", session.session_type)
-        .gte("date", session.date);
-      if (futureError) throw futureError;
+      /* MVP_TRAINER_R78_PROGRAM_SCOPED_FUTURE_TEMPLATE
+       * Do not fan out by user_id + session_type in the browser. That allowed
+       * another program to be edited and left the canonical rotation pointing
+       * at the old template. The RPC atomically scopes the change to this
+       * session's program, updates the canonical slot, and updates only this
+       * occurrence + later live occurrences of the same workout type.
+       */
+      const { data, error: applyError } = await supabase.rpc(
+        "rpc_apply_future_template_v1",
+        {
+          p_session_id: session.id,
+          p_new_template_id: newTemplateId,
+        }
+      );
 
-      const futureIds = (futureRows ?? [])
-        .filter((row: any) => !["completed", "skipped", "canceled", "cancelled"].includes(String(row.status ?? "scheduled").toLowerCase()))
-        .map((row: any) => String(row.id))
-        .filter(Boolean);
-
-      if (!futureIds.length) {
-        await supabase.from("workout_templates").delete().eq("id", newTemplateId);
+      if (applyError) throw applyError;
+      if (!(data as any)?.ok || Number((data as any)?.future_rows_updated ?? 0) < 1) {
         throw new Error("No matching future sessions were updated.");
       }
-
-      const { data: updatedRows, error: updateError } = await supabase
-        .from("scheduled_sessions")
-        .update({ template_id: newTemplateId })
-        .eq("user_id", userId)
-        .in("id", futureIds)
-        .select("id");
-      if (updateError || !updatedRows?.length) {
-        await supabase.from("workout_templates").delete().eq("id", newTemplateId);
-        throw updateError ?? new Error("No matching future sessions were updated.");
-      }
+      applied = true;
 
       await onSaved();
       onClose();
     } catch (e: any) {
+      if (newTemplateId && !applied) {
+        await supabase.from("workout_templates").delete().eq("id", newTemplateId);
+      }
       setError(e?.message ?? String(e));
     } finally {
       setSaving(false);

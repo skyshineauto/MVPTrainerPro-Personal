@@ -382,6 +382,17 @@ const nextQueue: QueueDash = {
       let nextActiveId: string | null = null;
 
       if (activeProgramId) {
+        /* MVP_TRAINER_R78_ROTATION_GUARD
+         * rpc_queue_dashboard may advance/refill the queue after a completion.
+         * Normalize only logical workout order afterward while preserving the
+         * current first row as Up Next and preserving one-session overrides.
+         */
+        const { error: rotationGuardError } = await supabase.rpc(
+          "rpc_enforce_active_program_rotation_v1",
+          { p_program_block_id: activeProgramId }
+        );
+        if (rotationGuardError) throw rotationGuardError;
+
         const { data: activeCandidates, error: activeError } = await supabase
           .from("workouts")
           .select("id,scheduled_session_id,started_at")

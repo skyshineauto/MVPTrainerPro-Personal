@@ -3875,10 +3875,39 @@ export function AppShell({
       return;
     }
 
-    const { data: qd, error: qErr } = await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
+    const { error: qErr } = await supabase.rpc("rpc_queue_dashboard", { p_keep: 7 });
     if (qErr) throw qErr;
 
-    const next = (qd as any)?.nextSession ?? null;
+    /* MVP_TRAINER_R78_ROTATION_GUARD
+     * Queue maintenance runs first, then the canonical four-slot guard repairs
+     * logical order without changing the current first row. Read Up Next from
+     * scheduled_sessions afterward so the header and the big Training card use
+     * the same authoritative row.
+     */
+    const { error: rotationGuardError } = await supabase.rpc(
+      "rpc_enforce_active_program_rotation_v1",
+      { p_program_block_id: ab.id }
+    );
+    if (rotationGuardError) throw rotationGuardError;
+
+    const { data: nextCandidates, error: nextError } = await supabase
+      .from("scheduled_sessions")
+      .select("id,template_id,session_type,date,status,queue_index,created_at")
+      .eq("user_id", u.user.id)
+      .eq("program_block_id", ab.id)
+      .order("queue_index", { ascending: true, nullsFirst: false })
+      .order("date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true })
+      .limit(16);
+    if (nextError) throw nextError;
+
+    const next = (nextCandidates ?? []).find((row: any) => {
+      const status = String(row.status ?? "scheduled").toLowerCase();
+      const queueIndex = row.queue_index == null ? null : Number(row.queue_index);
+      return !["completed", "skipped", "canceled", "cancelled"].includes(status)
+        && (queueIndex == null || queueIndex < 1000000);
+    }) as any ?? null;
+
     const nextSessionId = next?.id ?? null;
     const nextSessionType = next?.session_type ?? null;
 
