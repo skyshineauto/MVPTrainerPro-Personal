@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../../lib/supabase";
+import { requestTrainingReadyEmail } from "../../lib/trainingEmailAlerts";
 import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { inferSymptomKey, isSymptomMode, type SymptomKey } from "../../lib/sessionLabel";
 import { MusicMiniPlayer } from "../../features/music/MusicMiniPlayer";
@@ -4204,6 +4205,9 @@ export function AppShell({
         .eq("id", hud.workoutId);
 
       if (error) throw error;
+
+      /* R83_EMAIL_COACH: completion advances readiness; email delivery is idempotent. */
+      void requestTrainingReadyEmail("workout_completed");
 
       Object.values(LS).forEach((k) => lsDel(k));
 

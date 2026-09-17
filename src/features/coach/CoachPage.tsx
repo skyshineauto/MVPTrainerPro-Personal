@@ -2,6 +2,7 @@
 // MVP Trainer Pro - semantic program identity + clear coaching decisions + responsive pro UI
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabase";
+import { requestTrainingReadyEmail, sendTrainingEmailTest, type TrainingEmailPreferences } from "../../lib/trainingEmailAlerts";
 import { canonicalExerciseKey } from "../../lib/exerciseIdentity";
 import { applyExerciseNameOverrides } from "../../lib/exerciseNames";
 import { analyzeProgression } from "../../lib/trainingIntelligence";
@@ -233,6 +234,17 @@ type CoachHistoryRow = {
 };
 
 type ToastState = { open: boolean; tone: "ok" | "err"; text: string };
+
+const DEFAULT_EMAIL_PREFS: Omit<TrainingEmailPreferences, "user_id"> = {
+  program_block_id: null,
+  enabled: false,
+  workout_ready: true,
+  include_coach_tip: true,
+  include_exercise_plan: true,
+  include_progress_snapshot: true,
+  email_override: null,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+};
 
 const LEGACY_HISTORY_KEY = "mvp-coach-recommendation-history-v3";
 const HISTORY_KEY_PREFIX = "mvp-coach-recommendation-history-v4";
@@ -500,6 +512,12 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
   );
   const [recommendationHistory, setRecommendationHistory] = useState<CoachHistoryRow[]>([]);
 
+  /* R83_EMAIL_COACH */
+  const [accountEmail, setAccountEmail] = useState("");
+  const [emailPrefs, setEmailPrefs] = useState<Omit<TrainingEmailPreferences, "user_id">>(DEFAULT_EMAIL_PREFS);
+  const [emailPrefsBusy, setEmailPrefsBusy] = useState(false);
+  const [emailTestBusy, setEmailTestBusy] = useState(false);
+
   function showToast(text: string, tone: "ok" | "err" = "ok") {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     setToast({ open: true, tone, text });
@@ -539,6 +557,82 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     };
   }, [age, equipment, focus, goal, heightFt, heightIn, mode, symptom, weightLb]);
 
+  async function loadTrainingEmailPreferences(uid: string, activeProgramId: string | null, signedInEmail: string) {
+    setAccountEmail(signedInEmail);
+    const { data, error } = await supabase
+      .from("training_email_preferences")
+      .select("program_block_id,enabled,workout_ready,include_coach_tip,include_exercise_plan,include_progress_snapshot,email_override,timezone")
+      .eq("user_id", uid)
+      .maybeSingle();
+    if (error) {
+      const message = String(error.message ?? "").toLowerCase();
+      if (message.includes("training_email_preferences") && (message.includes("does not exist") || message.includes("schema cache"))) {
+        setEmailPrefs({ ...DEFAULT_EMAIL_PREFS, program_block_id: activeProgramId });
+        return;
+      }
+      throw error;
+    }
+    if (data) {
+      setEmailPrefs({
+        program_block_id: data.program_block_id ?? null,
+        enabled: Boolean(data.enabled),
+        workout_ready: data.workout_ready !== false,
+        include_coach_tip: data.include_coach_tip !== false,
+        include_exercise_plan: data.include_exercise_plan !== false,
+        include_progress_snapshot: data.include_progress_snapshot !== false,
+        email_override: data.email_override ?? null,
+        timezone: data.timezone || DEFAULT_EMAIL_PREFS.timezone,
+      });
+      return;
+    }
+    setEmailPrefs({ ...DEFAULT_EMAIL_PREFS, program_block_id: activeProgramId });
+  }
+
+  async function saveTrainingEmailPreferences(patch: Partial<Omit<TrainingEmailPreferences, "user_id">>, sendReadyAfter = false) {
+    if (!userId) return;
+    const next = {
+      ...emailPrefs,
+      ...patch,
+      program_block_id: (patch.enabled ?? emailPrefs.enabled)
+        ? (patch.program_block_id ?? emailPrefs.program_block_id ?? activeProgram?.id ?? null)
+        : (patch.program_block_id ?? emailPrefs.program_block_id),
+    };
+    setEmailPrefs(next);
+    setEmailPrefsBusy(true);
+    try {
+      const { error } = await supabase.from("training_email_preferences").upsert({
+        user_id: userId,
+        ...next,
+        email_override: next.email_override?.trim() || null,
+      }, { onConflict: "user_id" });
+      if (error) throw error;
+      showToast("Email Coach settings saved.");
+      if (sendReadyAfter && next.enabled) void requestTrainingReadyEmail("alerts_enabled");
+    } catch (error: any) {
+      showToast(error?.message ?? "Could not save email settings.", "err");
+      await loadTrainingEmailPreferences(userId, activeProgram?.id ?? null, accountEmail);
+    } finally {
+      setEmailPrefsBusy(false);
+    }
+  }
+
+  async function sendCoachTestEmail() {
+    if (!userId) return;
+    setEmailTestBusy(true);
+    try {
+      if (!emailPrefs.program_block_id && activeProgram?.id) {
+        await saveTrainingEmailPreferences({ program_block_id: activeProgram.id });
+      }
+      const result = await sendTrainingEmailTest();
+      if (!result?.sent) throw new Error(result?.reason || "Test email was not sent.");
+      showToast("Test coaching email sent.");
+    } catch (error: any) {
+      showToast(error?.message ?? "Could not send test email.", "err");
+    } finally {
+      setEmailTestBusy(false);
+    }
+  }
+
   async function ensureProfile() {
     const { data, error } = await supabase.auth.getUser();
     if (error) throw error;
@@ -558,6 +652,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       if (!auth.user) throw new Error("Sign in to use Coach.");
       const uid = auth.user.id;
       setUserId(uid);
+      setAccountEmail(auth.user.email ?? "");
 
       const { data: programData, error: programError } = await supabase
         .from("program_blocks")
@@ -569,6 +664,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
       const programs = (programData ?? []) as ProgramBlockRow[];
       const active = programs.find((row) => row.status === "active") ?? null;
       setActiveProgram(active);
+      await loadTrainingEmailPreferences(uid, active?.id ?? null, auth.user.email ?? "");
       if (!active) setBuilderOpen(true);
 
       let intakeRow: IntakeSnapshotRow | null = null;
@@ -1424,6 +1520,30 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       </section>
 
+      <section className="co-surface co-section co-section--emailCoach">
+        <SectionTitle title="Training Email Coach" subtitle="A pro coaching brief when your next workout becomes ready. Alerts stay pinned to one program, so testing stays isolated." />
+        <div className="co-emailCoachPanel">
+          <div className="co-emailCoachTop">
+            <div><span>EMAIL COACH</span><strong>{emailPrefs.enabled ? "READY ALERTS ON" : "READY ALERTS OFF"}</strong><small>{emailPrefs.enabled ? "One email per ready workout. Duplicate protection is enforced server-side." : "Turn this on when you want your current program to email its next training brief."}</small></div>
+            <label className="co-emailCoachSwitch"><input type="checkbox" checked={emailPrefs.enabled} disabled={emailPrefsBusy || !activeProgram} onChange={(event) => void saveTrainingEmailPreferences({ enabled: event.target.checked, program_block_id: event.target.checked ? (emailPrefs.program_block_id ?? activeProgram?.id ?? null) : emailPrefs.program_block_id }, event.target.checked)} /><i /></label>
+          </div>
+
+          <div className="co-emailCoachOptions">
+            <label><input type="checkbox" checked={emailPrefs.workout_ready} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ workout_ready: event.target.checked })} /><span><strong>Workout Ready</strong><small>Send once when the rotation advances to a new Up Next workout.</small></span></label>
+            <label><input type="checkbox" checked={emailPrefs.include_coach_tip} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_coach_tip: event.target.checked })} /><span><strong>Coach Focus</strong><small>Technique and recovery cue matched to the workout and targeted program.</small></span></label>
+            <label><input type="checkbox" checked={emailPrefs.include_exercise_plan} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_exercise_plan: event.target.checked })} /><span><strong>Exercise Plan</strong><small>Include the saved exercise order, sets and rep ranges.</small></span></label>
+            <label><input type="checkbox" checked={emailPrefs.include_progress_snapshot} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_progress_snapshot: event.target.checked })} /><span><strong>Progress Snapshot</strong><small>Include the prior best set and a concise progression cue when available.</small></span></label>
+          </div>
+
+          <div className="co-emailCoachDelivery">
+            <label className="co-field"><span>DELIVERY EMAIL</span><input type="email" value={emailPrefs.email_override ?? ""} disabled={emailPrefsBusy} placeholder={accountEmail || "Signed-in account email"} onChange={(event) => setEmailPrefs((current) => ({ ...current, email_override: event.target.value }))} onBlur={() => void saveTrainingEmailPreferences({ email_override: emailPrefs.email_override?.trim() || null })} /></label>
+            <div className="co-emailCoachProgram"><div><span>PINNED PROGRAM</span><strong>{emailPrefs.program_block_id === activeProgram?.id ? activeProgramName : emailPrefs.program_block_id ? "Saved program (not currently active)" : "Not pinned yet"}</strong><small>{emailPrefs.program_block_id === activeProgram?.id ? "This program owns the emails even if you switch to a test program later." : "Use the active program button when you want alerts to follow the program currently on screen."}</small></div><button type="button" disabled={emailPrefsBusy || !activeProgram} onClick={() => void saveTrainingEmailPreferences({ program_block_id: activeProgram?.id ?? null })}>USE ACTIVE PROGRAM</button></div>
+          </div>
+
+          <div className="co-emailCoachActions"><button type="button" disabled={emailTestBusy || emailPrefsBusy || !activeProgram} onClick={() => void sendCoachTestEmail()}>{emailTestBusy ? "SENDING…" : "SEND TEST EMAIL"}</button><span>Test sends the current ready workout immediately and does not consume the one-time ready alert.</span></div>
+        </div>
+      </section>
+
       <section className="co-surface co-section co-section--control">
         <SectionTitle title="Program Control" subtitle="Manage programs without exposing database IDs." />
         <div className="co-programControl">
@@ -1554,7 +1674,14 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-section--nutrition::before{background:var(--a)!important}.co-section--nutrition .co-sectionAccent{background:var(--a)!important}
         .co-section--tips::before{background:var(--violet)!important}.co-section--tips .co-sectionAccent{background:var(--violet)!important}
         .co-section--history::before{background:#8ba0aa!important}.co-section--history .co-sectionAccent{background:#8ba0aa!important}
-        .co-section--control::before{background:#6f8cf5!important}.co-section--control .co-sectionAccent{background:#6f8cf5!important}
+        .co-section--control::before{background:#6f8cf5!important}.co-section--control .co-sectionAccent{background:#6f8cf5!important}.co-section--emailCoach::before{background:#35c98a!important}.co-section--emailCoach .co-sectionAccent{background:#35c98a!important}
+        .co-emailCoachPanel{display:grid;gap:12px;padding:14px;border:1px solid rgba(101,218,174,.16);border-radius:13px;background:linear-gradient(145deg,rgba(53,201,138,.045),rgba(255,255,255,.008))}
+        .co-emailCoachTop{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center}.co-emailCoachTop>div{display:grid;gap:4px}.co-emailCoachTop span,.co-emailCoachProgram span{color:#72d9b2;font-size:9px;font-weight:1000;letter-spacing:.12em}.co-emailCoachTop strong,.co-emailCoachProgram strong{font-size:18px;color:#f6fbfd}.co-emailCoachTop small,.co-emailCoachProgram small{color:#9bb0ba;font-size:11px;line-height:1.45}
+        .co-emailCoachSwitch{position:relative;width:58px;height:32px;display:block;flex:0 0 auto}.co-emailCoachSwitch input{position:absolute;opacity:0;pointer-events:none}.co-emailCoachSwitch i{display:block;width:58px;height:32px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#0b1217;transition:.18s}.co-emailCoachSwitch i::after{content:"";display:block;width:24px;height:24px;margin:3px;border-radius:50%;background:#71818a;transition:.18s}.co-emailCoachSwitch input:checked+i{background:rgba(53,201,138,.18);border-color:rgba(53,201,138,.65);box-shadow:0 0 20px rgba(53,201,138,.12)}.co-emailCoachSwitch input:checked+i::after{transform:translateX(26px);background:#54e2a6}
+        .co-emailCoachOptions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.co-emailCoachOptions label{display:grid;grid-template-columns:20px minmax(0,1fr);gap:9px;align-items:start;padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.014)}.co-emailCoachOptions input{margin-top:2px;accent-color:#35c98a}.co-emailCoachOptions span{display:grid;gap:3px}.co-emailCoachOptions strong{font-size:13px}.co-emailCoachOptions small{font-size:10.5px;color:#8fa5af;line-height:1.4}
+        .co-emailCoachDelivery{display:grid;grid-template-columns:minmax(0,1fr) 1.15fr;gap:9px;align-items:stretch}.co-emailCoachProgram{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.014)}.co-emailCoachProgram>div{display:grid;gap:3px}.co-emailCoachProgram button,.co-emailCoachActions button{border:1px solid rgba(90,220,255,.25);border-radius:9px;background:#0a2029;padding:10px 12px;font-size:10px;font-weight:1000;letter-spacing:.04em}
+        .co-emailCoachActions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.co-emailCoachActions span{color:#7f98a3;font-size:10.5px}
+        @media(max-width:700px){.co-emailCoachTop{grid-template-columns:minmax(0,1fr) auto;gap:10px}.co-emailCoachOptions,.co-emailCoachDelivery{grid-template-columns:1fr}.co-emailCoachProgram{grid-template-columns:1fr}.co-emailCoachProgram button,.co-emailCoachActions button{width:100%}.co-emailCoachActions{display:grid}}
         .co-builder::before{background:#6f8cf5!important}.co-builder .co-sectionAccent{background:#6f8cf5!important}
         .co-briefCard{background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(255,255,255,.006))!important;border-color:rgba(255,255,255,.075)!important}
         .co-briefCard.is-green{background:linear-gradient(145deg,rgba(44,190,119,.075),rgba(255,255,255,.008))!important}

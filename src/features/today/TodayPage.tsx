@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { requestTrainingReadyEmail } from "../../lib/trainingEmailAlerts";
 import { PlannedSessionEditor } from "./PlannedSessionEditor";
 import {
   formatSessionLabel,
@@ -572,6 +573,9 @@ const nextQueue: QueueDash = {
 
       const goalMode = nextQueue.activeBlock?.goal_mode ? String(nextQueue.activeBlock.goal_mode) : null;
       setSymptomKey(await loadLatestSymptom(goalMode, userId));
+
+      /* R83_EMAIL_COACH: safe sync; server dedupe means one ready email per session. */
+      void requestTrainingReadyEmail("dashboard_sync");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load workouts.");
       setQueue(null);
@@ -725,6 +729,8 @@ const nextQueue: QueueDash = {
       setSkipCandidate(null);
       window.dispatchEvent(new CustomEvent("mvp:workout-schedule-changed", { detail: data ?? null }));
       await load();
+      /* R83_EMAIL_COACH: skipped occurrence advances to the next ready rotation slot. */
+      void requestTrainingReadyEmail("workout_skipped");
     } catch (caught: any) {
       const message = caught?.message ?? String(caught);
       setSkipActionError(message);
