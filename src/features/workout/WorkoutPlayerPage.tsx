@@ -4650,6 +4650,11 @@ export function WorkoutPlayerPage({ params }: any) {
                 style={{ "--tr-rm-exercise": roadmapAccentFor(activeIdx) } as any}
               >
                 <div className="tr-roadmapV2CurrentFx" aria-hidden="true" />
+                <div className={`tr-roadmapV2CurrentBanner ${current?.completed_at ? "is-complete" : ""}`}>
+                  <span className="tr-roadmapV2CurrentBannerDot" aria-hidden="true" />
+                  <strong>{current?.completed_at ? "COMPLETED • SELECTED" : "CURRENT EXERCISE"}</strong>
+                  <span className="tr-roadmapV2CurrentBannerLine" aria-hidden="true" />
+                </div>
                 <div className="tr-roadmapV2CurrentVisual" aria-hidden="true">
                   <span className="tr-roadmapV2VisualHalo" />
                   <img
@@ -4665,9 +4670,6 @@ export function WorkoutPlayerPage({ params }: any) {
                   </div>
                   <strong>{currentExerciseName}</strong>
                   <span className="tr-roadmapV2MuscleLabel">{currentRoadmapVisual.label} • PRIMARY TARGET</span>
-                  <span className={`tr-roadmapV2CurrentState ${current?.completed_at ? "is-complete" : ""}`}>
-                    {current?.completed_at ? "COMPLETED • SELECTED" : "CURRENT"}
-                  </span>
                 </div>
               </div>
 
@@ -12234,6 +12236,107 @@ const unlock = async () => {
   .tr-recoveryAdjustments{padding:14px 17px 9px;}
   .tr-recoverySkip{width:calc(100% - 34px);margin:0 17px 17px;}
   .tr-recoveryReadyState{min-height:330px;padding:34px 18px;}
+}
+
+/* ============================================================
+   R79 — CURRENT EXERCISE HERO HEADER
+   Makes the active exercise unmistakable on desktop and mobile.
+   Presentation only. No workout state or progression logic changes.
+   ============================================================ */
+.tr-roadmapV2CurrentBanner{
+  grid-column:1 / -1;
+  position:relative;
+  z-index:5;
+  min-width:0;
+  min-height:40px;
+  margin:-12px -14px 2px;
+  padding:0 15px;
+  display:grid;
+  grid-template-columns:auto auto minmax(24px,1fr);
+  align-items:center;
+  gap:9px;
+  overflow:hidden;
+  border-bottom:1px solid rgba(255,153,47,.42);
+  background:
+    linear-gradient(90deg,rgba(255,139,24,.18),rgba(255,151,36,.07) 46%,rgba(255,151,36,.015) 78%,transparent),
+    linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255,222,174,.08),
+    inset 0 -1px 0 rgba(59,30,5,.34),
+    0 8px 22px rgba(0,0,0,.12);
+}
+.tr-roadmapV2CurrentBannerDot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#ff941f;
+  box-shadow:0 0 0 3px rgba(255,148,31,.10),0 0 15px rgba(255,142,23,.58);
+}
+.tr-roadmapV2CurrentBanner>strong{
+  min-width:0;
+  color:#ff9b2f;
+  font-size:clamp(13px,1.18vw,17px);
+  line-height:1;
+  font-weight:1100;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  text-shadow:0 2px 8px rgba(0,0,0,.55),0 0 16px rgba(255,139,24,.16);
+}
+.tr-roadmapV2CurrentBannerLine{
+  min-width:0;
+  height:1px;
+  background:linear-gradient(90deg,rgba(255,155,48,.48),rgba(255,155,48,.08),transparent);
+}
+.tr-roadmapV2CurrentBanner.is-complete{
+  border-bottom-color:rgba(92,224,158,.34);
+  background:linear-gradient(90deg,rgba(45,190,124,.14),rgba(45,190,124,.045) 48%,transparent);
+}
+.tr-roadmapV2CurrentBanner.is-complete .tr-roadmapV2CurrentBannerDot{
+  background:#6de5a7;
+  box-shadow:0 0 0 3px rgba(109,229,167,.09),0 0 14px rgba(91,220,153,.34);
+}
+.tr-roadmapV2CurrentBanner.is-complete>strong{color:#7beab2;text-shadow:0 2px 8px rgba(0,0,0,.55)}
+.tr-roadmapV2CurrentBanner.is-complete .tr-roadmapV2CurrentBannerLine{background:linear-gradient(90deg,rgba(100,229,167,.40),rgba(100,229,167,.07),transparent)}
+
+/* The old tiny status location is intentionally retired by R79. */
+.tr-roadmapV2CurrentState{display:none!important}
+
+@media (max-width:900px) and (min-width:721px){
+  .tr-roadmapV2CurrentBanner{min-height:36px;margin:-10px -12px 1px;padding:0 12px;gap:8px}
+  .tr-roadmapV2CurrentBanner>strong{font-size:12.5px}
+}
+
+@media (max-width:720px){
+  .tr-roadmapV2Current{
+    grid-template-rows:auto auto;
+    align-items:center;
+  }
+  .tr-roadmapV2CurrentBanner{
+    min-height:31px;
+    margin:-6px -8px 2px;
+    padding:0 9px;
+    grid-template-columns:auto auto minmax(12px,1fr);
+    gap:6px;
+    border-bottom-color:rgba(255,153,47,.36);
+  }
+  .tr-roadmapV2CurrentBannerDot{width:6px;height:6px;box-shadow:0 0 0 2px rgba(255,148,31,.09),0 0 10px rgba(255,142,23,.42)}
+  .tr-roadmapV2CurrentBanner>strong{
+    font-size:clamp(10.5px,3.15vw,12px);
+    letter-spacing:.115em;
+  }
+  .tr-roadmapV2CurrentBannerLine{opacity:.82}
+}
+
+@media (max-width:390px){
+  .tr-roadmapV2CurrentBanner{min-height:29px;margin:-5px -7px 2px;padding:0 8px;gap:5px}
+  .tr-roadmapV2CurrentBanner>strong{font-size:10.5px;letter-spacing:.10em}
+}
+
+@media (max-width:345px){
+  .tr-roadmapV2CurrentBanner{min-height:28px;padding:0 7px;grid-template-columns:auto auto minmax(6px,1fr)}
+  .tr-roadmapV2CurrentBanner>strong{font-size:9.7px;letter-spacing:.085em}
+  .tr-roadmapV2CurrentBannerDot{width:5px;height:5px}
 }
 
 /* R9.4 LIVE ADAPTIVE COACH */
