@@ -12237,28 +12237,27 @@ const unlock = async () => {
 }
 
 /* ============================================================
-   R80 — SIMPLE CURRENT LABEL
-   Simple orange CURRENT label centered directly above the
-   active exercise image. No line, dot, banner, or background.
-   Desktop + mobile presentation only.
+   R81 — LARGE CENTERED CURRENT LABEL
+   Large orange CURRENT centered in the open hero space above
+   the active exercise art/name. No line, dot, or background.
+   Responsive on desktop, tablet, and mobile.
    ============================================================ */
 .tr-roadmapV2Current{
+  grid-template-columns:minmax(210px,.9fr) minmax(0,1.1fr);
   grid-template-rows:auto minmax(0,1fr);
+  align-items:center;
 }
 .tr-roadmapV2CurrentBanner{
-  grid-column:1;
+  grid-column:1 / -1;
   grid-row:1;
   position:relative;
   z-index:5;
   width:100%;
-  min-width:0;
   margin:0;
-  padding:1px 0 3px;
+  padding:14px 0 10px;
   display:flex;
   align-items:center;
   justify-content:center;
-  align-self:end;
-  justify-self:stretch;
   background:none;
   border:0;
   box-shadow:none;
@@ -12266,14 +12265,14 @@ const unlock = async () => {
 }
 .tr-roadmapV2CurrentBanner>strong{
   color:#ff981f;
-  font-size:clamp(15px,1.25vw,18px);
+  font-size:clamp(24px,2.2vw,34px);
   line-height:1;
   font-weight:1100;
-  letter-spacing:.16em;
+  letter-spacing:.19em;
   text-align:center;
   text-transform:uppercase;
   white-space:nowrap;
-  text-shadow:0 2px 8px rgba(0,0,0,.58),0 0 13px rgba(255,145,31,.18);
+  text-shadow:0 3px 10px rgba(0,0,0,.62),0 0 18px rgba(255,145,31,.24);
 }
 .tr-roadmapV2CurrentVisual{
   grid-column:1;
@@ -12282,14 +12281,17 @@ const unlock = async () => {
 }
 .tr-roadmapV2CurrentCopy{
   grid-column:2;
-  grid-row:1 / span 2;
+  grid-row:2;
   align-self:center;
 }
 .tr-roadmapV2CurrentState{display:none!important}
 
 @media (max-width:900px) and (min-width:721px){
-  .tr-roadmapV2CurrentBanner{padding:0 0 2px}
-  .tr-roadmapV2CurrentBanner>strong{font-size:13px;letter-spacing:.14em}
+  .tr-roadmapV2CurrentBanner{padding:10px 0 8px}
+  .tr-roadmapV2CurrentBanner>strong{
+    font-size:clamp(20px,2.4vw,26px);
+    letter-spacing:.16em;
+  }
 }
 
 @media (max-width:720px){
@@ -12299,14 +12301,13 @@ const unlock = async () => {
     align-items:center;
   }
   .tr-roadmapV2CurrentBanner{
-    grid-column:1;
+    grid-column:1 / -1;
     grid-row:1;
-    padding:0 0 1px;
-    min-height:0;
+    padding:8px 0 6px;
   }
   .tr-roadmapV2CurrentBanner>strong{
-    font-size:11px;
-    letter-spacing:.12em;
+    font-size:clamp(16px,5vw,21px);
+    letter-spacing:.14em;
   }
   .tr-roadmapV2CurrentVisual{
     grid-column:1;
@@ -12314,16 +12315,23 @@ const unlock = async () => {
   }
   .tr-roadmapV2CurrentCopy{
     grid-column:2;
-    grid-row:1 / span 2;
+    grid-row:2;
   }
 }
 
 @media (max-width:390px){
-  .tr-roadmapV2CurrentBanner>strong{font-size:10.5px;letter-spacing:.105em}
+  .tr-roadmapV2CurrentBanner{padding:7px 0 5px}
+  .tr-roadmapV2CurrentBanner>strong{
+    font-size:16px;
+    letter-spacing:.12em;
+  }
 }
 
 @media (max-width:345px){
-  .tr-roadmapV2CurrentBanner>strong{font-size:9.8px;letter-spacing:.09em}
+  .tr-roadmapV2CurrentBanner>strong{
+    font-size:15px;
+    letter-spacing:.10em;
+  }
 }
 
 /* R9.4 LIVE ADAPTIVE COACH */
