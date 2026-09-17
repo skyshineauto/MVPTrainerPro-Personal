@@ -124,6 +124,14 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
     this.compEnv=0;
     this.compGain=1;
     this.limitGain=1;
+    this.limiterEnv=0;
+    this.lookaheadSamples=Math.max(
+      128,
+      Math.min(512,Math.round(sampleRate*.006))
+    );
+    this.limitBufL=new Float32Array(this.lookaheadSamples);
+    this.limitBufR=new Float32Array(this.lookaheadSamples);
+    this.limitIndex=0;
 
     this.fastEnv=0;
     this.slowEnv=0;
@@ -142,7 +150,21 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
       const m=e.data||{};
 
       if(m.type==="state"){
+        const previousMode=this.state.mode;
+
         this.state={...this.state,...m.state};
+
+        if(previousMode!==this.state.mode){
+          this.compEnv=0;
+          this.compGain=1;
+          this.limitGain=1;
+          this.limiterEnv=0;
+
+          this.limitBufL.fill(0);
+          this.limitBufR.fill(0);
+          this.limitIndex=0;
+        }
+
         this.configure();
         this.port.postMessage({
           type:"ack",
@@ -164,6 +186,12 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
         this.compEnv=0;
         this.compGain=1;
         this.limitGain=1;
+        this.limiterEnv=0;
+
+        this.limitBufL.fill(0);
+        this.limitBufR.fill(0);
+        this.limitIndex=0;
+
         this.fastEnv=0;
         this.slowEnv=0;
       }
@@ -173,7 +201,7 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
 
     this.port.postMessage({
       type:"ready",
-      version:"mvp-sound-v7-1-authority"
+      version:"mvp-sound-v7-2-clean-authority"
     });
   }
 
@@ -249,59 +277,103 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
 
   modeProcess(l,r){
     const s=this.state;
-    if(s.mode===0)return [l,r];
+
+    if(s.mode===0){
+      return [l,r];
+    }
 
     const i=clamp(s.intensity,0,1);
 
-    // Large, intentional gain ladder.
-    // Adaptive: +4.5 .. +7.0 dB input drive
-    // Power:    +10.0 .. +15.0 dB input drive
-    const preDb =
-      s.mode===2
-        ? 10.0 + 5.0*i
-        : 4.5 + 2.5*i;
+    const detector=Math.sqrt(
+      (l*l+r*r)*.5
+    );
 
-    const pre=dbGain(preDb);
-    l*=pre;
-    r*=pre;
+    /*
+     * Slow musical envelope.
+     * This follows program level rather than the waveform itself.
+     */
+    const envAttack=
+      1-Math.exp(-1/(sampleRate*.018));
 
-    const detector=Math.max(Math.abs(l),Math.abs(r));
-
-    const attack=
-      1-Math.exp(-1/(sampleRate*(s.mode===2?.004:.010)));
-
-    const release=
-      1-Math.exp(-1/(sampleRate*(s.mode===2?.150:.220)));
+    const envRelease=
+      1-Math.exp(-1/(sampleRate*.280));
 
     this.compEnv +=
       (detector-this.compEnv) *
-      (detector>this.compEnv ? attack : release);
+      (
+        detector>this.compEnv
+          ? envAttack
+          : envRelease
+      );
 
-    const threshold=s.mode===2 ? .27 : .58;
-    const ratio=s.mode===2 ? 7.5 : 2.6;
+    const envDb=
+      gainDb(Math.max(this.compEnv,1e-7));
 
-    let target=1;
+    const power=
+      s.mode===2;
 
-    if(this.compEnv>threshold){
-      const over=this.compEnv/threshold;
-      target=Math.pow(over,(1/ratio)-1);
-    }
+    /*
+     * REAL MODE LADDER
+     *
+     * ADAPTIVE:
+     * +3.5 to +5.5 dB clean drive
+     *
+     * POWER:
+     * +9 to +13 dB drive plus much stronger density control
+     */
+    const driveDb=
+      power
+        ? 9.0 + 4.0*i
+        : 3.5 + 2.0*i;
+
+    const thresholdDb=
+      power
+        ? -15.0
+        : -9.0;
+
+    const ratio=
+      power
+        ? 4.5
+        : 1.9;
+
+    const overDb=
+      Math.max(
+        0,
+        envDb-thresholdDb
+      );
+
+    const reductionDb=
+      overDb*(1-1/ratio);
+
+    const targetGain=
+      dbGain(
+        driveDb-reductionDb
+      );
+
+    /*
+     * Smooth gain changes.
+     * Prevents buzzing / waveform modulation.
+     */
+    const gainAttack=
+      1-Math.exp(-1/(sampleRate*.025));
+
+    const gainRelease=
+      1-Math.exp(-1/(sampleRate*.060));
 
     this.compGain +=
-      (target-this.compGain) *
-      (target<this.compGain ? attack : release);
+      (targetGain-this.compGain) *
+      (
+        targetGain<this.compGain
+          ? gainAttack
+          : gainRelease
+      );
 
-    // Power is deliberately much denser and louder than Adaptive.
-    const makeupDb =
-      s.mode===2
-        ? 6.0 + 3.0*i
-        : 2.0 + 1.8*i;
+    l*=this.compGain;
+    r*=this.compGain;
 
-    const makeup=dbGain(makeupDb);
-
-    l*=this.compGain*makeup;
-    r*=this.compGain*makeup;
-
+    /*
+     * MODE VOICING
+     */
     l=this.modeAirL.run(
       this.modePresenceL.run(
         this.modeBodyL.run(
@@ -331,41 +403,99 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
   }
 
   impactProcess(l,r){
-    const d=Math.max(Math.abs(l),Math.abs(r));
+    const d=
+      Math.max(
+        Math.abs(l),
+        Math.abs(r)
+      );
 
-    const fa=1-Math.exp(-1/(sampleRate*.0007));
-    const fr=1-Math.exp(-1/(sampleRate*.010));
-    const sa=1-Math.exp(-1/(sampleRate*.030));
-    const sr=1-Math.exp(-1/(sampleRate*.220));
+    const fa=
+      1-Math.exp(-1/(sampleRate*.0012));
 
-    this.fastEnv+=(d-this.fastEnv)*(d>this.fastEnv?fa:fr);
-    this.slowEnv+=(d-this.slowEnv)*(d>this.slowEnv?sa:sr);
+    const fr=
+      1-Math.exp(-1/(sampleRate*.018));
 
-    if(!this.state.impact)return [l,r];
+    const sa=
+      1-Math.exp(-1/(sampleRate*.035));
 
-    const i=clamp(this.state.intensity,0,1);
+    const sr=
+      1-Math.exp(-1/(sampleRate*.240));
 
-    const transient=clamp(
-      (this.fastEnv-this.slowEnv*.88)/(this.slowEnv+.015),
-      0,
-      1
-    );
+    this.fastEnv +=
+      (d-this.fastEnv) *
+      (
+        d>this.fastEnv
+          ? fa
+          : fr
+      );
 
-    // Sustain reduction makes the drum hit jump even when Power is
-    // already pressing against the final limiter.
-    const sustainCutDb=(1-transient)*(1.5+3.5*i);
+    this.slowEnv +=
+      (d-this.slowEnv) *
+      (
+        d>this.slowEnv
+          ? sa
+          : sr
+      );
 
-    // Large clean attack gain.
-    const attackBoostDb=transient*(5.0+7.0*i);
+    if(!this.state.impact){
+      return [l,r];
+    }
 
-    const g=dbGain(attackBoostDb-sustainCutDb);
+    const i=
+      clamp(
+        this.state.intensity,
+        0,
+        1
+      );
 
-    this.impactBoost=Math.max(
-      this.impactBoost,
-      attackBoostDb
-    );
+    const ratio=
+      this.fastEnv /
+      (this.slowEnv+.001);
 
-    return [l*g,r*g];
+    const transient=
+      clamp(
+        (ratio-1)*1.35,
+        0,
+        1
+      );
+
+    /*
+     * At high intensity:
+     *
+     * sustain ≈ -5.8 dB
+     * attacks  ≈ +6 dB
+     *
+     * Huge transient contrast without requiring clipping.
+     */
+    const sustainCutDb=
+      (1-transient) *
+      (2.0+3.8*i);
+
+    const attackLiftDb=
+      transient *
+      (2.2+3.8*i);
+
+    const makeupDb=
+      .6+1.0*i;
+
+    const gainDb=
+      makeupDb +
+      attackLiftDb -
+      sustainCutDb;
+
+    const g=
+      dbGain(gainDb);
+
+    this.impactBoost=
+      Math.max(
+        this.impactBoost,
+        Math.max(0,attackLiftDb)
+      );
+
+    return [
+      l*g,
+      r*g
+    ];
   }
 
   clarityProcess(l,r){
@@ -383,75 +513,217 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
       return [l,r];
     }
 
-    const mode=clamp(s.spaceMode,0,2);
-    const intensity=clamp(s.intensity,0,1);
+    const mode=
+      clamp(
+        s.spaceMode,
+        0,
+        2
+      );
+
+    const i=
+      clamp(
+        s.intensity,
+        0,
+        1
+      );
 
     let width;
-    let delayMs;
-    let decor;
-    let centerDepth;
+    let delayAms;
+    let delayBms;
+    let wet;
+    let depth;
 
     if(s.profile===1){
-      // HEADPHONES / IMMERSION
-      // Studio = wide/precise
-      // Live = dramatically wider
-      // Arena = extreme wraparound presentation
-      width=[1.45,2.15,2.90][mode];
-      delayMs=[5,13,24][mode];
-      decor=[.08,.19,.32][mode];
-      centerDepth=[.02,.07,.13][mode];
-    }else if(s.profile===2){
-      // BLUETOOTH / STAGE
-      // Controlled width because both channels mix acoustically.
-      width=[1.22,1.55,1.92][mode];
-      delayMs=[4,9,16][mode];
-      decor=[.05,.12,.21][mode];
-      centerDepth=[.04,.10,.18][mode];
-    }else{
-      // CAR / HI-FI
-      width=[1.18,1.48,1.80][mode];
-      delayMs=[3,8,14][mode];
-      decor=[.04,.10,.17][mode];
-      centerDepth=[.03,.08,.14][mode];
+      /*
+       * HEADPHONES / IMMERSION
+       */
+      width=[
+        1.55,
+        2.25,
+        3.05
+      ][mode];
+
+      delayAms=[
+        4.5,
+        10.5,
+        17.5
+      ][mode];
+
+      delayBms=[
+        7.0,
+        15.5,
+        25.0
+      ][mode];
+
+      wet=[
+        .10,
+        .19,
+        .29
+      ][mode];
+
+      depth=[
+        .02,
+        .06,
+        .11
+      ][mode];
+    }
+    else if(s.profile===2){
+      /*
+       * BLUETOOTH / STAGE
+       */
+      width=[
+        1.22,
+        1.52,
+        1.88
+      ][mode];
+
+      delayAms=[
+        3.5,
+        8.0,
+        13.0
+      ][mode];
+
+      delayBms=[
+        5.5,
+        11.5,
+        18.0
+      ][mode];
+
+      wet=[
+        .045,
+        .09,
+        .15
+      ][mode];
+
+      depth=[
+        .03,
+        .07,
+        .12
+      ][mode];
+    }
+    else{
+      /*
+       * CAR / HI-FI
+       */
+      width=[
+        1.20,
+        1.46,
+        1.76
+      ][mode];
+
+      delayAms=[
+        3.0,
+        7.0,
+        12.0
+      ][mode];
+
+      delayBms=[
+        5.0,
+        10.0,
+        16.0
+      ][mode];
+
+      wet=[
+        .04,
+        .08,
+        .13
+      ][mode];
+
+      depth=[
+        .025,
+        .06,
+        .10
+      ][mode];
     }
 
-    width=1+(width-1)*intensity;
-    decor*=intensity;
-    centerDepth*=intensity;
+    /*
+     * Intensity 0 = dry.
+     * Intensity 100 = full spatial design.
+     */
+    width=
+      1+(width-1)*i;
 
-    const mid=(l+r)*.5;
-    const side=(l-r)*.5;
+    wet*=i;
+    depth*=i;
 
-    const delaySamples=clamp(
-      Math.round(sampleRate*delayMs/1000),
-      1,
-      4095
-    );
+    const mid=
+      (l+r)*.5;
 
-    let read=this.delayIndex-delaySamples;
-    if(read<0)read+=4096;
+    const side=
+      (l-r)*.5;
 
-    const delayed=this.delay[read];
+    const a=
+      clamp(
+        Math.round(
+          sampleRate*delayAms/1000
+        ),
+        1,
+        4095
+      );
+
+    const b=
+      clamp(
+        Math.round(
+          sampleRate*delayBms/1000
+        ),
+        1,
+        4095
+      );
+
+    let readA=
+      this.delayIndex-a;
+
+    let readB=
+      this.delayIndex-b;
+
+    if(readA<0){
+      readA+=4096;
+    }
+
+    if(readB<0){
+      readB+=4096;
+    }
+
+    const delayedA=
+      this.delay[readA];
+
+    const delayedB=
+      this.delay[readB];
 
     this.delay[this.delayIndex]=mid;
-    this.delayIndex=(this.delayIndex+1)&4095;
 
-    // Decorrelation gives genuine apparent depth, not only a width meter.
-    const decorSignal=(delayed-mid)*decor;
+    this.delayIndex=
+      (this.delayIndex+1)&4095;
 
-    // Slight delayed center component adds front-to-back stage depth while
-    // keeping the direct vocal firmly in the center.
-    const depthCue=delayed*centerDepth;
+    /*
+     * Preserve solid center.
+     */
+    const center=
+      mid*(1-depth*.28) +
+      (delayedA+delayedB)*.5*depth;
 
-    const widenedSide=side*width+decorSignal;
+    /*
+     * Widen original stereo information.
+     */
+    const widened=
+      side*width;
 
-    const center=mid*(1-centerDepth*.35)+depthCue;
+    /*
+     * Different left/right delay cues create real spatial spread even
+     * when the source is almost mono.
+     */
+    const leftDecor=
+      (delayedA-mid)*wet;
 
-    this.widthPercent=width*100;
+    const rightDecor=
+      (delayedB-mid)*wet;
+
+    this.widthPercent=
+      width*100;
 
     return [
-      center+widenedSide,
-      center-widenedSide
+      center+widened+leftDecor,
+      center-widened+rightDecor
     ];
   }
 
@@ -483,21 +755,84 @@ class MvpSoundV7Processor extends AudioWorkletProcessor {
   }
 
   limit(l,r){
-    const peak=Math.max(Math.abs(l),Math.abs(r),1e-9);
-    const target=peak>.965?.965/peak:1;
+    const peak=
+      Math.max(
+        Math.abs(l),
+        Math.abs(r),
+        1e-9
+      );
 
-    if(target<this.limitGain){
-      this.limitGain=target;
-    }else{
-      this.limitGain+=(1-this.limitGain)*.0030;
-    }
+    const releaseCoef=
+      Math.exp(
+        -1/(sampleRate*.090)
+      );
 
-    const gr=-gainDb(this.limitGain);
-    this.limiterGr=Math.max(this.limiterGr,gr);
+    this.limiterEnv=
+      Math.max(
+        peak,
+        this.limiterEnv*releaseCoef
+      );
+
+    const ceiling=.955;
+
+    const target=
+      this.limiterEnv>ceiling
+        ? ceiling/this.limiterEnv
+        : 1;
+
+    const attack=
+      1-Math.exp(
+        -1/(sampleRate*.0012)
+      );
+
+    const release=
+      1-Math.exp(
+        -1/(sampleRate*.120)
+      );
+
+    this.limitGain +=
+      (target-this.limitGain) *
+      (
+        target<this.limitGain
+          ? attack
+          : release
+      );
+
+    /*
+     * Output delayed signal while limiter reacts to future samples.
+     */
+    const outL=
+      this.limitBufL[this.limitIndex] *
+      this.limitGain;
+
+    const outR=
+      this.limitBufR[this.limitIndex] *
+      this.limitGain;
+
+    this.limitBufL[this.limitIndex]=l;
+    this.limitBufR[this.limitIndex]=r;
+
+    this.limitIndex=
+      (this.limitIndex+1) %
+      this.lookaheadSamples;
+
+    const gr=
+      -gainDb(
+        Math.max(
+          this.limitGain,
+          1e-9
+        )
+      );
+
+    this.limiterGr=
+      Math.max(
+        this.limiterGr,
+        gr
+      );
 
     return [
-      l*this.limitGain,
-      r*this.limitGain
+      outL,
+      outR
     ];
   }
 

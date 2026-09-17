@@ -57,7 +57,7 @@ export type MvpStudioRuntimeInfo = {
   appliedState: Record<string,unknown> | null;
 };
 
-const ASSET_VERSION="7.1.0-authority";
+const ASSET_VERSION="7.2.0-clean-authority";
 
 const EMPTY:MvpStudioTelemetry={
   inputPeak:0,
@@ -105,7 +105,7 @@ const proofAckByNode=new WeakMap<AudioWorkletNode,{id:number;enabled:boolean}>()
 
 let runtime:MvpStudioRuntimeInfo={
   assetVersion:ASSET_VERSION,
-  processorVersion:"mvp-sound-v7-1-authority",
+  processorVersion:"mvp-sound-v7-2-clean-authority",
   ready:false,
   faulted:false,
   requestedRevision:0,
@@ -146,11 +146,13 @@ function publicState(state:MvpStudioState){
     spatialEnabled:Boolean(state.broadcastSpatialEnabled),
 
     spaceMode:
-      state.broadcastSpaceModeCode===2
-        ?"arena"
-        :state.broadcastSpaceModeCode===1
-          ?"live"
-          :"studio",
+      Number(state.broadcastSpaceModeCode)===3
+        ?"stage3d"
+        :state.broadcastSpaceModeCode===2
+          ?"arena"
+          :state.broadcastSpaceModeCode===1
+            ?"live"
+            :"studio",
 
     personalEnabled:Boolean(state.broadcastPersonalEnabled),
     personalBass:clamp(state.broadcastPersonalBass,-1,1,0),
@@ -242,7 +244,7 @@ export async function createMvpStudioNode(context:AudioContext){
         ...runtime,
         ready:true,
         faulted:false,
-        processorVersion:String(data.version||"mvp-sound-v7-1-authority"),
+        processorVersion:String(data.version||"mvp-sound-v7-2-clean-authority"),
         lastError:null
       };
       return;
