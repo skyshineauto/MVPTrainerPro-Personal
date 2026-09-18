@@ -1899,7 +1899,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R10 full-range mastering: PURE is untouched. ADAPTIVE adds clean density. POWER prioritizes bass and body, controls upper-band harshness, and uses 4× inter-sample peak detection with stereo-linked limiting.
+              R11 phase-safe direct mastering: PURE is untouched. ADAPTIVE is clearly louder and fuller. POWER adds extreme clean loudness with bass/body priority. No crossover reconstruction, no saturation, and no fake treble loudness.
             </p>
           </section>
         </div>,
