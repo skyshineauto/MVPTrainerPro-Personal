@@ -45,6 +45,8 @@ export type MusicPlayerState = {
   libraryLoaded: boolean;
   volume: number;
   experienceMode: MusicExperienceMode;
+  soundEngineReady: boolean;
+  soundEngineConfirmedMode: MusicExperienceMode | null;
 };
 
 const STORAGE_KEYS = {
@@ -220,6 +222,8 @@ let state: MusicPlayerState = {
   libraryLoaded: false,
   volume: readVolume(),
   experienceMode: readExperienceMode(),
+  soundEngineReady: false,
+  soundEngineConfirmedMode: null,
 };
 
 function emit(patch: Partial<MusicPlayerState>) {
@@ -321,7 +325,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r1");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r6-audible");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -331,6 +335,22 @@ async function connectMusicGraph() {
       channelCountMode: "explicit",
       channelInterpretation: "speakers",
     });
+    worklet.port.onmessage = (event) => {
+      const message = event?.data ?? {};
+      if (message.type === "ready") {
+        emit({ soundEngineReady: true });
+        return;
+      }
+      if (
+        message.type === "mode-active" &&
+        (message.mode === "pure" || message.mode === "adaptive" || message.mode === "power")
+      ) {
+        emit({
+          soundEngineReady: true,
+          soundEngineConfirmedMode: message.mode,
+        });
+      }
+    };
     const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.68;
@@ -348,6 +368,7 @@ async function connectMusicGraph() {
     analyserNode = analyser;
     userVolumeNode = volume;
     audio.volume = 1;
+    worklet.port.postMessage({ type: "ping" });
     worklet.port.postMessage({ type: "mode", mode: state.experienceMode });
   })();
 
@@ -858,7 +879,7 @@ export function setMusicVolume(value: number) {
 export function setMusicExperienceMode(mode: MusicExperienceMode) {
   if (mode !== "pure" && mode !== "adaptive" && mode !== "power") return;
   saveStored(STORAGE_KEYS.experienceMode, mode);
-  emit({ experienceMode: mode });
+  emit({ experienceMode: mode, soundEngineConfirmedMode: null });
   modeWorkletNode?.port.postMessage({ type: "mode", mode });
 }
 

@@ -163,8 +163,8 @@ function neuralSteeringStatus(mode: MusicRadioMode) {
 
 const SOUND_MODES: Array<{ mode: MusicExperienceMode; label: string; detail: string }> = [
   { mode: "pure", label: "PURE", detail: "Original source • no processing" },
-  { mode: "adaptive", label: "ADAPTIVE", detail: "Clean broadband density" },
-  { mode: "power", label: "POWER", detail: "Maximum broadband density" },
+  { mode: "adaptive", label: "ADAPTIVE", detail: "Audible broadband density" },
+  { mode: "power", label: "POWER", detail: "Extreme broadband density" },
 ];
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
@@ -1641,6 +1641,11 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     ? playlists.find((playlist) => playlist.id === player.activePlaylistId)?.name || "All Uploaded Songs"
     : player.activePlaylistName || "All Uploaded Songs";
   const soundModeLabel = player.experienceMode.toUpperCase();
+  const soundEngineLabel = player.soundEngineConfirmedMode === player.experienceMode
+    ? `ENGINE LIVE • ${soundModeLabel}`
+    : player.soundEngineReady
+      ? `ENGINE READY • ${soundModeLabel}`
+      : `ENGINE STARTS ON PLAY • ${soundModeLabel}`;
 
   return (
     <section
@@ -1868,7 +1873,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               <div>
                 <small>MVP AUDIO</small>
                 <strong>MVP SOUND</strong>
-                <span>FOUNDATION TEST • {soundModeLabel}</span>
+                <span>FOUNDATION TEST • {soundEngineLabel}</span>
               </div>
               <button type="button" onClick={() => setSoundOpen(false)} aria-label="Close MVP Sound">×</button>
             </header>
@@ -1890,7 +1895,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              One stereo path. No EQ, device profile, spatial mode, bass control, preamp, Personal Sound, or stacked effects.
+              Foundation only. PURE is untouched. ADAPTIVE and POWER are deliberately exaggerated so the live route can be proven before Bass, Impact, Clarity, Immersion and the rest are rebuilt.
             </p>
           </section>
         </div>,
