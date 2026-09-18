@@ -242,6 +242,9 @@ const DEFAULT_EMAIL_PREFS: Omit<TrainingEmailPreferences, "user_id"> = {
   include_coach_tip: true,
   include_exercise_plan: true,
   include_progress_snapshot: true,
+  reminder_enabled: true,
+  reminder_hours: 24,
+  reminder_max: 2,
   email_override: null,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
 };
@@ -561,7 +564,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
     setAccountEmail(signedInEmail);
     const { data, error } = await supabase
       .from("training_email_preferences")
-      .select("program_block_id,enabled,workout_ready,include_coach_tip,include_exercise_plan,include_progress_snapshot,email_override,timezone")
+      .select("program_block_id,enabled,workout_ready,include_coach_tip,include_exercise_plan,include_progress_snapshot,reminder_enabled,reminder_hours,reminder_max,email_override,timezone")
       .eq("user_id", uid)
       .maybeSingle();
     if (error) {
@@ -580,6 +583,9 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         include_coach_tip: data.include_coach_tip !== false,
         include_exercise_plan: data.include_exercise_plan !== false,
         include_progress_snapshot: data.include_progress_snapshot !== false,
+        reminder_enabled: data.reminder_enabled !== false,
+        reminder_hours: Number(data.reminder_hours || 24),
+        reminder_max: Number(data.reminder_max || 2),
         email_override: data.email_override ?? null,
         timezone: data.timezone || DEFAULT_EMAIL_PREFS.timezone,
       });
@@ -1524,7 +1530,7 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         <SectionTitle title="Training Email Coach" subtitle="A pro coaching brief when your next workout becomes ready. Alerts stay pinned to one program, so testing stays isolated." />
         <div className="co-emailCoachPanel">
           <div className="co-emailCoachTop">
-            <div><span>EMAIL COACH</span><strong>{emailPrefs.enabled ? "READY ALERTS ON" : "READY ALERTS OFF"}</strong><small>{emailPrefs.enabled ? "One email per ready workout. Duplicate protection is enforced server-side." : "Turn this on when you want your current program to email its next training brief."}</small></div>
+            <div><span>EMAIL COACH</span><strong>{emailPrefs.enabled ? "COACHING ALERTS ON" : "COACHING ALERTS OFF"}</strong><small>{emailPrefs.enabled ? "A full readiness brief for Up Next, plus optional server-side reminders if the same workout is still waiting." : "Turn this on when you want your pinned program to send training briefs and reminders."}</small></div>
             <label className="co-emailCoachSwitch"><input type="checkbox" checked={emailPrefs.enabled} disabled={emailPrefsBusy || !activeProgram} onChange={(event) => void saveTrainingEmailPreferences({ enabled: event.target.checked, program_block_id: event.target.checked ? (emailPrefs.program_block_id ?? activeProgram?.id ?? null) : emailPrefs.program_block_id }, event.target.checked)} /><i /></label>
           </div>
 
@@ -1533,6 +1539,13 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
             <label><input type="checkbox" checked={emailPrefs.include_coach_tip} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_coach_tip: event.target.checked })} /><span><strong>Coach Focus</strong><small>Technique and recovery cue matched to the workout and targeted program.</small></span></label>
             <label><input type="checkbox" checked={emailPrefs.include_exercise_plan} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_exercise_plan: event.target.checked })} /><span><strong>Exercise Plan</strong><small>Include the saved exercise order, sets and rep ranges.</small></span></label>
             <label><input type="checkbox" checked={emailPrefs.include_progress_snapshot} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ include_progress_snapshot: event.target.checked })} /><span><strong>Progress Snapshot</strong><small>Include the prior best set and a concise progression cue when available.</small></span></label>
+          </div>
+
+          <div className="co-emailCoachReminderSettings">
+            <div className="co-emailCoachReminderCopy"><span>REMINDER ALERTS</span><strong>{emailPrefs.reminder_enabled ? `ON • EVERY ${emailPrefs.reminder_hours}H` : "OFF"}</strong><small>Only while the exact same workout is still Up Next. Reminders stop automatically after you start, complete or skip it.</small></div>
+            <label className="co-emailCoachSwitch"><input type="checkbox" checked={emailPrefs.reminder_enabled} disabled={emailPrefsBusy} onChange={(event) => void saveTrainingEmailPreferences({ reminder_enabled: event.target.checked })} /><i /></label>
+            <label className="co-field"><span>REMIND AFTER</span><select value={emailPrefs.reminder_hours} disabled={emailPrefsBusy || !emailPrefs.reminder_enabled} onChange={(event) => void saveTrainingEmailPreferences({ reminder_hours: Number(event.target.value) })}><option value={12}>12 HOURS</option><option value={24}>24 HOURS</option><option value={36}>36 HOURS</option><option value={48}>48 HOURS</option></select></label>
+            <label className="co-field"><span>MAX REMINDERS</span><select value={emailPrefs.reminder_max} disabled={emailPrefsBusy || !emailPrefs.reminder_enabled} onChange={(event) => void saveTrainingEmailPreferences({ reminder_max: Number(event.target.value) })}><option value={1}>1 REMINDER</option><option value={2}>2 REMINDERS</option><option value={3}>3 REMINDERS</option></select></label>
           </div>
 
           <div className="co-emailCoachDelivery">
@@ -1681,7 +1694,10 @@ export function CoachPage({ navigate }: { navigate: (to: string) => void }) {
         .co-emailCoachOptions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.co-emailCoachOptions label{display:grid;grid-template-columns:20px minmax(0,1fr);gap:9px;align-items:start;padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.014)}.co-emailCoachOptions input{margin-top:2px;accent-color:#35c98a}.co-emailCoachOptions span{display:grid;gap:3px}.co-emailCoachOptions strong{font-size:13px}.co-emailCoachOptions small{font-size:10.5px;color:#8fa5af;line-height:1.4}
         .co-emailCoachDelivery{display:grid;grid-template-columns:minmax(0,1fr) 1.15fr;gap:9px;align-items:stretch}.co-emailCoachProgram{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.014)}.co-emailCoachProgram>div{display:grid;gap:3px}.co-emailCoachProgram button,.co-emailCoachActions button{border:1px solid rgba(90,220,255,.25);border-radius:9px;background:#0a2029;padding:10px 12px;font-size:10px;font-weight:1000;letter-spacing:.04em}
         .co-emailCoachActions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.co-emailCoachActions span{color:#7f98a3;font-size:10.5px}
-        @media(max-width:700px){.co-emailCoachTop{grid-template-columns:minmax(0,1fr) auto;gap:10px}.co-emailCoachOptions,.co-emailCoachDelivery{grid-template-columns:1fr}.co-emailCoachProgram{grid-template-columns:1fr}.co-emailCoachProgram button,.co-emailCoachActions button{width:100%}.co-emailCoachActions{display:grid}}
+        /* R84_EMAIL_COACH_PRO */
+        .co-emailCoachReminderSettings{display:grid;grid-template-columns:minmax(0,1fr) auto 160px 160px;gap:10px;align-items:center;padding:11px;border:1px solid rgba(255,180,93,.16);border-radius:11px;background:linear-gradient(145deg,rgba(255,180,93,.035),rgba(255,255,255,.008))}.co-emailCoachReminderCopy{display:grid;gap:3px;min-width:0}.co-emailCoachReminderCopy span{color:#ffb45d;font-size:9px;font-weight:1000;letter-spacing:.12em}.co-emailCoachReminderCopy strong{color:#fff;font-size:14px}.co-emailCoachReminderCopy small{color:#8fa5af;font-size:10.5px;line-height:1.4}.co-emailCoachReminderSettings .co-field select{min-height:39px}
+        @media(max-width:900px){.co-emailCoachReminderSettings{grid-template-columns:minmax(0,1fr) auto}.co-emailCoachReminderSettings .co-field{grid-column:span 1}}
+        @media(max-width:700px){.co-emailCoachTop{grid-template-columns:minmax(0,1fr) auto;gap:10px}.co-emailCoachOptions,.co-emailCoachDelivery{grid-template-columns:1fr}.co-emailCoachProgram{grid-template-columns:1fr}.co-emailCoachProgram button,.co-emailCoachActions button{width:100%}.co-emailCoachActions{display:grid}.co-emailCoachReminderSettings{grid-template-columns:minmax(0,1fr) auto}.co-emailCoachReminderSettings .co-field{grid-column:1 / -1}}
         .co-builder::before{background:#6f8cf5!important}.co-builder .co-sectionAccent{background:#6f8cf5!important}
         .co-briefCard{background:linear-gradient(145deg,rgba(255,255,255,.025),rgba(255,255,255,.006))!important;border-color:rgba(255,255,255,.075)!important}
         .co-briefCard.is-green{background:linear-gradient(145deg,rgba(44,190,119,.075),rgba(255,255,255,.008))!important}

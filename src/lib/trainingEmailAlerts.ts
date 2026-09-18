@@ -8,6 +8,9 @@ export type TrainingEmailPreferences = {
   include_coach_tip: boolean;
   include_exercise_plan: boolean;
   include_progress_snapshot: boolean;
+  reminder_enabled: boolean;
+  reminder_hours: number;
+  reminder_max: number;
   email_override: string | null;
   timezone: string;
 };
