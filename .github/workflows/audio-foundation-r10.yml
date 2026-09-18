@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R9
+name: MVP Audio Foundation R10
 
 on:
   workflow_dispatch:
@@ -9,8 +9,8 @@ on:
       - "public/audio/mvpSoundModes.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r9.mjs"
-      - ".github/workflows/audio-foundation-r9.yml"
+      - "scripts/test-audio-foundation-r10.mjs"
+      - ".github/workflows/audio-foundation-r10.yml"
 
 permissions:
   contents: read
@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate worklet syntax
+      - name: Validate R10 Worklet syntax
         run: node --check public/audio/mvpSoundModes.worklet.js
 
-      - name: Run R9 audio audibility and safety validation
-        run: node scripts/test-audio-foundation-r9.mjs
+      - name: Run R10 audibility, tonal-balance, peak, and bass-cleanliness validation
+        run: node scripts/test-audio-foundation-r10.mjs
 
-      - name: Run production build
+      - name: Run production app build
         run: npm run build

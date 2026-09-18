@@ -163,8 +163,8 @@ function neuralSteeringStatus(mode: MusicRadioMode) {
 
 const SOUND_MODES: Array<{ mode: MusicExperienceMode; label: string; detail: string }> = [
   { mode: "pure", label: "PURE", detail: "Original source • no processing" },
-  { mode: "adaptive", label: "ADAPTIVE", detail: "Audible broadband density" },
-  { mode: "power", label: "POWER", detail: "Extreme broadband density" },
+  { mode: "adaptive", label: "ADAPTIVE", detail: "Louder • fuller • clean" },
+  { mode: "power", label: "POWER", detail: "Extreme clean loudness • full-range" },
 ];
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
@@ -1899,7 +1899,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R9 live proof: PURE is untouched. ADAPTIVE uses clean mastering. POWER uses stronger clean loudness plus presence/air authority with a stereo-linked lookahead limiter.
+              R10 full-range mastering: PURE is untouched. ADAPTIVE adds clean density. POWER prioritizes bass and body, controls upper-band harshness, and uses 4× inter-sample peak detection with stereo-linked limiting.
             </p>
           </section>
         </div>,

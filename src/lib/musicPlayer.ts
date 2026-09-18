@@ -333,7 +333,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r9-audible-clean");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r10-fullrange-max");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
