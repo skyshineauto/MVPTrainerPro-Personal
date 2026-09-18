@@ -1646,6 +1646,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     : player.soundEngineReady
       ? `ENGINE READY • ${soundModeLabel}`
       : `ENGINE STARTS ON PLAY • ${soundModeLabel}`;
+  const soundTelemetryLabel = player.soundDeltaDb == null
+    ? "LIVE METER STARTING"
+    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} dB • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} dB • Δ ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS`;
 
   return (
     <section
@@ -1874,6 +1877,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 <small>MVP AUDIO</small>
                 <strong>MVP SOUND</strong>
                 <span>FOUNDATION TEST • {soundEngineLabel}</span>
+                <span>{soundTelemetryLabel}</span>
               </div>
               <button type="button" onClick={() => setSoundOpen(false)} aria-label="Close MVP Sound">×</button>
             </header>
@@ -1895,7 +1899,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              Foundation only. PURE is untouched. ADAPTIVE and POWER are deliberately exaggerated so the live route can be proven before Bass, Impact, Clarity, Immersion and the rest are rebuilt.
+              R9 live proof: PURE is untouched. ADAPTIVE uses clean mastering. POWER uses stronger clean loudness plus presence/air authority with a stereo-linked lookahead limiter.
             </p>
           </section>
         </div>,

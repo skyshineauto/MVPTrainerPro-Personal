@@ -47,6 +47,10 @@ export type MusicPlayerState = {
   experienceMode: MusicExperienceMode;
   soundEngineReady: boolean;
   soundEngineConfirmedMode: MusicExperienceMode | null;
+  soundInputRmsDb: number | null;
+  soundOutputRmsDb: number | null;
+  soundDeltaDb: number | null;
+  soundOutputPeakDb: number | null;
 };
 
 const STORAGE_KEYS = {
@@ -224,6 +228,10 @@ let state: MusicPlayerState = {
   experienceMode: readExperienceMode(),
   soundEngineReady: false,
   soundEngineConfirmedMode: null,
+  soundInputRmsDb: null,
+  soundOutputRmsDb: null,
+  soundDeltaDb: null,
+  soundOutputPeakDb: null,
 };
 
 function emit(patch: Partial<MusicPlayerState>) {
@@ -325,7 +333,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r8-clean-maximizer");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r9-audible-clean");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -339,6 +347,18 @@ async function connectMusicGraph() {
       const message = event?.data ?? {};
       if (message.type === "ready") {
         emit({ soundEngineReady: true });
+        return;
+      }
+      if (
+        message.type === "telemetry" &&
+        (message.mode === "pure" || message.mode === "adaptive" || message.mode === "power")
+      ) {
+        emit({
+          soundInputRmsDb: Number(message.inputRmsDb),
+          soundOutputRmsDb: Number(message.outputRmsDb),
+          soundDeltaDb: Number(message.deltaDb),
+          soundOutputPeakDb: Number(message.outputPeakDb),
+        });
         return;
       }
       if (
@@ -879,7 +899,14 @@ export function setMusicVolume(value: number) {
 export function setMusicExperienceMode(mode: MusicExperienceMode) {
   if (mode !== "pure" && mode !== "adaptive" && mode !== "power") return;
   saveStored(STORAGE_KEYS.experienceMode, mode);
-  emit({ experienceMode: mode, soundEngineConfirmedMode: null });
+  emit({
+    experienceMode: mode,
+    soundEngineConfirmedMode: null,
+    soundInputRmsDb: null,
+    soundOutputRmsDb: null,
+    soundDeltaDb: null,
+    soundOutputPeakDb: null,
+  });
   modeWorkletNode?.port.postMessage({ type: "mode", mode });
 }
 

@@ -1,0 +1,43 @@
+name: MVP Audio Foundation R9
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "public/audio/mvpSoundModes.worklet.js"
+      - "src/lib/musicPlayer.ts"
+      - "src/features/music/MusicMiniPlayer.tsx"
+      - "scripts/test-audio-foundation-r9.mjs"
+      - ".github/workflows/audio-foundation-r9.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-audio-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate worklet syntax
+        run: node --check public/audio/mvpSoundModes.worklet.js
+
+      - name: Run R9 audio audibility and safety validation
+        run: node scripts/test-audio-foundation-r9.mjs
+
+      - name: Run production build
+        run: npm run build

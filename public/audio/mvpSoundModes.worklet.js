@@ -4,17 +4,29 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     this.mode = "pure";
     this.pendingModeConfirmation = true;
 
-    this.compEnvelope = 0;
-    this.limiterGain = 1;
-    this.bassShare = 0;
-    this.bassState = [0, 0];
+    this.programPeak = 0;
+    this.programAvg = 0;
+    this.compEnv = 0;
+    this.compGain = 1;
+    this.limiterEnvelope = 0;
 
     this.lookaheadFrames = 256;
-    this.delay = [
-      new Float32Array(this.lookaheadFrames),
-      new Float32Array(this.lookaheadFrames),
-    ];
-    this.delayIndex = 0;
+    this.lookL = new Float32Array(this.lookaheadFrames);
+    this.lookR = new Float32Array(this.lookaheadFrames);
+    this.lookGain = new Float32Array(this.lookaheadFrames);
+    this.lookGain.fill(1);
+    this.lookIndex = 0;
+
+    this.filters = {
+      adaptive: this.createToneBank("adaptive"),
+      power: this.createToneBank("power"),
+    };
+
+    this.telemetryFrames = 0;
+    this.telemetryInputSq = 0;
+    this.telemetryOutputSq = 0;
+    this.telemetrySamples = 0;
+    this.telemetryOutputPeak = 0;
 
     this.port.onmessage = (event) => {
       const message = event?.data ?? {};
@@ -36,15 +48,8 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     };
   }
 
-  resetDynamics() {
-    this.compEnvelope = 0;
-    this.limiterGain = 1;
-    this.bassShare = 0;
-    this.bassState[0] = 0;
-    this.bassState[1] = 0;
-    this.delay[0].fill(0);
-    this.delay[1].fill(0);
-    this.delayIndex = 0;
+  static clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 
   static dbToGain(db) {
@@ -55,8 +60,117 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     return 20 * Math.log10(Math.max(1e-12, gain));
   }
 
-  static clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
+  createBiquad() {
+    return { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0, z1: 0, z2: 0 };
+  }
+
+  setPeaking(filter, frequency, q, gainDb) {
+    const rate = typeof sampleRate === "number" && sampleRate > 0 ? sampleRate : 48000;
+    const f = MvpSoundModesProcessor.clamp(frequency, 10, rate * 0.475);
+    const A = Math.pow(10, gainDb / 40);
+    const w = 2 * Math.PI * f / rate;
+    const c = Math.cos(w);
+    const s = Math.sin(w);
+    const alpha = s / (2 * q);
+    const aa = 1 + alpha / A;
+    filter.b0 = (1 + alpha * A) / aa;
+    filter.b1 = (-2 * c) / aa;
+    filter.b2 = (1 - alpha * A) / aa;
+    filter.a1 = (-2 * c) / aa;
+    filter.a2 = (1 - alpha / A) / aa;
+  }
+
+  setLowShelf(filter, frequency, gainDb) {
+    const rate = typeof sampleRate === "number" && sampleRate > 0 ? sampleRate : 48000;
+    const f = MvpSoundModesProcessor.clamp(frequency, 10, rate * 0.475);
+    const A = Math.pow(10, gainDb / 40);
+    const w = 2 * Math.PI * f / rate;
+    const c = Math.cos(w);
+    const s = Math.sin(w);
+    const beta = 2 * Math.sqrt(A) * s;
+    const aa = (A + 1) + (A - 1) * c + beta;
+    filter.b0 = A * ((A + 1) - (A - 1) * c + beta) / aa;
+    filter.b1 = 2 * A * ((A - 1) - (A + 1) * c) / aa;
+    filter.b2 = A * ((A + 1) - (A - 1) * c - beta) / aa;
+    filter.a1 = -2 * ((A - 1) + (A + 1) * c) / aa;
+    filter.a2 = ((A + 1) + (A - 1) * c - beta) / aa;
+  }
+
+  setHighShelf(filter, frequency, gainDb) {
+    const rate = typeof sampleRate === "number" && sampleRate > 0 ? sampleRate : 48000;
+    const f = MvpSoundModesProcessor.clamp(frequency, 10, rate * 0.475);
+    const A = Math.pow(10, gainDb / 40);
+    const w = 2 * Math.PI * f / rate;
+    const c = Math.cos(w);
+    const s = Math.sin(w);
+    const beta = 2 * Math.sqrt(A) * s;
+    const aa = (A + 1) - (A - 1) * c + beta;
+    filter.b0 = A * ((A + 1) + (A - 1) * c + beta) / aa;
+    filter.b1 = -2 * A * ((A - 1) + (A + 1) * c) / aa;
+    filter.b2 = A * ((A + 1) + (A - 1) * c - beta) / aa;
+    filter.a1 = 2 * ((A - 1) - (A + 1) * c) / aa;
+    filter.a2 = ((A + 1) - (A - 1) * c - beta) / aa;
+  }
+
+  createToneBank(mode) {
+    const left = Array.from({ length: 5 }, () => this.createBiquad());
+    const right = Array.from({ length: 5 }, () => this.createBiquad());
+
+    const gains = mode === "power"
+      ? { bass: 1.8, body: 0.8, mud: -1.5, presence: 5.5, air: 5.5 }
+      : { bass: 0.7, body: 0.25, mud: -0.5, presence: 1.2, air: 1.3 };
+
+    for (const bank of [left, right]) {
+      this.setLowShelf(bank[0], 76, gains.bass);
+      this.setPeaking(bank[1], 160, 0.72, gains.body);
+      this.setPeaking(bank[2], 520, 0.70, gains.mud);
+      this.setPeaking(bank[3], 3200, 0.80, gains.presence);
+      this.setHighShelf(bank[4], 9600, gains.air);
+    }
+
+    return { left, right };
+  }
+
+  processBiquad(filter, input) {
+    const output = filter.b0 * input + filter.z1;
+    filter.z1 = filter.b1 * input - filter.a1 * output + filter.z2;
+    filter.z2 = filter.b2 * input - filter.a2 * output;
+    return output;
+  }
+
+  processTone(bank, channel, input) {
+    const filters = channel === 0 ? bank.left : bank.right;
+    let output = input;
+    for (let index = 0; index < filters.length; index += 1) {
+      output = this.processBiquad(filters[index], output);
+    }
+    return output;
+  }
+
+  resetFilterState(bank) {
+    for (const filter of [...bank.left, ...bank.right]) {
+      filter.z1 = 0;
+      filter.z2 = 0;
+    }
+  }
+
+  resetDynamics() {
+    this.programPeak = 0;
+    this.programAvg = 0;
+    this.compEnv = 0;
+    this.compGain = 1;
+    this.limiterEnvelope = 0;
+    this.lookL.fill(0);
+    this.lookR.fill(0);
+    this.lookGain.fill(1);
+    this.lookIndex = 0;
+    this.resetFilterState(this.filters.adaptive);
+    this.resetFilterState(this.filters.power);
+    this.telemetryFrames = 0;
+    this.telemetryInputSq = 0;
+    this.telemetryOutputSq = 0;
+    this.telemetrySamples = 0;
+    this.telemetryOutputPeak = 0;
   }
 
   static copyInput(input, output) {
@@ -93,6 +207,41 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     this.port.postMessage({ type: "mode-active", mode: this.mode });
   }
 
+  addTelemetry(inputLeft, inputRight, outputLeft, outputRight) {
+    this.telemetryInputSq += inputLeft * inputLeft + inputRight * inputRight;
+    this.telemetryOutputSq += outputLeft * outputLeft + outputRight * outputRight;
+    this.telemetrySamples += 2;
+    this.telemetryOutputPeak = Math.max(
+      this.telemetryOutputPeak,
+      Math.abs(outputLeft),
+      Math.abs(outputRight),
+    );
+    this.telemetryFrames += 1;
+
+    const rate = typeof sampleRate === "number" && sampleRate > 0 ? sampleRate : 48000;
+    if (this.telemetryFrames < Math.floor(rate * 0.5)) return;
+
+    const inputRms = Math.sqrt(this.telemetryInputSq / Math.max(1, this.telemetrySamples));
+    const outputRms = Math.sqrt(this.telemetryOutputSq / Math.max(1, this.telemetrySamples));
+    const inputRmsDb = MvpSoundModesProcessor.gainToDb(inputRms);
+    const outputRmsDb = MvpSoundModesProcessor.gainToDb(outputRms);
+
+    this.port.postMessage({
+      type: "telemetry",
+      mode: this.mode,
+      inputRmsDb,
+      outputRmsDb,
+      deltaDb: outputRmsDb - inputRmsDb,
+      outputPeakDb: MvpSoundModesProcessor.gainToDb(this.telemetryOutputPeak),
+    });
+
+    this.telemetryFrames = 0;
+    this.telemetryInputSq = 0;
+    this.telemetryOutputSq = 0;
+    this.telemetrySamples = 0;
+    this.telemetryOutputPeak = 0;
+  }
+
   process(inputs, outputs) {
     const input = inputs[0] ?? [];
     const output = outputs[0] ?? [];
@@ -102,163 +251,122 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
 
     if (this.mode === "pure") {
       MvpSoundModesProcessor.copyInput(input, output);
+      for (let frame = 0; frame < frames; frame += 1) {
+        const left = input[0]?.[frame] ?? 0;
+        const right = input[1]?.[frame] ?? left;
+        this.addTelemetry(left, right, left, right);
+      }
       this.confirmModeIfAudible(input, frames);
       return true;
     }
 
-    // R8: parallel crest compression + bass-aware lookahead limiting.
-    // This raises average musical energy instead of brute-force clipping peaks.
-    // PURE remains untouched. No EQ, saturation, bass boost, stereo widening,
-    // exciter, spatial processing or device-specific profile is used here.
-    const isPower = this.mode === "power";
-    const settings = isPower
-      ? {
-          thresholdDb: -26,
-          ratio: 10,
-          attackMs: 1.5,
-          releaseMs: 45,
-          parallelAmount: 3.0,
-          makeupDb: 5.5,
-          ceiling: 0.89,
-          limiterFastReleaseMs: 10,
-          limiterBassReleaseMs: 300,
-          bassCutoffHz: 145,
-          bassMemoryMs: 100,
-          bassParallelReduction: 0.95,
-          bassMakeupReduction: 0.70,
-        }
-      : {
-          thresholdDb: -14,
-          ratio: 2,
-          attackMs: 8,
-          releaseMs: 120,
-          parallelAmount: 0.10,
-          makeupDb: 0.40,
-          ceiling: 0.89,
-          limiterFastReleaseMs: 60,
-          limiterBassReleaseMs: 180,
-          bassCutoffHz: 140,
-          bassMemoryMs: 120,
-          bassParallelReduction: 0.30,
-          bassMakeupReduction: 0.10,
-        };
-
+    const power = this.mode === "power";
+    const bank = power ? this.filters.power : this.filters.adaptive;
     const rate = typeof sampleRate === "number" && sampleRate > 0 ? sampleRate : 48000;
-    const attackCoeff = Math.exp(-1 / (rate * settings.attackMs / 1000));
-    const releaseCoeff = Math.exp(-1 / (rate * settings.releaseMs / 1000));
-    const bassMemoryCoeff = Math.exp(-1 / (rate * settings.bassMemoryMs / 1000));
-    const lowPassAlpha = 1 - Math.exp(-2 * Math.PI * settings.bassCutoffHz / rate);
+
+    const peakAttack = 1 - Math.exp(-1 / (rate * 0.001));
+    const peakRelease = 1 - Math.exp(-1 / (rate * 0.180));
+    const avgAttack = 1 - Math.exp(-1 / (rate * 0.025));
+    const avgRelease = 1 - Math.exp(-1 / (rate * 0.300));
+    const compAttack = 1 - Math.exp(-1 / (rate * (power ? 0.004 : 0.008)));
+    const compRelease = 1 - Math.exp(-1 / (rate * (power ? 0.110 : 0.160)));
+    const limiterRelease = 1 - Math.exp(-1 / (rate * 0.150));
+
+    const ceiling = power ? 0.894 : 0.80;
 
     for (let frame = 0; frame < frames; frame += 1) {
-      const left = input[0]?.[frame] ?? 0;
-      const right = input[1]?.[frame] ?? left;
-      const samplePeak = Math.max(Math.abs(left), Math.abs(right));
+      const inputLeft = input[0]?.[frame] ?? 0;
+      const inputRight = input[1]?.[frame] ?? inputLeft;
 
-      const envelopeCoeff = samplePeak > this.compEnvelope ? attackCoeff : releaseCoeff;
-      this.compEnvelope =
-        envelopeCoeff * this.compEnvelope +
-        (1 - envelopeCoeff) * samplePeak;
+      const detector = Math.max(Math.abs(inputLeft), Math.abs(inputRight));
+      const peakCoeff = detector > this.programPeak ? peakAttack : peakRelease;
+      this.programPeak += (detector - this.programPeak) * peakCoeff;
+      const avgCoeff = detector > this.programAvg ? avgAttack : avgRelease;
+      this.programAvg += (detector - this.programAvg) * avgCoeff;
 
-      const envelopeDb = MvpSoundModesProcessor.gainToDb(this.compEnvelope);
-      const overDb = Math.max(0, envelopeDb - settings.thresholdDb);
-      const compressionDb = overDb * (1 - 1 / settings.ratio);
-      const compressedGain = MvpSoundModesProcessor.dbToGain(-compressionDb);
+      const density = MvpSoundModesProcessor.clamp(
+        this.programAvg / Math.max(this.programPeak, 1e-6),
+        0,
+        1,
+      );
+      const hotGuard = MvpSoundModesProcessor.clamp((this.programPeak - 0.70) / 0.22, 0, 1);
 
-      let sampleSq = 0;
-      let lowSq = 0;
-      const samples = [left, right];
-      for (let channel = 0; channel < 2; channel += 1) {
-        const sample = samples[channel];
-        sampleSq += sample * sample;
-        const low =
-          this.bassState[channel] +
-          lowPassAlpha * (sample - this.bassState[channel]);
-        this.bassState[channel] = low;
-        lowSq += low * low;
+      let preampDb = power ? 6.28 : 2.35;
+      preampDb -= power ? hotGuard * 3.60 : hotGuard * 1.00;
+      const preamp = MvpSoundModesProcessor.dbToGain(preampDb);
+
+      let left = inputLeft * preamp;
+      let right = inputRight * preamp;
+
+      const compDetector = Math.max(this.programAvg * preamp, 1e-6);
+      const compEnvCoeff = compDetector > this.compEnv ? compAttack : compRelease;
+      this.compEnv += (compDetector - this.compEnv) * compEnvCoeff;
+
+      const threshold = power ? 0.473 : 0.681;
+      const ratio = power ? 3.78 : 1.71;
+      let targetGain = 1;
+      if (this.compEnv > threshold) {
+        targetGain = Math.pow(this.compEnv / threshold, (1 / ratio) - 1);
       }
-      sampleSq *= 0.5;
-      lowSq *= 0.5;
 
-      const instantaneousBassShare =
-        sampleSq > 1e-12
-          ? MvpSoundModesProcessor.clamp(lowSq / sampleSq, 0, 1)
-          : 0;
-      this.bassShare =
-        bassMemoryCoeff * this.bassShare +
-        (1 - bassMemoryCoeff) * instantaneousBassShare;
+      const compGainCoeff = targetGain < this.compGain ? compAttack : compRelease;
+      this.compGain += (targetGain - this.compGain) * compGainCoeff;
 
-      const effectiveParallel =
-        settings.parallelAmount *
-        (1 - settings.bassParallelReduction * this.bassShare);
-      const effectiveMakeupDb =
-        settings.makeupDb *
-        (1 - settings.bassMakeupReduction * this.bassShare);
+      const blend = power ? 0.75 : 0.38;
+      const compression = (1 - blend) + blend * this.compGain;
+      const envNorm = MvpSoundModesProcessor.clamp(
+        this.compEnv / (power ? 0.72 : 0.80),
+        0,
+        1,
+      );
+      const upwardDb = (1 - envNorm) * (power ? 1.10 : 0.30);
+      const densityGuard = MvpSoundModesProcessor.clamp((density - 0.82) / 0.13, 0, 1);
+      const makeupDb = (power ? 3.70 : 1.30) - (power ? densityGuard * 0.30 : 0);
+      const programGain = compression * MvpSoundModesProcessor.dbToGain(makeupDb + upwardDb);
 
-      const makeupGain = MvpSoundModesProcessor.dbToGain(effectiveMakeupDb);
+      left *= programGain;
+      right *= programGain;
 
-      // Direct path + heavily compressed parallel path. Peaks receive much less
-      // contribution than the musical body, which lowers crest factor without
-      // soft-clipping or saturating the waveform.
-      const programGain =
-        (1 + effectiveParallel * compressedGain) * makeupGain;
+      left = this.processTone(bank, 0, left);
+      right = this.processTone(bank, 1, right);
 
-      // Look ahead 256 samples (~5.3 ms at 48 kHz) so the limiter reduces gain
-      // before the protected peak reaches the output.
-      const delayedLeft = this.delay[0][this.delayIndex];
-      const delayedRight = this.delay[1][this.delayIndex];
-      this.delay[0][this.delayIndex] = left;
-      this.delay[1][this.delayIndex] = right;
-      this.delayIndex += 1;
-      if (this.delayIndex >= this.lookaheadFrames) this.delayIndex = 0;
+      const processedPeak = Math.max(Math.abs(left), Math.abs(right));
 
-      const candidatePeak = samplePeak * programGain;
-      const requiredLimiter =
-        candidatePeak > settings.ceiling
-          ? settings.ceiling / Math.max(candidatePeak, 1e-12)
-          : 1;
-
-      if (requiredLimiter < this.limiterGain) {
-        this.limiterGain = requiredLimiter;
+      // Stereo-linked lookahead limiter. Attack is immediate, release is slow.
+      // Store the gain alongside the delayed samples so each sample exits with
+      // the exact clean attenuation calculated from its own future peak envelope.
+      if (processedPeak > this.limiterEnvelope) {
+        this.limiterEnvelope = processedPeak;
       } else {
-        const limiterReleaseMs =
-          settings.limiterFastReleaseMs +
-          (settings.limiterBassReleaseMs - settings.limiterFastReleaseMs) *
-            this.bassShare;
-        const limiterReleaseCoeff =
-          Math.exp(-1 / (rate * limiterReleaseMs / 1000));
-        this.limiterGain =
-          limiterReleaseCoeff * this.limiterGain +
-          (1 - limiterReleaseCoeff);
+        this.limiterEnvelope += (processedPeak - this.limiterEnvelope) * limiterRelease;
       }
 
-      const finalGain = programGain * this.limiterGain;
-      const outLeft = delayedLeft * finalGain;
-      const outRight = delayedRight * finalGain;
+      const requiredGain = this.limiterEnvelope > ceiling
+        ? ceiling / Math.max(this.limiterEnvelope, 1e-12)
+        : 1;
 
-      if (output[0]) {
-        output[0][frame] = MvpSoundModesProcessor.clamp(
-          outLeft,
-          -settings.ceiling,
-          settings.ceiling,
-        );
-      }
-      if (output[1]) {
-        output[1][frame] = MvpSoundModesProcessor.clamp(
-          outRight,
-          -settings.ceiling,
-          settings.ceiling,
-        );
-      }
+      const delayedLeft = this.lookL[this.lookIndex];
+      const delayedRight = this.lookR[this.lookIndex];
+      const delayedGain = this.lookGain[this.lookIndex];
+
+      this.lookL[this.lookIndex] = left;
+      this.lookR[this.lookIndex] = right;
+      this.lookGain[this.lookIndex] = requiredGain;
+      this.lookIndex += 1;
+      if (this.lookIndex >= this.lookaheadFrames) this.lookIndex = 0;
+
+      const outputLeft = delayedLeft * delayedGain;
+      const outputRight = delayedRight * delayedGain;
+
+      if (output[0]) output[0][frame] = outputLeft;
+      if (output[1]) output[1][frame] = outputRight;
       for (let channel = 2; channel < output.length; channel += 1) {
         const target = output[channel];
         if (!target) continue;
-        const delayed = channel % 2 === 0 ? delayedLeft : delayedRight;
-        target[frame] = MvpSoundModesProcessor.clamp(
-          delayed * finalGain,
-          -settings.ceiling,
-          settings.ceiling,
-        );
+        target[frame] = channel % 2 === 0 ? outputLeft : outputRight;
       }
+
+      this.addTelemetry(inputLeft, inputRight, outputLeft, outputRight);
     }
 
     this.confirmModeIfAudible(input, frames);
