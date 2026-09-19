@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R11
+name: MVP Audio Foundation R12
 
 on:
   workflow_dispatch:
@@ -6,11 +6,12 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes.worklet.js"
+      - "public/audio/mvpSoundModes-r12.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r11.mjs"
-      - ".github/workflows/audio-foundation-r11.yml"
+      - "src/workers/musicAudioIntelligence.worker.ts"
+      - "scripts/test-audio-foundation-r12.mjs"
+      - ".github/workflows/audio-foundation-r12.yml"
 
 permissions:
   contents: read
@@ -19,25 +20,19 @@ jobs:
   validate-audio-foundation:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
-      - name: Validate R11 Worklet syntax
-        run: node --check public/audio/mvpSoundModes.worklet.js
-
-      - name: Run R11 audibility and phase-safe full-range validation
-        run: node scripts/test-audio-foundation-r11.mjs
-
+      - name: Validate R12 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r12.worklet.js
+      - name: Run R12 real-mode and Song IQ validation
+        run: node scripts/test-audio-foundation-r12.mjs public/audio/mvpSoundModes-r12.worklet.js
       - name: Run production app build
         run: npm run build

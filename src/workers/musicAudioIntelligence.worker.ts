@@ -368,9 +368,9 @@ function buildTechnical(
 
 function buildMasterPrep(technical: MusicAudioTechnicalAnalysis): MusicMasterPrepProfile {
   const reasons: string[] = [];
-  // R78f: Master Prep never turns down the song. The proven r77i shared clean-headroom
-  // controller already owns attenuation and true-peak safety. Master Prep may only
-  // recover clean level from quieter masters.
+  // R12: Master Prep is stored as per-song guidance. The live Adaptive/Power engine
+  // owns final program gain and true-peak safety; this source-gain value is only a
+  // non-negative headroom hint and never attenuates the original during analysis.
   const sourceGainDb = clamp(-1.3 - technical.truePeakDbtp, 0, 1.5);
   const highpassHz = technical.rumble > 72 ? 26 : technical.rumble > 55 || technical.dcOffset > 0.002 ? 22 : 18;
   const lowMidDb = -clamp((technical.lowMidBuildup - 56) * 0.035, 0, 1.5);

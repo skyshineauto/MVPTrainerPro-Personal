@@ -25,6 +25,7 @@ import {
   syncLikedSongsPlaylist,
   type MusicRadioMode,
 } from "./musicIntelligence";
+import { getMusicTrackIntelligence } from "./musicIntelligenceEnrichment";
 
 export type MusicRepeatMode = "off" | "one" | "all";
 export type MusicExperienceMode = "pure" | "adaptive" | "power";
@@ -51,6 +52,11 @@ export type MusicPlayerState = {
   soundOutputRmsDb: number | null;
   soundDeltaDb: number | null;
   soundOutputPeakDb: number | null;
+  soundRequestedGainDb: number | null;
+  soundLimiterReductionDb: number | null;
+  soundTrackProfileReady: boolean;
+  soundContextState: AudioContextState | null;
+  soundModeGeneration: number;
 };
 
 const STORAGE_KEYS = {
@@ -153,6 +159,8 @@ let recordedPlayToken = "";
 let timeSaveAt = 0;
 let mediaRecoveryInFlight = false;
 let rtaBuffer: Uint8Array<ArrayBuffer> | null = null;
+let soundModeGeneration = 0;
+let soundTrackProfileToken = 0;
 
 function readStored(key: string) {
   try {
@@ -232,6 +240,11 @@ let state: MusicPlayerState = {
   soundOutputRmsDb: null,
   soundDeltaDb: null,
   soundOutputPeakDb: null,
+  soundRequestedGainDb: null,
+  soundLimiterReductionDb: null,
+  soundTrackProfileReady: false,
+  soundContextState: null,
+  soundModeGeneration: 0,
 };
 
 function emit(patch: Partial<MusicPlayerState>) {
@@ -319,7 +332,7 @@ function ensureAudioElement() {
 }
 
 function getAudioContext() {
-  if (audioContext) return audioContext;
+  if (audioContext && audioContext.state !== "closed") return audioContext;
   const AudioContextCtor = window.AudioContext;
   audioContext = new AudioContextCtor({ latencyHint: "interactive" });
   return audioContext;
@@ -333,7 +346,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes.worklet.js?v=foundation-r11-phase-safe-direct");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes-r12.worklet.js");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -350,7 +363,15 @@ async function connectMusicGraph() {
         return;
       }
       if (
+        message.type === "track-profile-active" &&
+        (!message.trackId || message.trackId === state.currentTrack?.id)
+      ) {
+        emit({ soundTrackProfileReady: Boolean(message.applied) });
+        return;
+      }
+      if (
         message.type === "telemetry" &&
+        message.generation === soundModeGeneration &&
         (message.mode === "pure" || message.mode === "adaptive" || message.mode === "power")
       ) {
         emit({
@@ -358,17 +379,22 @@ async function connectMusicGraph() {
           soundOutputRmsDb: Number(message.outputRmsDb),
           soundDeltaDb: Number(message.deltaDb),
           soundOutputPeakDb: Number(message.outputPeakDb),
+          soundRequestedGainDb: Number(message.requestedGainDb),
+          soundLimiterReductionDb: Number(message.limiterReductionDb),
+          soundTrackProfileReady: Boolean(message.trackProfileApplied),
         });
         return;
       }
       if (
         message.type === "mode-active" &&
+        message.generation === soundModeGeneration &&
         (message.mode === "pure" || message.mode === "adaptive" || message.mode === "power")
       ) {
         emit({
           soundEngineReady: true,
           soundEngineConfirmedMode: message.mode,
         });
+        console.info(`[MVP AUDIO] processed ${String(message.mode).toUpperCase()} generation=${message.generation}`);
       }
     };
     const analyser = context.createAnalyser();
@@ -388,8 +414,12 @@ async function connectMusicGraph() {
     analyserNode = analyser;
     userVolumeNode = volume;
     audio.volume = 1;
+
+    if (soundModeGeneration <= 0) soundModeGeneration = 1;
+    emit({ soundModeGeneration, soundContextState: context.state });
     worklet.port.postMessage({ type: "ping" });
-    worklet.port.postMessage({ type: "mode", mode: state.experienceMode });
+    worklet.port.postMessage({ type: "mode", mode: state.experienceMode, generation: soundModeGeneration });
+    if (state.currentTrack) void applyTrackSoundProfile(state.currentTrack);
   })();
 
   try {
@@ -402,10 +432,58 @@ async function connectMusicGraph() {
   }
 }
 
+function profileNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function applyTrackSoundProfile(track: MusicTrack) {
+  const token = ++soundTrackProfileToken;
+  emit({ soundTrackProfileReady: false });
+  modeWorkletNode?.port.postMessage({ type: "track-profile", trackId: track.id, profile: null });
+
+  try {
+    const intelligence = await getMusicTrackIntelligence(track.id);
+    if (token !== soundTrackProfileToken || state.currentTrack?.id !== track.id) return;
+
+    const audio = intelligence?.audioAnalysis;
+    const prep = intelligence?.masterPrep;
+    const profile = audio || prep ? {
+      rmsDb: profileNumber(audio?.rmsDb),
+      truePeakDbtp: profileNumber(audio?.truePeakDbtp),
+      crestFactorDb: profileNumber(audio?.crestFactorDb),
+      dynamicRangeDb: profileNumber(audio?.dynamicRangeDb),
+      bassExtension: profileNumber(audio?.bassExtension),
+      lowMidBuildup: profileNumber(audio?.lowMidBuildup),
+      presenceBalance: profileNumber(audio?.presenceBalance),
+      harshness: profileNumber(audio?.harshness),
+      sibilance: profileNumber(audio?.sibilance),
+      hfRolloff: profileNumber(audio?.hfRolloff),
+      transientStrength: profileNumber(audio?.transientStrength),
+      correlation: profileNumber(audio?.correlation),
+      phaseRisk: Boolean(audio?.phaseRisk),
+      sourceGainDb: profileNumber(prep?.sourceGainDb),
+      lowMidDb: profileNumber(prep?.lowMidDb),
+      presenceDb: profileNumber(prep?.presenceDb),
+      harshnessDb: profileNumber(prep?.harshnessDb),
+    } : null;
+
+    modeWorkletNode?.port.postMessage({ type: "track-profile", trackId: track.id, profile });
+    emit({ soundTrackProfileReady: Boolean(profile) });
+    console.info(`[MVP AUDIO] Song IQ ${profile ? "active" : "fallback"} • ${track.artist || "Unknown Artist"} — ${track.title}`);
+  } catch (error) {
+    if (token !== soundTrackProfileToken || state.currentTrack?.id !== track.id) return;
+    modeWorkletNode?.port.postMessage({ type: "track-profile", trackId: track.id, profile: null });
+    emit({ soundTrackProfileReady: false });
+    console.info("[MVP AUDIO] Song IQ fallback", error);
+  }
+}
+
 async function unlockMusicAudio() {
   await connectMusicGraph();
   const context = getAudioContext();
   if (context.state === "suspended") await context.resume();
+  emit({ soundContextState: context.state });
 }
 
 async function resolveTrackUrl(track: MusicTrack, force = false) {
@@ -432,6 +510,8 @@ async function loadTrack(track: MusicTrack, startAt = 0, force = false) {
       audio.load();
       modeWorkletNode?.port.postMessage({ type: "reset" });
     }
+
+    void applyTrackSoundProfile(track);
 
     const seekWhenReady = () => {
       const target = Math.max(0, Number(startAt) || 0);
@@ -896,19 +976,45 @@ export function setMusicVolume(value: number) {
   }
 }
 
+async function activateMusicExperienceMode(mode: MusicExperienceMode, generation: number) {
+  const context = getAudioContext();
+  const before = context.state;
+  console.info(`[MVP AUDIO] button=${mode.toUpperCase()} generation=${generation} context-before=${before}`);
+
+  if (context.state === "suspended") await context.resume();
+  await connectMusicGraph();
+  if (context.state === "suspended") await context.resume();
+  if (generation !== soundModeGeneration) return;
+
+  emit({ soundContextState: context.state });
+  console.info(`[MVP AUDIO] context-after=${context.state}`);
+  modeWorkletNode?.port.postMessage({ type: "mode", mode, generation });
+  console.info(`[MVP AUDIO] sent mode=${mode.toUpperCase()} generation=${generation}`);
+}
+
 export function setMusicExperienceMode(mode: MusicExperienceMode) {
   if (mode !== "pure" && mode !== "adaptive" && mode !== "power") return;
+  const generation = ++soundModeGeneration;
   saveStored(STORAGE_KEYS.experienceMode, mode);
   emit({
     experienceMode: mode,
+    soundModeGeneration: generation,
     soundEngineConfirmedMode: null,
     soundInputRmsDb: null,
     soundOutputRmsDb: null,
     soundDeltaDb: null,
     soundOutputPeakDb: null,
+    soundRequestedGainDb: null,
+    soundLimiterReductionDb: null,
   });
-  modeWorkletNode?.port.postMessage({ type: "mode", mode });
+
+  void activateMusicExperienceMode(mode, generation).catch((error) => {
+    const message = error instanceof Error ? error.message : "AudioContext could not resume.";
+    emit({ error: `MVP SOUND MODE FAILED • ${message}` });
+    console.error("[MVP AUDIO] mode activation failed", error);
+  });
 }
+
 
 export function getMusicRtaLevels() {
   const analyser = analyserNode;
