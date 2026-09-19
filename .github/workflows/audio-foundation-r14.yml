@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R15
+name: MVP Audio Foundation R16 No Limiter
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes-r15.worklet.js"
+      - "public/audio/mvpSoundModes-r16.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r15.mjs"
+      - "scripts/test-audio-foundation-r16.mjs"
       - ".github/workflows/audio-foundation-r14.yml"
 
 permissions:
@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate R15 Worklet syntax
-        run: node --check public/audio/mvpSoundModes-r15.worklet.js
+      - name: Validate R16 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r16.worklet.js
 
-      - name: Run R15 loudness and switching validation
-        run: node scripts/test-audio-foundation-r15.mjs
+      - name: Run R16 no-limiter loudness validation
+        run: node scripts/test-audio-foundation-r16.mjs
 
       - name: Run production app build
         run: npm run build

@@ -1648,7 +1648,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       : `ENGINE STARTS ON PLAY • ${soundModeLabel}`;
   const soundTelemetryLabel = player.soundDeltaDb == null
     ? "LIVE METER STARTING"
-    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT -${Math.max(0, player.soundLimiterReductionDb ?? 0).toFixed(1)} • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS • GEN ${player.soundModeGeneration}`;
+    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT OFF • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS • GEN ${player.soundModeGeneration}`;
   const soundProfileLabel = player.soundTrackProfileReady ? "SONG IQ • ACTIVE" : "SONG IQ • LIVE FALLBACK";
 
   return (
@@ -1901,7 +1901,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R14 stable mastering: PURE is untouched. ADAPTIVE and POWER run continuously in parallel so switching modes never cold-starts or resets the DSP. POWER stays loud after returning from PURE, while bass-dominant material gets slower limiter recovery for clean lows.
+              R16 NO LIMITER: PURE stays untouched. ADAPTIVE is louder, fuller and clearer. POWER is the biggest clean step with stronger bass, body, mids and highs. No final limiter gain reduction.
             </p>
           </section>
         </div>,
