@@ -163,8 +163,8 @@ function neuralSteeringStatus(mode: MusicRadioMode) {
 
 const SOUND_MODES: Array<{ mode: MusicExperienceMode; label: string; detail: string }> = [
   { mode: "pure", label: "PURE", detail: "Original source • no processing" },
-  { mode: "adaptive", label: "ADAPTIVE", detail: "Song-aware • louder • fuller" },
-  { mode: "power", label: "POWER", detail: "Maximum clean loudness • bass/body" },
+  { mode: "adaptive", label: "ADAPTIVE", detail: "Clearly louder • fuller • Song IQ" },
+  { mode: "power", label: "POWER", detail: "Extreme step • maximum clean bass/body" },
 ];
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
@@ -1648,7 +1648,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       : `ENGINE STARTS ON PLAY • ${soundModeLabel}`;
   const soundTelemetryLabel = player.soundDeltaDb == null
     ? "LIVE METER STARTING"
-    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • Δ ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT -${Math.max(0, player.soundLimiterReductionDb ?? 0).toFixed(1)} • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS`;
+    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT -${Math.max(0, player.soundLimiterReductionDb ?? 0).toFixed(1)} • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS`;
   const soundProfileLabel = player.soundTrackProfileReady ? "SONG IQ • ACTIVE" : "SONG IQ • LIVE FALLBACK";
 
   return (
@@ -1901,7 +1901,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R12 Song IQ mastering: PURE is untouched. ADAPTIVE and POWER use each song’s Enrich audio analysis and Master Prep. POWER pushes substantially harder with bass/body priority, explicit context resume, live gain/limiter telemetry, and processed-generation verification.
+              R13.1 Song IQ mastering: PURE is untouched. ADAPTIVE must make an obvious loudness/fullness jump. POWER makes another major step on normal and hot masters. Bass-dominant material gets slower limiter recovery to protect clean low frequencies.
             </p>
           </section>
         </div>,

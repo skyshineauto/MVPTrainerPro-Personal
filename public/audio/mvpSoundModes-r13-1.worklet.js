@@ -23,6 +23,13 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     this.lookIndex = 0;
     this.tpL = this.createTruePeakState();
     this.tpR = this.createTruePeakState();
+    this.bassLowL = 0;
+    this.bassLowR = 0;
+    this.prevInputL = 0;
+    this.prevInputR = 0;
+    this.bassEnergy = 0;
+    this.fullEnergy = 0;
+    this.diffEnergy = 0;
 
     this.tone = { adaptive: this.createToneBank("adaptive"), power: this.createToneBank("power") };
 
@@ -37,7 +44,7 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       const m = event?.data ?? {};
       if (m.type === "ping") {
-        this.port.postMessage({ type: "ready", engine: "r12" });
+        this.port.postMessage({ type: "ready", engine: "r13.1" });
         return;
       }
       if (m.type === "track-profile") {
@@ -47,7 +54,7 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
         this.resetDynamics();
         this.port.postMessage({
           type: "track-profile-active",
-          engine: "r12",
+          engine: "r13.1",
           trackId: this.profileTrackId,
           applied: Boolean(this.profile),
         });
@@ -59,7 +66,7 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
         this.generation = Number.isFinite(Number(m.generation)) ? Number(m.generation) : this.generation + 1;
         if (changed) this.resetDynamics();
         this.pendingModeConfirmation = true;
-        this.port.postMessage({ type: "mode-selected", mode: this.mode, generation: this.generation, engine: "r12" });
+        this.port.postMessage({ type: "mode-selected", mode: this.mode, generation: this.generation, engine: "r13.1" });
         return;
       }
       if (m.type === "reset") {
@@ -211,6 +218,8 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     this.limiterGain=1; this.limiterMaxReductionDb=0;
     this.lookL.fill(0); this.lookR.fill(0); this.lookIndex=0;
     this.resetTruePeak(this.tpL); this.resetTruePeak(this.tpR);
+    this.bassLowL=0; this.bassLowR=0; this.prevInputL=0; this.prevInputR=0;
+    this.bassEnergy=0; this.fullEnergy=0; this.diffEnergy=0;
     this.resetToneBank(this.tone.adaptive); this.resetToneBank(this.tone.power);
   }
 
@@ -232,7 +241,7 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
   confirmModeIfAudible(input, frames) {
     if(!this.pendingModeConfirmation || !MvpSoundModesProcessor.hasAudibleSignal(input,frames)) return;
     this.pendingModeConfirmation=false;
-    this.port.postMessage({type:"mode-active",mode:this.mode,generation:this.generation,engine:"r12"});
+    this.port.postMessage({type:"mode-active",mode:this.mode,generation:this.generation,engine:"r13.1"});
   }
 
   modeSettings(power) {
@@ -243,40 +252,40 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     if(power){
       return {
         ceiling:.89,
-        levelThresholdDb:-20.5 + hot*1.5,
-        levelRatio:3.1 + hot*0.8,
-        levelAttackMs:28,
-        levelReleaseMs:220,
-        levelWet:.72,
-        crestThresholdDb:-8.0 + MvpSoundModesProcessor.clamp((8-crest)*0.18,-0.6,0.5),
-        crestRatio:4.8,
-        crestAttackMs:3.2,
-        crestReleaseMs:78 + MvpSoundModesProcessor.clamp((transient-50)*0.35,-12,18),
-        crestWet:.84,
-        targetRmsDb:-5.8 + hot*0.35,
-        maxMakeupDb:10.5,
-        gainAttackMs:95,
-        gainReleaseMs:320,
-        limiterReleaseMs:95,
+        levelThresholdDb:-15.5 + hot*0.5,
+        levelRatio:1.9 + hot*0.3,
+        levelAttackMs:22,
+        levelReleaseMs:170,
+        levelWet:.30,
+        crestThresholdDb:-11.5 + MvpSoundModesProcessor.clamp((8-crest)*0.10,-0.35,0.35),
+        crestRatio:10.0,
+        crestAttackMs:1.5,
+        crestReleaseMs:32 + MvpSoundModesProcessor.clamp((transient-50)*0.12,-5,7),
+        crestWet:.97,
+        targetRmsDb:-2.0 + hot*0.05,
+        maxMakeupDb:14.0,
+        gainAttackMs:55,
+        gainReleaseMs:180,
+        limiterReleaseMs:12,
       };
     }
     return {
       ceiling:.91,
-      levelThresholdDb:-16.5 + hot*0.8,
-      levelRatio:2.0 + hot*0.3,
-      levelAttackMs:38,
-      levelReleaseMs:270,
-      levelWet:.46,
-      crestThresholdDb:-6.2,
-      crestRatio:2.2,
-      crestAttackMs:7,
-      crestReleaseMs:125,
-      crestWet:.36,
-      targetRmsDb:-9.4 + hot*0.2,
-      maxMakeupDb:5.4,
-      gainAttackMs:170,
-      gainReleaseMs:480,
-      limiterReleaseMs:130,
+      levelThresholdDb:-13.5 + hot*0.3,
+      levelRatio:1.5 + hot*0.1,
+      levelAttackMs:32,
+      levelReleaseMs:220,
+      levelWet:.20,
+      crestThresholdDb:-8.5,
+      crestRatio:3.8,
+      crestAttackMs:3.8,
+      crestReleaseMs:72,
+      crestWet:.68,
+      targetRmsDb:-6.2 + hot*0.05,
+      maxMakeupDb:8.5,
+      gainAttackMs:100,
+      gainReleaseMs:300,
+      limiterReleaseMs:35,
     };
   }
 
@@ -292,7 +301,7 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     const outRms=Math.sqrt(this.telemetryOutputSq/Math.max(1,this.telemetrySamples));
     const inDb=MvpSoundModesProcessor.gainToDb(inRms),outDb=MvpSoundModesProcessor.gainToDb(outRms);
     this.port.postMessage({
-      type:"telemetry",mode:this.mode,generation:this.generation,engine:"r12",
+      type:"telemetry",mode:this.mode,generation:this.generation,engine:"r13.1",
       inputRmsDb:inDb,outputRmsDb:outDb,deltaDb:outDb-inDb,
       outputPeakDb:MvpSoundModesProcessor.gainToDb(this.telemetryPeak),
       requestedGainDb:this.telemetryRequestedGainDb,
@@ -327,13 +336,26 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
     const rmsCoeff=Math.exp(-1/(sr*.42));
     const gainAttack=1-Math.exp(-1/(sr*s.gainAttackMs/1000));
     const gainRelease=1-Math.exp(-1/(sr*s.gainReleaseMs/1000));
-    const limiterRelease=1-Math.exp(-1/(sr*s.limiterReleaseMs/1000));
+    const limiterReleaseFast=1-Math.exp(-1/(sr*s.limiterReleaseMs/1000));
+    const limiterReleaseBass=1-Math.exp(-1/(sr*Math.max(s.limiterReleaseMs,125)/1000));
+    const bassAlpha=1-Math.exp(-2*Math.PI*155/sr);
+    const energyAlpha=1-Math.exp(-1/(sr*.035));
     const levelThreshold=MvpSoundModesProcessor.dbToGain(s.levelThresholdDb);
     const crestThreshold=MvpSoundModesProcessor.dbToGain(s.crestThresholdDb);
     const maxMakeup=MvpSoundModesProcessor.dbToGain(s.maxMakeupDb + MvpSoundModesProcessor.clamp(this.profile?.sourceGainDb??0,0,.8));
 
     for(let i=0;i<frames;i++){
       const iL=input[0]?.[i]??0,iR=input[1]?.[i]??iL;
+      this.bassLowL+=(iL-this.bassLowL)*bassAlpha;
+      this.bassLowR+=(iR-this.bassLowR)*bassAlpha;
+      const diffL=iL-this.prevInputL,diffR=iR-this.prevInputR;
+      this.prevInputL=iL;this.prevInputR=iR;
+      const lowSq=(this.bassLowL*this.bassLowL+this.bassLowR*this.bassLowR)*.5;
+      const fullSq=(iL*iL+iR*iR)*.5;
+      const diffSq=(diffL*diffL+diffR*diffR)*.5;
+      this.bassEnergy+=(lowSq-this.bassEnergy)*energyAlpha;
+      this.fullEnergy+=(fullSq-this.fullEnergy)*energyAlpha;
+      this.diffEnergy+=(diffSq-this.diffEnergy)*energyAlpha;
       let l=this.processTone(bank,0,iL),r=this.processTone(bank,1,iR);
 
       const sampleSq=(l*l+r*r)*.5;
@@ -370,7 +392,15 @@ class MvpSoundModesProcessor extends AudioWorkletProcessor {
       const tp=Math.max(this.truePeak4x(this.tpL,l),this.truePeak4x(this.tpR,r));
       const required=tp>s.ceiling?s.ceiling/Math.max(tp,1e-12):1;
       if(required<this.limiterGain)this.limiterGain=required;
-      else this.limiterGain+=(1-this.limiterGain)*limiterRelease;
+      else {
+        const bassShare=MvpSoundModesProcessor.clamp(this.bassEnergy/Math.max(1e-12,this.fullEnergy),0,1);
+        const diffShare=MvpSoundModesProcessor.clamp(this.diffEnergy/Math.max(1e-12,this.fullEnergy),0,1);
+        const bassDominant=MvpSoundModesProcessor.clamp((bassShare-.35)/.35,0,1);
+        const narrowband=1-MvpSoundModesProcessor.clamp((diffShare-.00035)/.006,0,1);
+        const bassHold=bassDominant*narrowband;
+        const releaseCoeff=limiterReleaseFast*(1-bassHold)+limiterReleaseBass*bassHold;
+        this.limiterGain+=(1-this.limiterGain)*releaseCoeff;
+      }
       this.limiterGain=MvpSoundModesProcessor.clamp(this.limiterGain,.10,1);
 
       const dL=this.lookL[this.lookIndex],dR=this.lookR[this.lookIndex];
