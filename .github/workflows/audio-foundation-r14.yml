@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R17 Direct Gain
+name: MVP Audio Foundation R18 Dimension EQ
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes-r17.worklet.js"
+      - "public/audio/mvpSoundModes-r18.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r17.mjs"
+      - "scripts/test-audio-foundation-r18.mjs"
       - ".github/workflows/audio-foundation-r14.yml"
 
 permissions:
@@ -19,19 +19,25 @@ jobs:
   validate-audio-foundation:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
+
       - name: Install dependencies
         run: npm ci
-      - name: Validate R17 Worklet syntax
-        run: node --check public/audio/mvpSoundModes-r17.worklet.js
-      - name: Run R17 direct-gain loudness validation
-        run: node scripts/test-audio-foundation-r17.mjs
+
+      - name: Validate R18 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r18.worklet.js
+
+      - name: Run R18 Dimension and EQ validation
+        run: node scripts/test-audio-foundation-r18.mjs
+
       - name: Run production app build
         run: npm run build

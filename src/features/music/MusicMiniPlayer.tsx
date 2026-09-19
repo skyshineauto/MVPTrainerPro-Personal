@@ -29,6 +29,9 @@ import {
   playMusicPlaylist,
   previousMusicTrack,
   seekMusic,
+  resetMusicEq,
+  setMusicDimensionEnabled,
+  setMusicEqBand,
   setMusicExperienceMode,
   setMusicVolume,
   setPlayerMusicPreference,
@@ -1650,6 +1653,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
     ? "LIVE METER STARTING"
     : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT OFF • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS • GEN ${player.soundModeGeneration}`;
   const soundProfileLabel = player.soundTrackProfileReady ? "SONG IQ • ACTIVE" : "SONG IQ • LIVE FALLBACK";
+  const soundFxLabel = `DIMENSION ${player.soundDimensionEnabled ? "ON" : "OFF"} • EQ B ${player.soundEqBassDb >= 0 ? "+" : ""}${player.soundEqBassDb.toFixed(1)} • M ${player.soundEqMidsDb >= 0 ? "+" : ""}${player.soundEqMidsDb.toFixed(1)} • T ${player.soundEqTrebleDb >= 0 ? "+" : ""}${player.soundEqTrebleDb.toFixed(1)}`;
 
   return (
     <section
@@ -1880,6 +1884,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 <span>FOUNDATION TEST • {soundEngineLabel}</span>
                 <span>{soundTelemetryLabel}</span>
                 <span>{soundProfileLabel} • CONTEXT ${(player.soundContextState || "pending").toUpperCase()}</span>
+                <span>{soundFxLabel}</span>
               </div>
               <button type="button" onClick={() => setSoundOpen(false)} aria-label="Close MVP Sound">×</button>
             </header>
@@ -1900,8 +1905,37 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 );
               })}
             </div>
+            <div className="tr-soundResetTools">
+              <button
+                type="button"
+                className={`tr-soundDimension ${player.soundDimensionEnabled ? "is-active" : ""}`}
+                aria-pressed={player.soundDimensionEnabled}
+                onClick={() => setMusicDimensionEnabled(!player.soundDimensionEnabled)}
+              >
+                <span><b>MVP DIMENSION</b><strong>{player.soundDimensionEnabled ? "ON" : "OFF"}</strong></span>
+                <small>Wider sides • centered lows • deeper stage</small>
+              </button>
+              <div className="tr-soundSimpleEq" aria-label="MVP EQ">
+                <header><div><b>MVP EQ</b><small>Simple 3-band tone</small></div><button type="button" onClick={resetMusicEq}>FLAT</button></header>
+                <label className="tr-soundEqRow">
+                  <span>BASS</span>
+                  <input type="range" min="-6" max="6" step="0.5" value={player.soundEqBassDb} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqBand("bass", Number(event.target.value))} />
+                  <strong>{player.soundEqBassDb >= 0 ? "+" : ""}{player.soundEqBassDb.toFixed(1)}</strong>
+                </label>
+                <label className="tr-soundEqRow">
+                  <span>MIDS</span>
+                  <input type="range" min="-6" max="6" step="0.5" value={player.soundEqMidsDb} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqBand("mids", Number(event.target.value))} />
+                  <strong>{player.soundEqMidsDb >= 0 ? "+" : ""}{player.soundEqMidsDb.toFixed(1)}</strong>
+                </label>
+                <label className="tr-soundEqRow">
+                  <span>TREBLE</span>
+                  <input type="range" min="-6" max="6" step="0.5" value={player.soundEqTrebleDb} onChange={(event: ChangeEvent<HTMLInputElement>) => setMusicEqBand("treble", Number(event.target.value))} />
+                  <strong>{player.soundEqTrebleDb >= 0 ? "+" : ""}{player.soundEqTrebleDb.toFixed(1)}</strong>
+                </label>
+              </div>
+            </div>
             <p className="tr-soundResetNote">
-              R17 DIRECT GAIN: PURE stays untouched. ADAPTIVE is a fixed clean loudness step with fuller bass, body, mids and highs. POWER is a much bigger fixed step. No compressor. No limiter. No automatic gain reduction.
+              R18 DIRECT GAIN + DIMENSION + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the R17 direct loudness steps. DIMENSION expands the sides and tightens low-end width without delays. No compressor. No limiter. No automatic gain reduction.
             </p>
           </section>
         </div>,
@@ -11782,6 +11816,13 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
         .tr-soundResetModes>button.is-active{color:#fff;border-color:rgba(79,211,248,.62);background:linear-gradient(180deg,rgba(11,83,108,.88),rgba(5,35,48,.96));box-shadow:inset 0 -3px #42cdf4,0 0 26px rgba(51,194,235,.12)}
         .tr-soundResetModes>button.is-power.is-active{border-color:rgba(255,167,62,.72);background:linear-gradient(180deg,rgba(118,64,11,.90),rgba(52,27,4,.96));box-shadow:inset 0 -3px #ff9d2e,0 0 28px rgba(255,145,35,.14)}
         .tr-soundResetModes>button.is-pure.is-active{border-color:rgba(221,237,243,.45);background:linear-gradient(180deg,rgba(55,71,78,.84),rgba(17,26,31,.96));box-shadow:inset 0 -3px #d7e8ee,0 0 22px rgba(214,235,242,.08)}
+        .tr-soundResetTools{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(0,1.2fr);gap:10px;padding:0 18px 16px}
+        .tr-soundDimension{min-height:132px;padding:15px;border:1px solid rgba(103,205,239,.24);border-radius:14px;background:linear-gradient(180deg,rgba(10,30,39,.94),rgba(4,13,18,.98));color:#dcecf2;text-align:left;cursor:pointer;box-shadow:inset 0 1px rgba(255,255,255,.035)}
+        .tr-soundDimension>span{display:flex;align-items:center;justify-content:space-between;gap:10px}.tr-soundDimension b{font-size:12px;letter-spacing:.08em}.tr-soundDimension strong{padding:5px 8px;border-radius:999px;background:rgba(105,139,151,.18);font-size:8px;letter-spacing:.11em}.tr-soundDimension small{display:block;margin-top:13px;color:#849da7;font-size:8px;line-height:1.45;font-weight:850;letter-spacing:.035em}
+        .tr-soundDimension.is-active{border-color:rgba(104,224,255,.62);background:linear-gradient(180deg,rgba(9,67,87,.88),rgba(4,29,40,.98));box-shadow:0 0 26px rgba(73,202,239,.10),inset 0 1px rgba(255,255,255,.06)}.tr-soundDimension.is-active strong{background:rgba(74,219,255,.18);color:#7ee8ff}.tr-soundDimension.is-active small{color:#b5d6e0}
+        .tr-soundSimpleEq{display:grid;gap:8px;padding:12px 13px;border:1px solid rgba(118,188,212,.20);border-radius:14px;background:linear-gradient(180deg,rgba(11,27,35,.94),rgba(4,12,17,.98))}.tr-soundSimpleEq>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.tr-soundSimpleEq>header>div{display:grid;gap:2px}.tr-soundSimpleEq>header b{font-size:11px;letter-spacing:.10em}.tr-soundSimpleEq>header small{color:#718994;font-size:7px;font-weight:850;letter-spacing:.05em}.tr-soundSimpleEq>header button{height:27px;padding:0 10px;border:1px solid rgba(126,195,218,.24);border-radius:8px;background:#07151b;color:#9ed8e9;font-size:7px;font-weight:1000;letter-spacing:.09em;cursor:pointer}
+        .tr-soundEqRow{display:grid;grid-template-columns:58px minmax(0,1fr) 46px;align-items:center;gap:8px}.tr-soundEqRow>span{font-size:8px;font-weight:1000;letter-spacing:.09em;color:#adc5ce}.tr-soundEqRow>strong{text-align:right;font-size:8px;font-weight:1000;color:#e9f8fd;font-variant-numeric:tabular-nums}.tr-soundEqRow input{width:100%;accent-color:#54d7fb;cursor:pointer}
+        @media(max-width:650px){.tr-soundResetTools{grid-template-columns:1fr;padding:0 14px 14px}.tr-soundDimension{min-height:94px}.tr-soundEqRow{grid-template-columns:52px minmax(0,1fr) 44px}}
         .tr-soundResetNote{margin:0;padding:0 18px 18px;color:#728993;font-size:8px;line-height:1.5;font-weight:800;text-align:center;letter-spacing:.035em}
         @media(max-width:650px){.tr-soundResetBack{padding:12px;align-items:end}.tr-soundResetPanel{border-radius:17px 17px 12px 12px}.tr-soundResetModes{grid-template-columns:1fr;gap:8px;padding:14px}.tr-soundResetModes>button{min-height:78px;grid-template-columns:112px minmax(0,1fr);justify-items:start;text-align:left;padding:12px 14px}.tr-soundResetModes>button span{max-width:none;text-align:left}.tr-soundResetNote{padding:0 15px 15px}}
 

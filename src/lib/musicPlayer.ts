@@ -57,6 +57,10 @@ export type MusicPlayerState = {
   soundTrackProfileReady: boolean;
   soundContextState: AudioContextState | null;
   soundModeGeneration: number;
+  soundDimensionEnabled: boolean;
+  soundEqBassDb: number;
+  soundEqMidsDb: number;
+  soundEqTrebleDb: number;
 };
 
 const STORAGE_KEYS = {
@@ -69,6 +73,10 @@ const STORAGE_KEYS = {
   activeQueueTrackIds: "mvp_music_active_queue_track_ids_v1",
   volume: "mvp_music_volume_v2",
   experienceMode: "mvp_music_experience_mode_foundation_v1",
+  soundDimension: "mvp_music_dimension_r18",
+  soundEqBass: "mvp_music_eq_bass_r18",
+  soundEqMids: "mvp_music_eq_mids_r18",
+  soundEqTreble: "mvp_music_eq_treble_r18",
 } as const;
 
 const LEGACY_SOUND_KEYS = [
@@ -216,6 +224,15 @@ function readVolume() {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.8;
 }
 
+function readSoundDimensionEnabled() {
+  return readStored(STORAGE_KEYS.soundDimension) !== "false";
+}
+
+function readSoundEqDb(key: string) {
+  const value = Number(readStored(key));
+  return Number.isFinite(value) ? Math.max(-6, Math.min(6, value)) : 0;
+}
+
 purgeLegacySoundState();
 
 let state: MusicPlayerState = {
@@ -245,6 +262,10 @@ let state: MusicPlayerState = {
   soundTrackProfileReady: false,
   soundContextState: null,
   soundModeGeneration: 0,
+  soundDimensionEnabled: readSoundDimensionEnabled(),
+  soundEqBassDb: readSoundEqDb(STORAGE_KEYS.soundEqBass),
+  soundEqMidsDb: readSoundEqDb(STORAGE_KEYS.soundEqMids),
+  soundEqTrebleDb: readSoundEqDb(STORAGE_KEYS.soundEqTreble),
 };
 
 function emit(patch: Partial<MusicPlayerState>) {
@@ -346,7 +367,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes-r17.worklet.js");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes-r18.worklet.js");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -419,6 +440,13 @@ async function connectMusicGraph() {
     emit({ soundModeGeneration, soundContextState: context.state });
     worklet.port.postMessage({ type: "ping" });
     worklet.port.postMessage({ type: "mode", mode: state.experienceMode, generation: soundModeGeneration });
+    worklet.port.postMessage({
+      type: "user-controls",
+      dimensionEnabled: state.soundDimensionEnabled,
+      eqBassDb: state.soundEqBassDb,
+      eqMidsDb: state.soundEqMidsDb,
+      eqTrebleDb: state.soundEqTrebleDb,
+    });
     if (state.currentTrack) void applyTrackSoundProfile(state.currentTrack);
   })();
 
@@ -974,6 +1002,46 @@ export function setMusicVolume(value: number) {
     userVolumeNode.gain.cancelScheduledValues(now);
     userVolumeNode.gain.setTargetAtTime(volume, now, 0.01);
   }
+}
+
+function postMusicSoundControls() {
+  modeWorkletNode?.port.postMessage({
+    type: "user-controls",
+    dimensionEnabled: state.soundDimensionEnabled,
+    eqBassDb: state.soundEqBassDb,
+    eqMidsDb: state.soundEqMidsDb,
+    eqTrebleDb: state.soundEqTrebleDb,
+  });
+}
+
+export function setMusicDimensionEnabled(enabled: boolean) {
+  const next = Boolean(enabled);
+  saveStored(STORAGE_KEYS.soundDimension, String(next));
+  emit({ soundDimensionEnabled: next });
+  postMusicSoundControls();
+}
+
+export function setMusicEqBand(band: "bass" | "mids" | "treble", value: number) {
+  const db = Math.max(-6, Math.min(6, Number(value) || 0));
+  if (band === "bass") {
+    saveStored(STORAGE_KEYS.soundEqBass, String(db));
+    emit({ soundEqBassDb: db });
+  } else if (band === "mids") {
+    saveStored(STORAGE_KEYS.soundEqMids, String(db));
+    emit({ soundEqMidsDb: db });
+  } else {
+    saveStored(STORAGE_KEYS.soundEqTreble, String(db));
+    emit({ soundEqTrebleDb: db });
+  }
+  postMusicSoundControls();
+}
+
+export function resetMusicEq() {
+  saveStored(STORAGE_KEYS.soundEqBass, "0");
+  saveStored(STORAGE_KEYS.soundEqMids, "0");
+  saveStored(STORAGE_KEYS.soundEqTreble, "0");
+  emit({ soundEqBassDb: 0, soundEqMidsDb: 0, soundEqTrebleDb: 0 });
+  postMusicSoundControls();
 }
 
 async function activateMusicExperienceMode(mode: MusicExperienceMode, generation: number) {
