@@ -346,7 +346,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes-r14.worklet.js");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes-r15.worklet.js");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -433,7 +433,7 @@ async function connectMusicGraph() {
 }
 
 function profileNumber(value: unknown) {
-  const number = Number(value);
+  const number = value === null || value === undefined || value === "" ? NaN : Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
