@@ -1901,7 +1901,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R16 NO LIMITER: PURE stays untouched. ADAPTIVE is louder, fuller and clearer. POWER is the biggest clean step with stronger bass, body, mids and highs. No final limiter gain reduction.
+              R17 DIRECT GAIN: PURE stays untouched. ADAPTIVE is a fixed clean loudness step with fuller bass, body, mids and highs. POWER is a much bigger fixed step. No compressor. No limiter. No automatic gain reduction.
             </p>
           </section>
         </div>,
