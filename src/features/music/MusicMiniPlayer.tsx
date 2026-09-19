@@ -163,8 +163,8 @@ function neuralSteeringStatus(mode: MusicRadioMode) {
 
 const SOUND_MODES: Array<{ mode: MusicExperienceMode; label: string; detail: string }> = [
   { mode: "pure", label: "PURE", detail: "Original source • no processing" },
-  { mode: "adaptive", label: "ADAPTIVE", detail: "Clearly louder • fuller • Song IQ" },
-  { mode: "power", label: "POWER", detail: "Extreme step • maximum clean bass/body" },
+  { mode: "adaptive", label: "ADAPTIVE", detail: "Stable louder • fuller • Song IQ" },
+  { mode: "power", label: "POWER", detail: "Stable extreme loudness • bass/body" },
 ];
 
 const RTA_LABELS = ["31", "63", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"] as const;
@@ -1901,7 +1901,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               })}
             </div>
             <p className="tr-soundResetNote">
-              R13.1 Song IQ mastering: PURE is untouched. ADAPTIVE must make an obvious loudness/fullness jump. POWER makes another major step on normal and hot masters. Bass-dominant material gets slower limiter recovery to protect clean low frequencies.
+              R14 stable mastering: PURE is untouched. ADAPTIVE and POWER run continuously in parallel so switching modes never cold-starts or resets the DSP. POWER stays loud after returning from PURE, while bass-dominant material gets slower limiter recovery for clean lows.
             </p>
           </section>
         </div>,
