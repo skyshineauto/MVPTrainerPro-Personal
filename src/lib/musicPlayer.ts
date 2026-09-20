@@ -367,7 +367,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes-r21.worklet.js");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes-r22.worklet.js");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
