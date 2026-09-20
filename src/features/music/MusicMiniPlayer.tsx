@@ -1913,7 +1913,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 onClick={() => setMusicDimensionEnabled(!player.soundDimensionEnabled)}
               >
                 <span><b>MVP DIMENSION</b><strong>{player.soundDimensionEnabled ? "ON" : "OFF"}</strong></span>
-                <small>EXTREME width • centered lows • deeper stage</small>
+                <small>SPATIAL width • center locked • extreme depth</small>
               </button>
               <div className="tr-soundSimpleEq" aria-label="MVP EQ">
                 <header><div><b>MVP EQ</b><small>Simple 3-band tone</small></div><button type="button" onClick={resetMusicEq}>FLAT</button></header>
@@ -1935,7 +1935,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               </div>
             </div>
             <p className="tr-soundResetNote">
-              R19 STRONG DIMENSION + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the same direct loudness and EQ. DIMENSION now pushes the sides much farther out, tightens low-end width harder, and adds center focus so ON/OFF is clearly audible. No compressor. No limiter. No automatic gain reduction.
+              R20 SPATIAL DIMENSION + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the same direct loudness and EQ. DIMENSION now creates new upper-mid/high side space from center-heavy material, widens existing stereo harder, keeps bass centered, and preserves a strong center image. No compressor. No limiter. No automatic gain reduction.
             </p>
           </section>
         </div>,
