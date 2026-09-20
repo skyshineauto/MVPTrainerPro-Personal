@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R22 Dimension ULTRA
+name: MVP Audio Foundation R23 Dimension ULTRA SMOOTH
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes-r22.worklet.js"
+      - "public/audio/mvpSoundModes-r23.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r22.mjs"
+      - "scripts/test-audio-foundation-r23.mjs"
       - ".github/workflows/audio-foundation-r14.yml"
 
 permissions:
@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate R22 Worklet syntax
-        run: node --check public/audio/mvpSoundModes-r22.worklet.js
+      - name: Validate R23 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r23.worklet.js
 
-      - name: Run R22 Dimension ULTRA validation
-        run: node scripts/test-audio-foundation-r22.mjs
+      - name: Run R23 Dimension ULTRA SMOOTH validation
+        run: node scripts/test-audio-foundation-r23.mjs
 
       - name: Run production app build
         run: npm run build
