@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R18 Dimension EQ
+name: MVP Audio Foundation R19 Dimension EQ
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes-r18.worklet.js"
+      - "public/audio/mvpSoundModes-r19.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r18.mjs"
+      - "scripts/test-audio-foundation-r19.mjs"
       - ".github/workflows/audio-foundation-r14.yml"
 
 permissions:
@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate R18 Worklet syntax
-        run: node --check public/audio/mvpSoundModes-r18.worklet.js
+      - name: Validate R19 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r19.worklet.js
 
-      - name: Run R18 Dimension and EQ validation
-        run: node scripts/test-audio-foundation-r18.mjs
+      - name: Run R19 Dimension and EQ validation
+        run: node scripts/test-audio-foundation-r19.mjs
 
       - name: Run production app build
         run: npm run build
