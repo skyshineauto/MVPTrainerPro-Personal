@@ -1,4 +1,4 @@
-name: MVP Audio Foundation R20 Spatial Dimension EQ
+name: MVP Audio Foundation R21 Dimension MAX
 
 on:
   workflow_dispatch:
@@ -6,10 +6,10 @@ on:
     branches:
       - main
     paths:
-      - "public/audio/mvpSoundModes-r20.worklet.js"
+      - "public/audio/mvpSoundModes-r21.worklet.js"
       - "src/lib/musicPlayer.ts"
       - "src/features/music/MusicMiniPlayer.tsx"
-      - "scripts/test-audio-foundation-r20.mjs"
+      - "scripts/test-audio-foundation-r21.mjs"
       - ".github/workflows/audio-foundation-r14.yml"
 
 permissions:
@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate R20 Worklet syntax
-        run: node --check public/audio/mvpSoundModes-r20.worklet.js
+      - name: Validate R21 Worklet syntax
+        run: node --check public/audio/mvpSoundModes-r21.worklet.js
 
-      - name: Run R20 Spatial Dimension and EQ validation
-        run: node scripts/test-audio-foundation-r20.mjs
+      - name: Run R21 Dimension MAX validation
+        run: node scripts/test-audio-foundation-r21.mjs
 
       - name: Run production app build
         run: npm run build

@@ -1912,8 +1912,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 aria-pressed={player.soundDimensionEnabled}
                 onClick={() => setMusicDimensionEnabled(!player.soundDimensionEnabled)}
               >
-                <span><b>MVP DIMENSION</b><strong>{player.soundDimensionEnabled ? "ON" : "OFF"}</strong></span>
-                <small>SPATIAL width • center locked • extreme depth</small>
+                <span><b>MVP DIMENSION MAX</b><strong>{player.soundDimensionEnabled ? "ON" : "OFF"}</strong></span>
+                <small>MAX width • center locked • outside-speaker depth</small>
               </button>
               <div className="tr-soundSimpleEq" aria-label="MVP EQ">
                 <header><div><b>MVP EQ</b><small>Simple 3-band tone</small></div><button type="button" onClick={resetMusicEq}>FLAT</button></header>
@@ -1935,7 +1935,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               </div>
             </div>
             <p className="tr-soundResetNote">
-              R20 SPATIAL DIMENSION + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the same direct loudness and EQ. DIMENSION now creates new upper-mid/high side space from center-heavy material, widens existing stereo harder, keeps bass centered, and preserves a strong center image. No compressor. No limiter. No automatic gain reduction.
+              R21 DIMENSION MAX + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the same direct loudness and EQ. DIMENSION MAX pushes existing stereo far outside the speakers and creates much stronger upper-mid/high side space while bass stays centered and the vocal/center remains anchored. No compressor. No limiter. No automatic gain reduction.
             </p>
           </section>
         </div>,
