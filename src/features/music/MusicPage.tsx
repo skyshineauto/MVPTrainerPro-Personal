@@ -217,6 +217,20 @@ function formatBurnClock(seconds: number) {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
     : `${minutes}:${String(secs).padStart(2, "0")}`;
 }
+async function withMusicUploadDeadline<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(label)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+  }
+}
+
 function formatBurnMb(bytes: number) {
   return `${(Math.max(0, bytes) / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
 }
@@ -1227,68 +1241,103 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     try {
       let order = tracks.length;
       let intelligenceReady = 0;
+      let completedSteps = 0;
+      const uploadedBatch: Array<{ file: File; track: MusicTrack }> = [];
 
+      // Phase 1: upload and save filename identity for the entire batch first.
+      // Album/artwork services never get to block file 2/5, 3/5, etc.
       for (let index = 0; index < batch.length; index += 1) {
         const file = batch[index];
         const currentFile = index + 1;
-        const stepBase = index * 3;
 
         setUploadProgress((current) => ({
           ...(current || {
-            visible: true, status: "active", stage: "uploading", currentFile, totalFiles: batch.length, completedSteps: stepBase, totalSteps, fileName: file.name, displayName: file.name, intelligenceReady, summary: "",
+            visible: true, status: "active", stage: "uploading", currentFile, totalFiles: batch.length, completedSteps, totalSteps, fileName: file.name, displayName: file.name, intelligenceReady, summary: "",
           }),
           visible: true,
           status: "active",
           stage: "uploading",
           currentFile,
           totalFiles: batch.length,
-          completedSteps: stepBase,
+          completedSteps,
           totalSteps,
           fileName: file.name,
           displayName: file.name,
           intelligenceReady,
-          summary: "Uploading to your private music library…",
+          summary: "Saving artist and song title from the filename…",
         }));
 
-        let uploaded = await uploadMusicTrack(file, order++);
+        const uploaded = await uploadMusicTrack(file, order++);
+        uploadedBatch.push({ file, track: uploaded });
+        completedSteps += 1;
+
+        setUploadProgress((current) => current ? ({
+          ...current,
+          completedSteps,
+          displayName: uploaded.artist ? `${uploaded.artist} — ${uploaded.title}` : uploaded.title || file.name,
+          summary: currentFile < batch.length ? "Song imported • uploading the next file…" : "All files uploaded • updating song info…",
+        }) : current);
+      }
+
+      // Make the imported songs visible immediately before catalog enrichment.
+      await refreshTracks();
+      await loadMusicLibrary(true);
+
+      // Phase 2: enrich each imported song. Exact filename identity drives the
+      // search, while the catalog fills album, artwork, year and genre.
+      for (let index = 0; index < uploadedBatch.length; index += 1) {
+        const item = uploadedBatch[index];
+        const currentFile = index + 1;
+        let uploaded = item.track;
 
         setUploadProgress((current) => current ? ({
           ...current,
           stage: "enriching",
-          completedSteps: stepBase + 1,
-          displayName: uploaded.title || file.name,
-          summary: "Finding the best song info and artwork…",
+          currentFile,
+          fileName: item.file.name,
+          displayName: uploaded.artist ? `${uploaded.artist} — ${uploaded.title}` : uploaded.title || item.file.name,
+          completedSteps,
+          summary: "Finding official album, artwork, year and genre…",
         }) : current);
 
         try {
-          // Every new upload runs through the same release/version-aware matcher
-          // used by Find Song Info and Find Artwork. Embedded artwork remains
-          // protected, but metadata can be normalized to the correct official
-          // Studio / Unplugged / Live / Remix / Deluxe release when confidence
-          // is high enough. Uncertain release identity goes to Review instead.
-          const result = await enrichMusicTrack(uploaded, { autoApplyThreshold: 0.98 });
+          const result = await withMusicUploadDeadline(
+            enrichMusicTrack(uploaded, { autoApplyThreshold: 0.97, replaceArtwork: true }),
+            9000,
+            "Song info lookup timed out"
+          );
           uploaded = result.track;
+          item.track = uploaded;
+        } catch (lookupError) {
+          console.warn("Automatic song info lookup will retry from Enrich Library:", lookupError);
+        }
 
-          setUploadProgress((current) => current ? ({
-            ...current,
-            stage: "analyzing",
-            completedSteps: stepBase + 2,
-            displayName: uploaded.title || file.name,
-            summary: "Building Song DNA and Artist DNA…",
-          }) : current);
+        completedSteps += 1;
+        setUploadProgress((current) => current ? ({
+          ...current,
+          stage: "analyzing",
+          completedSteps,
+          displayName: uploaded.artist ? `${uploaded.artist} — ${uploaded.title}` : uploaded.title || item.file.name,
+          summary: "Building Song DNA and Artist DNA…",
+        }) : current);
 
-          await analyzeMusicTrackIntelligence(uploaded);
+        try {
+          await withMusicUploadDeadline(
+            analyzeMusicTrackIntelligence(uploaded),
+            20000,
+            "Music intelligence analysis timed out"
+          );
           intelligenceReady += 1;
         } catch (analysisError) {
           console.warn("Automatic music intelligence enrichment will retry from Enrich Library:", analysisError);
         }
 
+        completedSteps += 1;
         setUploadProgress((current) => current ? ({
           ...current,
-          stage: "analyzing",
-          completedSteps: stepBase + 3,
+          completedSteps,
           intelligenceReady,
-          summary: currentFile < batch.length ? "Song ready • moving to the next file…" : "Finishing library refresh…",
+          summary: currentFile < uploadedBatch.length ? "Song ready • moving to the next song…" : "Finishing library refresh…",
         }) : current);
       }
 
@@ -2672,7 +2721,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     : uploadProgress?.status === "error"
       ? "UPLOAD NEEDS ATTENTION"
       : uploadProgress?.stage === "enriching"
-        ? "MATCHING SONG INFO"
+        ? "UPDATING SONG INFO"
         : uploadProgress?.stage === "analyzing"
           ? "BUILDING INTELLIGENCE"
           : "UPLOADING";

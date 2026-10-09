@@ -112,9 +112,11 @@ const ARTWORK_LOOKUP_CACHE = new Map<
   Omit<MusicMetadataCandidate, "confidence">[]
 >();
 
-const LOOKUP_MIN_GAP_MS = 3300;
-const MUSICBRAINZ_MIN_GAP_MS = 1150;
-const LOOKUP_RETRY_DELAYS_MS = [5000, 8000, 12000];
+const LOOKUP_MIN_GAP_MS = 650;
+const MUSICBRAINZ_MIN_GAP_MS = 1100;
+const LOOKUP_RETRY_DELAYS_MS = [900];
+const ITUNES_REQUEST_TIMEOUT_MS = 6000;
+const MUSICBRAINZ_REQUEST_TIMEOUT_MS = 7000;
 let lastLookupRequestAt = 0;
 let lookupGate: Promise<void> = Promise.resolve();
 let lastMusicBrainzRequestAt = 0;
@@ -122,6 +124,20 @@ let musicBrainzGate: Promise<void> = Promise.resolve();
 
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = ITUNES_REQUEST_TIMEOUT_MS
+) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 async function enterLookupGate() {
@@ -765,9 +781,10 @@ async function searchItunes(
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await fetchWithTimeout(
         `https://itunes.apple.com/search?${params.toString()}`,
-        { mode: "cors", cache: "no-store" }
+        { mode: "cors", cache: "no-store" },
+        ITUNES_REQUEST_TIMEOUT_MS
       );
     } catch {
       if (attempt >= LOOKUP_RETRY_DELAYS_MS.length) {
@@ -859,10 +876,10 @@ async function searchItunesAlbums(
   for (let attempt = 0; attempt <= LOOKUP_RETRY_DELAYS_MS.length; attempt += 1) {
     await enterLookupGate();
     try {
-      const response = await fetch(`https://itunes.apple.com/search?${params.toString()}`, {
+      const response = await fetchWithTimeout(`https://itunes.apple.com/search?${params.toString()}`, {
         mode: "cors",
         cache: "no-store",
-      });
+      }, ITUNES_REQUEST_TIMEOUT_MS);
       if (response.ok) {
         const payload = (await response.json()) as ItunesResponse;
         const rows = (payload.results || [])
@@ -944,11 +961,11 @@ async function searchMusicBrainz(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await enterMusicBrainzGate();
     try {
-      const response = await fetch(`https://musicbrainz.org/ws/2/recording/?${params.toString()}`, {
+      const response = await fetchWithTimeout(`https://musicbrainz.org/ws/2/recording/?${params.toString()}`, {
         mode: "cors",
         cache: "no-store",
         headers: { Accept: "application/json" },
-      });
+      }, MUSICBRAINZ_REQUEST_TIMEOUT_MS);
       if (!response.ok) {
         if ((response.status === 429 || response.status >= 500) && attempt < 2) {
           const delayMs = 1800 * (attempt + 1);
@@ -1148,7 +1165,7 @@ export async function findMusicMetadataCandidates(
         ? bestArtistScore(signals.artistVariants, candidate.artist) >= 0.94
         : true;
       const releaseOkay = !hasReleaseContext || (candidate.releaseConfidence ?? 0) >= 0.86;
-      return titleExact && artistOkay && releaseOkay && candidate.confidence >= 0.985;
+      return titleExact && artistOkay && releaseOkay && candidate.confidence >= 0.97;
     });
 
   // First four are the fast/precise pass.
@@ -1169,9 +1186,12 @@ export async function findMusicMetadataCandidates(
     if (hasAuthoritativeMatch()) break;
   }
 
-  // Always compare at least one MusicBrainz result set so the final ranking is
-  // cross-catalog instead of simply trusting whichever provider answered first.
-  addRows(await searchMusicBrainz(primaryTitle, bestArtist, 30, options, false));
+  // Exact filename/tag identity plus an authoritative Apple recording already
+  // gives us title, artist, album, year, genre and artwork. Do not force a second
+  // provider round-trip when that match is already settled.
+  if (!hasAuthoritativeMatch()) {
+    addRows(await searchMusicBrainz(primaryTitle, bestArtist, 30, options, false));
+  }
 
   // If the exact pass did not settle the recording, widen the Apple search
   // using filename/title variants. Cap the total requests to keep full-library
@@ -1482,22 +1502,30 @@ export async function applyMusicArtworkCandidate(
 export async function applyMusicMetadataCandidate(
   track: MusicTrack,
   candidate: MusicMetadataCandidate,
-  status: "matched" | "manual" = "matched"
+  status: "matched" | "manual" = "matched",
+  options?: { replaceArtwork?: boolean }
 ) {
+  const preserveFilenameIdentity =
+    status === "matched" &&
+    Boolean(track.artist?.trim()) &&
+    /^filename(?:$|\+)/i.test(track.metadata_source || "");
+
   let updated = await updateMusicTrack(track.id, {
-    title: candidate.title,
-    artist: candidate.artist,
+    title: preserveFilenameIdentity ? track.title : candidate.title,
+    artist: preserveFilenameIdentity ? track.artist : candidate.artist,
     album: candidate.album,
     release_year: candidate.releaseYear,
     genre: candidate.genre,
     metadata_status: status,
     metadata_confidence:
       status === "manual" ? 1 : candidate.confidence,
-    metadata_source: candidate.source,
+    metadata_source: preserveFilenameIdentity
+      ? `filename+${candidate.source}`
+      : candidate.source,
     metadata_updated_at: new Date().toISOString(),
   });
 
-  if (candidate.artworkUrl && needsMusicArtwork(updated)) {
+  if (candidate.artworkUrl && (options?.replaceArtwork || needsMusicArtwork(updated))) {
     updated = await applyMusicArtworkCandidate(updated, candidate);
   }
 
@@ -1509,6 +1537,7 @@ export async function enrichMusicTrack(
   options?: {
     artworkOnly?: boolean;
     autoApplyThreshold?: number;
+    replaceArtwork?: boolean;
     onLookupRetry?: (info: MusicLookupRetryInfo) => void;
   }
 ): Promise<MusicEnrichmentResult> {
@@ -1579,7 +1608,8 @@ export async function enrichMusicTrack(
     const updated = await applyMusicMetadataCandidate(
       track,
       candidate,
-      "matched"
+      "matched",
+      { replaceArtwork: options?.replaceArtwork }
     );
 
     return {

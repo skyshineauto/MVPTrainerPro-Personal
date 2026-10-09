@@ -868,10 +868,44 @@ function recordingVersionIdentity(...values: Array<string | null | undefined>) {
   return "studio";
 }
 
+function cleanImportedFileIdentity(value: string, kind: "artist" | "title") {
+  let cleaned = value.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
+  if (kind === "title") {
+    const trailingNoise = [
+      /\s*[\[(](?:official\s+)?(?:music\s+)?(?:video|audio|lyrics?|lyric\s+video|visuali[sz]er|audio\s+only|hd|hq|4k)[^)\]]*[\])]\s*$/i,
+      /\s*[-–—|:]\s*(?:official\s+)?(?:music\s+)?(?:video|audio|lyrics?|lyric\s+video|visuali[sz]er|audio\s+only|hd|hq|4k)\s*$/i,
+    ];
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const pattern of trailingNoise) {
+        const next = cleaned.replace(pattern, "").trim();
+        if (next !== cleaned) {
+          cleaned = next;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return cleaned;
+}
+
 function artistTitleFromFileName(fileName: string) {
-  const stem = fileName.replace(/\.[^.]+$/, "").replace(/_/g, " ").trim();
+  const stem = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const match = stem.match(/^(.+?)\s+[-–—]\s+(.+)$/);
-  return match ? { artist: match[1].trim(), title: match[2].trim() } : null;
+  if (!match) return null;
+
+  const artist = cleanImportedFileIdentity(match[1], "artist");
+  const title = cleanImportedFileIdentity(match[2], "title");
+  if (!artist || !title || /^\d{1,2}$/.test(artist)) return null;
+  return { artist, title };
 }
 
 async function fileSha256(file: File) {
@@ -927,8 +961,11 @@ async function replaceExistingTrackAudio(
     updated_at: new Date().toISOString(),
   };
   if (audioHash) update.audio_hash = audioHash;
-  if ((!existing.artist || /unknown artist/i.test(existing.artist)) && embeddedTags.artist?.trim()) update.artist = embeddedTags.artist.trim();
-  if ((!existing.title || /^(track|song|untitled)/i.test(existing.title)) && embeddedTags.title?.trim()) update.title = embeddedTags.title.trim();
+  const fileIdentity = artistTitleFromFileName(file.name);
+  const replacementArtist = fileIdentity?.artist || embeddedTags.artist?.trim() || null;
+  const replacementTitle = fileIdentity?.title || embeddedTags.title?.trim() || null;
+  if ((!existing.artist || /unknown artist/i.test(existing.artist)) && replacementArtist) update.artist = replacementArtist;
+  if ((!existing.title || /^(track|song|untitled)/i.test(existing.title)) && replacementTitle) update.title = replacementTitle;
   if (!existing.album && embeddedTags.album?.trim()) update.album = embeddedTags.album.trim();
   if (!existing.release_year && embeddedTags.releaseYear) update.release_year = embeddedTags.releaseYear;
   if (!existing.genre && embeddedTags.genre?.trim()) update.genre = embeddedTags.genre.trim();
@@ -1048,8 +1085,10 @@ export async function uploadMusicTrack(
   ]);
 
   const fileIdentity = artistTitleFromFileName(file.name);
-  const identityTitle = embeddedTags.title?.trim() || fileIdentity?.title || titleFromFileName(file.name);
-  const identityArtist = embeddedTags.artist?.trim() || fileIdentity?.artist || null;
+  // A valid "Artist - Title" filename is the immediate identity source.
+  // Embedded tags remain the fallback when the filename is not structured.
+  const identityTitle = fileIdentity?.title || embeddedTags.title?.trim() || titleFromFileName(file.name);
+  const identityArtist = fileIdentity?.artist || embeddedTags.artist?.trim() || null;
   const identityVersion = recordingVersionIdentity(embeddedTags.title, file.name);
 
   let duplicate: MusicTrack | null = null;
@@ -1088,8 +1127,8 @@ export async function uploadMusicTrack(
     user_id: userId,
     ...(audioHash ? { audio_hash: audioHash } : {}),
     storage_path: storagePath,
-    title: embeddedTags.title?.trim() || titleFromFileName(file.name),
-    artist: embeddedTags.artist?.trim() || null,
+    title: identityTitle,
+    artist: identityArtist,
     album: embeddedTags.album?.trim() || null,
     release_year: embeddedTags.releaseYear || null,
     genre: embeddedTags.genre?.trim() || null,
@@ -1109,14 +1148,20 @@ export async function uploadMusicTrack(
     last_played_at: null,
     last_skipped_at: null,
     last_completed_at: null,
-    metadata_status:
-      embeddedTags.title || embeddedTags.artist || embeddedTags.album
+    metadata_status: fileIdentity
+      ? "unknown"
+      : embeddedTags.title || embeddedTags.artist || embeddedTags.album
         ? "manual"
         : "unknown",
-    metadata_confidence: embeddedTags.title || embeddedTags.artist ? 1 : null,
-    metadata_source: embeddedTags.title || embeddedTags.artist ? "embedded" : null,
-    metadata_updated_at:
-      embeddedTags.title || embeddedTags.artist || embeddedTags.album
+    metadata_confidence: identityArtist ? 1 : null,
+    metadata_source: fileIdentity
+      ? "filename"
+      : embeddedTags.title || embeddedTags.artist
+        ? "embedded"
+        : null,
+    metadata_updated_at: fileIdentity
+      ? null
+      : embeddedTags.title || embeddedTags.artist || embeddedTags.album
         ? new Date().toISOString()
         : null,
     updated_at: new Date().toISOString(),
