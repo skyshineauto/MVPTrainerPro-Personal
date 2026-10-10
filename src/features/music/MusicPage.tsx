@@ -75,6 +75,7 @@ import {
 } from "../../lib/musicDiscovery";
 
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
+import { getCachedMusicTrackIntelligence } from "../../lib/musicIntelligenceCache";
 import { startAutomaticMusicEnrichment, queueAutomaticMusicEnrichment } from "../../lib/musicAutoEnrichment";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
@@ -126,22 +127,10 @@ type DiscoveryView = "archive" | "saved";
 type SmartIntensity = "high" | "balanced" | "recovery";
 type LibraryHealth = "all" | "needs_info" | "missing_art" | "liked" | "review";
 type SongSort =
-  | "library"
-  | "recently_added"
-  | "title_asc"
-  | "title_desc"
-  | "artist_asc"
-  | "artist_desc"
-  | "album_asc"
-  | "most_played"
-  | "recently_played"
-  | "high_rotation"
-  | "least_played"
-  | "most_skipped"
-  | "longest"
-  | "shortest"
-  | "energy_high"
-  | "energy_low";
+  | "library" | "recently_added" | "title" | "artist" | "album"
+  | "year" | "genre" | "energy" | "duration" | "most_played"
+  | "recently_played" | "high_rotation" | "most_skipped";
+type SongSortDirection = "asc" | "desc";
 type EnergyFilter = "all" | MusicEnergyLevel;
 type CollectionView = "list" | "grid4" | "grid8" | "grid16";
 type PageSize = 12 | 24 | 48;
@@ -298,17 +287,63 @@ function compareLibraryText(left: string | null | undefined, right: string | nul
 function compareSongTitle(a: MusicTrack, b: MusicTrack) {
   return compareLibraryText(a.title, b.title) || compareLibraryText(artistLabel(a), artistLabel(b)) || a.sort_order - b.sort_order;
 }
-function compareSongTitleDescending(a: MusicTrack, b: MusicTrack) {
-  return compareLibraryText(b.title, a.title) || compareLibraryText(artistLabel(a), artistLabel(b)) || a.sort_order - b.sort_order;
-}
 function songSortLabel(sort: SongSort) {
   const labels: Record<SongSort, string> = {
-    library: "Library order", recently_added: "Recently added", title_asc: "Title A–Z", title_desc: "Title Z–A",
-    artist_asc: "Artist A–Z", artist_desc: "Artist Z–A", album_asc: "Album A–Z", most_played: "Most played",
-    recently_played: "Recently played", high_rotation: "High rotation", least_played: "Least played", most_skipped: "Most skipped",
-    longest: "Longest", shortest: "Shortest", energy_high: "Energy high → low", energy_low: "Energy low → high",
+    library: "Library order", recently_added: "Date added", title: "Track title",
+    artist: "Artist", album: "Album", year: "Year", genre: "Genre",
+    energy: "Energy", duration: "Time", most_played: "Play count",
+    recently_played: "Last played", high_rotation: "Rotation score", most_skipped: "Skip count",
   };
   return labels[sort];
+}
+function songSortDefaultDirection(sort: SongSort): SongSortDirection {
+  return ["recently_added", "year", "energy", "duration", "most_played", "recently_played", "high_rotation", "most_skipped"].includes(sort) ? "desc" : "asc";
+}
+function songTableYear(track: MusicTrack) {
+  const semantic = getCachedMusicTrackIntelligence(track.id)?.providerPayload?.semantic_profile as { originalReleaseYear?: unknown } | undefined;
+  const verified = Number(semantic?.originalReleaseYear || 0);
+  if (Number.isInteger(verified) && verified >= 1900 && verified <= 2100) return { value: verified, verified: true };
+  const catalog = Number(track.release_year || 0);
+  return { value: Number.isInteger(catalog) && catalog >= 1900 && catalog <= 2100 ? catalog : null, verified: false };
+}
+function songTableGenre(track: MusicTrack) {
+  const intelligence = getCachedMusicTrackIntelligence(track.id);
+  const all = [...(intelligence?.subgenres || []), ...(intelligence?.mainGenres || []), track.genre || ""]
+    .map(value => String(value || "").trim()).filter(Boolean);
+  const unique = all.filter((value, index) => all.findIndex(other => other.toLowerCase() === value.toLowerCase()) === index);
+  return { label: unique[0] || "", full: unique.join(" • ") };
+}
+function compareNullableNumber(left: number | null, right: number | null, direction: SongSortDirection) {
+  // Unknown dates and durations stay last in BOTH directions.
+  if (left == null) return right == null ? 0 : 1;
+  if (right == null) return -1;
+  return direction === "asc" ? left - right : right - left;
+}
+function compareNullableText(left: string, right: string, direction: SongSortDirection) {
+  if (!left) return right ? 1 : 0;
+  if (!right) return -1;
+  return direction === "asc" ? compareLibraryText(left, right) : compareLibraryText(right, left);
+}
+function compareSongRows(a: MusicTrack, b: MusicTrack, field: SongSort, direction: SongSortDirection) {
+  const numeric = (left: number, right: number) => direction === "asc" ? left - right : right - left;
+  let result = 0;
+  switch (field) {
+
+        case "library": result = numeric(a.sort_order, b.sort_order); break;
+        case "recently_added": result = numeric(new Date(a.created_at).getTime(), new Date(b.created_at).getTime()); break;
+        case "title": result = compareNullableText(a.title, b.title, direction); break;
+        case "artist": result = compareNullableText(artistLabel(a), artistLabel(b), direction); break;
+        case "album": result = compareNullableText(a.album || "", b.album || "", direction); break;
+        case "year": result = compareNullableNumber(songTableYear(a).value, songTableYear(b).value, direction); break;
+        case "genre": result = compareNullableText(songTableGenre(a).label, songTableGenre(b).label, direction); break;
+        case "energy": result = numeric(energyRank(a.energy_level), energyRank(b.energy_level)); break;
+        case "duration": result = compareNullableNumber(Number(a.duration_seconds) > 0 ? Number(a.duration_seconds) : null, Number(b.duration_seconds) > 0 ? Number(b.duration_seconds) : null, direction); break;
+        case "most_played": result = numeric(a.play_count || 0, b.play_count || 0); break;
+        case "recently_played": result = compareNullableNumber(a.last_played_at ? new Date(a.last_played_at).getTime() : null, b.last_played_at ? new Date(b.last_played_at).getTime() : null, direction); break;
+        case "high_rotation": result = numeric(highRotationScore(a), highRotationScore(b)); break;
+        case "most_skipped": result = numeric(a.skip_count || 0, b.skip_count || 0); break;
+  }
+  return result || compareSongTitle(a, b);
 }
 function smartMixScore(track: MusicTrack, intensity: SmartIntensity) {
   const target: MusicEnergyLevel = intensity === "high" ? "high" : intensity === "recovery" ? "low" : "medium";
@@ -767,6 +802,27 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [songSearch, setSongSearch] = useState("");
   const [songSort, setSongSort] = useState<SongSort>("recently_added");
+  const [songSortDirection, setSongSortDirection] = useState<SongSortDirection>("desc");
+  const [songInfoVersion, setSongInfoVersion] = useState(0);
+  const songTrackIds = useMemo(() => tracks.map(track => track.id).join("|"), [tracks]);
+  useEffect(() => {
+    let mounted = true;
+    const update = () => { if (mounted) setSongInfoVersion(value => value + 1); };
+    window.addEventListener("mvp:music-intelligence-updated", update);
+    if (tracks.length) {
+      // Hydrate the persisted original dates and styles once per library identity.
+      // Track row presentation never initiates enrichment or alters metadata.
+      void hydrateMusicIntelligenceCache(tracks, { fresh: true })
+        .then(update).catch(() => undefined);
+    }
+    return () => { mounted = false; window.removeEventListener("mvp:music-intelligence-updated", update); };
+    // IDs are stable across routine player/preference rerenders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songTrackIds]);
+  function chooseSongSort(next: SongSort) {
+    if (next === songSort) setSongSortDirection(current => current === "asc" ? "desc" : "asc");
+    else { setSongSort(next); setSongSortDirection(songSortDefaultDirection(next)); }
+  }
   const [artistView, setArtistView] = useState<CollectionView>(() => readCollectionView("mvp_music_artist_view_v1", "grid8"));
   const [albumView, setAlbumView] = useState<CollectionView>(() => readCollectionView("mvp_music_album_view_v1", "grid8"));
   const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
@@ -1069,42 +1125,29 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   const filteredTracks = useMemo(() => {
     const query = songSearch.trim().toLowerCase();
-    const next = tracks.filter((track) => {
-      const matchesSearch = !query || `${track.title} ${track.artist || ""} ${track.album || ""} ${track.genre || ""} ${track.original_name}`.toLowerCase().includes(query);
-      if (!matchesSearch) return false;
+    const next = tracks.filter(track => {
+      const year = songTableYear(track).value;
+      const genre = songTableGenre(track);
+      const searchable = `${track.title} ${track.artist || ""} ${track.album || ""} ${track.genre || ""} ${genre.full} ${year || ""} ${track.original_name}`.toLowerCase();
+      if (query && !searchable.includes(query)) return false;
       if (energyFilter !== "all" && track.energy_level !== energyFilter) return false;
       if (healthFilter === "needs_info" && !needsMusicMetadata(track)) return false;
       if (healthFilter === "missing_art" && !trackNeedsArtwork(track)) return false;
       if (healthFilter === "liked" && !track.favorite) return false;
-      if (healthFilter === "review" && track.metadata_status !== "review" && !reviewItems.some((item) => item.trackId === track.id)) return false;
+      if (healthFilter === "review" && track.metadata_status !== "review" && !reviewItems.some(item => item.trackId === track.id)) return false;
       return true;
     });
-    return [...next].sort((a, b) => {
-      if (songSort === "recently_added") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || compareSongTitle(a, b);
-      if (songSort === "title_asc") return compareSongTitle(a, b);
-      if (songSort === "title_desc") return compareSongTitleDescending(a, b);
-      if (songSort === "artist_asc") return compareLibraryText(artistLabel(a), artistLabel(b)) || compareSongTitle(a, b);
-      if (songSort === "artist_desc") return compareLibraryText(artistLabel(b), artistLabel(a)) || compareSongTitle(a, b);
-      if (songSort === "album_asc") return compareLibraryText(albumLabel(a), albumLabel(b)) || compareLibraryText(artistLabel(a), artistLabel(b)) || compareSongTitle(a, b);
-      if (songSort === "most_played") return Number(b.play_count || 0) - Number(a.play_count || 0) || Number(b.completed_play_count || 0) - Number(a.completed_play_count || 0) || compareSongTitle(a, b);
-      if (songSort === "recently_played") return new Date(b.last_played_at || 0).getTime() - new Date(a.last_played_at || 0).getTime() || compareSongTitle(a, b);
-      if (songSort === "high_rotation") return highRotationScore(b) - highRotationScore(a) || compareSongTitle(a, b);
-      if (songSort === "least_played") return Number(a.play_count || 0) - Number(b.play_count || 0) || Number(a.completed_play_count || 0) - Number(b.completed_play_count || 0) || compareSongTitle(a, b);
-      if (songSort === "most_skipped") return Number(b.skip_count || 0) - Number(a.skip_count || 0) || compareSongTitle(a, b);
-      if (songSort === "longest") return Number(b.duration_seconds || 0) - Number(a.duration_seconds || 0) || compareSongTitle(a, b);
-      if (songSort === "shortest") return Number(a.duration_seconds || 0) - Number(b.duration_seconds || 0) || compareSongTitle(a, b);
-      if (songSort === "energy_high") return energyRank(b.energy_level) - energyRank(a.energy_level) || compareSongTitle(a, b);
-      if (songSort === "energy_low") return energyRank(a.energy_level) - energyRank(b.energy_level) || compareSongTitle(a, b);
-      return a.sort_order - b.sort_order || compareSongTitle(a, b);
-    });
-  }, [tracks, songSearch, songSort, energyFilter, healthFilter, reviewItems, resolvedArtworkIds]);
+    return [...next].sort((a, b) => compareSongRows(a, b, songSort, songSortDirection));
+  // songInfoVersion refreshes the view when a background intelligence record is saved.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracks, songSearch, songSort, songSortDirection, energyFilter, healthFilter, reviewItems, resolvedArtworkIds, songInfoVersion]);
 
   const pageCount = Math.max(1, Math.ceil(filteredTracks.length / pageSize));
   const safePage = Math.min(page, pageCount);
   const pagedTracks = filteredTracks.slice((safePage - 1) * pageSize, safePage * pageSize);
   const selectedCount = selectedSongIds.size;
 
-  useEffect(() => { setPage(1); }, [songSearch, songSort, energyFilter, healthFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [songSearch, songSort, songSortDirection, energyFilter, healthFilter, pageSize]);
   useEffect(() => { setSavedSongsPage(1); }, [discoverySearch, discoverySort, discoveryView]);
 
   async function hydrateArtworkPresence(rows: MusicTrack[]) {
@@ -1435,9 +1478,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   async function playTrackOnce(track: MusicTrack) {
     const current = player.currentTrack?.id === track.id;
 
-    // Recently Added is displayed newest -> oldest. Its playback queue must
-    // use that same visible order so the newest song continues into the next
-    // newest instead of landing at the end of the underlying library queue.
+    // Recently Added playback follows the VISIBLE sorted order, including asc/desc.
     if (songSort === "recently_added") {
       const recentQueueActive = !player.activePlaylistId && player.activePlaylistName === "Recently Added";
       if (current && recentQueueActive && player.playing) { pauseMusic(); return; }
@@ -1468,7 +1509,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           const visibleIds = new Set(filteredTracks.map((item) => item.id));
           const refreshedQueue = refreshed
             .filter((item) => visibleIds.has(item.id))
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            .sort((a, b) => songSortDirection === "asc"
+              ? new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              : new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
           await playMusicAdHocQueue("Recently Added", refreshedQueue, track.id);
         } else {
           activateAllMusicTracks();
@@ -1522,6 +1565,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
   function moveTrack(trackId: string, direction: -1 | 1) {
     setSongSort("library");
+    setSongSortDirection("asc");
     setTracks((current) => {
       const ordered = [...current].sort((a, b) => a.sort_order - b.sort_order);
       const index = ordered.findIndex((track) => track.id === trackId);
@@ -2804,7 +2848,10 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           <div className="m37-toolbar tr10-toolbar tr40-songToolbar">
             <label><span>SEARCH</span><input value={songSearch} onChange={(event) => setSongSearch(event.target.value)} placeholder="Song, artist, album, or file…" /></label>
             <div className="tr52-energyFilter" role="group" aria-label="Energy filter"><span>ENERGY</span><div>{(["all","low","medium","high"] as EnergyFilter[]).map((level) => <button key={level} type="button" className={`is-${level}${energyFilter === level ? " is-active" : ""}`} aria-pressed={energyFilter === level} onClick={() => setEnergyFilter(level)}>{level === "all" ? "ALL" : level.toUpperCase()}</button>)}</div></div>
-            <MusicPremiumSelect label="SORT" value={songSort} onChange={(next) => setSongSort(next as SongSort)} options={(["library","recently_added","title_asc","title_desc","artist_asc","artist_desc","album_asc","most_played","recently_played","high_rotation","least_played","most_skipped","longest","shortest","energy_high","energy_low"] as SongSort[]).map((sort) => ({ value: sort, label: songSortLabel(sort) }))} />
+            <div className="tr67-sortWrap">
+              <MusicPremiumSelect label="SORT BY" value={songSort} onChange={next => chooseSongSort(next as SongSort)} options={(["library","recently_added","title","artist","album","year","genre","energy","duration","most_played","recently_played","high_rotation","most_skipped"] as SongSort[]).map(sort => ({ value: sort, label: songSortLabel(sort) }))} />
+              <button type="button" className="tr67-sortDirection" onClick={() => setSongSortDirection(current => current === "asc" ? "desc" : "asc")} aria-label={`${songSortLabel(songSort)}: ${songSortDirection === "asc" ? "ascending" : "descending"}. Reverse sort.`} title={songSortDirection === "asc" ? "Ascending • reverse order" : "Descending • reverse order"}><span aria-hidden>{songSortDirection === "asc" ? "↑" : "↓"}</span><small>{songSortDirection === "asc" ? "ASC" : "DESC"}</small></button>
+            </div>
             <MusicPremiumSelect label="SHOW" value={pageSize} onChange={(next) => setPageSize(Number(next) as PageSize)} options={[{value:12,label:"12"},{value:24,label:"24"},{value:48,label:"48"}]} />
             <div className="tr36-mobileManage" aria-label="Mobile song list controls">
               <button type="button" className={mobileSelectMode ? "is-active" : ""} aria-pressed={mobileSelectMode} onClick={() => { setMobileSelectMode((current) => { const next = !current; if (next) setMobileReorderMode(false); if (!next) setSelectedSongIds(new Set()); return next; }); }}>SELECT</button>
@@ -2815,8 +2862,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           {selectedCount ? <div className="tr10-bulk"><strong>{selectedCount} SELECTED</strong><div><button onClick={() => openPlaylistModal([...selectedSongIds])}>+ PLAYLIST</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)))}>IDENTIFY</button><button onClick={() => void enrichTracks(tracks.filter((track) => selectedSongIds.has(track.id)), true)}>FIND ART</button><button onClick={() => setSelectedSongIds(new Set())}>CLEAR</button></div></div> : null}
 
           <div className={`m37-songTable tr10-table tr37-desktopSongTable tr40-desktopSongTable is-list${mobileSelectMode ? " is-mobile-selecting" : ""}${mobileReorderMode ? " is-mobile-reordering" : ""}`}>
-            <div className="tr10-tableHead tr38-desktopSongHead tr40-desktopSongHead">
-              <span className="tr10-trackHead">TRACK</span><span className="tr10-energyHead">ENERGY</span><span className="tr10-timeHead">TIME</span><span className="tr10-actionsHead">ACTIONS</span>
+            <div className="tr10-tableHead tr38-desktopSongHead tr40-desktopSongHead tr67-songHead">
+              {([ ["title", "TRACK"], ["year", "YEAR"], ["genre", "GENRE"], ["energy", "ENERGY"], ["duration", "TIME"] ] as Array<[SongSort,string]>).map(([field,label]) => <button key={field} type="button" className={`tr67-heading is-${field}${songSort === field ? " is-active" : ""}`} onClick={() => chooseSongSort(field)} aria-label={`Sort ${label.toLowerCase()} ${songSort === field && songSortDirection === "asc" ? "descending" : "ascending"}`} aria-pressed={songSort === field}><span>{label}</span><i aria-hidden>{songSort === field ? (songSortDirection === "asc" ? "↑" : "↓") : "↕"}</i></button>)}
+              <span className="tr10-actionsHead">ACTIONS</span>
             </div>
             {loading ? <div className="tr10-empty">Loading your music…</div> : null}
             {!loading && !pagedTracks.length ? <div className="tr10-empty">No songs match this view.</div> : null}
@@ -2837,6 +2885,8 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                   <div className="tr10-trackText tr40-trackText"><strong title={track.title}>{track.title}</strong><div className="tr40-trackMeta" title={[artistLabel(track), track.album].filter(Boolean).join(" • ")}><span className="tr40-trackArtist">{artistLabel(track)}</span>{track.album ? <><i aria-hidden>•</i><span className="tr40-trackAlbum">{track.album}</span></> : null}</div><small>{track.original_name}</small>{playbackErrors[track.id] ? <em className="tr10-playbackError">{playbackErrors[track.id]}</em> : null}</div>
                   {needsInfo ? <em className="tr10-healthBadge is-needs">NEEDS INFO</em> : missingArt ? <em className="tr10-healthBadge is-art">MISSING ART</em> : null}
                 </div>
+                <span className={`tr67-yearCell${songTableYear(track).verified ? " is-verified" : " is-catalog"}`} title={songTableYear(track).verified ? "Verified original recording year" : songTableYear(track).value ? "Catalog/edition year • original date not yet verified" : "Original recording year not yet found"}>{songTableYear(track).value ? `${songTableYear(track).verified ? "" : "~"}${songTableYear(track).value}` : "—"}</span>
+                <span className="tr67-genreCell" title={songTableGenre(track).full || "Genre not yet classified"}>{songTableGenre(track).label || "—"}</span>
                 <R38EnergyBadge level={track.energy_level} title="Click to change energy" onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} />
                 <span className="tr10-duration">{formatDuration(track.duration_seconds)}</span>
                 <div className="tr38-desktopSongActions tr40-desktopSongActions">
@@ -2883,6 +2933,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
                   <strong title={track.title}>{track.title}</strong>
                   <div className="tr41-mobileSongSub" title={[artistLabel(track), track.album].filter(Boolean).join(" • ")}><span className="tr41-mobileSongArtist">{artistLabel(track)}</span>{track.album ? <><i aria-hidden>•</i><span className="tr41-mobileSongAlbum">{track.album}</span></> : null}</div>
                   <div className="tr41-mobileSongMeta"><b>{formatDuration(track.duration_seconds)}</b><R38EnergyBadge level={track.energy_level} title="Change energy" onClick={() => void setEnergy(track, track.energy_level === "low" ? "medium" : track.energy_level === "medium" ? "high" : "low")} />{needsInfo ? <mark>NEEDS INFO</mark> : missingArt ? <mark>MISSING ART</mark> : null}</div>
+                  <div className="tr67-mobileFacts"><span title={songTableYear(track).verified ? "Verified original year" : "Catalog year (unverified original)"}>{songTableYear(track).value ? `${songTableYear(track).verified ? "" : "~"}${songTableYear(track).value}` : "YEAR —"}</span><span title={songTableGenre(track).full || "Genre not yet classified"}>{songTableGenre(track).label || "GENRE —"}</span></div>
                 </div>
                 <div className="tr41-mobileSongActions">
                   <button type="button" className={`is-like${track.favorite ? " is-active" : ""}`} aria-label={track.favorite ? `Unlike ${track.title}` : `Like ${track.title}`} aria-pressed={track.favorite} onClick={() => void changePreference(track, track.favorite ? "neutral" : "like")}><HeartPremiumIcon filled={track.favorite} /></button>
