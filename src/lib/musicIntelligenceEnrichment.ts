@@ -17,7 +17,7 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 7;
+export const MUSIC_INTELLIGENCE_VERSION = 8;
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const TRACK_SELECT = "track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,provider_payload,analyzed_at,updated_at,error";
 
@@ -205,7 +205,10 @@ async function saveLocalAudioIntelligence(
   const keySignature = localKeySignature ?? base.keySignature ?? null;
   const localFeatures = Array.isArray(facts.successfulFeatures) ? facts.successfulFeatures.filter(Boolean) : [];
   const hasLocalMeasurements = localFeatures.length > 0;
-  const coreComplete = bpm != null && Boolean(keySignature) && hasLocalMeasurements;
+  const semantic = base.providerPayload?.semantic_profile as Record<string, unknown> | undefined;
+  const metadataComplete = Number(semantic?.originalReleaseYear || 0) >= 1900 &&
+    (base.mainGenres.length > 0 || base.subgenres.length > 0);
+  const coreComplete = bpm != null && Boolean(keySignature) && hasLocalMeasurements && metadataComplete;
   if (!hasLocalMeasurements) {
     const failureDetail = describeLocalFailures(facts);
     throw new Error(failureDetail || "Local audio analysis returned no usable measurements.");
@@ -252,7 +255,7 @@ async function saveLocalAudioIntelligence(
       provider_payload: providerPayload,
       analyzed_at: updatedAt,
       updated_at: updatedAt,
-      error: coreComplete ? null : (failureDetail || "Local audio analysis is partial. BPM or key is still missing."),
+      error: coreComplete ? null : (failureDetail || (metadataComplete ? "Audio analysis remains partial." : "Original release year or genre classification remains unresolved.")),
     })
     .eq("track_id", base.trackId)
     .select(TRACK_SELECT)
@@ -282,7 +285,9 @@ export function isMusicIntelligenceCurrent(value: MusicTrackIntelligence | null 
       value.status === "complete" &&
       value.bpm != null && Number.isFinite(Number(value.bpm)) &&
       Boolean(value.keySignature) &&
-      hasStrictSemanticProfile(value)
+      hasStrictSemanticProfile(value) &&
+      (value.mainGenres.length > 0 || value.subgenres.length > 0) &&
+      Number((value.providerPayload?.semantic_profile as Record<string, unknown> | undefined)?.originalReleaseYear || 0) >= 1900
   );
 }
 

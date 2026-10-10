@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const ARTIST_TABLE = "trainer_music_artist_intelligence";
-const ANALYSIS_VERSION = 7;
+const ANALYSIS_VERSION = 8;
 const CYANITE_LIMIT_BYTES = 20 * 1024 * 1024;
 const CYANITE_LIMIT_SECONDS = 15 * 60;
 const CYANITE_MODELS = [
@@ -72,6 +72,9 @@ type ProviderContext = {
   mbArtistId: string | null;
   mbGenres: string[];
   mbOriginalYear: number | null;
+  yearSource: string;
+  mainGenres: string[];
+  subgenres: string[];
 };
 
 type DeezerAudioFacts = {
@@ -407,7 +410,7 @@ function buildSemanticProfile(track: InputTrack, context: ProviderContext, extra
   return {
     version: 1,
     originalReleaseYear,
-    originalReleaseYearSource: originalReleaseYear != null ? "musicbrainz-recording-first-release-date" : "unverified",
+    originalReleaseYearSource: context.yearSource,
     suppliedEditionYear: Number(track.releaseYear) || null,
     decade,
     themes: { love, heartbreak, motivation: motivational, party },
@@ -456,16 +459,87 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
   const [trackTags, artistTags, mb] = await Promise.all([
     lastFmKey && track.artist && track.title ? lastFmTags("track.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
     cachedTags.length ? Promise.resolve(cachedTags) : lastFmKey && track.artist ? lastFmTags("artist.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
-    musicBrainzIdentity(track).catch(() => ({ recordingId: null, artistId: null, genres: [] as string[] })),
+    musicBrainzIdentity(track).catch(() => ({ recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null })),
   ]);
+  const albumYear = mb.originalYear ? null : await r27AlbumYear(track).catch(() => null);
+  const year = mb.originalYear || albumYear;
+  const classification = r27Classification(track, {
+    trackTags, artistTags, mbRecordingId: mb.recordingId, mbArtistId: mb.artistId,
+    mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || [])], mainGenres: [], subgenres: [],
+  });
   return {
     trackTags,
     artistTags,
     mbRecordingId: mb.recordingId,
-    mbOriginalYear: mb.originalYear,
+    mbOriginalYear: year,
+    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : albumYear ? "musicbrainz-original-album-release-group" : "unverified",
+    mainGenres: classification.mainGenres,
+    subgenres: classification.subgenres,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
     mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : [])])].slice(0, 12),
   };
+}
+
+// R27: curate genre tags rather than storing arbitrary moods, artist names or prose as genres.
+// Prefer track evidence; artist tags alone may provide a broad family but not prove a subgenre.
+const R27_GENRES = new Map<string, string>([
+  ["grunge", "grunge"], ["post grunge", "post grunge"],
+  ["alternative metal", "alternative metal"], ["alternative rock", "alternative rock"],
+  ["hard rock", "hard rock"], ["heavy metal", "heavy metal"],
+  ["thrash metal", "thrash metal"], ["nu metal", "nu metal"],
+  ["industrial metal", "industrial metal"], ["industrial rock", "industrial rock"],
+  ["metalcore", "metalcore"], ["post hardcore", "post hardcore"],
+  ["punk rock", "punk rock"], ["pop punk", "pop punk"],
+  ["classic rock", "classic rock"], ["progressive rock", "progressive rock"],
+  ["progressive metal", "progressive metal"], ["indie rock", "indie rock"],
+  ["blues rock", "blues rock"], ["southern rock", "southern rock"],
+  ["rock", "rock"], ["metal", "metal"], ["pop", "pop"],
+  ["hip hop", "hip hop"], ["rap", "rap"], ["electronic", "electronic"],
+  ["country", "country"], ["folk", "folk"], ["jazz", "jazz"],
+  ["r&b", "r&b"], ["soul", "soul"], ["funk", "funk"],
+  ["dance", "dance"], ["synthpop", "synthpop"], ["new wave", "new wave"],
+]);
+function r27GenreTags(values: string[]) {
+  const out: string[] = [];
+  for (const raw of values) {
+    const key = String(raw).toLowerCase().trim().replace(/[-_]+/g, " ").replace(/\s+/g, " ");
+    const value = R27_GENRES.get(key);
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+function r27Classification(track: InputTrack, context: ProviderContext) {
+  const trackEvidence = r27GenreTags([
+    ...context.mbGenres,
+    ...context.trackTags.filter(t => t.count >= 1).map(t => t.name),
+    ...(track.genre ? track.genre.split(/[,/;]+/) : []),
+  ]);
+  const artistEvidence = r27GenreTags(context.artistTags.map(t => t.name));
+  const main = [...new Set([...trackEvidence, ...artistEvidence])].slice(0, 10);
+  const sub = trackEvidence.filter(t => !["rock", "metal", "pop", "rap", "electronic", "country", "folk", "jazz", "dance"].includes(t)).slice(0, 8);
+  return { mainGenres: main, subgenres: sub, trackEvidence: trackEvidence.length > 0 };
+}
+function r27Complete(context: ProviderContext, mainGenres: string[]) {
+  return Boolean(context.mbOriginalYear && mainGenres.length);
+}
+
+// A matching original album release group is secondary evidence, never an edition year.
+async function r27AlbumYear(track: InputTrack): Promise<number | null> {
+  if (!track.artist || !track.album) return null;
+  const album = normalizeCatalogText(track.album);
+  if (!album || /greatest|best of|collection|anthology|compilation|deluxe|remaster/i.test(track.album)) return null;
+  const query = `releasegroup:"${escapeMb(track.album)}" AND artist:"${escapeMb(track.artist)}"`;
+  const response = await fetch(`https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=5`, {
+    headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" }, signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) return null;
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const rows = Array.isArray(body?.["release-groups"]) ? body["release-groups"] as Array<Record<string, unknown>> : [];
+  const matches = rows.filter(row => normalizeCatalogText(row.title) === album &&
+    normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(track.artist) &&
+    (row["primary-type"] === "Album" || row["primary-type"] === "Single"));
+  const years = matches.map(row => String(row["first-release-date"] || "").match(/^(19|20)\d{2}/)?.[0]).filter((y): y is string => Boolean(y)).map(Number);
+  return years.length ? Math.min(...years) : null;
 }
 
 function sourceList(context: ProviderContext, cyanite = false, deezer = false) {
@@ -667,7 +741,7 @@ async function upsertArtist(service: ReturnType<typeof createClient>, userId: st
     source: sources,
     artist_dna: dna,
     top_tags: context.artistTags,
-    genres: context.mbGenres,
+    genres: context.mainGenres,
     musicbrainz_artist_id: context.mbArtistId,
     analyzed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -698,7 +772,7 @@ async function finalizeCyanite(
       track_id: track.id,
       artist_key: track.artistKey || artistKey(track.artist || ""),
       artist_name: track.artist || "",
-      status: "complete",
+      status: r27Complete(context, [...cyanite.mainGenres, ...context.mainGenres]) ? "complete" : "partial",
       analysis_version: ANALYSIS_VERSION,
       confidence: confidenceFor(context, true, deezerUsed),
       source,
@@ -707,8 +781,8 @@ async function finalizeCyanite(
       bpm: cyanite.bpm ?? fallbackBpm,
       key_signature: cyanite.keySignature,
       tempo_label: cyanite.tempoLabel,
-      main_genres: cyanite.mainGenres.length ? cyanite.mainGenres : context.mbGenres,
-      subgenres: cyanite.subgenres,
+      main_genres: [...new Set([...cyanite.mainGenres, ...context.mainGenres])],
+      subgenres: [...new Set([...cyanite.subgenres, ...context.subgenres])],
       moods: cyanite.moods,
       character_tags: cyanite.characterTags,
       movement_tags: cyanite.movementTags,
@@ -781,12 +855,15 @@ Deno.serve(async (req) => {
           artistTags: [],
           mbRecordingId: existing.musicbrainz_recording_id || null,
           mbOriginalYear: Number(existing.provider_payload?.semantic_profile?.originalReleaseYear) || null,
+          yearSource: String(existing.provider_payload?.semantic_profile?.originalReleaseYearSource || "unverified"),
+          mainGenres: Array.isArray(existing.main_genres) ? existing.main_genres : [],
+          subgenres: Array.isArray(existing.subgenres) ? existing.subgenres : [],
           mbArtistId: existing.musicbrainz_artist_id || null,
           mbGenres: Array.isArray(existing.main_genres) ? existing.main_genres : [],
         };
         const updated = {
           ...existing,
-          status: "complete",
+          status: r27Complete(context, [...cyanite.mainGenres, ...(Array.isArray(existing.main_genres) ? existing.main_genres : [])]) ? "complete" : "partial",
           analysis_version: ANALYSIS_VERSION,
           confidence: Math.max(Number(existing.confidence || 0), confidenceFor(context, true)),
           source: [...new Set([...(Array.isArray(existing.source) ? existing.source : []), "cyanite"])],
@@ -794,8 +871,8 @@ Deno.serve(async (req) => {
           bpm: cyanite.bpm ?? existing.bpm ?? null,
           key_signature: cyanite.keySignature ?? existing.key_signature ?? null,
           tempo_label: cyanite.tempoLabel ?? existing.tempo_label ?? null,
-          main_genres: cyanite.mainGenres.length ? cyanite.mainGenres : existing.main_genres,
-          subgenres: cyanite.subgenres,
+          main_genres: [...new Set([...cyanite.mainGenres, ...(Array.isArray(existing.main_genres) ? existing.main_genres : [])])],
+          subgenres: [...new Set([...cyanite.subgenres, ...(Array.isArray(existing.subgenres) ? existing.subgenres : [])])],
           moods: cyanite.moods,
           character_tags: cyanite.characterTags,
           movement_tags: cyanite.movementTags,
@@ -834,6 +911,11 @@ Deno.serve(async (req) => {
       providerContext(track, cachedArtist as CachedArtistRow | null),
       deezerAudioFacts(track).catch(() => null),
     ]);
+    const oldSemantic = existing?.provider_payload?.semantic_profile;
+    if (!context.mbOriginalYear && Number(oldSemantic?.originalReleaseYear) >= 1900 && Number(oldSemantic?.originalReleaseYear) <= 2100) {
+      context.mbOriginalYear = Number(oldSemantic.originalReleaseYear);
+      context.yearSource = String(oldSemantic.originalReleaseYearSource || "previously-verified");
+    }
     const cachedArtistDna = cachedArtist && Number(cachedArtist.analysis_version || 0) >= ANALYSIS_VERSION && cachedArtist.artist_dna
       ? cachedArtist.artist_dna as ArtistDNA
       : null;
@@ -860,7 +942,7 @@ Deno.serve(async (req) => {
 
     const deezerUsed = Boolean(deezer?.bpm);
     const sources = sourceList(context, false, deezerUsed);
-    const status = cyaniteStatus === "processing" ? "processing" : "complete";
+    const status = cyaniteStatus === "processing" ? "processing" : r27Complete(context, context.mainGenres) ? "complete" : "partial";
     const provisional = {
       user_id: userId,
       track_id: track.id,
@@ -875,8 +957,8 @@ Deno.serve(async (req) => {
       bpm: deezer?.bpm ?? existing?.bpm ?? null,
       key_signature: existing?.key_signature ?? null,
       tempo_label: tempoLabelFromBpm(deezer?.bpm ?? existing?.bpm ?? null) ?? existing?.tempo_label ?? null,
-      main_genres: context.mbGenres,
-      subgenres: existing?.subgenres || [],
+      main_genres: [...new Set([...context.mainGenres, ...(Array.isArray(existing?.main_genres) ? existing.main_genres : [])])],
+      subgenres: [...new Set([...context.subgenres, ...(Array.isArray(existing?.subgenres) ? existing.subgenres : [])])],
       moods: context.trackTags.slice(0, 10).map((tag) => tag.name),
       character_tags: existing?.character_tags || [],
       movement_tags: existing?.movement_tags || [],
