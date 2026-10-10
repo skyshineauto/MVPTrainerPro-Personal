@@ -3193,3 +3193,35 @@
     min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;color:#88d3e3!important;
   }
 }
+
+/* R33 — flagship destructive confirmation. Separate portal above Song Control. */
+[data-mvp-music="flagship"] .tr68-deleteBack,
+.tr68-deleteBack {
+  position:fixed!important;inset:0!important;z-index:15050!important;display:flex!important;align-items:center!important;justify-content:center!important;
+  padding:18px!important;background:rgba(1,5,9,.82)!important;backdrop-filter:blur(17px) saturate(118%)!important;-webkit-backdrop-filter:blur(17px) saturate(118%)!important;
+}
+.tr68-deleteDialog {
+  position:relative!important;isolation:isolate!important;width:min(100%,440px)!important;max-height:calc(100dvh - 36px)!important;overflow-y:auto!important;
+  border:1px solid rgba(149,193,211,.23)!important;border-radius:19px!important;
+  background:radial-gradient(ellipse at 5% 0%,rgba(71,144,178,.14),transparent 57%),linear-gradient(145deg,rgba(19,34,43,.99),rgba(5,12,18,.995))!important;
+  color:#f6faff!important;box-shadow:0 32px 95px rgba(0,0,0,.75),inset 0 1px rgba(255,255,255,.085)!important;
+  font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;
+}
+.tr68-deleteDialog:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,#e85a42,#ffad4d 45%,rgba(77,195,245,.20));pointer-events:none}
+.tr68-deleteTop{display:flex;gap:9px;align-items:center;padding:20px 22px 0!important}
+.tr68-deleteMark{display:grid;place-items:center;flex:0 0 24px;height:24px;border:1px solid rgba(255,144,108,.35);border-radius:8px;background:linear-gradient(145deg,rgba(204,68,46,.3),rgba(92,24,18,.34));color:#ffb296;font-size:15px;font-weight:900}
+.tr68-deleteBrand{color:#70d7fb;font-size:8px;font-weight:900;letter-spacing:.13em;white-space:nowrap}.tr68-deleteBrand i{padding:0 3px;color:#607983;font-style:normal}
+.tr68-deleteRisk{margin-left:auto;padding:5px 7px;border:1px solid rgba(255,135,115,.17);border-radius:5px;color:#ffb2a4;font-size:7px;font-weight:850;letter-spacing:.065em}
+.tr68-deleteBody{padding:18px 22px 21px!important}.tr68-deleteBody h2{margin:0 0 18px!important;font-size:25px!important;font-weight:850!important;line-height:1.12!important;letter-spacing:-.045em!important;color:#f6faff!important}
+.tr68-deleteIdentity{display:flex;align-items:center;gap:12px;min-width:0;padding:11px;border:1px solid rgba(146,192,215,.12);border-radius:12px;background:rgba(53,85,101,.12)}
+.tr68-deleteIdentity>.tr10-art{flex:0 0 46px!important;width:46px!important;height:46px!important;border-radius:8px!important;overflow:hidden!important}
+.tr68-deleteIdentity>div{min-width:0;display:grid;gap:4px}.tr68-deleteIdentity strong{color:#f7fbff;font-size:13px;font-weight:810;overflow-wrap:anywhere}.tr68-deleteIdentity span{color:#9cb0bb;font-size:10px;font-weight:600;overflow-wrap:anywhere}
+.tr68-deleteBody>p{margin:16px 0 0;color:#adbfc8;font-size:11px;line-height:1.65;font-weight:520}.tr68-deleteBody>.tr68-deleteError{padding:10px 12px;border:1px solid rgba(255,110,110,.28);border-radius:8px;background:rgba(122,32,32,.18);color:#ffc3bf;font-size:10.5px}
+.tr68-deleteActions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 22px 20px;border-top:1px solid rgba(150,191,210,.11)}
+.tr68-deleteActions button{height:41px;min-width:0;border-radius:10px;font-family:inherit;font-size:10px;font-weight:850;letter-spacing:.075em;cursor:pointer;transition:filter .16s,transform .16s}
+.tr68-deleteActions button:hover:not(:disabled){filter:brightness(1.11);transform:translateY(-1px)}
+.tr68-deleteActions button:focus-visible{outline:2px solid #75daf8;outline-offset:3px}.tr68-deleteActions button:disabled{cursor:wait;opacity:.57}
+.tr68-deleteCancel{border:1px solid rgba(150,194,210,.22);background:linear-gradient(180deg,#263943,#14242e);color:#ebf4f7}
+.tr68-deleteConfirm{border:1px solid rgba(255,194,133,.45);background:linear-gradient(180deg,#ff9f45,#ed602f 92%);box-shadow:inset 0 1px rgba(255,242,218,.4),0 8px 18px rgba(218,76,32,.20);color:#1a0b04}
+@media(max-width:480px){.tr68-deleteBack{padding:12px!important}.tr68-deleteDialog{border-radius:16px!important}.tr68-deleteTop{padding:17px 16px 0!important}.tr68-deleteBody{padding:17px 16px!important}.tr68-deleteActions{padding:12px 16px 16px;gap:8px}.tr68-deleteBrand{font-size:7px}.tr68-deleteBody h2{font-size:22px!important}}
+@media(prefers-reduced-motion:reduce){.tr68-deleteActions button{transition:none}}

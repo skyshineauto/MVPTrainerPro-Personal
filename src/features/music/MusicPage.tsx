@@ -840,6 +840,13 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const pendingOrderRef = useRef<MusicTrack[]>([]);
   const [playbackErrors, setPlaybackErrors] = useState<Record<string, string>>({});
   const [detailTrackId, setDetailTrackId] = useState<string | null>(null);
+  const [deleteConfirmTrack, setDeleteConfirmTrack] = useState<MusicTrack | null>(null);
+  const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false);
+  const [deleteConfirmError, setDeleteConfirmError] = useState("");
+  const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteAcceptButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteConfirmBusyRef = useRef(false);
+  deleteConfirmBusyRef.current = deleteConfirmBusy;
   const [detailMode, setDetailMode] = useState<DetailMode>("edit");
   const [detailCandidates, setDetailCandidates] = useState<MusicMetadataCandidate[]>([]);
   const [detailSelectedCandidateId, setDetailSelectedCandidateId] = useState<string | null>(null);
@@ -1668,7 +1675,33 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       .catch(() => undefined);
   }
 
+  useEffect(() => {
+    if (!deleteConfirmTrack) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    deleteCancelButtonRef.current?.focus();
+    const onDeleteDialogKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!deleteConfirmBusyRef.current) { setDeleteConfirmTrack(null); setDeleteConfirmError(""); }
+      } else if (event.key === "Tab") {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (deleteConfirmBusyRef.current) return;
+        const cancel = deleteCancelButtonRef.current;
+        const accept = deleteAcceptButtonRef.current;
+        if (document.activeElement === cancel) accept?.focus();
+        else cancel?.focus();
+      }
+    };
+    document.addEventListener("keydown", onDeleteDialogKey, true);
+    return () => {
+      document.removeEventListener("keydown", onDeleteDialogKey, true);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [deleteConfirmTrack?.id]);
+
   function closeDetail() {
+    setDeleteConfirmTrack(null);
+    setDeleteConfirmError("");
     detailSessionRef.current += 1;
     detailLookupRequestRef.current += 1;
     detailIntelligenceRequestRef.current += 1;
@@ -1738,12 +1771,31 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     catch (caught) { setDetailStatusText(caught instanceof Error ? caught.message : "Could not remove artwork."); }
     finally { setBusyId(null); }
   }
-  async function deleteTrack(track: MusicTrack) {
-    if (!window.confirm(`Delete “${track.title}” from your private music library?`)) return;
+  function requestDeleteTrack(track: MusicTrack) {
+    if (deleteConfirmBusy || busyId === track.id) return;
+    setDeleteConfirmError("");
+    setDeleteConfirmTrack(track);
+  }
+
+  async function confirmDeleteTrack() {
+    const track = deleteConfirmTrack;
+    if (!track || deleteConfirmBusy) return;
+    setDeleteConfirmBusy(true);
+    setDeleteConfirmError("");
     setBusyId(track.id);
-    try { await removeMusicTrack(track.id); closeDetail(); await refreshTracks(); showTemporaryMessage("Song deleted."); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete song."); }
-    finally { setBusyId(null); }
+    try {
+      await removeMusicTrack(track.id);
+    } catch (caught) {
+      setDeleteConfirmError(caught instanceof Error ? caught.message : "Could not delete this song. Please try again.");
+      setDeleteConfirmBusy(false);
+      setBusyId(null);
+      return;
+    }
+    setDeleteConfirmTrack(null);
+    closeDetail();
+    try { await refreshTracks(); showTemporaryMessage("Song deleted."); }
+    catch (caught) { setError(caught instanceof Error ? `Song deleted, but the library could not refresh: ${caught.message}` : "Song deleted. Refresh the library to see the change."); }
+    finally { setDeleteConfirmBusy(false); setBusyId(null); }
   }
 
   async function findDetailMatches(track: MusicTrack, mode: "info_results" | "artwork_results") {
@@ -3175,6 +3227,17 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         <footer className="tr44-enrichmentFooter"><div><strong>GOOD DATA STAYS PROTECTED</strong><small>Complete records are skipped. MVP searches only missing or outdated song info, artwork and intelligence.</small></div><div>{!enrichment.running && enrichment.failedTrackIds.length ? <button type="button" onClick={() => void enrichTracks(tracks.filter((track) => enrichment.failedTrackIds.includes(track.id)))}>RETRY {enrichment.failedTrackIds.length}</button> : null}<button type="button" className="is-primary" onClick={() => { if (!enrichment.running) setMessage(""); setEnrichment((current) => ({ ...current, open: false, minimized: current.running })); }}>{enrichment.running ? "RUN IN BACKGROUND" : "CLOSE"}</button></div></footer>
       </motion.section></div>, document.body) : null}
 
+      {deleteConfirmTrack && typeof document !== "undefined" ? createPortal(
+        <div className="tr68-deleteBack" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !deleteConfirmBusy) { setDeleteConfirmTrack(null); setDeleteConfirmError(""); }
+        }}>
+          <motion.section className="tr68-deleteDialog" role="alertdialog" aria-modal="true" aria-labelledby="tr68-deleteTitle" aria-describedby="tr68-deleteDescription" aria-busy={deleteConfirmBusy} onMouseDown={(event) => event.stopPropagation()} initial={{ opacity: 0, y: 13, scale: .975 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 330, damping: 30 }}>
+            <header className="tr68-deleteTop"><span className="tr68-deleteMark" aria-hidden="true">!</span><span className="tr68-deleteBrand">MVP TRAINER PRO <i aria-hidden="true">/</i> MUSIC LIBRARY</span><span className="tr68-deleteRisk">PERMANENT</span></header>
+            <div className="tr68-deleteBody"><h2 id="tr68-deleteTitle">Delete this song?</h2><div className="tr68-deleteIdentity"><TrackArtwork track={deleteConfirmTrack} size="row" /><div><strong>{deleteConfirmTrack.title}</strong><span>{artistLabel(deleteConfirmTrack)}</span></div></div><p id="tr68-deleteDescription">This removes the recording from your private music library. This action cannot be undone.</p>{deleteConfirmError ? <p className="tr68-deleteError" role="alert">{deleteConfirmError}</p> : null}</div>
+            <footer className="tr68-deleteActions"><button type="button" ref={deleteCancelButtonRef} disabled={deleteConfirmBusy} className="tr68-deleteCancel" onClick={() => { setDeleteConfirmTrack(null); setDeleteConfirmError(""); }}>CANCEL</button><button type="button" ref={deleteAcceptButtonRef} disabled={deleteConfirmBusy} className="tr68-deleteConfirm" onClick={() => void confirmDeleteTrack()}>{deleteConfirmBusy ? "DELETING…" : "DELETE SONG"}</button></footer>
+          </motion.section>
+        </div>, document.body) : null}
+
       {detailTrack && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-detailPortal tr44-detailBack" onMouseDown={closeDetail}><motion.section key={detailTrack.id} className="tr10-inspector tr44-songInspector" role="dialog" aria-modal="true" onMouseDown={(event: MouseEvent<HTMLElement>) => event.stopPropagation()} initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 320, damping: 32 }}>
         <header className="tr44-songHeader"><div className="tr10-inspectIdentity tr44-songIdentity">{detailPendingCandidate?.artworkUrl ? <img className="tr10-detailPreviewArt" src={detailPendingCandidate.artworkUrl} alt="" /> : <TrackArtwork track={detailTrack} size="detail" />}<div><span>SONG CONTROL</span><h2>{detailDraft?.title || detailTrack.title}</h2><p>{detailDraft?.artist || artistLabel(detailTrack)}{(detailDraft?.album || detailTrack.album) ? ` • ${detailDraft?.album || detailTrack.album}` : ""}</p>{detailMode === "edit" ? <small className={`tr10-editState ${detailSaveState === "changed" ? "is-changed" : detailDirty ? "is-dirty" : ""}`}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : detailDirty ? "UNSAVED CHANGES" : "LIBRARY RECORD"}</small> : null}</div></div><button className="tr44-close" onClick={closeDetail} aria-label="Close song control">×</button></header>
         {detailMode === "edit" ? <>
@@ -3206,7 +3269,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
             <section className="tr44-historyRail"><div><b>{detailTrack.play_count}</b><span>PLAYS</span></div><div><b>{detailTrack.completed_play_count}</b><span>COMPLETED</span></div><div><b>{detailTrack.skip_count}</b><span>SKIPS</span></div><div><b>{formatDate(detailTrack.last_played_at)}</b><span>LAST PLAYED</span></div><div><b>{detailTrack.metadata_status.toUpperCase()}</b><span>METADATA</span></div><div className="is-file" title={detailTrack.original_name}><b>{detailTrack.original_name}</b><span>FILE</span></div></section>
           </div>
-          <footer className="tr44-songFooter"><button onClick={() => openPlaylistModal([detailTrack.id])}><PlaylistPremiumIcon /> PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => void deleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : "SAVE CHANGES"}</button></footer>
+          <footer className="tr44-songFooter"><button onClick={() => openPlaylistModal([detailTrack.id])}><PlaylistPremiumIcon /> PLAYLIST</button><button className="is-danger" disabled={busyId===detailTrack.id} onClick={() => requestDeleteTrack(detailTrack)}>DELETE</button><button className={`is-primary tr10-saveButton ${detailSaveState === "changed" ? "is-changed" : ""}`} disabled={!detailDirty || detailSaveState === "saving" || detailSaveState === "changed"} onClick={() => void saveTrack(detailTrack)}>{detailSaveState === "saving" ? "SAVING…" : detailSaveState === "changed" ? "SAVED ✓" : "SAVE CHANGES"}</button></footer>
         </> : <>
           <div className="tr10-detailLookup"><div className="tr10-detailLookupHead"><button onClick={() => {setDetailMode("edit");setDetailSelectedCandidateId(null);}}>← BACK TO SONG</button><div><span>{detailMode === "artwork_results" ? "ARTWORK RESULTS" : "SONG MATCH RESULTS"}</span><h3>{detailMode === "artwork_results" ? "Choose the correct cover" : "Choose the correct recording"}</h3><p>{detailStatusText}</p></div></div>
           <div className={`tr10-detailCandidates ${detailMode === "artwork_results" ? "is-artwork" : ""}`}>{detailSaveState === "searching" ? <div className="tr10-reviewLoading">SEARCHING FOR THE BEST MATCHES…</div> : null}{detailCandidates.map((candidate) => { const selected = detailSelectedCandidateId === candidate.sourceId; const displayConfidence = detailMode === "artwork_results" ? (candidate.releaseConfidence ?? candidate.confidence) : candidate.confidence; const tier = detailMode === "artwork_results" ? artworkReleaseTier(displayConfidence) : musicMatchTier(displayConfidence); return <button type="button" key={candidate.sourceId} className={selected ? "is-selected" : ""} onClick={() => setDetailSelectedCandidateId(candidate.sourceId)}><CandidateArtworkThumb candidate={candidate} /><div><strong>{candidate.title}</strong><span>{candidate.artist}</span><small>{candidate.album || "Unknown album"}{candidate.releaseYear ? ` • ${candidate.releaseYear}` : ""}{candidate.durationSeconds ? ` • ${formatDuration(candidate.durationSeconds)}` : ""}</small></div><em className={`tr10-matchTier is-${tier.toLowerCase().replaceAll(" ","-")}`}>{tier}<b>{Math.round(displayConfidence*100)}%</b></em><i className="tr10-selectMark">{selected ? "✓" : ""}</i></button>; })}{detailSaveState !== "searching" && !detailCandidates.length ? <div className="tr10-empty">No matching catalog results to show.</div> : null}</div></div>
