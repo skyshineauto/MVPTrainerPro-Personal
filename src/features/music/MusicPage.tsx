@@ -2008,6 +2008,12 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       }
 
       await refreshTracks();
+      // Completion means verified DB readiness, not merely no thrown exception.
+      // Never display 707 completed while catalog metadata is still partial.
+      const finalTracks = await listMusicTracks();
+      const finalIntelligence = await hydrateMusicIntelligenceCache(finalTracks, { fresh: true });
+      const actuallyReady = finalTracks.filter(track => isMusicIntelligenceCurrent(finalIntelligence.get(track.id))).length;
+      const unresolved = finalTracks.length - actuallyReady;
       setReviewItems(reviewQueue);
       setEnrichment((current) => ({
         ...current,
@@ -2023,12 +2029,14 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         review,
         notFound,
         failed,
-        intelligenceComplete,
+        intelligenceComplete: artworkOnly ? intelligenceComplete : actuallyReady,
         metadataUpdated,
         artworkUpdated,
         intelligenceUpdated,
-        label: artworkOnly ? "ARTWORK SCAN COMPLETE" : "LIBRARY ENRICHMENT COMPLETE",
-        serviceMessage: failed
+        label: artworkOnly ? "ARTWORK SCAN COMPLETE" : unresolved ? `INTELLIGENCE PARTIAL • ${unresolved} UNRESOLVED` : "LIBRARY INTELLIGENCE VERIFIED COMPLETE",
+        serviceMessage: !artworkOnly && unresolved
+          ? `${actuallyReady}/${finalTracks.length} verified • ${unresolved} require more catalog evidence; automatic recovery will continue without another full scan.`
+          : failed
           ? `${failed} song${failed === 1 ? "" : "s"} can be retried. ${skipped} complete song${skipped === 1 ? " was" : "s were"} never rescanned.`
           : reviewQueue.length
             ? `${reviewQueue.length} possible metadata match${reviewQueue.length === 1 ? "" : "es"} need review. ${skipped} complete song${skipped === 1 ? " was" : "s were"} skipped.`
@@ -3108,7 +3116,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       {enrichment.open && !enrichment.minimized && typeof document !== "undefined" ? createPortal(<div className="tr10-modalBack tr10-analysisBack tr44-enrichmentBack"><motion.section className="tr10-analysisModal tr44-enrichmentModal" role="dialog" aria-modal="true" aria-live="polite" initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
         <header className="tr44-enrichmentHeader"><div><span>MVP MUSIC INTELLIGENCE</span><h2>{enrichment.label}</h2><p>{enrichment.serviceMessage}</p></div><div className="tr44-enrichmentHeaderTools"><div className="tr10-analysisCounter"><strong>{enrichment.running ? enrichment.completed : enrichment.libraryTotal}</strong><span>{enrichment.running ? `OF ${enrichment.total}` : "CHECKED"}</span></div><button type="button" onClick={() => { if (!enrichment.running) setMessage(""); setEnrichment((current) => ({ ...current, open: false, minimized: current.running })); }}>{enrichment.running ? "MINIMIZE" : "CLOSE"}</button></div></header>
         <div className="tr44-progressLine"><motion.i initial={false} animate={{ scaleX: enrichment.running ? (enrichment.total ? enrichment.completed / enrichment.total : 0) : 1 }} transition={{ type: "spring", stiffness: 220, damping: 28 }} /></div>
-        <div className="tr44-stageRail">{ENRICHMENT_STAGE_ORDER.map((item, index) => { const activeIndex = ENRICHMENT_STAGE_ORDER.findIndex((stage) => stage.key === enrichment.stage); const complete = enrichment.stage === "complete" || (activeIndex >= 0 && index < activeIndex); const active = item.key === enrichment.stage; return <div key={item.key} className={`${complete ? "is-complete " : ""}${active ? "is-active" : ""}`}><i>{complete ? "✓" : index + 1}</i><span>{item.label}</span></div>; })}</div>
+        <div className="tr44-stageRail">{ENRICHMENT_STAGE_ORDER.map((item, index) => { const activeIndex = ENRICHMENT_STAGE_ORDER.findIndex((stage) => stage.key === enrichment.stage); const complete = (enrichment.stage === "complete" && (!enrichment.label.startsWith("INTELLIGENCE PARTIAL"))) || (activeIndex >= 0 && index < activeIndex); const active = item.key === enrichment.stage; return <div key={item.key} className={`${complete ? "is-complete " : ""}${active ? "is-active" : ""}`}><i>{complete ? "✓" : index + 1}</i><span>{item.label}</span></div>; })}</div>
         <div className="tr44-enrichmentMetrics"><span><b>{enrichment.completed}</b> COMPLETED</span><span><b>{Math.max(0,enrichment.total-enrichment.completed)}</b> REMAINING</span><span><b>{enrichment.skipped}</b> SKIPPED</span><span><b>{enrichment.intelligenceComplete}</b> DNA READY</span><span><b>{enrichment.review}</b> REVIEW</span><span className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b> FAILED</span></div>
         <div className="tr44-enrichmentNow"><span>{enrichment.running ? "NOW PROCESSING" : "SCAN SUMMARY"}</span><strong>{enrichment.running && enrichment.currentTrackId ? tracks.find((track) => track.id === enrichment.currentTrackId)?.title || enrichment.label : enrichment.label}</strong><small>{enrichment.serviceMessage}</small></div>
         {!enrichment.running && enrichment.stage === "complete" ? <div className="tr51-completionSummary" aria-label="Enrichment completion summary"><div><b>{enrichment.libraryTotal}</b><span>SONGS CHECKED</span></div><div><b>{enrichment.skipped}</b><span>ALREADY COMPLETE</span></div><div><b>{enrichment.metadataUpdated}</b><span>SONG INFO UPDATED</span></div><div><b>{enrichment.artworkUpdated}</b><span>ARTWORK UPDATED</span></div><div><b>{enrichment.intelligenceUpdated}</b><span>V3 / AUDIO UPDATED</span></div><div><b>{enrichment.review}</b><span>NEED REVIEW</span></div><div className={enrichment.failed ? "is-alert" : ""}><b>{enrichment.failed}</b><span>FAILED</span></div></div> : null}

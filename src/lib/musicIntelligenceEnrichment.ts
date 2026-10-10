@@ -245,7 +245,9 @@ async function saveLocalAudioIntelligence(
     .from(TRACK_TABLE)
     .update({
       status: coreComplete ? "complete" : "partial",
-      analysis_version: coreComplete ? MUSIC_INTELLIGENCE_VERSION : Math.min(base.analysisVersion, MUSIC_INTELLIGENCE_VERSION - 1),
+      // Analysis version is the engine schema used, not a completion score.
+      // An unresolved catalog date must not downgrade successful audio analysis.
+      analysis_version: MUSIC_INTELLIGENCE_VERSION,
       confidence,
       source,
       song_dna: songDna,
@@ -402,7 +404,10 @@ export async function analyzeMusicTrackIntelligence(
   };
   cacheMusicTrackIntelligence(parsed);
 
-  if (audioUrl) {
+  const audioAlreadySaved = Boolean(parsed.bpm != null && parsed.keySignature && parsed.audioAnalysis && parsed.masterPrep);
+  if (audioAlreadySaved) {
+    options.onStage?.("audio_intelligence", "Existing BPM, key and Master Prep preserved; resolving metadata only.");
+  } else if (audioUrl) {
     options.onStage?.("audio_intelligence", "Analyzing the actual audio for Master Prep, BPM, key, dynamics, true-peak risk and stereo integrity…");
     try {
       const facts = await analyzeMusicAudioLocally(audioUrl, payload);
@@ -424,12 +429,12 @@ export async function analyzeMusicTrackIntelligence(
     options.onStage?.("audio_intelligence", "Song + Artist DNA ready • audio file was unavailable for Master Prep analysis.");
   }
 
-  if (parsed.analysisVersion < MUSIC_INTELLIGENCE_VERSION) {
-    options.onStage?.("saving", "Metadata intelligence saved · Master Prep audio analysis still pending…");
+  if (!isMusicIntelligenceCurrent(parsed)) {
+    options.onStage?.("saving", "V8 analysis retained; unresolved metadata is recorded as partial for automatic retry.");
   }
-  options.onStage?.("complete", parsed.analysisVersion >= MUSIC_INTELLIGENCE_VERSION
-    ? "Music Intelligence + Master Prep complete"
-    : "Music Intelligence ready · Master Prep pending");
+  options.onStage?.("complete", isMusicIntelligenceCurrent(parsed)
+    ? "Music Intelligence + Master Prep verified complete"
+    : "Music Intelligence partial · evidence still pending");
   return parsed;
 }
 

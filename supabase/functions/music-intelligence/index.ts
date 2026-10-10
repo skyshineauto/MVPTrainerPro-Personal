@@ -519,8 +519,12 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     appleCatalog(track).catch(() => null),
     discogsAlbumMaster(track).catch(() => null),
   ]);
-  const albumYear = mb.originalYear ? null : await r27AlbumYear(track).catch(() => null);
-  const year = mb.originalYear || albumYear;
+  // Reuse the recording-specific release associations before considering albums.
+  // Edition, cover and live recordings must never inherit the composition date.
+  const recordingYear = mb.originalYear || !mb.recordingId ? null
+    : await r30RecordingReleaseYear(mb.recordingId).catch(() => null);
+  const albumYear = mb.originalYear || recordingYear ? null : await r27AlbumYear(track).catch(() => null);
+  const year = mb.originalYear || recordingYear || albumYear;
   const classification = r27Classification(track, {
     trackTags, artistTags, mbRecordingId: mb.recordingId, mbArtistId: mb.artistId,
     mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])], mainGenres: [], subgenres: [],
@@ -530,13 +534,17 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     artistTags,
     mbRecordingId: mb.recordingId,
     mbOriginalYear: year,
-    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : albumYear ? "musicbrainz-original-album-release-group" : "unverified",
+    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : recordingYear ? "musicbrainz-recording-release-groups" : albumYear ? "musicbrainz-original-album-release-group" : "unverified",
     mainGenres: classification.mainGenres,
     subgenres: classification.subgenres,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
     mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])])].slice(0, 16),
     catalogSources: [...(apple ? ["itunes"] : []), ...(discogs ? ["discogs"] : [])],
-    catalogCandidates: { apple: apple || null, discogs: discogs || null },
+    // Catalog edition years are evidence candidates only, not original dates.
+    catalogCandidates: { apple: apple || null, discogs: discogs || null,
+      releaseYearCandidate: apple?.catalogYear || discogs?.albumMasterYear || Number(track.releaseYear) || null,
+      yearEvidence: { recordingYear, albumYear, matchedRecordingId: mb.recordingId || null,
+        reason: year ? "verified-recording-or-original-release-group" : "original-recording-date-unverified" } },
   };
 }
 
@@ -560,12 +568,24 @@ const R27_GENRES = new Map<string, string>([
   ["country", "country"], ["folk", "folk"], ["jazz", "jazz"],
   ["r&b", "r&b"], ["soul", "soul"], ["funk", "funk"],
   ["dance", "dance"], ["synthpop", "synthpop"], ["new wave", "new wave"],
+  // Valid catalog families previously discarded as if no genre existed.
+  ["christian", "christian"], ["christian rock", "christian rock"], ["christian music", "christian"],
+  ["children's music", "children's music"], ["childrens music", "children's music"],
+  ["kids", "children's music"], ["children", "children's music"],
+  ["soundtrack", "soundtrack"], ["soundtracks", "soundtrack"],
+  ["film score", "soundtrack"], ["alternative hip hop", "alternative hip hop"],
+  ["pop rock", "pop rock"], ["adult alternative", "adult alternative"],
+  ["modern rock", "modern rock"], ["indie pop", "indie pop"],
+  ["reggae", "reggae"], ["ska", "ska"], ["disco", "disco"],
+  ["comedy", "comedy"], ["spoken word", "spoken word"], ["latin", "latin"],
+  ["electropop", "electropop"], ["rnb", "r&b"], ["rhythm and blues", "r&b"],
+  ["trap", "trap"], ["drum and bass", "drum and bass"], ["dubstep", "dubstep"],
 ]);
 function r27GenreTags(values: string[]) {
   const out: string[] = [];
   for (const raw of values) {
     const key = String(raw).toLowerCase().trim().replace(/[-_]+/g, " ").replace(/\s+/g, " ");
-    const value = R27_GENRES.get(key);
+    const value = R27_GENRES.get(key) || (key === "christian & gospel" ? "christian" : key === "kids & family" ? "children's music" : null);
     if (value && !out.includes(value)) out.push(value);
   }
   return out;
@@ -585,12 +605,38 @@ function r27Complete(context: ProviderContext, mainGenres: string[]) {
   return Boolean(context.mbOriginalYear && mainGenres.length);
 }
 
-// A matching original album release group is secondary evidence, never an edition year.
+// Look up the exact identified recording's linked release groups. This is
+// preferable to using an arbitrary remaster, cover, or compilation date.
+async function r30RecordingReleaseYear(recordingId: string): Promise<number | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(recordingId)) return null;
+  const response = await fetch(`https://musicbrainz.org/ws/2/recording/${encodeURIComponent(recordingId)}?inc=releases+release-groups&fmt=json`, {
+    headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" }, signal: AbortSignal.timeout(9500),
+  });
+  if (!response.ok) return null;
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const releases = Array.isArray(body?.releases) ? body.releases as Array<Record<string, unknown>> : [];
+  const years = releases.map(release => {
+    const group = release["release-group"] && typeof release["release-group"] === "object"
+      ? release["release-group"] as Record<string, unknown> : null;
+    const kind = String(group?.["primary-type"] || "");
+    if (!group || !["Album", "Single", "EP"].includes(kind)) return null;
+    const match = /^(19|20)\d{2}/.exec(String(group["first-release-date"] || ""));
+    return match ? Number(match[0]) : null;
+  }).filter((year): year is number => year != null && year >= 1900 && year <= 2100);
+  return years.length ? Math.min(...years) : null;
+}
+
+// A verified original album release-group date is secondary evidence; the
+// uploaded deluxe/remastered edition's own year is never substituted.
 async function r27AlbumYear(track: InputTrack): Promise<number | null> {
   if (!track.artist || !track.album) return null;
-  const album = normalizeCatalogText(track.album);
-  if (!album || /greatest|best of|collection|anthology|compilation|deluxe|remaster/i.test(track.album)) return null;
-  const query = `releasegroup:"${escapeMb(track.album)}" AND artist:"${escapeMb(track.artist)}"`;
+  if (/greatest|best of|collection|anthology|compilation|soundtrack|live at|live in|tour|concert/i.test(track.album)) return null;
+  const originalAlbum = track.album
+    .replace(/\s*[([{]\s*(?:\d{4}\s+)?(?:anniversary|deluxe|expanded|special|remaster(?:ed)?|bonus tracks?|edition|\d{4} bonus)[^\])}]*[\])}]/ig, "")
+    .replace(/\s+(?:deluxe|expanded|remastered?)\s+edition$/i, "").trim();
+  const album = normalizeCatalogText(originalAlbum);
+  if (!album) return null;
+  const query = `releasegroup:"${escapeMb(originalAlbum)}" AND artist:"${escapeMb(track.artist)}"`;
   const response = await fetch(`https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=5`, {
     headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" }, signal: AbortSignal.timeout(8000),
   });
@@ -978,6 +1024,32 @@ Deno.serve(async (req) => {
     if (!context.mbOriginalYear && Number(oldSemantic?.originalReleaseYear) >= 1900 && Number(oldSemantic?.originalReleaseYear) <= 2100) {
       context.mbOriginalYear = Number(oldSemantic.originalReleaseYear);
       context.yearSource = String(oldSemantic.originalReleaseYearSource || "previously-verified");
+    }
+    if (existing) {
+      const retainedCatalog = existing.provider_payload?.catalogCandidates &&
+        typeof existing.provider_payload.catalogCandidates === "object"
+        ? existing.provider_payload.catalogCandidates as Record<string, unknown> : {};
+      const previousApple = retainedCatalog.apple && typeof retainedCatalog.apple === "object"
+        ? retainedCatalog.apple as Record<string, unknown> : null;
+      const previousDiscogs = retainedCatalog.discogs && typeof retainedCatalog.discogs === "object"
+        ? retainedCatalog.discogs as Record<string, unknown> : null;
+      const priorCatalogGenres = [
+        ...(typeof previousApple?.genre === "string" ? [previousApple.genre] : []),
+        ...(Array.isArray(previousDiscogs?.genre) ? previousDiscogs.genre.map(String) : []),
+        ...(Array.isArray(previousDiscogs?.style) ? previousDiscogs.style.map(String) : []),
+      ];
+      const previousClassification = r27GenreTags(priorCatalogGenres);
+      context.mainGenres = [...new Set([...context.mainGenres, ...previousClassification,
+        ...(Array.isArray(existing.main_genres) ? existing.main_genres : [])])].slice(0, 12);
+      context.subgenres = [...new Set([...context.subgenres,
+        ...(Array.isArray(existing.subgenres) ? existing.subgenres : [])])].slice(0, 10);
+      context.mbGenres = [...new Set([...context.mbGenres, ...priorCatalogGenres])].slice(0, 18);
+      context.catalogCandidates = {
+        ...retainedCatalog,
+        ...(context.catalogCandidates || {}),
+        apple: context.catalogCandidates?.apple || retainedCatalog.apple || null,
+        discogs: context.catalogCandidates?.discogs || retainedCatalog.discogs || null,
+      };
     }
     const cachedArtistDna = cachedArtist && Number(cachedArtist.analysis_version || 0) >= ANALYSIS_VERSION && cachedArtist.artist_dna
       ? cachedArtist.artist_dna as ArtistDNA

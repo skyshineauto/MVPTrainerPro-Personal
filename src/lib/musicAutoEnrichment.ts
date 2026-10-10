@@ -13,7 +13,7 @@ import {
 } from "./musicIntelligenceEnrichment";
 import { supabase } from "./supabase";
 
-const STORAGE = "mvp_music_auto_enrichment_r29";
+const STORAGE = "mvp_music_auto_enrichment_r30";
 type Attempt = { failures: number; retryAt: number; finished?: boolean };
 type Saved = { userId: string; attempts: Record<string, Attempt> };
 let active = false;
@@ -34,7 +34,7 @@ function save(value: Saved) {
   try { localStorage.setItem(STORAGE, JSON.stringify(value)); } catch { /* retry on next app visit */ }
 }
 function delayFor(failures: number) {
-  return [0, 60_000, 30 * 60_000, 24 * 3600_000, 3 * 86400_000, 7 * 86400_000, 30 * 86400_000][Math.min(6, failures)];
+  return [0, 60_000, 30 * 60_000, 24 * 3600_000, 3 * 86400_000, 7 * 86400_000, 7 * 86400_000][Math.min(6, failures)];
 }
 function publish(phase: string, completed: number, total: number, track?: MusicTrack) {
   if (typeof window === "undefined") return;
@@ -61,7 +61,9 @@ async function processLibrary() {
       const result = intelligence.get(track.id);
       if (isMusicIntelligenceCurrent(result) && !needsMusicMetadata(track)) return false;
       const attempt = saved.attempts[track.id];
-      return !attempt || (attempt.finished && !isMusicIntelligenceCurrent(result)) || attempt.retryAt <= now || preferredTrackIds.has(track.id);
+      // Honor backoff even for partial rows. New R30 storage initializes one
+      // targeted recovery pass; subsequent retries do not hammer providers.
+      return !attempt || attempt.retryAt <= now || preferredTrackIds.has(track.id);
     });
     let completed = 0;
     publish("running", completed, needed.length);
@@ -95,7 +97,10 @@ async function processLibrary() {
         publish("running", completed, needed.length, track);
       }
     }
-    publish("idle", completed, needed.length);
+    const snapshot = await hydrateMusicIntelligenceCache(tracks, { fresh: true }).catch(() => intelligence);
+    const remaining = tracks.filter(track => !isMusicIntelligenceCurrent(snapshot.get(track.id)));
+    publish(remaining.length ? "partial" : "verified-complete", completed, needed.length);
+    if (remaining.length) console.info(`[MVP INTELLIGENCE] ${tracks.length - remaining.length}/${tracks.length} verified; ${remaining.length} partial. Automatic retry is scheduled.`);
   } catch (error) {
     console.warn("Automatic music enrichment deferred until connectivity resumes", error);
   } finally {
