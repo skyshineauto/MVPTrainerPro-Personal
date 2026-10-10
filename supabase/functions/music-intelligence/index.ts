@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const ARTIST_TABLE = "trainer_music_artist_intelligence";
-const ANALYSIS_VERSION = 6;
+const ANALYSIS_VERSION = 7;
 const CYANITE_LIMIT_BYTES = 20 * 1024 * 1024;
 const CYANITE_LIMIT_SECONDS = 15 * 60;
 const CYANITE_MODELS = [
@@ -71,6 +71,7 @@ type ProviderContext = {
   mbRecordingId: string | null;
   mbArtistId: string | null;
   mbGenres: string[];
+  mbOriginalYear: number | null;
 };
 
 type DeezerAudioFacts = {
@@ -154,13 +155,13 @@ function musicBrainzCreditName(recording: Record<string, unknown>) {
 }
 
 async function musicBrainzIdentity(track: InputTrack) {
-  if (!track.artist || !track.title) return { recordingId: null, artistId: null, genres: [] as string[] };
+  if (!track.artist || !track.title) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
   const query = `recording:"${escapeMb(track.title)}" AND artist:"${escapeMb(track.artist)}"`;
   const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=5`;
   const response = await fetch(url, {
     headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" },
   });
-  if (!response.ok) return { recordingId: null, artistId: null, genres: [] as string[] };
+  if (!response.ok) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
   const recordings = Array.isArray(payload?.recordings) ? payload?.recordings as Array<Record<string, unknown>> : [];
   const wantedTitle = normalizeCatalogText(track.title);
@@ -184,14 +185,20 @@ async function musicBrainzIdentity(track: InputTrack) {
     }
     return { recording, score };
   }).sort((a, b) => b.score - a.score);
-  const best = ranked[0]?.score >= 45 ? ranked[0].recording : null;
-  if (!best) return { recordingId: null, artistId: null, genres: [] as string[] };
+  const best = ranked[0]?.score >= 110 ? ranked[0].recording : null;
+  if (!best) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
   const credits = Array.isArray(best["artist-credit"]) ? best["artist-credit"] as Array<Record<string, unknown>> : [];
   const firstCredit = credits[0] || {};
   const artist = firstCredit.artist && typeof firstCredit.artist === "object" ? firstCredit.artist as Record<string, unknown> : {};
   const genresRaw = Array.isArray(best.genres) ? best.genres as Array<Record<string, unknown>> : [];
+  // MusicBrainz recording first-release-date references the original recording,
+  // not the uploaded deluxe/remastered edition. A non-verified year stays null.
+  const firstDate = typeof best["first-release-date"] === "string" ? best["first-release-date"] : "";
+  const foundYear = /^(19|20)\d{2}/.exec(firstDate);
+  const originalYear = foundYear ? Number(foundYear[0]) : null;
   return {
     recordingId: typeof best.id === "string" ? best.id : null,
+    originalYear,
     artistId: typeof artist.id === "string" ? artist.id : null,
     genres: genresRaw.map((item) => String(item.name || "").trim()).filter(Boolean).slice(0, 10),
   };
@@ -392,7 +399,7 @@ function buildSemanticProfile(track: InputTrack, context: ProviderContext, extra
   const growledVocal = semanticPhraseScore(trackText, ["growled vocals", "growling vocals", "death growls", "growls"], ["death metal", "deathcore"]);
   const raspyVocal = semanticPhraseScore(trackText, ["raspy vocals", "raspy vocal", "gritty vocals", "gravelly vocals"], ["grunge", "blues rock"]);
 
-  const originalReleaseYear = Number.isFinite(Number(track.releaseYear)) ? Number(track.releaseYear) : null;
+  const originalReleaseYear = context.mbOriginalYear;
   const decade = originalReleaseYear != null ? Math.floor(originalReleaseYear / 10) * 10 : null;
   const evidenceCount = Number(context.trackTags.length > 0) + Number(context.mbGenres.length > 0) + Number(Boolean(extras.description)) + Number((extras.moods || []).length > 0);
   const confidence = Math.min(.98, .46 + evidenceCount * .11 + (context.mbRecordingId ? .08 : 0));
@@ -400,6 +407,8 @@ function buildSemanticProfile(track: InputTrack, context: ProviderContext, extra
   return {
     version: 1,
     originalReleaseYear,
+    originalReleaseYearSource: originalReleaseYear != null ? "musicbrainz-recording-first-release-date" : "unverified",
+    suppliedEditionYear: Number(track.releaseYear) || null,
     decade,
     themes: { love, heartbreak, motivation: motivational, party },
     moods: { sad, angry },
@@ -453,6 +462,7 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     trackTags,
     artistTags,
     mbRecordingId: mb.recordingId,
+    mbOriginalYear: mb.originalYear,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
     mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : [])])].slice(0, 12),
   };
@@ -770,6 +780,7 @@ Deno.serve(async (req) => {
           trackTags: Array.isArray(existing.lastfm_track_tags) ? existing.lastfm_track_tags : [],
           artistTags: [],
           mbRecordingId: existing.musicbrainz_recording_id || null,
+          mbOriginalYear: Number(existing.provider_payload?.semantic_profile?.originalReleaseYear) || null,
           mbArtistId: existing.musicbrainz_artist_id || null,
           mbGenres: Array.isArray(existing.main_genres) ? existing.main_genres : [],
         };

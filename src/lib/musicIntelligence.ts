@@ -392,8 +392,8 @@ function normalizedStyleTokens(track: MusicTrack) {
  * before ranking. Surprise Me remains the exploration mode.
  */
 const R25_STYLE_NEIGHBORHOODS: string[][] = [
-  ["grunge", "post grunge", "alternative rock", "alternative metal", "hard rock"],
-  ["post grunge", "alternative rock", "alternative metal", "hard rock", "modern rock"],
+  ["grunge", "alternative metal", "alternative rock"],
+  ["post grunge", "alternative rock", "hard rock", "modern rock"],
   ["nu metal", "alternative metal", "industrial metal", "hard rock", "rap metal"],
   ["heavy metal", "groove metal", "thrash metal", "alternative metal", "hard rock"],
   ["metalcore", "post hardcore", "alternative metal", "modern metal", "hard rock"],
@@ -438,6 +438,9 @@ function releaseYear(track: MusicTrack) {
   const semanticYear = Number(semantic?.originalReleaseYear ?? 0);
   if (Number.isFinite(semanticYear) && semanticYear >= 1900 && semanticYear <= 2100) return semanticYear;
 
+  // V7 analysis distinguishes original recording date from an edition year.
+  // Never treat a remaster/compilation year as an original-release date.
+  if (intelligence?.analysisVersion && intelligence.analysisVersion >= 7) return null;
   const year = Number(track.release_year || 0);
   return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
 }
@@ -459,6 +462,17 @@ function exactSongFingerprintScore(seed: MusicTrack, candidate: MusicTrack) {
   return 122 - distance * 1.72 + styleOverlapScore(seed, candidate) + eraSimilarityScore(seed, candidate);
 }
 
+function r26SteeringEligible(seed: MusicTrack, candidate: MusicTrack, mode: MusicRadioMode) {
+  if (mode === "surprise") return true;
+  if (mode === "more_like_this") return r25MoreLikeEligible(seed, candidate);
+  const seedYear = releaseYear(seed);
+  const candidateYear = releaseYear(candidate);
+  if (seedYear == null || candidateYear == null) return false;
+  if (Math.floor(seedYear / 10) !== Math.floor(candidateYear / 10)) return false;
+  const style = r25StyleCompatibility(seed, candidate);
+  return style.known && (style.exact > 0 || style.neighborhood > 0);
+}
+
 function r25MoreLikeEligible(seed: MusicTrack, candidate: MusicTrack) {
   if (candidate.id === seed.id || candidate.play_less) return false;
 
@@ -467,31 +481,21 @@ function r25MoreLikeEligible(seed: MusicTrack, candidate: MusicTrack) {
   const style = r25StyleCompatibility(seed, candidate);
   const seedYear = releaseYear(seed);
   const candidateYear = releaseYear(candidate);
-  const yearDelta = seedYear != null && candidateYear != null
-    ? Math.abs(seedYear - candidateYear)
-    : null;
 
-  // Same-artist material is intrinsically valid, but still reject a radically
-  // different fingerprint so alternate projects/live versions do not dominate.
+  // LIKE THIS is anchored to the original *decade*, not a flexible year span.
+  // Unknown era or unknown style is ineligible: audio energy alone is not proof.
+  if (seedYear == null || candidateYear == null) return false;
+  if (Math.floor(seedYear / 10) !== Math.floor(candidateYear / 10)) return false;
+  if (!style.known || (style.exact === 0 && style.neighborhood === 0)) return false;
+  // A grunge seed requires an actual grunge classification, not merely the
+  // same broad alternative-rock label shared by modern post-grunge acts.
+  const seedStyles = normalizedStyleTokens(seed);
+  const candidateStyles = normalizedStyleTokens(candidate);
+  if (seedStyles.has("grunge") && !candidateStyles.has("grunge") && !sameArtist) return false;
+  if (seedStyles.has("post grunge") && !candidateStyles.has("post grunge") && !sameArtist) return false;
+
+  // The original artist is welcome, but still must match the selected era.
   if (sameArtist) return distance <= 34;
-
-  // When both years are known, More Like This stays in the same era neighborhood.
-  // A very strong style match may stretch to 12 years, but never decades away.
-  if (yearDelta != null) {
-    const maxEraDelta = style.exact > 0 || style.neighborhood > 0 ? 12 : 7;
-    if (yearDelta > maxEraDelta) return false;
-  }
-
-  // Known-but-unrelated style tags are a hard rejection. This is the specific
-  // guard that prevents modern generic rock from following a 90s grunge seed.
-  if (style.known && style.exact === 0 && style.neighborhood === 0) return false;
-
-  // Missing metadata is allowed only when the measured Song DNA is extremely
-  // close. We never use missing metadata as permission to wander broadly.
-  if (!style.known && distance > 11) return false;
-
-  // Even inside the same style/era family, the actual song fingerprint must be
-  // close enough to the seed to qualify for strict similarity radio.
   if (distance > 25) return false;
 
   return true;
@@ -774,7 +778,7 @@ export function startRadioSession(
 
   const ranked = library
     .filter((track) => track.id !== seed.id && !track.play_less)
-    .filter((track) => mode !== "more_like_this" || r25MoreLikeEligible(seed, track))
+    .filter((track) => r26SteeringEligible(seed, track, mode))
     .map((track) => ({
       track,
       score: candidateScore(
@@ -814,7 +818,7 @@ function rankedAdaptiveCandidates(current: MusicTrack, library: MusicTrack[]) {
 
   const eligible = library
     .filter((track) => track.id !== current.id && track.id !== seed.id && !track.play_less)
-    .filter((track) => radio.mode !== "more_like_this" || r25MoreLikeEligible(seed, track));
+    .filter((track) => r26SteeringEligible(seed, track, radio.mode));
 
   const cycle = readPlaybackCycle();
   const played = new Set(cycle.playedIds);

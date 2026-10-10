@@ -672,6 +672,12 @@ function includesAny(text: string, terms: string[]) {
 }
 
 function trackReleaseYear(track: MusicTrack) {
+  const semantic = getCachedMusicTrackIntelligence(track.id)?.providerPayload?.semantic_profile as { originalReleaseYear?: unknown } | undefined;
+  const verified = Number(semantic?.originalReleaseYear ?? 0);
+  if (Number.isInteger(verified) && verified >= 1900 && verified <= 2100) return verified;
+  // Analyzed V7 tracks without a verified original year must not be admitted
+  // to a strict decade request based only on a remaster's supplied year.
+  if ((getCachedMusicTrackIntelligence(track.id)?.analysisVersion ?? 0) >= 7) return null;
   const root = track as unknown as Record<string, unknown>;
   const candidates = [root.release_year, root.releaseYear, root.year, root.original_release_year, root.release_date, root.releaseDate];
   for (const value of candidates) {
