@@ -159,18 +159,81 @@ function musicBrainzCreditName(recording: Record<string, unknown>) {
   }).filter(Boolean).join(" ");
 }
 
+// R31: MusicBrainz permits a modest request rate. An HTTP 429 is NOT
+// evidence that an original recording cannot be identified.
+let musicBrainzSlot = Promise.resolve();
+let nextMusicBrainzRequest = 0;
+async function musicBrainzJson(url: string, timeout = 9000): Promise<Record<string, unknown> | null> {
+  const request = musicBrainzSlot.catch(() => undefined).then(async () => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const wait = Math.max(0, nextMusicBrainzRequest - Date.now());
+      if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+      nextMusicBrainzRequest = Date.now() + 1150;
+      const response = await fetch(url, {
+        headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence; contact: https://fitnesstrainer.skyshineautodetailing.com)", Accept: "application/json" },
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (response.status === 429 || response.status === 503) {
+        if (attempt === 0) { nextMusicBrainzRequest = Date.now() + 2400; continue; }
+        throw new Error(`MusicBrainz rate limited (${response.status}); retry automatically`);
+      }
+      if (!response.ok) return null;
+      return await response.json().catch(() => null) as Record<string, unknown> | null;
+    }
+    return null;
+  });
+  musicBrainzSlot = request.then(() => undefined, () => undefined);
+  return request;
+}
+function originalAlbumName(value: string) {
+  return String(value || "")
+    .replace(/\s*[([{]\s*(?:\d{4}\s+)?(?:\d+(?:st|nd|rd|th)?\s+anniversary|anniversary|deluxe|expanded|special|remaster(?:ed)?|bonus tracks?|edition|\d{4} bonus)[^\])}]*[\])}]/ig, "")
+    .replace(/\s+(?:\d+(?:st|nd|rd|th)?|twentieth|twenty-?fifth|thirtieth)\s+anniversary\b/ig, "")
+    .replace(/\s+(?:deluxe|expanded|remastered?|anniversary|special)\s+(?:version|edition)$/i, "")
+    .trim();
+}
+function isCollectionOrLive(value: string) {
+  return /\b(greatest hits|best of|anthology|compilation|collection|soundtrack|live at|live in|live broadcast|tour|concert|various artists|now that.s what i call)\b|^(?:rock|pop|hits|party|top 40)\s*:/i.test(value);
+}
+function isEdition(value: string) {
+  return /\b(remaster|deluxe|anniversary|expanded|bonus tracks|special edition|legacy edition|twentieth anniversary)\b/i.test(value);
+}
+function versionKind(value: string) {
+  const s = String(value || "").toLowerCase();
+  if (/\bremix\b/.test(s)) return "remix";
+  if (/\b(?:live|unplugged|broadcast)\b/.test(s)) return "live";
+  if (/\bdemo\b/.test(s)) return "demo";
+  if (/\bradio edit\b/.test(s)) return "radio-edit";
+  if (/\bacoustic\b/.test(s)) return "acoustic";
+  return "studio";
+}
+function cleanLookupTitle(track: InputTrack) {
+  const title = String(track.title || "").trim();
+  const prefix = `${track.artist} / `;
+  return title.toLowerCase().startsWith(prefix.toLowerCase()) ? title.slice(prefix.length).trim() : title;
+}
+function leadArtist(value: string) {
+  return String(value || "").split(/\s*(?:,|\s+&\s+|\s+feat\.?\s+|\s+featuring\s+)\s*/i)[0].trim();
+}
+
 async function musicBrainzIdentity(track: InputTrack) {
   if (!track.artist || !track.title) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
-  const query = `recording:"${escapeMb(track.title)}" AND artist:"${escapeMb(track.artist)}"`;
-  const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=5`;
-  const response = await fetch(url, {
-    headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" },
-  });
-  if (!response.ok) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-  const recordings = Array.isArray(payload?.recordings) ? payload?.recordings as Array<Record<string, unknown>> : [];
-  const wantedTitle = normalizeCatalogText(track.title);
+  const lookupTitle = cleanLookupTitle(track);
+  const exactQuery = `recording:"${escapeMb(lookupTitle)}" AND artist:"${escapeMb(track.artist)}"`;
+  const search = async (q: string) => musicBrainzJson(`https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(q)}&fmt=json&limit=12`);
+  let payload = await search(exactQuery);
+  let recordings = Array.isArray(payload?.recordings) ? payload.recordings as Array<Record<string, unknown>> : [];
+  if (leadArtist(track.artist) !== track.artist &&
+      !recordings.some(row => normalizeCatalogText(row.title) === normalizeCatalogText(lookupTitle) &&
+        normalizeCatalogText(musicBrainzCreditName(row)).includes(normalizeCatalogText(leadArtist(track.artist))))) {
+    payload = await search(`recording:"${escapeMb(lookupTitle)}" AND artist:"${escapeMb(leadArtist(track.artist))}"`);
+    const alternate = Array.isArray(payload?.recordings) ? payload.recordings as Array<Record<string, unknown>> : [];
+    recordings = [...recordings, ...alternate];
+  }
+  const wantedTitle = normalizeCatalogText(lookupTitle);
   const wantedArtist = normalizeCatalogText(track.artist);
+  const wantedLeadArtist = normalizeCatalogText(leadArtist(track.artist));
+  const wantedVersion = versionKind(`${lookupTitle} ${track.album || ""}`);
   const wantedDurationMs = track.durationSeconds ? Number(track.durationSeconds) * 1000 : null;
   const ranked = recordings.map((recording) => {
     const candidateTitle = normalizeCatalogText(recording.title);
@@ -179,7 +242,12 @@ async function musicBrainzIdentity(track: InputTrack) {
     if (wantedTitle && candidateTitle === wantedTitle) score += 70;
     else if (wantedTitle && candidateTitle && (candidateTitle.includes(wantedTitle) || wantedTitle.includes(candidateTitle))) score += 34;
     if (wantedArtist && candidateArtist === wantedArtist) score += 55;
+    else if (wantedLeadArtist && candidateArtist && (candidateArtist === wantedLeadArtist || candidateArtist.startsWith(`${wantedLeadArtist} `))) score += 48;
     else if (wantedArtist && candidateArtist && (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist))) score += 22;
+    // Never use the studio recording as evidence of a separately uploaded live/remix/edit.
+    const candidateVersion = versionKind(`${String(recording.title || "")} ${String(recording.disambiguation || "")}`);
+    if (wantedVersion !== "studio" && candidateVersion !== wantedVersion) score = -1000;
+    if (wantedVersion === "studio" && ["live", "remix", "demo"].includes(candidateVersion)) score = -1000;
     const candidateDuration = Number(recording.length || 0);
     if (wantedDurationMs && candidateDuration > 0) {
       const diff = Math.abs(wantedDurationMs - candidateDuration);
@@ -281,12 +349,17 @@ async function appleCatalog(track: InputTrack) {
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
   const rows = Array.isArray(payload?.results) ? payload.results as Array<Record<string, unknown>> : [];
   const artist = normalizeCatalogText(track.artist);
-  const title = normalizeCatalogText(track.title);
-  const album = normalizeCatalogText(track.album);
+  const title = normalizeCatalogText(cleanLookupTitle(track));
+  const album = normalizeCatalogText(originalAlbumName(track.album || ""));
+  const requestedVersion = versionKind(`${track.title} ${track.album || ""}`);
   const scored = rows.map(row => {
     const a = normalizeCatalogText(row.artistName), t = normalizeCatalogText(row.trackName);
-    let score = a === artist && t === title ? 140 : 0;
-    if (score && album && normalizeCatalogText(row.collectionName) === album) score += 15;
+    let score = t === title && (a === artist ||
+      a === normalizeCatalogText(leadArtist(track.artist)) ||
+      a.startsWith(`${normalizeCatalogText(leadArtist(track.artist))} `)) ? 140 : 0;
+    if (score && requestedVersion !== "studio" && requestedVersion !== versionKind(String(row.trackName || ""))) score = 0;
+    if (score && requestedVersion === "studio" && ["live", "remix", "demo"].includes(versionKind(String(row.trackName || "")))) score = 0;
+    if (score && album && normalizeCatalogText(originalAlbumName(String(row.collectionName || ""))) === album) score += 15;
     const expected = Number(track.durationSeconds || 0), actual = Number(row.trackTimeMillis || 0) / 1000;
     if (score && expected && actual && Math.abs(actual - expected) > 35) score = 0;
     return { row, score };
@@ -299,13 +372,19 @@ async function appleCatalog(track: InputTrack) {
     album: String(row.collectionName || ""),
     catalogYear: Number(String(row.releaseDate || "").slice(0,4)) || null,
     catalogTrackId: String(row.trackId || ""),
+    matchedArtist: String(row.artistName || ""),
+    matchedTitle: String(row.trackName || ""),
+    sourceUrl: typeof row.trackViewUrl === "string" && row.trackViewUrl.startsWith("https://") ? row.trackViewUrl : null,
+    isCompilation: row.isCompilation === true,
   };
 }
 
 async function discogsAlbumMaster(track: InputTrack) {
   const token = Deno.env.get("DISCOGS_TOKEN") || "";
   if (!token || !track.album || !track.artist) return null;
-  const params = new URLSearchParams({ artist: track.artist, release_title: track.album, type: "master", per_page: "5" });
+  if (isCollectionOrLive(track.album) || ["live", "remix"].includes(versionKind(track.title))) return null;
+  const originalAlbum = originalAlbumName(track.album);
+  const params = new URLSearchParams({ artist: leadArtist(track.artist), release_title: originalAlbum, type: "master", per_page: "5" });
   const response = await fetch(`https://api.discogs.com/database/search?${params}`, {
     headers: { Authorization: `Discogs token=${token}`, "User-Agent": "MVPTrainerPro/1.0" },
     signal: AbortSignal.timeout(8500),
@@ -313,9 +392,8 @@ async function discogsAlbumMaster(track: InputTrack) {
   if (!response.ok) return null;
   const body = await response.json().catch(() => null) as Record<string, unknown> | null;
   const rows = Array.isArray(body?.results) ? body.results as Array<Record<string, unknown>> : [];
-  const expected = `${normalizeCatalogText(track.artist)} ${normalizeCatalogText(track.album)}`;
-  const row = rows.find(item => normalizeCatalogText(item.title) === expected ||
-    normalizeCatalogText(item.title) === `${normalizeCatalogText(track.artist)} ${normalizeCatalogText(track.album)}`);
+  const expected = `${normalizeCatalogText(leadArtist(track.artist))} ${normalizeCatalogText(originalAlbum)}`;
+  const row = rows.find(item => normalizeCatalogText(item.title) === expected);
   if (!row) return null;
   return {
     genre: Array.isArray(row.genre) ? row.genre.map(String) : [] as string[],
@@ -524,7 +602,17 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
   const recordingYear = mb.originalYear || !mb.recordingId ? null
     : await r30RecordingReleaseYear(mb.recordingId).catch(() => null);
   const albumYear = mb.originalYear || recordingYear ? null : await r27AlbumYear(track).catch(() => null);
-  const year = mb.originalYear || recordingYear || albumYear;
+  const singleYear = mb.originalYear || recordingYear || albumYear ? null : await exactSingleReleaseYear(track).catch(() => null);
+  const appleYear = mb.originalYear || recordingYear || albumYear || singleYear ? null : exactAppleEditionYear(track, apple);
+  // Discogs master years describe the original master, not the later reissue.
+  // Require Apple to establish that this exact track belongs to the same album.
+  const discogsYear = !mb.originalYear && !recordingYear && !albumYear && !singleYear && !appleYear &&
+    discogs?.albumMasterYear && apple?.album && track.album &&
+    !isCollectionOrLive(track.album) &&
+    normalizeCatalogText(originalAlbumName(apple.album)) === normalizeCatalogText(originalAlbumName(track.album)) &&
+    Number(discogs.albumMasterYear) >= 1900 && Number(discogs.albumMasterYear) <= new Date().getFullYear() + 1
+    ? Number(discogs.albumMasterYear) : null;
+  const year = mb.originalYear || recordingYear || albumYear || singleYear || appleYear || discogsYear;
   const classification = r27Classification(track, {
     trackTags, artistTags, mbRecordingId: mb.recordingId, mbArtistId: mb.artistId,
     mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])], mainGenres: [], subgenres: [],
@@ -534,7 +622,7 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     artistTags,
     mbRecordingId: mb.recordingId,
     mbOriginalYear: year,
-    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : recordingYear ? "musicbrainz-recording-release-groups" : albumYear ? "musicbrainz-original-album-release-group" : "unverified",
+    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : recordingYear ? "musicbrainz-recording-release-groups" : albumYear ? "musicbrainz-original-album-release-group" : singleYear ? "musicbrainz-exact-single-release-group" : appleYear ? "apple-exact-original-release-record" : discogsYear ? "discogs-original-master-plus-apple-track-match" : "unverified",
     mainGenres: classification.mainGenres,
     subgenres: classification.subgenres,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
@@ -543,8 +631,8 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     // Catalog edition years are evidence candidates only, not original dates.
     catalogCandidates: { apple: apple || null, discogs: discogs || null,
       releaseYearCandidate: apple?.catalogYear || discogs?.albumMasterYear || Number(track.releaseYear) || null,
-      yearEvidence: { recordingYear, albumYear, matchedRecordingId: mb.recordingId || null,
-        reason: year ? "verified-recording-or-original-release-group" : "original-recording-date-unverified" } },
+      yearEvidence: { recordingYear, albumYear, singleYear, appleYear, discogsYear, matchedRecordingId: mb.recordingId || null,
+        reason: year ? "recording-or-original-edition-evidence" : "original-recording-date-unverified" } },
   };
 }
 
@@ -580,6 +668,14 @@ const R27_GENRES = new Map<string, string>([
   ["comedy", "comedy"], ["spoken word", "spoken word"], ["latin", "latin"],
   ["electropop", "electropop"], ["rnb", "r&b"], ["rhythm and blues", "r&b"],
   ["trap", "trap"], ["drum and bass", "drum and bass"], ["dubstep", "dubstep"],
+  ["hip-hop/rap", "hip hop"], ["hip hop/rap", "hip hop"], ["hip hop rap", "hip hop"],
+  ["prog-rock/art rock", "progressive rock"], ["prog rock/art rock", "progressive rock"], ["progressive", "progressive rock"],
+  ["christian & gospel", "christian"], ["gospel", "gospel"], ["hard rock & metal", "hard rock"],
+  ["rock & roll", "rock"], ["r&b/soul", "r&b"],
+  ["singer/songwriter", "singer songwriter"], ["singer songwriter", "singer songwriter"],
+  ["new age", "new age"], ["adult contemporary", "adult contemporary"],
+  ["alternative & punk", "alternative rock"], ["indie", "indie rock"],
+  ["world", "world"], ["instrumental", "instrumental"], ["worship", "christian"],
 ]);
 function r27GenreTags(values: string[]) {
   const out: string[] = [];
@@ -609,11 +705,7 @@ function r27Complete(context: ProviderContext, mainGenres: string[]) {
 // preferable to using an arbitrary remaster, cover, or compilation date.
 async function r30RecordingReleaseYear(recordingId: string): Promise<number | null> {
   if (!/^[0-9a-f-]{36}$/i.test(recordingId)) return null;
-  const response = await fetch(`https://musicbrainz.org/ws/2/recording/${encodeURIComponent(recordingId)}?inc=releases+release-groups&fmt=json`, {
-    headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" }, signal: AbortSignal.timeout(9500),
-  });
-  if (!response.ok) return null;
-  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const body = await musicBrainzJson(`https://musicbrainz.org/ws/2/recording/${encodeURIComponent(recordingId)}?inc=releases+release-groups&fmt=json`, 9500);
   const releases = Array.isArray(body?.releases) ? body.releases as Array<Record<string, unknown>> : [];
   const years = releases.map(release => {
     const group = release["release-group"] && typeof release["release-group"] === "object"
@@ -630,24 +722,51 @@ async function r30RecordingReleaseYear(recordingId: string): Promise<number | nu
 // uploaded deluxe/remastered edition's own year is never substituted.
 async function r27AlbumYear(track: InputTrack): Promise<number | null> {
   if (!track.artist || !track.album) return null;
-  if (/greatest|best of|collection|anthology|compilation|soundtrack|live at|live in|tour|concert/i.test(track.album)) return null;
-  const originalAlbum = track.album
-    .replace(/\s*[([{]\s*(?:\d{4}\s+)?(?:anniversary|deluxe|expanded|special|remaster(?:ed)?|bonus tracks?|edition|\d{4} bonus)[^\])}]*[\])}]/ig, "")
-    .replace(/\s+(?:deluxe|expanded|remastered?)\s+edition$/i, "").trim();
+  if (isCollectionOrLive(track.album) || versionKind(track.title) === "live" || versionKind(track.title) === "remix") return null;
+  const originalAlbum = originalAlbumName(track.album);
   const album = normalizeCatalogText(originalAlbum);
   if (!album) return null;
-  const query = `releasegroup:"${escapeMb(originalAlbum)}" AND artist:"${escapeMb(track.artist)}"`;
-  const response = await fetch(`https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=5`, {
-    headers: { "User-Agent": "MVPTrainerPro/1.0 (music-intelligence)" }, signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) return null;
-  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const query = `releasegroup:"${escapeMb(originalAlbum)}" AND artist:"${escapeMb(leadArtist(track.artist))}"`;
+  const body = await musicBrainzJson(`https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=12`, 8000);
   const rows = Array.isArray(body?.["release-groups"]) ? body["release-groups"] as Array<Record<string, unknown>> : [];
   const matches = rows.filter(row => normalizeCatalogText(row.title) === album &&
-    normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(track.artist) &&
+    (normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(track.artist) ||
+      normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(leadArtist(track.artist))) &&
     (row["primary-type"] === "Album" || row["primary-type"] === "Single"));
   const years = matches.map(row => String(row["first-release-date"] || "").match(/^(19|20)\d{2}/)?.[0]).filter((y): y is string => Boolean(y)).map(Number);
   return years.length ? Math.min(...years) : null;
+}
+
+// R31: Standalone singles may not have a useful album identity. Search the
+// artist's actual single release group, rather than an unrelated song/composition.
+async function exactSingleReleaseYear(track: InputTrack): Promise<number | null> {
+  const title = cleanLookupTitle(track);
+  if (!title || !track.artist || versionKind(title) === "live" || versionKind(title) === "remix") return null;
+  const query = `releasegroup:"${escapeMb(title)}" AND artist:"${escapeMb(leadArtist(track.artist))}"`;
+  const body = await musicBrainzJson(`https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=8`, 8000);
+  const groups = Array.isArray(body?.["release-groups"]) ? body["release-groups"] as Array<Record<string, unknown>> : [];
+  const exact = groups.filter(row => normalizeCatalogText(row.title) === normalizeCatalogText(title) &&
+    (normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(track.artist) ||
+      normalizeCatalogText(musicBrainzCreditName(row)) === normalizeCatalogText(leadArtist(track.artist))) &&
+    row["primary-type"] === "Single");
+  const years = exact.map(row => /^(19|20)\d{2}/.exec(String(row["first-release-date"] || ""))?.[0]).filter((v): v is string => Boolean(v)).map(Number);
+  return years.length ? Math.min(...years) : null;
+}
+function exactAppleEditionYear(track: InputTrack, apple: Awaited<ReturnType<typeof appleCatalog>>) {
+  if (!apple?.catalogYear || apple.catalogYear < 1900 || apple.catalogYear > new Date().getFullYear() + 1) return null;
+  const album = String(apple.album || "");
+  const wanted = String(track.album || "");
+  const albumClean = normalizeCatalogText(originalAlbumName(album));
+  const wantedClean = normalizeCatalogText(originalAlbumName(wanted));
+  // A remaster, compilation, remix, live set or best-of catalog date is not the
+  // original recording date. An exact originally-issued album/single is evidence.
+  if (apple.isCompilation || !albumClean || !wantedClean || albumClean !== wantedClean || isCollectionOrLive(album) ||
+    isCollectionOrLive(wanted) || isEdition(album) || isEdition(wanted)) return null;
+  if (["live", "remix", "demo"].includes(versionKind(`${track.title} ${wanted}`))) return null;
+  const isSingle = /(?:^|\s)(?:-\s*)?single$/i.test(album) && albumClean === wantedClean;
+  const exactOriginalAlbum = !/\b(single|ep|greatest|remaster)\b/i.test(album) &&
+    normalizeCatalogText(album) === normalizeCatalogText(wanted);
+  return isSingle || exactOriginalAlbum ? apple.catalogYear : null;
 }
 
 function sourceList(context: ProviderContext, cyanite = false, deezer = false) {
@@ -955,7 +1074,10 @@ Deno.serve(async (req) => {
     }
 
     const cyaniteKey = Deno.env.get("CYANITE_API_KEY") || "";
-    if (existing?.cyanite_track_id && cyaniteKey) {
+    if (existing?.cyanite_track_id && cyaniteKey &&
+      Number(existing.provider_payload?.semantic_profile?.originalReleaseYear || 0) >= 1900 &&
+      (Array.isArray(existing.main_genres) && existing.main_genres.length > 0 ||
+       Array.isArray(existing.subgenres) && existing.subgenres.length > 0)) {
       const payload = await fetchCyaniteModels(String(existing.cyanite_track_id), cyaniteKey).catch(() => null);
       const cyanite = applyCyanite((existing.song_dna || baseSongDna(track)) as SongDNA, payload);
       if (cyanite?.audioReady) {
@@ -1050,6 +1172,19 @@ Deno.serve(async (req) => {
         apple: context.catalogCandidates?.apple || retainedCatalog.apple || null,
         discogs: context.catalogCandidates?.discogs || retainedCatalog.discogs || null,
       };
+      // The saved Apple candidate previously passed exact artist/title matching;
+      // reuse it when a later provider request was throttled, not an arbitrary date.
+      if (!context.mbOriginalYear && previousApple) {
+        const stored = {
+          album: String(previousApple.album || ""), catalogYear: Number(previousApple.catalogYear || 0),
+        } as NonNullable<Awaited<ReturnType<typeof appleCatalog>>>;
+        const supportedYear = exactAppleEditionYear(track, stored);
+        if (supportedYear) {
+          context.mbOriginalYear = supportedYear;
+          context.yearSource = "apple-cached-exact-original-release-record";
+          context.catalogSources = [...new Set([...(context.catalogSources || []), "itunes"])];
+        }
+      }
     }
     const cachedArtistDna = cachedArtist && Number(cachedArtist.analysis_version || 0) >= ANALYSIS_VERSION && cachedArtist.artist_dna
       ? cachedArtist.artist_dna as ArtistDNA

@@ -13,7 +13,7 @@ import {
 } from "./musicIntelligenceEnrichment";
 import { supabase } from "./supabase";
 
-const STORAGE = "mvp_music_auto_enrichment_r30";
+const STORAGE = "mvp_music_auto_enrichment_r31";
 type Attempt = { failures: number; retryAt: number; finished?: boolean };
 type Saved = { userId: string; attempts: Record<string, Attempt> };
 let active = false;
@@ -34,7 +34,7 @@ function save(value: Saved) {
   try { localStorage.setItem(STORAGE, JSON.stringify(value)); } catch { /* retry on next app visit */ }
 }
 function delayFor(failures: number) {
-  return [0, 60_000, 30 * 60_000, 24 * 3600_000, 3 * 86400_000, 7 * 86400_000, 7 * 86400_000][Math.min(6, failures)];
+  return [0, 90_000, 10 * 60_000, 60 * 60_000, 6 * 3600_000, 24 * 3600_000, 24 * 3600_000][Math.min(6, failures)];
 }
 function publish(phase: string, completed: number, total: number, track?: MusicTrack) {
   if (typeof window === "undefined") return;
@@ -100,7 +100,15 @@ async function processLibrary() {
     const snapshot = await hydrateMusicIntelligenceCache(tracks, { fresh: true }).catch(() => intelligence);
     const remaining = tracks.filter(track => !isMusicIntelligenceCurrent(snapshot.get(track.id)));
     publish(remaining.length ? "partial" : "verified-complete", completed, needed.length);
-    if (remaining.length) console.info(`[MVP INTELLIGENCE] ${tracks.length - remaining.length}/${tracks.length} verified; ${remaining.length} partial. Automatic retry is scheduled.`);
+    if (remaining.length) {
+      console.info(`[MVP INTELLIGENCE] ${tracks.length - remaining.length}/${tracks.length} verified; ${remaining.length} partial. Automatic retry is scheduled.`);
+      const nowNext = Date.now();
+      const nextDue = remaining.reduce((earliest, track) => {
+        const retryAt = saved.attempts[track.id]?.retryAt ?? nowNext;
+        return Math.min(earliest, retryAt);
+      }, nowNext + 12 * 60_000);
+      schedule(Math.max(30_000, Math.min(12 * 60_000, nextDue - nowNext)));
+    }
   } catch (error) {
     console.warn("Automatic music enrichment deferred until connectivity resumes", error);
   } finally {
