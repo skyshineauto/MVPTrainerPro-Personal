@@ -79,6 +79,7 @@ export type MusicTodayContext = {
 };
 
 const LEGACY_STORAGE_KEY = "mvp_music_today_v2";
+const PERSISTENT_AI_KEY = "mvp_music_ai_persistent_r28";
 const QUEUE_PREFIX = "MVP Today · ";
 const listeners = new Set<() => void>();
 
@@ -156,6 +157,17 @@ function removeLegacyTodayPersistence() {
 
 removeLegacyTodayPersistence();
 let state: MusicTodayContext = freshContext();
+// Restore the previous instruction only for the same authenticated account.
+if (typeof window !== "undefined") {
+  void supabase.auth.getUser().then(({ data }) => {
+    const userId = data.user?.id;
+    if (!userId || state.active) return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(PERSISTENT_AI_KEY) || "null") as { userId?: string; context?: MusicTodayContext } | null;
+      if (saved?.userId === userId && saved.context?.active && saved.context.prompt) emit(saved.context);
+    } catch { /* invalid prior session; do not restore */ }
+  }).catch(() => undefined);
+}
 let activeAuthUserId: string | null = null;
 
 function clamp(value: number) {
@@ -177,6 +189,7 @@ function emit(next: MusicTodayContext) {
 
 export function resetMusicTodaySession() {
   removeLegacyTodayPersistence();
+  try { window.localStorage.removeItem(PERSISTENT_AI_KEY); } catch { /* unavailable storage */ }
   emit(freshContext());
 }
 
@@ -1219,7 +1232,10 @@ function rankForToday(
   libraryIntent: TodayLibraryIntent = EMPTY_LIBRARY_INTENT,
 ) {
   const unique = uniqueTracks(library);
-  const constraints = inferHardConstraints(target, tags, explicitConstraints);
+  // Explicit catalog requests must not inherit invented emotion thresholds.
+  const constraints = libraryIntent.directRequest
+    ? { min: {}, max: {}, bpmMin: explicitConstraints.bpmMin, bpmMax: explicitConstraints.bpmMax } as TodayConstraints
+    : inferHardConstraints(target, tags, explicitConstraints);
   const similarArtistReference = averageRequestedArtistDNA(unique, libraryIntent);
   const likedTracks = unique.filter((track) => track.favorite && !track.play_less);
   const prepared = unique.map((track) => {
@@ -1236,7 +1252,7 @@ function rankForToday(
     matchesLibraryIntent(track, libraryIntent) &&
     matchesSimilarArtistIntent(track, libraryIntent, similarArtistReference) &&
     strictCompatibility(constraints, dna, bpm) &&
-    strictTagCompatibility(track, tags, dna, bpm)
+    (libraryIntent.directRequest || strictTagCompatibility(track, tags, dna, bpm))
   );
   if (!eligible.length) return [];
 
@@ -1264,8 +1280,9 @@ function compactQueueName(tags: string[]) {
 
 export function ensureMusicTodayPlaybackMode() {
   if (getMusicPlayerSnapshot().shuffle) toggleMusicShuffle();
+  // Loop the *qualified AI queue*, never fall back to the whole library.
   let guard = 0;
-  while (getMusicPlayerSnapshot().repeat !== "off" && guard < 3) {
+  while (getMusicPlayerSnapshot().repeat !== "all" && guard < 3) {
     cycleMusicRepeat();
     guard += 1;
   }
@@ -1302,6 +1319,10 @@ async function startQueue(next: MusicTodayContext, surpriseStrength = 0, exclude
   emit(ready);
   await playMusicAdHocQueue(queueName, queue, queue[0].id);
   ensureMusicTodayPlaybackMode();
+  try {
+    const { data } = await supabase.auth.getUser();
+    if (data.user?.id) window.localStorage.setItem(PERSISTENT_AI_KEY, JSON.stringify({ userId: data.user.id, context: ready }));
+  } catch { /* playback succeeds even if session persistence is unavailable */ }
   return ready;
 }
 
