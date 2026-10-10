@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { SmartWeightKeypad, SmartNextSetDialog } from "./SmartSetTransition";
 import { supabase } from "../../lib/supabase";
 import {
   playWorkoutAlert,
@@ -2117,6 +2118,7 @@ type RestTimerState = {
   nextSetNumber: number | null;
   totalSets: number | null;
   nextInstruction: string;
+  workoutExerciseId: string | null;
 };
 
 type RestTimerController = RestTimerState & {
@@ -2126,14 +2128,15 @@ type RestTimerController = RestTimerState & {
     completedSetIndex: number,
     nextSetNumber?: number,
     totalSets?: number,
-    nextInstruction?: string
+    nextInstruction?: string,
+    workoutExerciseId?: string
   ) => void;
+  dismiss: () => void;
   addSeconds: (seconds: number) => void;
   skip: () => void;
 };
 
 const REST_TIMER_STORAGE_KEY = "mvp_rest_timer_v3";
-const REST_COMPLETE_VISIBLE_MS = 1400;
 
 function emptyRestTimer(): RestTimerState {
   return {
@@ -2147,6 +2150,7 @@ function emptyRestTimer(): RestTimerState {
     nextSetNumber: null,
     totalSets: null,
     nextInstruction: "",
+    workoutExerciseId: null,
   };
 }
 
@@ -2194,20 +2198,11 @@ function readStoredRestTimer(): RestTimerState {
     }
 
     if (normalized.status === "finished") {
+      // R34: retain the handoff until the next-set dialog consumes it, even
+      // if the browser was suspended or refreshed during rest completion.
       const finishedAt = Number(normalized.finishedAtMs ?? 0);
-      if (
-        finishedAt > 0 &&
-        Date.now() - finishedAt >= REST_COMPLETE_VISIBLE_MS
-      ) {
-        return idle;
-      }
-
-      return {
-        ...normalized,
-        remainingSeconds: 0,
-        deadlineMs: null,
-        finishedAtMs: finishedAt > 0 ? finishedAt : Date.now(),
-      };
+      return { ...normalized, remainingSeconds: 0, deadlineMs: null,
+        finishedAtMs: finishedAt > 0 ? finishedAt : Date.now() };
     }
 
     return normalized;
@@ -2289,22 +2284,8 @@ function useRestTimer(): RestTimerController {
       void playWorkoutAlert("rest_complete");
     }
 
-    const finishedAt = Number(timer.finishedAtMs ?? Date.now());
-    const remainingVisibleMs = Math.max(
-      0,
-      REST_COMPLETE_VISIBLE_MS - (Date.now() - finishedAt)
-    );
-
-    if (remainingVisibleMs <= 0) {
-      setTimer(emptyRestTimer());
-      return;
-    }
-
-    const dismissId = window.setTimeout(() => {
-      setTimer(emptyRestTimer());
-    }, remainingVisibleMs);
-
-    return () => window.clearTimeout(dismissId);
+    // Keep finished state until the exercise acknowledges it. The next-set
+    // recommendation is not lost when the tab is backgrounded.
   }, [timer.status, timer.finishedAtMs]);
 
   const start = (
@@ -2313,7 +2294,8 @@ function useRestTimer(): RestTimerController {
     completedSetIndex: number,
     nextSetNumber?: number,
     totalSets?: number,
-    nextInstruction?: string
+    nextInstruction?: string,
+    workoutExerciseId?: string
   ) => {
     const total = Math.max(1, Math.floor(Number(seconds) || 0));
 
@@ -2337,6 +2319,7 @@ function useRestTimer(): RestTimerController {
           ? Number(totalSets)
           : null,
       nextInstruction: String(nextInstruction ?? "").trim(),
+      workoutExerciseId: workoutExerciseId || null,
     });
   };
 
@@ -2370,11 +2353,15 @@ function useRestTimer(): RestTimerController {
   };
 
   const skip = () => {
-    alertedRef.current = false;
-    setTimer(emptyRestTimer());
+    // Skip rest means the set is ready now, not abandon its recommendation.
+    alertedRef.current = true;
+    setTimer((current) => current.status === "running"
+      ? { ...current, status: "finished", remainingSeconds: 0, deadlineMs: null, finishedAtMs: Date.now() }
+      : current);
   };
+  const dismiss = () => setTimer(emptyRestTimer());
 
-  return { ...timer, start, addSeconds, skip };
+  return { ...timer, start, addSeconds, skip, dismiss };
 }
 
 function formatRestClock(seconds: number) {
@@ -2449,7 +2436,8 @@ function RestTimerDock({ timer }: { timer: RestTimerController }) {
             <div className="tr-recoveryReadyKicker">REST COMPLETE</div>
             <div className="tr-recoveryReadyTitle">{setLabel} READY</div>
             <div className="tr-recoveryReadyGo">GO</div>
-            <div className="tr-recoveryReadyNote">Opening automatically</div>
+            <div className="tr-recoveryReadyNote">Opening your next-set coach</div>
+            <button type="button" className="tr-recoverySkip" onClick={timer.dismiss}>CONTINUE</button>
           </div>
         ) : (
           <>
@@ -4773,6 +4761,7 @@ export function WorkoutPlayerPage({ params }: any) {
             }
             sessionComplete={sessionComplete}
             onStartRest={restTimer.start}
+            restTimer={restTimer}
           />
         </div>
       ) : (
@@ -9229,6 +9218,7 @@ function ExerciseRunner({
   isFinalIncompleteExercise,
   sessionComplete,
   onStartRest,
+  restTimer,
 }: {
   workoutExercise: WorkoutExerciseRow;
   item: any;
@@ -9247,8 +9237,10 @@ function ExerciseRunner({
     completedSetIndex: number,
     nextSetNumber?: number,
     totalSets?: number,
-    nextInstruction?: string
+    nextInstruction?: string,
+    workoutExerciseId?: string
   ) => void;
+  restTimer: RestTimerController;
 }) {
   const weId = workoutExercise.id;
   const isDone = !!workoutExercise.completed_at;
@@ -9269,6 +9261,14 @@ function ExerciseRunner({
   const [historyStats, setHistoryStats] = useState<ExerciseHistoryStats>(() => emptyHistoryStats());
   const [completedSetIndexes, setCompletedSetIndexes] = useState<number[]>([]);
   const [prCelebration, setPrCelebration] = useState<PersonalRecordCelebrationState | null>(null);
+  const [weightEntry, setWeightEntry] = useState<{ setIndex: number; initial: number; transition: boolean } | null>(null);
+  const [nextReadySet, setNextReadySet] = useState<number | null>(null);
+  const [nextReadyVisible, setNextReadyVisible] = useState(false);
+  const savingSetRef = useRef(false);
+  const draftWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const activeSetAnchorRef = useRef<HTMLElement | null>(null);
+  const revealActiveSet = () => window.setTimeout(() => activeSetAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+  const [savingSet, setSavingSet] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [progressionOpen, setProgressionOpen] = useState(() => {
     const isMobile =
@@ -9319,6 +9319,9 @@ function ExerciseRunner({
     setActualMinutes(Number.isFinite(act) && act > 0 ? Math.floor(act) : Math.max(0, Math.floor(dp)));
     setCalculatorOpen(false);
     setPrCelebration(null);
+    setWeightEntry(null);
+    setNextReadySet(null);
+    setNextReadyVisible(false);
     setProgressionOpen(
       !(
         typeof window !== "undefined" &&
@@ -9539,6 +9542,63 @@ function ExerciseRunner({
     [lastCompletedSet, item, repMin, repMax]
   );
 
+  useEffect(() => {
+    if (isDone || timed || loadingSets || restTimer.status !== "finished" ||
+      restTimer.workoutExerciseId !== weId || restTimer.setIndex == null) return;
+    const nextIndex = sets.findIndex((row) => Number(row.set_index) === Number(restTimer.nextSetNumber));
+    if (nextIndex < 0 || completedSetIndexes.includes(Number(restTimer.nextSetNumber))) {
+      restTimer.dismiss();
+      return;
+    }
+    // Consume a persisted finished timer exactly once. Reopening the coach is
+    // possible via its compact strip; dismissal never logs the next set.
+    setNextReadySet(Number(restTimer.nextSetNumber));
+    setNextReadyVisible(true);
+    setProgressionOpen(false);
+    restTimer.dismiss();
+  }, [restTimer.status, restTimer.workoutExerciseId, restTimer.setIndex, restTimer.nextSetNumber, weId, isDone, timed, loadingSets, sets, completedSetIndexes]);
+
+  const readyIndex = nextReadySet == null ? -1 : sets.findIndex((row) => Number(row.set_index) === nextReadySet);
+  const readyPrevious = readyIndex > 0 ? sets[readyIndex - 1] : lastCompletedSet;
+  const readyAdvice = readyPrevious ? buildLiveSetAdvice({ set: readyPrevious, exercise: item, repMin, repMax }) : null;
+  const unknownEffort = readyPrevious?.effort_key === "not_sure" || (readyPrevious?.rir == null && !readyPrevious?.effort_key);
+  const safeRecommendedWeight = readyAdvice && !unknownEffort && Number(readyAdvice.nextWeight) > 0
+    ? Number(readyAdvice.nextWeight) : null;
+  const readyInstruction = unknownEffort
+    ? "Effort was not estimated. Choose a controlled weight; the coach will not invent a confident increase."
+    : readyAdvice?.nextInstruction?.replace(/\s*Rest\s+\d+\s+seconds\.?\s*$/i, "").trim() || "Use controlled technique throughout the target range.";
+
+  const persistDraftRow = (row: any): Promise<void> => {
+    const next = draftWriteRef.current.catch(() => undefined).then(async () => {
+      const { error } = await supabase.from("workout_sets").upsert({
+        workout_exercise_id: weId,
+        set_index: row.set_index,
+        reps: Number(row.reps ?? 0),
+        weight: Number(row.weight ?? 0),
+        rir: row.rir,
+      }, { onConflict: "workout_exercise_id,set_index" });
+      if (error) throw new Error(error.message);
+    });
+    draftWriteRef.current = next;
+    return next;
+  };
+
+  const saveChosenWeight = async (index: number, value: number) => {
+    if (isDone || timed || !(value > 0) || !Number.isFinite(value) ||
+      index < 0 || completedSetIndexes.includes(Number(sets[index]?.set_index))) {
+      throw new Error("THIS SET IS NO LONGER AVAILABLE FOR WEIGHT ENTRY.");
+    }
+    const row = sets[index];
+    if (!row) throw new Error("THE SELECTED SET COULD NOT BE FOUND.");
+    const weight = Math.round(value * 100) / 100;
+    await persistDraftRow({ ...row, weight });
+    setSets((previous) => previous.map((set, setIndex) => setIndex === index ? { ...set, weight } : set));
+    setCalculatorWeight(weight);
+    setWeightEntry(null);
+    if (nextReadySet === Number(row.set_index)) { setNextReadySet(null); setNextReadyVisible(false); }
+    revealActiveSet();
+  };
+
   const currentPrLabels = useMemo(() => {
     const labels = new Set<string>();
     for (const set of sets) {
@@ -9571,16 +9631,7 @@ function ExerciseRunner({
     setSets(next);
 
     const row = next[idx];
-    await supabase.from("workout_sets").upsert(
-      {
-        workout_exercise_id: weId,
-        set_index: row.set_index,
-        reps: row.reps,
-        weight: row.weight,
-        rir: row.rir,
-      },
-      { onConflict: "workout_exercise_id,set_index" }
-    );
+    void persistDraftRow(row).catch((error) => showToast(error instanceof Error ? error.message : "SET SAVE FAILED", "err"));
   };
 
   const persistCompletedSetIndexes = (indexes: number[]) => {
@@ -9610,19 +9661,12 @@ function ExerciseRunner({
     } catch {}
 
     const row = next[idx];
-    await supabase.from("workout_sets").upsert(
-      {
-        workout_exercise_id: weId,
-        set_index: row.set_index,
-        reps: Number(row.reps ?? 0),
-        weight: Number(row.weight ?? 0),
-        rir: option.rir,
-      },
-      { onConflict: "workout_exercise_id,set_index" }
-    );
+    try { await persistDraftRow({ ...row, rir: option.rir }); }
+    catch (error) { showToast(error instanceof Error ? error.message : "EFFORT SAVE FAILED", "err"); }
   };
 
   const completeSetAndStartRest = async (idx: number) => {
+    if (savingSetRef.current || completedSetIndexes.includes(Number(sets[idx]?.set_index))) return;
     primeWorkoutAudio();
     void preloadWorkoutAlerts();
 
@@ -9643,48 +9687,31 @@ function ExerciseRunner({
       return;
     }
 
-    const { error } = await supabase.from("workout_sets").upsert(
-      {
-        workout_exercise_id: weId,
-        set_index: row.set_index,
-        reps,
-        weight,
-        rir,
-      },
-      { onConflict: "workout_exercise_id,set_index" }
-    );
-
-    if (error) {
-      showToast(error.message, "err");
+    savingSetRef.current = true;
+    setSavingSet(true);
+    try {
+      // Finish any in-flight rep/effort edits before final completion is saved.
+      await draftWriteRef.current.catch(() => undefined);
+      const { error } = await supabase.from("workout_sets").upsert(
+        { workout_exercise_id: weId, set_index: row.set_index, reps, weight, rir },
+        { onConflict: "workout_exercise_id,set_index" }
+      );
+      if (error) throw new Error(error.message);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "SET SAVE FAILED", "err");
+      savingSetRef.current = false;
+      setSavingSet(false);
       return;
     }
+    savingSetRef.current = false;
+    setSavingSet(false);
 
     persistCompletedSetIndexes([...completedSetIndexes, Number(row.set_index)]);
 
     const advice = buildLiveSetAdvice({ set: { ...row, reps, weight, rir }, exercise: item, repMin, repMax });
     const nextIndex = idx + 1;
-    if (advice && nextIndex < sets.length) {
-      const nextRows = sets.map((set, setIndex) =>
-        setIndex === nextIndex && !completedSetIndexes.includes(Number(set.set_index))
-          ? { ...set, weight: advice.nextWeight > 0 ? advice.nextWeight : set.weight }
-          : set
-      );
-      setSets(nextRows);
-
-      const nextRow = nextRows[nextIndex];
-      if (nextRow && Number(nextRow.weight) > 0) {
-        await supabase.from("workout_sets").upsert(
-          {
-            workout_exercise_id: weId,
-            set_index: nextRow.set_index,
-            reps: Number(nextRow.reps ?? 0),
-            weight: Number(nextRow.weight),
-            rir: nextRow.rir,
-          },
-          { onConflict: "workout_exercise_id,set_index" }
-        );
-      }
-    }
+    // R34: a suggested next weight remains a suggestion. Do not alter a
+    // future row until the user explicitly accepts it or enters their own.
 
     const hasNextSet = nextIndex < sets.length;
 
@@ -9735,7 +9762,8 @@ function ExerciseRunner({
         Number(row.set_index),
         nextSetNumber,
         sets.length,
-        advice?.nextInstruction ?? fallbackInstruction
+        advice?.nextInstruction ?? fallbackInstruction,
+        weId
       );
     }
   };
@@ -9751,33 +9779,12 @@ function ExerciseRunner({
   const applySuggestedWeight = async () => {
     const suggested = Number(previousGuidance.suggestedWeight ?? 0);
     if (!(suggested > 0) || isDone || timed) return;
-
-    const next = sets.map((set) =>
-      completedSetIndexes.includes(Number(set.set_index))
-        ? set
-        : { ...set, weight: suggested }
-    );
-    setSets(next);
-    setCalculatorWeight(suggested);
-
-    const rows = next.map((row) => ({
-      workout_exercise_id: weId,
-      set_index: row.set_index,
-      reps: Number(row.reps ?? 0),
-      weight: suggested,
-      rir: row.rir,
-    }));
-
-    const { error } = await supabase
-      .from("workout_sets")
-      .upsert(rows, { onConflict: "workout_exercise_id,set_index" });
-
-    if (error) {
-      showToast(error.message, "err");
-      return;
+    try {
+      await saveChosenWeight(activeSetIndex, suggested);
+      showToast(`APPLIED ${formatLoggedWeight(suggested)} LB TO THE ACTIVE SET.`, "ok");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "COULD NOT APPLY THE SUGGESTION.", "err");
     }
-
-    showToast(`APPLIED ${formatLoggedWeight(suggested)} LB TO TODAY'S SETS.`, "ok");
   };
 
   const addSet = async () => {
@@ -9911,6 +9918,25 @@ const unlock = async () => {
 
   return (
     <>
+      <SmartWeightKeypad
+        open={weightEntry !== null}
+        initialWeight={weightEntry?.initial ?? 0}
+        onCancel={() => { if (weightEntry?.transition) setNextReadyVisible(true); setWeightEntry(null); }}
+        onApply={async (value) => { if (weightEntry) await saveChosenWeight(weightEntry.setIndex, value); }}
+      />
+      <SmartNextSetDialog
+        open={nextReadyVisible && readyIndex >= 0 && !isDone}
+        setNumber={nextReadySet ?? 1}
+        totalSets={sets.length}
+        previous={{ weight: Number(readyPrevious?.weight ?? 0), reps: Number(readyPrevious?.reps ?? 0), effort: effortLabel(readyPrevious?.rir, readyPrevious?.effort_key) }}
+        suggestedWeight={safeRecommendedWeight}
+        instruction={readyInstruction}
+        repMin={repMin}
+        repMax={repMax}
+        onAccept={async () => { if (readyIndex >= 0 && safeRecommendedWeight != null) await saveChosenWeight(readyIndex, safeRecommendedWeight); }}
+        onManual={() => { if (readyIndex >= 0) { setNextReadyVisible(false); setWeightEntry({ setIndex: readyIndex, initial: safeRecommendedWeight ?? Number(sets[readyIndex]?.weight ?? 0), transition: true }); } }}
+        onDismiss={() => { setNextReadyVisible(false); revealActiveSet(); }}
+      />
       <PersonalRecordOverlay
         celebration={prCelebration}
         onClose={() => setPrCelebration(null)}
@@ -10219,7 +10245,7 @@ const unlock = async () => {
                               className="tr-btn tr-proCoachApply"
                               onClick={applySuggestedWeight}
                             >
-                              APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO TODAY'S SETS
+                              APPLY {formatLoggedWeight(previousGuidance.suggestedWeight)} LB TO ACTIVE SET
                             </button>
                           ) : null}
 
@@ -10248,6 +10274,12 @@ const unlock = async () => {
                 )}
               </section>
 
+              {!isDone && sets.length > 0 && <div className="tr-smartCoachStrip" aria-label="Active set coach">
+                <strong>PROGRESSION COACH · SET {Number(sets[activeSetIndex]?.set_index ?? 1)} · TARGET {repMin}–{repMax} REPS</strong>
+                <span>{lastCompletedSet ? (liveSetAdvice?.nextInstruction || "Keep technique controlled.") : (previousGuidance.why || "Choose a controlled starting weight.")}</span>
+                {nextReadySet != null && readyIndex >= 0 && <button type="button" onClick={() => setNextReadyVisible(true)}>VIEW NEXT SET PLAN</button>}
+                {!lastCompletedSet && Number(previousGuidance.suggestedWeight ?? 0) > 0 && Number(sets[activeSetIndex]?.weight ?? 0) !== Number(previousGuidance.suggestedWeight) && <button type="button" onClick={() => void saveChosenWeight(activeSetIndex, Number(previousGuidance.suggestedWeight)).catch((error) => showToast(error instanceof Error ? error.message : "WEIGHT SAVE FAILED", "err"))}>USE COACH STARTING WEIGHT · {formatLoggedWeight(Number(previousGuidance.suggestedWeight))} LB</button>}
+              </div>}
               <section className="tr-workingSetsPanel" aria-label="Working sets">
                 <div className="tr-workingSetsPanelHead">
                   <div>
@@ -10309,7 +10341,7 @@ const unlock = async () => {
                     }
 
                     return (
-                      <article key={setNumber} className="tr-workingSetActive">
+                      <article key={setNumber} ref={activeSetAnchorRef} className="tr-workingSetActive">
                         <div className="tr-workingSetActiveHead">
                           <div>
                             <span className="tr-kicker">ACTIVE WORKING SET</span>
@@ -10326,14 +10358,11 @@ const unlock = async () => {
                         <div className="tr-workingSetControls">
                           <div className="tr-workingSetField">
                             <span>WEIGHT (LB)</span>
-                            <Qty
-                              label=""
-                              value={Number(set.weight ?? 0)}
-                              step={5}
-                              allowDecimal
-                              disabled={isDone}
-                              onChange={(value) => upsertSet(index, { weight: value })}
-                            />
+                            <div className="tr-smart-weight-control">
+                              <button type="button" aria-label="Decrease weight by five pounds" disabled={isDone} onClick={() => void upsertSet(index, { weight: Math.max(0, Number(set.weight ?? 0) - 5) })}>−</button>
+                              <button type="button" className="tr-smart-weight-value" aria-label={`Edit weight for set ${setNumber}`} disabled={isDone} onClick={() => setWeightEntry({ setIndex: index, initial: Number(set.weight ?? 0), transition: false })}>{formatLoggedWeight(Number(set.weight ?? 0))}<small>EDIT</small></button>
+                              <button type="button" aria-label="Increase weight by five pounds" disabled={isDone} onClick={() => void upsertSet(index, { weight: Number(set.weight ?? 0) + 5 })}>+</button>
+                            </div>
                           </div>
 
                           <div className="tr-workingSetField">
@@ -10393,10 +10422,10 @@ const unlock = async () => {
                         <button
                           type="button"
                           className="tr-workingSetComplete"
-                          disabled={isDone}
-                          onClick={() => completeSetAndStartRest(index)}
+                          disabled={isDone || savingSet}
+                          onClick={() => void completeSetAndStartRest(index)}
                         >
-                          <span>COMPLETE SET</span>
+                          <span>{savingSet ? "SAVING SET…" : "COMPLETE SET"}</span>
                         </button>
                       </article>
                     );
@@ -12363,10 +12392,10 @@ function Qty({
   disabled: boolean;
   onChange: (v: number) => void;
 }) {
-  const [draft, setDraft] = useState(() => String(value ?? 0));
+  const [draft, setDraft] = useState(() => Number(value) > 0 ? String(value) : "");
 
   useEffect(() => {
-    setDraft(String(value ?? 0));
+    setDraft(Number(value) > 0 ? String(value) : "");
   }, [value]);
 
   const commitDraft = () => {
@@ -12399,6 +12428,8 @@ function Qty({
           value={draft}
           disabled={disabled}
           inputMode={allowDecimal ? "decimal" : "numeric"}
+          placeholder="—"
+          onFocus={(e) => e.currentTarget.select()}
           onChange={(e) => {
             const raw = e.target.value;
             const cleaned = allowDecimal
