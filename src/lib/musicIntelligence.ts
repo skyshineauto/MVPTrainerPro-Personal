@@ -378,7 +378,48 @@ function richSimilarityDistance(a: MusicTrack, b: MusicTrack) {
 function normalizedStyleTokens(track: MusicTrack) {
   const intelligence = getCachedMusicTrackIntelligence(track.id);
   const values = [track.genre || "", ...(intelligence?.mainGenres || []), ...(intelligence?.subgenres || [])];
-  return new Set(values.flatMap((value) => String(value).toLowerCase().replace(/[’']/g, "'").split(/[,/|]+/)).map((value) => value.trim().replace(/[-_]+/g, " ")).filter(Boolean));
+  return new Set(
+    values
+      .flatMap((value) => String(value).toLowerCase().replace(/[’']/g, "'").split(/[,/|]+/))
+      .map((value) => value.trim().replace(/[-_]+/g, " "))
+      .filter(Boolean),
+  );
+}
+
+/* R25_STRICT_SEED_SIMILARITY
+ * More Like This is a fixed-seed radio. The seed never walks forward with the
+ * currently-playing song. Candidates must first pass era/style/DNA eligibility
+ * before ranking. Surprise Me remains the exploration mode.
+ */
+const R25_STYLE_NEIGHBORHOODS: string[][] = [
+  ["grunge", "post grunge", "alternative rock", "alternative metal", "hard rock"],
+  ["post grunge", "alternative rock", "alternative metal", "hard rock", "modern rock"],
+  ["nu metal", "alternative metal", "industrial metal", "hard rock", "rap metal"],
+  ["heavy metal", "groove metal", "thrash metal", "alternative metal", "hard rock"],
+  ["metalcore", "post hardcore", "alternative metal", "modern metal", "hard rock"],
+  ["power metal", "heavy metal", "speed metal", "melodic metal", "hard rock"],
+  ["punk rock", "pop punk", "alternative rock", "post hardcore"],
+  ["industrial rock", "industrial metal", "alternative rock", "alternative metal"],
+];
+
+function r25StyleCompatibility(seed: MusicTrack, candidate: MusicTrack) {
+  const seedStyles = normalizedStyleTokens(seed);
+  const candidateStyles = normalizedStyleTokens(candidate);
+  if (!seedStyles.size || !candidateStyles.size) {
+    return { known: false, exact: 0, neighborhood: 0 };
+  }
+
+  let exact = 0;
+  for (const value of seedStyles) if (candidateStyles.has(value)) exact += 1;
+
+  let neighborhood = 0;
+  for (const group of R25_STYLE_NEIGHBORHOODS) {
+    const seedInGroup = group.some((value) => seedStyles.has(value));
+    const candidateInGroup = group.some((value) => candidateStyles.has(value));
+    if (seedInGroup && candidateInGroup) neighborhood += 1;
+  }
+
+  return { known: true, exact, neighborhood };
 }
 
 function styleOverlapScore(seed: MusicTrack, candidate: MusicTrack) {
@@ -392,6 +433,11 @@ function styleOverlapScore(seed: MusicTrack, candidate: MusicTrack) {
 }
 
 function releaseYear(track: MusicTrack) {
+  const intelligence = getCachedMusicTrackIntelligence(track.id);
+  const semantic = intelligence?.providerPayload?.semantic_profile as { originalReleaseYear?: unknown } | undefined;
+  const semanticYear = Number(semantic?.originalReleaseYear ?? 0);
+  if (Number.isFinite(semanticYear) && semanticYear >= 1900 && semanticYear <= 2100) return semanticYear;
+
   const year = Number(track.release_year || 0);
   return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
 }
@@ -413,6 +459,44 @@ function exactSongFingerprintScore(seed: MusicTrack, candidate: MusicTrack) {
   return 122 - distance * 1.72 + styleOverlapScore(seed, candidate) + eraSimilarityScore(seed, candidate);
 }
 
+function r25MoreLikeEligible(seed: MusicTrack, candidate: MusicTrack) {
+  if (candidate.id === seed.id || candidate.play_less) return false;
+
+  const sameArtist = normalizedArtist(seed) === normalizedArtist(candidate);
+  const distance = richSimilarityDistance(seed, candidate);
+  const style = r25StyleCompatibility(seed, candidate);
+  const seedYear = releaseYear(seed);
+  const candidateYear = releaseYear(candidate);
+  const yearDelta = seedYear != null && candidateYear != null
+    ? Math.abs(seedYear - candidateYear)
+    : null;
+
+  // Same-artist material is intrinsically valid, but still reject a radically
+  // different fingerprint so alternate projects/live versions do not dominate.
+  if (sameArtist) return distance <= 34;
+
+  // When both years are known, More Like This stays in the same era neighborhood.
+  // A very strong style match may stretch to 12 years, but never decades away.
+  if (yearDelta != null) {
+    const maxEraDelta = style.exact > 0 || style.neighborhood > 0 ? 12 : 7;
+    if (yearDelta > maxEraDelta) return false;
+  }
+
+  // Known-but-unrelated style tags are a hard rejection. This is the specific
+  // guard that prevents modern generic rock from following a 90s grunge seed.
+  if (style.known && style.exact === 0 && style.neighborhood === 0) return false;
+
+  // Missing metadata is allowed only when the measured Song DNA is extremely
+  // close. We never use missing metadata as permission to wander broadly.
+  if (!style.known && distance > 11) return false;
+
+  // Even inside the same style/era family, the actual song fingerprint must be
+  // close enough to the seed to qualify for strict similarity radio.
+  if (distance > 25) return false;
+
+  return true;
+}
+
 export function radioModeLabel(mode: MusicRadioMode) {
   if (mode === "harder") return "Harder";
   if (mode === "heavier") return "Heavier";
@@ -425,6 +509,22 @@ export function radioModeLabel(mode: MusicRadioMode) {
 
 export function getActiveRadioMode(): MusicRadioMode | null {
   return readRadioState()?.mode ?? null;
+}
+
+/* R25_PRESERVE_SEED_STEERING
+ * Direction buttons may change the radio mode, but they never replace the
+ * original More Like This seed. Only an explicit LIKE THIS press reseeds.
+ */
+export function steerActiveRadioModePreserveSeed(mode: MusicRadioMode) {
+  const current = readRadioState();
+  if (!current?.seedTrackId) return null;
+  const next: RadioState = {
+    ...current,
+    mode,
+    steeringRemaining: steeringLength(mode),
+  };
+  writeJson(KEYS.radio, next);
+  return next.seedTrackId;
 }
 
 export function getActiveRadioSteeringRemaining() {
@@ -563,29 +663,40 @@ function candidateScore(
   const currentDna = getSongDna(current);
   const candidateDna = getSongDna(candidate);
 
+  if (mode === "more_like_this") {
+    if (!r25MoreLikeEligible(seed, candidate)) return -99999;
+    if (recent.has(candidate.id)) return -99999;
+
+    let score = exactSongFingerprintScore(seed, candidate);
+    const sameSeedArtist = normalizedArtist(seed) === normalizedArtist(candidate);
+    const sameCurrentArtist = normalizedArtist(current) === normalizedArtist(candidate);
+    const candidateAlbum = normalizedAlbum(candidate);
+
+    // Similarity wins. Preference/play-history only break close ties.
+    if (sameSeedArtist) score += 18;
+    if (sameCurrentArtist && !sameSeedArtist) score -= 4;
+    if (candidateAlbum && candidateAlbum === normalizedAlbum(current)) score -= 3;
+    if (recentArtists.has(normalizedArtist(candidate)) && !sameSeedArtist) score -= 7;
+    if (candidateAlbum && recentAlbums.has(candidateAlbum)) score -= 4;
+    score += candidate.favorite ? 2 : 0;
+    score -= Math.min(12, candidate.skip_count * 3);
+    return score;
+  }
+
   const surpriseSimilarityScale = mode === "surprise" ? 0.58 : 1;
-  let score = mode === "more_like_this"
-    ? exactSongFingerprintScore(seed, candidate)
-    : 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
+  let score = 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
 
   if (normalizedArtist(seed) === normalizedArtist(candidate)) {
     score += mode === "surprise" ? -12 : 8;
   }
-  // Strong artist cooldown. Repeating an artist immediately should be rare.
   if (normalizedArtist(current) === normalizedArtist(candidate)) score -= 95;
   const candidateAlbum = normalizedAlbum(candidate);
   if (candidateAlbum && candidateAlbum === normalizedAlbum(current)) score -= 46;
 
-  // Recent tracks are effectively excluded. Artist and album cooldowns stop
-  // the radio from orbiting the same few bands/records even when their DNA is
-  // an otherwise perfect match.
   if (recent.has(candidate.id)) score -= 1000;
   if (recentArtists.has(normalizedArtist(candidate))) score -= 62;
   if (candidateAlbum && recentAlbums.has(candidateAlbum)) score -= 30;
 
-  // Steering commands are directional from the song playing NOW, not merely
-  // similarity tags relative to the original radio seed. This makes a tap on
-  // HEAVIER / FASTER / HARDER audibly change what comes next.
   if (mode === "harder") {
     const gain = (candidateDna.energy - currentDna.energy) * 1.15 + (candidateDna.heavy - currentDna.heavy) * 1.05 + (candidateDna.drive - currentDna.drive) * 0.85;
     score += gain;
@@ -631,7 +742,7 @@ function candidateScore(
     score += mode === "surprise" ? 22 : 12;
   }
 
-  return score + Math.random() * (mode === "surprise" ? 8 : mode === "more_like_this" ? 1.25 : 4);
+  return score + Math.random() * (mode === "surprise" ? 8 : 4);
 }
 
 function steeringLength(mode: MusicRadioMode) {
@@ -652,6 +763,7 @@ export function startRadioSession(
     steeringRemaining: steeringLength(mode),
   };
 
+  // R25: this is the only place that establishes/replaces the radio seed.
   writeJson(KEYS.radio, radio);
   rememberTrack(seed.id);
   markCyclePlayed(seed.id);
@@ -662,6 +774,7 @@ export function startRadioSession(
 
   const ranked = library
     .filter((track) => track.id !== seed.id && !track.play_less)
+    .filter((track) => mode !== "more_like_this" || r25MoreLikeEligible(seed, track))
     .map((track) => ({
       track,
       score: candidateScore(
@@ -674,6 +787,7 @@ export function startRadioSession(
         recentAlbums,
       ),
     }))
+    .filter((entry) => entry.score > -90000)
     .sort((a, b) => b.score - a.score)
     .slice(0, 50)
     .map((entry) => entry.track);
@@ -685,7 +799,11 @@ function rankedAdaptiveCandidates(current: MusicTrack, library: MusicTrack[]) {
   const radio = readRadioState();
   if (!radio) return [] as Array<{ track: MusicTrack; score: number }>;
 
-  const seed = library.find((track) => track.id === radio.seedTrackId) ?? current;
+  // R25 fixed seed: never fall back to the currently-playing track. If the
+  // original seed disappears from the library, the radio stops instead of drifting.
+  const seed = library.find((track) => track.id === radio.seedTrackId);
+  if (!seed) return [] as Array<{ track: MusicTrack; score: number }>;
+
   const recentList = recentIds();
   const recent = new Set(recentList);
   const recentTracks = recentList
@@ -694,16 +812,17 @@ function rankedAdaptiveCandidates(current: MusicTrack, library: MusicTrack[]) {
   const recentArtists = new Set(recentTracks.map(normalizedArtist));
   const recentAlbums = new Set(recentTracks.map(normalizedAlbum).filter(Boolean));
 
-  const eligible = library.filter((track) => track.id !== current.id && !track.play_less);
+  const eligible = library
+    .filter((track) => track.id !== current.id && track.id !== seed.id && !track.play_less)
+    .filter((track) => radio.mode !== "more_like_this" || r25MoreLikeEligible(seed, track));
+
   const cycle = readPlaybackCycle();
   const played = new Set(cycle.playedIds);
   let available = eligible.filter((track) => !played.has(track.id));
 
-  // A track is never eligible again until every other playable track in the
-  // current library pool has been exhausted. Only then do we open a new cycle.
   if (!available.length && eligible.length) {
     restartPlaybackCycle(current.id);
-    available = eligible;
+    available = eligible.filter((track) => track.id !== current.id);
   }
 
   return available
@@ -711,6 +830,7 @@ function rankedAdaptiveCandidates(current: MusicTrack, library: MusicTrack[]) {
       track,
       score: candidateScore(seed, current, track, radio.mode, recent, recentArtists, recentAlbums),
     }))
+    .filter((entry) => entry.score > -90000)
     .sort((a, b) => b.score - a.score);
 }
 
@@ -726,23 +846,27 @@ export function chooseAdaptiveNextTrack(
   const ranked = rankedAdaptiveCandidates(current, library);
   if (!ranked.length) return null;
 
-  // Do not deterministically hammer the single highest score. Randomize within
-  // the best unplayed candidates while preserving the steering bias.
   const radio = readRadioState();
   const closeMatchMode = radio?.mode === "more_like_this";
-  const explore = closeMatchMode && Math.random() < 0.12;
-  const poolSize = closeMatchMode
-    ? Math.min(explore ? 8 : 3, ranked.length)
-    : Math.min(10, Math.max(3, Math.ceil(Math.sqrt(ranked.length))));
-  const pool = ranked.slice(0, Math.max(1, poolSize));
-  const floor = pool[pool.length - 1]?.score ?? 0;
-  const weighted = pool.map((entry) => ({ ...entry, weight: Math.max(1, entry.score - floor + 6) }));
-  const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
-  let roll = Math.random() * totalWeight;
-  let next = weighted[0]?.track ?? null;
-  for (const entry of weighted) {
-    roll -= entry.weight;
-    if (roll <= 0) { next = entry.track; break; }
+
+  // R25: More Like This is deterministic strict similarity. No exploration,
+  // no random top-8 pool, and no current-song reseeding. Surprise Me is where
+  // intentional exploration belongs.
+  let next: MusicTrack | null = null;
+  if (closeMatchMode) {
+    next = ranked[0]?.track ?? null;
+  } else {
+    const poolSize = Math.min(10, Math.max(3, Math.ceil(Math.sqrt(ranked.length))));
+    const pool = ranked.slice(0, Math.max(1, poolSize));
+    const floor = pool[pool.length - 1]?.score ?? 0;
+    const weighted = pool.map((entry) => ({ ...entry, weight: Math.max(1, entry.score - floor + 6) }));
+    const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    let roll = Math.random() * totalWeight;
+    next = weighted[0]?.track ?? null;
+    for (const entry of weighted) {
+      roll -= entry.weight;
+      if (roll <= 0) { next = entry.track; break; }
+    }
   }
 
   if (next && options.remember !== false) {

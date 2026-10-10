@@ -36,6 +36,7 @@ import {
   setMusicVolume,
   setPlayerMusicPreference,
   startMvpNeuralRadio,
+  steerMvpNeuralRadio,
   toggleMusicShuffle,
   useMusicPlayer,
   type MusicExperienceMode,
@@ -1563,10 +1564,21 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
     try {
       const currentMode = isAdaptiveRadioName(player.activePlaylistName) ? getActiveRadioMode() : null;
-      if (currentMode === mode) {
+      /* R25_EXPLICIT_RESEED
+       * LIKE THIS is the one explicit command that establishes or changes the
+       * seed. Skip, Next, end-of-song, heart LIKE, and all steering modes keep
+       * the existing seed.
+       */
+      if (mode === "more_like_this") {
+        startMvpNeuralRadio(currentTrack.id, mode);
+        setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
+      } else if (currentMode === mode) {
         activateAllMusicTracks();
         setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} OFF`);
+      } else if (currentMode && steerMvpNeuralRadio(mode)) {
+        setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
       } else {
+        // No radio exists yet, so the current song becomes the initial seed.
         startMvpNeuralRadio(currentTrack.id, mode);
         setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} ACTIVE`);
       }

@@ -22,6 +22,7 @@ import {
   isAdaptiveRadioName,
   rememberPlaybackCycleTrack,
   startRadioSession,
+  steerActiveRadioModePreserveSeed,
   syncLikedSongsPlaylist,
   type MusicRadioMode,
 } from "./musicIntelligence";
@@ -775,7 +776,20 @@ async function performPlayMusicTrack(trackId: string, startAt = 0) {
     state.tracks.find((item) => item.id === trackId) ??
     state.libraryTracks.find((item) => item.id === trackId);
   if (!track) throw new Error("Song not found in your music library.");
-  if (!state.tracks.some((item) => item.id === trackId)) activateAllMusicTracks();
+  if (!state.tracks.some((item) => item.id === trackId)) {
+    /* R25_ADAPTIVE_QUEUE_PRESERVE
+     * Adaptive radio chooses from the full library. If a valid fixed-seed match
+     * was not in the original visible queue, append it without clearing the
+     * active radio name/seed. Ordinary playback keeps the old all-library fallback.
+     */
+    if (isAdaptiveRadioName(state.activePlaylistName)) {
+      const nextTracks = [...state.tracks, track];
+      saveStored(STORAGE_KEYS.activeQueueTrackIds, JSON.stringify(nextTracks.map((item) => item.id)));
+      emit({ tracks: nextTracks });
+    } else {
+      activateAllMusicTracks();
+    }
+  }
 
   await unlockMusicAudio();
   await loadTrack(track, startAt);
@@ -855,11 +869,19 @@ export async function nextMusicTrack(fromEnded = false) {
   }
 
   if (state.currentTrack && isAdaptiveRadioName(state.activePlaylistName)) {
+    /* R25_FIXED_SEED_TRANSPORT
+     * Skip/next/end-of-song must ask the active radio for another candidate.
+     * If strict More Like This has no valid candidate, do not fall through to
+     * the ordinary queue and play something unrelated.
+     */
     const adaptive = chooseAdaptiveNextTrack(state.currentTrack, state.libraryTracks, { remember: false });
     if (adaptive) {
       await playMusicTrack(adaptive.id, 0);
       return;
     }
+    emit({ error: "No more close matches are available for this radio seed yet." });
+    if (fromEnded) stopMusic();
+    return;
   }
 
   const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1);
@@ -961,10 +983,10 @@ export async function setPlayerMusicPreference(
 
     void syncLikedSongsPlaylist(nextLibrary).catch(() => undefined);
 
-    if (preference === "like" && wasCurrent) {
-      const radio = startRadioSession(updated, nextLibrary, "more_like_this");
-      activateMusicAdHocQueue(`Like Radio • ${updated.title}`, radio);
-    }
+    /* R25_LIKE_DOES_NOT_RESEED
+     * The heart LIKE is preference learning only. It must never replace an
+     * active More Like This seed. Only the explicit LIKE THIS control reseeds.
+     */
     return updated;
   } catch (error) {
     const restore = (track: MusicTrack) => track.id === trackId ? original : track;
@@ -986,6 +1008,29 @@ export function startMvpNeuralRadio(
   const queue = startRadioSession(seed, state.libraryTracks, mode);
   activateMusicAdHocQueue(adaptiveRadioQueueName(seed, mode), queue);
   return queue;
+}
+
+
+/* R25_STEER_WITHOUT_RESEED
+ * Change HARDER / HEAVIER / FASTER / MELODIC / DARKER / SURPRISE while
+ * preserving the original explicit LIKE THIS seed and the currently playing song.
+ */
+export function steerMvpNeuralRadio(mode: MusicRadioMode) {
+  const seedTrackId = steerActiveRadioModePreserveSeed(mode);
+  if (!seedTrackId) return false;
+  const seed = state.libraryTracks.find((track) => track.id === seedTrackId);
+  if (!seed) return false;
+
+  const name = adaptiveRadioQueueName(seed, mode);
+  removeStored(STORAGE_KEYS.activePlaylistId);
+  saveStored(STORAGE_KEYS.activePlaylistName, name);
+  emit({
+    activePlaylistId: null,
+    activePlaylistName: name,
+    error: null,
+  });
+  configureMediaSession();
+  return true;
 }
 
 export function getMusicPlayerSnapshot() {
