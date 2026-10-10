@@ -1,5 +1,6 @@
 import type { MusicTrack } from "./musicStorage";
 import {
+  activateMusicAdHocQueue,
   cycleMusicRepeat,
   getMusicPlayerSnapshot,
   playMusicAdHocQueue,
@@ -53,7 +54,9 @@ type TodayLibraryIntent = {
   decadeStart: number | null;
   decadeEnd: number | null;
   decadeLabel: string | null;
+  decadeRanges?: Array<{start: number; end: number}>;
   styles: string[];
+  excludedStyles?: string[];
   styleLabels: string[];
   themes: string[];
   themeLabels: string[];
@@ -76,10 +79,12 @@ export type MusicTodayContext = {
   libraryIntent: TodayLibraryIntent;
   revision: number;
   updatedAt: number;
+  sessionKey?: string;
 };
 
 const LEGACY_STORAGE_KEY = "mvp_music_today_v2";
 const PERSISTENT_AI_KEY = "mvp_music_ai_persistent_r28";
+const AI_CYCLE_KEY = "mvp_music_ai_cycle_r29";
 const QUEUE_PREFIX = "MVP Today · ";
 const listeners = new Set<() => void>();
 
@@ -164,7 +169,9 @@ if (typeof window !== "undefined") {
     if (!userId || state.active) return;
     try {
       const saved = JSON.parse(window.localStorage.getItem(PERSISTENT_AI_KEY) || "null") as { userId?: string; context?: MusicTodayContext } | null;
-      if (saved?.userId === userId && saved.context?.active && saved.context.prompt) emit(saved.context);
+      if (saved && saved.userId === userId && saved.context && saved.context.active && saved.context.prompt) {
+        emit({ ...saved.context, sessionKey: saved.context.sessionKey || `restored:${saved.context.updatedAt}` });
+      }
     } catch { /* invalid prior session; do not restore */ }
   }).catch(() => undefined);
 }
@@ -189,7 +196,7 @@ function emit(next: MusicTodayContext) {
 
 export function resetMusicTodaySession() {
   removeLegacyTodayPersistence();
-  try { window.localStorage.removeItem(PERSISTENT_AI_KEY); } catch { /* unavailable storage */ }
+  try { window.localStorage.removeItem(PERSISTENT_AI_KEY); window.localStorage.removeItem(AI_CYCLE_KEY); } catch { /* unavailable storage */ }
   emit(freshContext());
 }
 
@@ -386,7 +393,8 @@ const LIBRARY_STYLE_RULES: LibraryStyleRule[] = [
   { key: "nu-metal", label: "Nu Metal", promptTerms: ["nu metal", "nu-metal"], matchTerms: ["nu metal", "nu-metal"] },
   { key: "metalcore", label: "Metalcore", promptTerms: ["metalcore"], matchTerms: ["metalcore"] },
   { key: "alternative-metal", label: "Alternative Metal", promptTerms: ["alternative metal"], matchTerms: ["alternative metal"] },
-  { key: "hard-rock", label: "Hard Rock", promptTerms: ["hard rock"], matchTerms: ["hard rock"] },
+  { key: "hard-rock", label: "Hard Rock", promptTerms: ["hard rock", "heavy rock"], matchTerms: ["hard rock", "heavy rock"] },
+  { key: "rock", label: "Rock", promptTerms: ["rock music", "rock songs", "rock"], matchTerms: ["rock", "alternative rock", "hard rock", "classic rock", "grunge", "punk rock"] },
   { key: "heavy-metal", label: "Heavy Metal", promptTerms: ["heavy metal"], matchTerms: ["heavy metal"] },
   { key: "thrash-metal", label: "Thrash Metal", promptTerms: ["thrash metal", "thrash"], matchTerms: ["thrash metal", "thrash"] },
   { key: "industrial-metal", label: "Industrial Metal", promptTerms: ["industrial metal"], matchTerms: ["industrial metal"] },
@@ -457,19 +465,43 @@ function decadeFromPrompt(rawPrompt: string) {
 function parseLibraryIntent(rawPrompt: string): TodayLibraryIntent {
   const text = normalized(rawPrompt);
   const decade = decadeFromPrompt(rawPrompt);
-  const matched = LIBRARY_STYLE_RULES.filter((rule) => rule.promptTerms.some((term) => text.includes(` ${term} `)));
-  const styles = [...new Set(matched.map((rule) => rule.key))];
+  const mentionedStyles = LIBRARY_STYLE_RULES.filter((rule) => rule.promptTerms.some((term) => text.includes(` ${term} `)));
+  const excludedStyles = mentionedStyles.filter((rule) => rule.promptTerms.some((term) =>
+    new RegExp(`\\b(?:no|without|exclude|excluding|except|not)\\s+(?:any\\s+)?${term.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&").replace(/\\s+/g, "\\\\s+")}\\b`, "i").test(rawPrompt),
+  )).map((rule) => rule.key);
+  const specifiedRock = mentionedStyles.some((rule) => rule.key !== "rock" && rule.promptTerms.some((term) => term.includes("rock") && text.includes(` ${term} `)));
+  const matched = mentionedStyles.filter((rule) => !excludedStyles.includes(rule.key) && !(specifiedRock && rule.key === "rock"));
+  let styles = [...new Set(matched.map((rule) => rule.key))];
+  // 'post grunge' must not accidentally match BOTH post-grunge and grunge.
+  if (styles.includes("post-grunge")) styles = styles.filter((key) => key !== "grunge");
   const styleLabels = [...new Set(matched.map((rule) => rule.label))];
   const matchedThemes = LIBRARY_THEME_RULES.filter((rule) => rule.promptTerms.some((term) => text.includes(` ${term} `)));
   const themes = [...new Set(matchedThemes.map((rule) => rule.key))];
   const themeLabels = [...new Set(matchedThemes.map((rule) => rule.label))];
+  const ranges: Array<{start: number; end: number}> = [];
+  const normalizedPhrase = rawPrompt.toLowerCase().replace(/[’]/g, "'");
+  const words: Array<[RegExp, number]> = [
+    [/\bsixties\b/g,1960], [/\bseventies\b/g,1970], [/\beighties\b/g,1980], [/\bnineties\b/g,1990],
+    [/\b2000s\b/g,2000], [/\b2010s\b/g,2010], [/\b2020s\b/g,2020],
+  ];
+  for (const [regex, start] of words) if (regex.test(normalizedPhrase)) ranges.push({start,end:start+9});
+  for (const hit of normalizedPhrase.matchAll(/\b((?:19|20)?\d{2})\s*'?s\b/g)) {
+    let start = Number(hit[1]);
+    if (hit[1].length === 2) start += start >= 40 ? 1900 : 2000;
+    start = Math.floor(start / 10) * 10;
+    if (start >= 1950 && start <= 2030) ranges.push({start,end:start+9});
+  }
+  if (decade && !ranges.some((r) => r.start === decade.start)) ranges.push({start:decade.start,end:decade.end});
+  const distinctRanges = [...new Map(ranges.map((r) => [r.start,r])).values()].sort((a,b)=>a.start-b.start);
   const directCue = /\b(?:play|hear|listen|put on|give me|queue|songs?|music|bands?|artists?|tracks?|all)\b/i.test(rawPrompt);
-  const directRequest = Boolean(decade || styles.length || themes.length) && (directCue || styles.length > 0 || themes.length > 0 || Boolean(decade));
+  const directRequest = Boolean(decade || styles.length || excludedStyles.length || themes.length) && (directCue || styles.length > 0 || excludedStyles.length > 0 || themes.length > 0 || Boolean(decade));
   return {
     decadeStart: decade?.start ?? null,
     decadeEnd: decade?.end ?? null,
-    decadeLabel: decade?.label ?? null,
+    decadeLabel: distinctRanges.length > 1 ? distinctRanges.map((r) => `${String(r.start).slice(2)}s`).join(" + ") : decade?.label ?? null,
+    decadeRanges: distinctRanges,
     styles,
+    excludedStyles,
     styleLabels,
     themes,
     themeLabels,
@@ -795,6 +827,11 @@ function matchesLibraryStyle(track: MusicTrack, key: string) {
   const artist = normalizedArtistName(track.artist);
   if (rule.artistHints?.some((hint) => artist === normalizedArtistName(hint))) return true;
 
+  if (key === "rock") {
+    const i = getCachedMusicTrackIntelligence(track.id);
+    const genres = [track.genre || "", ...(i?.mainGenres || []), ...(i?.subgenres || [])].join(" ").toLowerCase();
+    return /\b(?:rock|grunge|punk)\b/.test(genres);
+  }
   if (key === "grunge") {
     const withoutPostGrunge = context.replace(/\bpost\s+grunge\b/g, " ");
     return /\bgrunge\b/.test(withoutPostGrunge);
@@ -881,9 +918,11 @@ function matchesLibraryIntent(track: MusicTrack, intent: TodayLibraryIntent) {
   if (!intent.directRequest) return true;
   if (intent.decadeStart != null && intent.decadeEnd != null) {
     const year = trackReleaseYear(track);
-    if (year == null || year < intent.decadeStart || year > intent.decadeEnd) return false;
+    const ranges = intent.decadeRanges?.length ? intent.decadeRanges : [{ start: intent.decadeStart, end: intent.decadeEnd }];
+    if (year == null || !ranges.some((range) => year >= range.start && year <= range.end)) return false;
   }
   if (intent.styles.length && !intent.styles.some((style) => matchesLibraryStyle(track, style))) return false;
+  if (intent.excludedStyles?.some((style) => matchesLibraryStyle(track, style))) return false;
   if (intent.themes.length && !intent.themes.every((theme) => semanticThemeScore(track, theme) >= .62)) return false;
   if (intent.artistMode === "only" && intent.artistKeys.length && !intent.artistKeys.some((key) => artistMatchesKey(track.artist, key))) return false;
   return true;
@@ -1295,7 +1334,7 @@ async function startQueue(next: MusicTodayContext, surpriseStrength = 0, exclude
 
   // R44: hydrate persisted Song DNA / Artist DNA before ranking. The cache keeps
   // this fast after the first read and the database remains authoritative.
-  await hydrateMusicIntelligenceCache(library).catch(() => undefined);
+  await hydrateMusicIntelligenceCache(library, { fresh: true }).catch(() => undefined);
 
   const resolvedIntent = resolveArtistIntent(next.prompt, library, next.libraryIntent);
   const artistTags = resolvedIntent.artistLabels.length ? resolvedIntent.artistLabels.slice(0, 2) : [];
@@ -1317,6 +1356,7 @@ async function startQueue(next: MusicTodayContext, surpriseStrength = 0, exclude
   const queueName = compactQueueName(resolvedNext.tags);
   const ready = { ...resolvedNext, active: true, queueName, queueSize: queue.length, updatedAt: Date.now() };
   emit(ready);
+  await resetAiCycle(ready).catch(() => undefined);
   await playMusicAdHocQueue(queueName, queue, queue[0].id);
   ensureMusicTodayPlaybackMode();
   try {
@@ -1343,6 +1383,7 @@ export async function activateMusicToday(rawPrompt: string) {
     libraryIntent: interpreted.libraryIntent,
     revision: state.revision + 1,
     updatedAt: Date.now(),
+    sessionKey: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
   };
 
   return startQueue(next, 0, Boolean(state.prompt));
@@ -1398,8 +1439,123 @@ export function steerMusicToday(rawMode: string) {
     reply: `${label} applied. I rebuilt Today around that direction and switched to the strongest new match.`,
     revision: state.revision + 1,
     updatedAt: Date.now(),
+    sessionKey: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
   };
 
   void startQueue(next, surpriseStrength, true).catch(() => undefined);
   return true;
+}
+
+
+// R29: The active instruction owns its own cycle. Generic listening history
+// does not eliminate otherwise eligible AI songs or cause premature repeats.
+type AiCycle = { sessionKey: string; userId: string; playedIds: string[]; completedCycles: number };
+let activeAiUserId = "";
+function readAiCycle(): AiCycle | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(AI_CYCLE_KEY);
+    const saved = raw ? JSON.parse(raw) as AiCycle : null;
+    return saved && saved.sessionKey === state.sessionKey && saved.userId === activeAiUserId ? saved : null;
+  } catch { return null; }
+}
+function writeAiCycle(value: AiCycle) {
+  try { window.localStorage.setItem(AI_CYCLE_KEY, JSON.stringify(value)); } catch { /* database remains source for music */ }
+}
+async function resetAiCycle(context: MusicTodayContext) {
+  try { window.localStorage.removeItem(AI_CYCLE_KEY); } catch { /* optional */ }
+  activeAiUserId = "";
+  const { data } = await supabase.auth.getUser();
+  if (!data.user?.id || state.sessionKey !== context.sessionKey) return;
+  activeAiUserId = data.user.id;
+  writeAiCycle({ sessionKey: context.sessionKey || "", userId: activeAiUserId, playedIds: [], completedCycles: 0 });
+}
+export function rememberMusicTodayTrackPlayed(trackId: string) {
+  if (!state.active || !state.sessionKey || !isMusicTodayQueueName(getMusicPlayerSnapshot().activePlaylistName)) return;
+  const cycle = readAiCycle();
+  if (!cycle || cycle.playedIds.includes(trackId)) return;
+  writeAiCycle({ ...cycle, playedIds: [...cycle.playedIds, trackId] });
+}
+let aiRefreshing = false;
+let aiRefreshScheduled = false;
+async function rankLiveAiPool() {
+  const player = getMusicPlayerSnapshot();
+  const library = player.libraryTracks;
+  if (!library.length) return [] as MusicTrack[];
+  await hydrateMusicIntelligenceCache(library, { fresh: true });
+  const intent = resolveArtistIntent(state.prompt, library, state.libraryIntent);
+  return rankForToday(library, state.target, state.constraints, state.tags, state.prompt, state.revision, null, 0, intent);
+}
+export async function refreshActiveMusicTodayQueue() {
+  if (aiRefreshing || !state.active || !state.sessionKey) return false;
+  const initialSession = state.sessionKey;
+  const player = getMusicPlayerSnapshot();
+  if (player.activePlaylistName !== state.queueName || !isMusicTodayQueueName(player.activePlaylistName)) return false;
+  aiRefreshing = true;
+  try {
+    const ranked = await rankLiveAiPool();
+    const latest = getMusicPlayerSnapshot();
+    if (state.sessionKey !== initialSession || latest.activePlaylistName !== state.queueName || !ranked.length) return false;
+    const current = latest.currentTrack;
+    const eligibleIds = new Set(ranked.map((track) => track.id));
+    const cycle = readAiCycle();
+    const played = new Set(cycle?.playedIds || []);
+    if (current) played.add(current.id);
+    const done = latest.tracks.filter((track) => eligibleIds.has(track.id) && played.has(track.id) && track.id !== current?.id);
+    const rest = ranked.filter((track) => !played.has(track.id));
+    const queue = [...done, ...(current ? [current] : []), ...rest];
+    if (!queue.length) return false;
+    if (queue.map((track) => track.id).join("|") !== latest.tracks.map((track) => track.id).join("|")) {
+      activateMusicAdHocQueue(state.queueName, queue);
+    }
+    emit({ ...state, queueSize: ranked.length });
+    return true;
+  } finally { aiRefreshing = false; }
+}
+
+// Called by transport ONLY at the end of the active AI queue. Recheck the
+// authoritative database before starting a new cycle. Newly classified songs
+// are played before any previously played song can repeat.
+export async function nextMusicTodayCycleTrack(): Promise<MusicTrack | null> {
+  for (let attempts = 0; aiRefreshing && attempts < 60; attempts += 1) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
+  }
+  if (aiRefreshing || !state.active || !state.sessionKey) return null;
+  const initialSession = state.sessionKey;
+  const initial = getMusicPlayerSnapshot();
+  if (initial.activePlaylistName !== state.queueName || !isMusicTodayQueueName(initial.activePlaylistName)) return null;
+  aiRefreshing = true;
+  try {
+    const ranked = await rankLiveAiPool();
+    const player = getMusicPlayerSnapshot();
+    if (initialSession !== state.sessionKey || player.activePlaylistName !== state.queueName || !ranked.length) return null;
+    const current = player.currentTrack;
+    const cycle = readAiCycle();
+    const played = new Set(cycle?.playedIds || []);
+    if (current) played.add(current.id);
+    let remaining = ranked.filter((track) => !played.has(track.id));
+    if (!remaining.length) {
+      // Every qualifying recording has been heard/skipped; only now restart.
+      remaining = ranked.filter((track) => track.id !== current?.id);
+      if (!remaining.length && current) remaining = [current];
+      if (cycle) writeAiCycle({ ...cycle, playedIds: current ? [current.id] : [], completedCycles: cycle.completedCycles + 1 });
+    }
+    if (!remaining.length) return null;
+    const queue = [...(current ? [current] : []), ...remaining];
+    activateMusicAdHocQueue(state.queueName, queue);
+    emit({ ...state, queueSize: ranked.length });
+    return remaining[0];
+  } finally { aiRefreshing = false; }
+}
+
+if (typeof window !== "undefined") {
+  void supabase.auth.getUser().then(({ data }) => { activeAiUserId = data.user?.id || ""; }).catch(() => undefined);
+  window.addEventListener("mvp:music-intelligence-updated", () => {
+    if (!state.active || aiRefreshing || aiRefreshScheduled) return;
+    aiRefreshScheduled = true;
+    window.setTimeout(() => {
+      aiRefreshScheduled = false;
+      void refreshActiveMusicTodayQueue().catch((error) => console.warn("Music AI eligibility refresh deferred", error));
+    }, 900);
+  });
 }

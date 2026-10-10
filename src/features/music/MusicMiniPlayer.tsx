@@ -1547,7 +1547,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
 
   function steerNeuralRadio(mode: MusicRadioMode) {
     /* MVP_MUSIC_TODAY_STEERING_R40 */
-    if (steerMusicToday(mode)) {
+    // LIKE THIS is a new fixed-song radio seed, never a mood blend on the old AI prompt.
+    if (mode !== "more_like_this" && steerMusicToday(mode)) {
       setNeuralMessage(`${radioModeLabel(mode).toUpperCase()} • TODAY`);
       if (neuralMessageTimerRef.current != null) {
         window.clearTimeout(neuralMessageTimerRef.current);

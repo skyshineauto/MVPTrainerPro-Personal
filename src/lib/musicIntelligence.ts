@@ -486,7 +486,9 @@ function r25MoreLikeEligible(seed: MusicTrack, candidate: MusicTrack) {
   // Unknown era or unknown style is ineligible: audio energy alone is not proof.
   if (seedYear == null || candidateYear == null) return false;
   if (Math.floor(seedYear / 10) !== Math.floor(candidateYear / 10)) return false;
-  if (!style.known || (style.exact === 0 && style.neighborhood === 0)) return false;
+  // Same original artist can qualify without a provider genre tag; never use
+  // that allowance for an unrelated artist or a different decade.
+  if (!sameArtist && (!style.known || (style.exact === 0 && style.neighborhood === 0))) return false;
   // A grunge seed requires an actual grunge classification, not merely the
   // same broad alternative-rock label shared by modern post-grunge acts.
   const seedStyles = normalizedStyleTokens(seed);
@@ -669,7 +671,8 @@ function candidateScore(
 
   if (mode === "more_like_this") {
     if (!r25MoreLikeEligible(seed, candidate)) return -99999;
-    if (recent.has(candidate.id)) return -99999;
+    // The eligible cycle, not the unrelated 72-track history, controls repetition.
+    // Recent listening is a ranking hint, never a hard eligibility gate.
 
     let score = exactSongFingerprintScore(seed, candidate);
     const sameSeedArtist = normalizedArtist(seed) === normalizedArtist(candidate);
@@ -682,6 +685,7 @@ function candidateScore(
     if (candidateAlbum && candidateAlbum === normalizedAlbum(current)) score -= 3;
     if (recentArtists.has(normalizedArtist(candidate)) && !sameSeedArtist) score -= 7;
     if (candidateAlbum && recentAlbums.has(candidateAlbum)) score -= 4;
+    if (recent.has(candidate.id)) score -= 5;
     score += candidate.favorite ? 2 : 0;
     score -= Math.min(12, candidate.skip_count * 3);
     return score;
@@ -770,7 +774,7 @@ export function startRadioSession(
   // R25: this is the only place that establishes/replaces the radio seed.
   writeJson(KEYS.radio, radio);
   rememberTrack(seed.id);
-  markCyclePlayed(seed.id);
+  restartPlaybackCycle(seed.id);
 
   const recent = new Set(recentIds());
   const recentArtists = new Set<string>();
@@ -793,7 +797,6 @@ export function startRadioSession(
     }))
     .filter((entry) => entry.score > -90000)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 50)
     .map((entry) => entry.track);
 
   return [seed, ...ranked];

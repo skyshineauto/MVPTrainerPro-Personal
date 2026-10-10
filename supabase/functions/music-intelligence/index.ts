@@ -75,6 +75,8 @@ type ProviderContext = {
   yearSource: string;
   mainGenres: string[];
   subgenres: string[];
+  catalogSources?: string[];
+  catalogCandidates?: Record<string, unknown>;
 };
 
 type DeezerAudioFacts = {
@@ -269,6 +271,60 @@ async function deezerAudioFacts(track: InputTrack): Promise<DeezerAudioFacts | n
   return { trackId: id, bpm, gain, confidence };
 }
 
+// R29: Secondary, independently matched catalog data. Catalog/edition release
+// dates are NOT treated as an original recording year without primary evidence.
+async function appleCatalog(track: InputTrack) {
+  if (!track.artist || !track.title) return null;
+  const query = new URLSearchParams({ term: `${track.artist} ${track.title}`, entity: "song", limit: "12" });
+  const response = await fetch(`https://itunes.apple.com/search?${query}`, { signal: AbortSignal.timeout(8500) });
+  if (!response.ok) return null;
+  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const rows = Array.isArray(payload?.results) ? payload.results as Array<Record<string, unknown>> : [];
+  const artist = normalizeCatalogText(track.artist);
+  const title = normalizeCatalogText(track.title);
+  const album = normalizeCatalogText(track.album);
+  const scored = rows.map(row => {
+    const a = normalizeCatalogText(row.artistName), t = normalizeCatalogText(row.trackName);
+    let score = a === artist && t === title ? 140 : 0;
+    if (score && album && normalizeCatalogText(row.collectionName) === album) score += 15;
+    const expected = Number(track.durationSeconds || 0), actual = Number(row.trackTimeMillis || 0) / 1000;
+    if (score && expected && actual && Math.abs(actual - expected) > 35) score = 0;
+    return { row, score };
+  }).sort((a,b) => b.score-a.score);
+  const found = scored[0];
+  if (!found || found.score < 140) return null;
+  const row = found.row;
+  return {
+    genre: typeof row.primaryGenreName === "string" ? row.primaryGenreName.trim() : "",
+    album: String(row.collectionName || ""),
+    catalogYear: Number(String(row.releaseDate || "").slice(0,4)) || null,
+    catalogTrackId: String(row.trackId || ""),
+  };
+}
+
+async function discogsAlbumMaster(track: InputTrack) {
+  const token = Deno.env.get("DISCOGS_TOKEN") || "";
+  if (!token || !track.album || !track.artist) return null;
+  const params = new URLSearchParams({ artist: track.artist, release_title: track.album, type: "master", per_page: "5" });
+  const response = await fetch(`https://api.discogs.com/database/search?${params}`, {
+    headers: { Authorization: `Discogs token=${token}`, "User-Agent": "MVPTrainerPro/1.0" },
+    signal: AbortSignal.timeout(8500),
+  });
+  if (!response.ok) return null;
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const rows = Array.isArray(body?.results) ? body.results as Array<Record<string, unknown>> : [];
+  const expected = `${normalizeCatalogText(track.artist)} ${normalizeCatalogText(track.album)}`;
+  const row = rows.find(item => normalizeCatalogText(item.title) === expected ||
+    normalizeCatalogText(item.title) === `${normalizeCatalogText(track.artist)} ${normalizeCatalogText(track.album)}`);
+  if (!row) return null;
+  return {
+    genre: Array.isArray(row.genre) ? row.genre.map(String) : [] as string[],
+    style: Array.isArray(row.style) ? row.style.map(String) : [] as string[],
+    albumMasterYear: Number(row.year || 0) || null,
+    masterId: String(row.master_id || row.id || ""),
+  };
+}
+
 function tempoLabelFromBpm(bpm: number | null) {
   if (bpm == null) return null;
   if (bpm < 78) return "very slow";
@@ -456,16 +512,18 @@ type CachedArtistRow = {
 async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow | null): Promise<ProviderContext> {
   const lastFmKey = Deno.env.get("LASTFM_API_KEY") || "";
   const cachedTags = Array.isArray(cachedArtist?.top_tags) ? cleanTags(cachedArtist?.top_tags) : [];
-  const [trackTags, artistTags, mb] = await Promise.all([
+  const [trackTags, artistTags, mb, apple, discogs] = await Promise.all([
     lastFmKey && track.artist && track.title ? lastFmTags("track.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
     cachedTags.length ? Promise.resolve(cachedTags) : lastFmKey && track.artist ? lastFmTags("artist.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
     musicBrainzIdentity(track).catch(() => ({ recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null })),
+    appleCatalog(track).catch(() => null),
+    discogsAlbumMaster(track).catch(() => null),
   ]);
   const albumYear = mb.originalYear ? null : await r27AlbumYear(track).catch(() => null);
   const year = mb.originalYear || albumYear;
   const classification = r27Classification(track, {
     trackTags, artistTags, mbRecordingId: mb.recordingId, mbArtistId: mb.artistId,
-    mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || [])], mainGenres: [], subgenres: [],
+    mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])], mainGenres: [], subgenres: [],
   });
   return {
     trackTags,
@@ -476,7 +534,9 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
     mainGenres: classification.mainGenres,
     subgenres: classification.subgenres,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
-    mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : [])])].slice(0, 12),
+    mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])])].slice(0, 16),
+    catalogSources: [...(apple ? ["itunes"] : []), ...(discogs ? ["discogs"] : [])],
+    catalogCandidates: { apple: apple || null, discogs: discogs || null },
   };
 }
 
@@ -493,6 +553,8 @@ const R27_GENRES = new Map<string, string>([
   ["classic rock", "classic rock"], ["progressive rock", "progressive rock"],
   ["progressive metal", "progressive metal"], ["indie rock", "indie rock"],
   ["blues rock", "blues rock"], ["southern rock", "southern rock"],
+  ["alternative", "alternative rock"], ["alt rock", "alternative rock"],
+  ["grunge rock", "grunge"], ["seattle sound", "grunge"], ["hardrock", "hard rock"],
   ["rock", "rock"], ["metal", "metal"], ["pop", "pop"],
   ["hip hop", "hip hop"], ["rap", "rap"], ["electronic", "electronic"],
   ["country", "country"], ["folk", "folk"], ["jazz", "jazz"],
@@ -545,7 +607,8 @@ async function r27AlbumYear(track: InputTrack): Promise<number | null> {
 function sourceList(context: ProviderContext, cyanite = false, deezer = false) {
   const sources = ["mvp"];
   if (context.trackTags.length || context.artistTags.length) sources.push("lastfm");
-  if (context.mbRecordingId || context.mbArtistId || context.mbGenres.length) sources.push("musicbrainz");
+  if (context.mbRecordingId || context.mbArtistId || context.yearSource.startsWith("musicbrainz")) sources.push("musicbrainz");
+  for (const source of context.catalogSources || []) sources.push(source);
   if (deezer) sources.push("deezer");
   if (cyanite) sources.push("cyanite");
   return sources;
@@ -970,8 +1033,10 @@ Deno.serve(async (req) => {
       cyanite_track_id: cyaniteTrackId,
       cyanite_status: cyaniteStatus,
       provider_payload: {
+        ...(existing?.provider_payload || {}),
         lastfmArtistTags: context.artistTags,
         musicbrainzGenres: context.mbGenres,
+        catalogCandidates: context.catalogCandidates || {},
         deezer: deezer ? { trackId: deezer.trackId, bpm: deezer.bpm, gain: deezer.gain, confidence: deezer.confidence } : null,
         semantic_profile: buildSemanticProfile(track, context, {
           moods: context.trackTags.slice(0, 10).map((tag) => tag.name),

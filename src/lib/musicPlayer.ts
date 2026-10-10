@@ -291,6 +291,7 @@ function ensureAudioElement() {
     if (trackId && token !== recordedPlayToken) {
       recordedPlayToken = token;
       rememberPlaybackCycleTrack(trackId);
+      void import("./musicToday").then((module) => module.rememberMusicTodayTrackPlayed(trackId)).catch(() => undefined);
       void recordMusicTrackPlayed(trackId).catch(() => undefined);
     }
   });
@@ -861,6 +862,10 @@ export function seekMusic(seconds: number) {
   }
 }
 
+function isMusicTodayQueueNameForTransport(value: string | null | undefined) {
+  return Boolean(value?.startsWith("MVP Today · "));
+}
+
 export async function nextMusicTrack(fromEnded = false) {
   if (!state.libraryLoaded) await loadMusicLibrary();
 
@@ -884,6 +889,15 @@ export async function nextMusicTrack(fromEnded = false) {
     return;
   }
 
+  if (isMusicTodayQueueNameForTransport(state.activePlaylistName) &&
+      state.currentTrack && getCurrentIndex() === state.tracks.length - 1) {
+    const { nextMusicTodayCycleTrack } = await import("./musicToday");
+    const nextAi = await nextMusicTodayCycleTrack().catch((error) => {
+      console.warn("Music AI cycle refresh failed; retaining the existing qualified queue", error);
+      return null;
+    });
+    if (nextAi) { await playMusicTrack(nextAi.id, 0); return; }
+  }
   const index = state.shuffle ? nextShuffleIndex() : nextSequentialIndex(1);
   if (index < 0) {
     if (fromEnded) stopMusic();

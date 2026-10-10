@@ -293,7 +293,7 @@ export function isMusicIntelligenceCurrent(value: MusicTrackIntelligence | null 
 
 export async function getMusicTrackIntelligence(trackId: string) {
   const cached = getCachedMusicTrackIntelligence(trackId);
-  if (cached && cached.analysisVersion >= MUSIC_INTELLIGENCE_VERSION && cached.status !== "processing" && cached.status !== "stale" && cached.status !== "failed") return cached;
+  if (cached && isMusicIntelligenceCurrent(cached)) return cached;
 
   const { data, error } = await supabase
     .from(TRACK_TABLE)
@@ -307,12 +307,12 @@ export async function getMusicTrackIntelligence(trackId: string) {
   return parsed;
 }
 
-export async function listMusicTrackIntelligenceMap(trackIds: string[]) {
+export async function listMusicTrackIntelligenceMap(trackIds: string[], fresh = false) {
   const ids = [...new Set(trackIds.filter(Boolean))];
   const map = new Map<string, MusicTrackIntelligence>();
   for (const id of ids) {
     const cached = getCachedMusicTrackIntelligence(id);
-    if (cached && cached.status !== "processing" && cached.status !== "stale" && cached.status !== "failed") map.set(id, cached);
+    if (!fresh && cached && isMusicIntelligenceCurrent(cached)) map.set(id, cached);
   }
   const missing = ids.filter((id) => !map.has(id));
   for (const group of chunk(missing, 180)) {
@@ -325,9 +325,9 @@ export async function listMusicTrackIntelligenceMap(trackIds: string[]) {
   return map;
 }
 
-export async function hydrateMusicIntelligenceCache(tracks: MusicTrack[]) {
+export async function hydrateMusicIntelligenceCache(tracks: MusicTrack[], options: { fresh?: boolean } = {}) {
   if (!tracks.length) return new Map<string, MusicTrackIntelligence>();
-  return listMusicTrackIntelligenceMap(tracks.map((track) => track.id));
+  return listMusicTrackIntelligenceMap(tracks.map((track) => track.id), Boolean(options.fresh));
 }
 
 function trackPayload(track: MusicTrack) {

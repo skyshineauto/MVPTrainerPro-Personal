@@ -163,6 +163,7 @@ export function cacheMusicTrackIntelligence(item: MusicTrackIntelligence) {
     state.artists[normalized.artistKey] = normalized.artistDna;
   }
   write();
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("mvp:music-intelligence-updated", { detail: { trackIds: [normalized.trackId] } }));
 }
 
 export function cacheMusicTrackIntelligenceMany(items: MusicTrackIntelligence[]) {
@@ -175,6 +176,7 @@ export function cacheMusicTrackIntelligenceMany(items: MusicTrackIntelligence[])
     }
   }
   write();
+  if (items.length && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("mvp:music-intelligence-updated", { detail: { trackIds: items.map((item) => item.trackId) } }));
 }
 
 export function getCachedMusicTrackIntelligence(trackId: string) {

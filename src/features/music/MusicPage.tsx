@@ -75,6 +75,7 @@ import {
 } from "../../lib/musicDiscovery";
 
 import { MusicIntelligencePanel } from "./MusicIntelligencePanel";
+import { startAutomaticMusicEnrichment, queueAutomaticMusicEnrichment } from "../../lib/musicAutoEnrichment";
 import { MusicAuditionPanel, markMusicAuditionSongInLibrary, type MusicAuditionSong } from "./MusicAuditionPanel";
 import { buildDiscoveryRadar } from "../../lib/musicIntelligence";
 import {
@@ -852,6 +853,11 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
     label: "LIBRARY INTELLIGENCE", serviceMessage: "Ready to enrich your music library.", stage: "idle", currentTrackId: null, failedTrackIds: [], activity: [],
   });
   const enrichmentRef = useRef(enrichment);
+  const autoEnrichmentPausedRef = useRef(false);
+  autoEnrichmentPausedRef.current = uploading || enrichment.running;
+  useEffect(() => {
+    startAutomaticMusicEnrichment(() => autoEnrichmentPausedRef.current);
+  }, []);
   const enrichmentFlushTimerRef = useRef<number | null>(null);
   const setEnrichment = (update: EnrichmentState | ((current: EnrichmentState) => EnrichmentState)) => {
     const previous = enrichmentRef.current;
@@ -1321,16 +1327,9 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
           summary: "Building Song DNA and Artist DNA…",
         }) : current);
 
-        try {
-          await withMusicUploadDeadline(
-            analyzeMusicTrackIntelligence(uploaded),
-            20000,
-            "Music intelligence analysis timed out"
-          );
-          intelligenceReady += 1;
-        } catch (analysisError) {
-          console.warn("Automatic music intelligence enrichment will retry from Enrich Library:", analysisError);
-        }
+        // R29: Upload success never depends on a 20-second metadata/audio deadline.
+        // The same resumable worker used for the existing library takes over.
+        queueAutomaticMusicEnrichment(uploaded.id);
 
         completedSteps += 1;
         setUploadProgress((current) => current ? ({
@@ -1344,7 +1343,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
       await refreshTracks();
       await loadMusicLibrary(true);
 
-      const summary = `${batch.length} song${batch.length === 1 ? "" : "s"} uploaded • ${intelligenceReady} intelligence profile${intelligenceReady === 1 ? "" : "s"} ready`;
+      const summary = `${batch.length} song${batch.length === 1 ? "" : "s"} uploaded • Music Intelligence continues automatically`;
       setUploadProgress((current) => current ? ({
         ...current,
         status: "success",
@@ -1403,6 +1402,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
         setMessage(`Analyzing ${auditionSong.title} intelligence…`);
         await analyzeMusicTrackIntelligence(uploaded);
       } catch (analysisError) {
+        queueAutomaticMusicEnrichment(uploaded.id);
         console.warn("Audition import intelligence will retry from Enrich Library:", analysisError);
       }
       await refreshTracks();
@@ -1840,7 +1840,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
 
     let intelligenceMap = new Map<string, MusicTrackIntelligence>();
     if (!artworkOnly && targets.length) {
-      intelligenceMap = await hydrateMusicIntelligenceCache(targets).catch(() => new Map<string, MusicTrackIntelligence>());
+      intelligenceMap = await hydrateMusicIntelligenceCache(targets, { fresh: true }).catch(() => new Map<string, MusicTrackIntelligence>());
     }
 
     const metadataNeedsWork = (track: MusicTrack) =>
