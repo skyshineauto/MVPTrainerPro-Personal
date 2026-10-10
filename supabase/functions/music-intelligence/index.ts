@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const ARTIST_TABLE = "trainer_music_artist_intelligence";
-const ANALYSIS_VERSION = 2;
+const ANALYSIS_VERSION = 6;
 const CYANITE_LIMIT_BYTES = 20 * 1024 * 1024;
 const CYANITE_LIMIT_SECONDS = 15 * 60;
 const CYANITE_MODELS = [
@@ -342,6 +342,73 @@ function weightedTagText(tags: LastFmTag[]) {
   return tags.slice(0, 20).map((tag) => `${tag.name} ${tag.name}`).join(" ");
 }
 
+function semanticText(parts: Array<string | null | undefined>) {
+  return ` ${parts.filter(Boolean).join(" ").toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9+'\s-]/g, " ").replace(/[-_/]+/g, " ").replace(/\s+/g, " ").trim()} `;
+}
+
+function semanticPhraseScore(text: string, strong: string[], supporting: string[] = []) {
+  let score = 0;
+  for (const phrase of strong) {
+    const normalized = phrase.toLowerCase().replace(/[-_/]+/g, " ");
+    if (text.includes(` ${normalized} `) || text.includes(normalized)) score = Math.max(score, .92);
+  }
+  for (const phrase of supporting) {
+    const normalized = phrase.toLowerCase().replace(/[-_/]+/g, " ");
+    if (text.includes(` ${normalized} `) || text.includes(normalized)) score = Math.max(score, .68);
+  }
+  return score;
+}
+
+type SemanticExtras = {
+  moods?: string[];
+  characterTags?: string[];
+  movementTags?: string[];
+  musicFor?: string[];
+  description?: string | null;
+};
+
+function buildSemanticProfile(track: InputTrack, context: ProviderContext, extras: SemanticExtras = {}) {
+  const trackTagNames = context.trackTags.map((tag) => tag.name);
+  const artistTagNames = context.artistTags.slice(0, 8).map((tag) => tag.name);
+  const trackText = semanticText([track.title, track.album, track.genre, ...context.mbGenres, ...trackTagNames, ...(extras.moods || []), ...(extras.characterTags || []), ...(extras.movementTags || []), ...(extras.musicFor || []), extras.description || ""]);
+  const titleText = semanticText([track.title]);
+  const tagText = semanticText([...trackTagNames, ...(extras.moods || []), ...(extras.characterTags || []), ...(extras.musicFor || []), extras.description || ""]);
+
+  const love = Math.max(
+    semanticPhraseScore(tagText, ["love", "romantic", "romance", "in love", "love song", "affectionate", "tender"], ["relationship", "passionate", "intimate"]),
+    semanticPhraseScore(titleText, ["love", "lover", "loving", "romance", "heart of mine"], ["kiss", "baby", "darling"]) * .90,
+  );
+  const heartbreak = Math.max(
+    semanticPhraseScore(tagText, ["heartbreak", "heartbroken", "broken heart", "breakup", "break up", "lost love", "unrequited"], ["grief", "mourning", "goodbye", "lonely"]),
+    semanticPhraseScore(titleText, ["heartbreak", "broken heart", "goodbye", "without you", "miss you"], ["alone", "lonely"]) * .88,
+  );
+  const sad = semanticPhraseScore(trackText, ["sad", "melancholy", "melancholic", "sorrowful", "depressing", "heartbroken", "grief"], ["bittersweet", "lonely", "reflective", "emotional"]);
+  const angry = semanticPhraseScore(trackText, ["angry", "aggressive", "rage", "furious", "violent", "hostile"], ["rebellious", "defiant", "intense"]);
+  const motivational = semanticPhraseScore(trackText, ["motivational", "determined", "empowerment", "triumphant", "victorious", "heroic"], ["confident", "uplifting", "driving"]);
+  const party = semanticPhraseScore(trackText, ["party", "party anthem", "club", "dance party"], ["fun", "celebration", "upbeat"]);
+
+  const cleanVocal = semanticPhraseScore(trackText, ["clean vocals", "clean vocal", "melodic vocals", "melodic vocal"], ["melodic"]);
+  const screamedVocal = semanticPhraseScore(trackText, ["screamed vocals", "screaming vocals", "scream vocals", "harsh vocals"], ["screamo", "metalcore"]);
+  const growledVocal = semanticPhraseScore(trackText, ["growled vocals", "growling vocals", "death growls", "growls"], ["death metal", "deathcore"]);
+  const raspyVocal = semanticPhraseScore(trackText, ["raspy vocals", "raspy vocal", "gritty vocals", "gravelly vocals"], ["grunge", "blues rock"]);
+
+  const originalReleaseYear = Number.isFinite(Number(track.releaseYear)) ? Number(track.releaseYear) : null;
+  const decade = originalReleaseYear != null ? Math.floor(originalReleaseYear / 10) * 10 : null;
+  const evidenceCount = Number(context.trackTags.length > 0) + Number(context.mbGenres.length > 0) + Number(Boolean(extras.description)) + Number((extras.moods || []).length > 0);
+  const confidence = Math.min(.98, .46 + evidenceCount * .11 + (context.mbRecordingId ? .08 : 0));
+
+  return {
+    version: 1,
+    originalReleaseYear,
+    decade,
+    themes: { love, heartbreak, motivation: motivational, party },
+    moods: { sad, angry },
+    vocals: { clean: cleanVocal, screamed: screamedVocal, growled: growledVocal, raspy: raspyVocal },
+    confidence,
+    evidence: [...new Set([...trackTagNames.slice(0, 8), ...context.mbGenres.slice(0, 6), ...artistTagNames.slice(0, 4)])].slice(0, 16),
+  };
+}
+
 function deriveArtistDna(track: InputTrack, context: ProviderContext): ArtistDNA {
   const text = [track.genre, ...context.mbGenres, weightedTagText(context.artistTags)].filter(Boolean).join(" ");
   return profileFromText(text);
@@ -642,7 +709,16 @@ async function finalizeCyanite(
       lastfm_track_tags: context.trackTags,
       cyanite_track_id: cyaniteTrackId,
       cyanite_status: "complete",
-      provider_payload: { cyanite: cyanite.raw },
+      provider_payload: {
+        cyanite: cyanite.raw,
+        semantic_profile: buildSemanticProfile(track, context, {
+          moods: cyanite.moods,
+          characterTags: cyanite.characterTags,
+          movementTags: cyanite.movementTags,
+          musicFor: cyanite.musicFor,
+          description: cyanite.description,
+        }),
+      },
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       error: null,
@@ -700,6 +776,7 @@ Deno.serve(async (req) => {
         const updated = {
           ...existing,
           status: "complete",
+          analysis_version: ANALYSIS_VERSION,
           confidence: Math.max(Number(existing.confidence || 0), confidenceFor(context, true)),
           source: [...new Set([...(Array.isArray(existing.source) ? existing.source : []), "cyanite"])],
           song_dna: cyanite.dna,
@@ -714,7 +791,20 @@ Deno.serve(async (req) => {
           music_for: cyanite.musicFor,
           description: cyanite.description,
           cyanite_status: "complete",
-          provider_payload: { ...(existing.provider_payload || {}), cyanite: cyanite.raw },
+          provider_payload: {
+            ...(existing.provider_payload || {}),
+            cyanite: cyanite.raw,
+            semantic_profile: buildSemanticProfile(track, {
+              ...context,
+              trackTags: Array.isArray(existing.lastfm_track_tags) ? existing.lastfm_track_tags : context.trackTags,
+            }, {
+              moods: cyanite.moods,
+              characterTags: cyanite.characterTags,
+              movementTags: cyanite.movementTags,
+              musicFor: cyanite.musicFor,
+              description: cyanite.description,
+            }),
+          },
           analyzed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           error: null,
@@ -790,6 +880,13 @@ Deno.serve(async (req) => {
         lastfmArtistTags: context.artistTags,
         musicbrainzGenres: context.mbGenres,
         deezer: deezer ? { trackId: deezer.trackId, bpm: deezer.bpm, gain: deezer.gain, confidence: deezer.confidence } : null,
+        semantic_profile: buildSemanticProfile(track, context, {
+          moods: context.trackTags.slice(0, 10).map((tag) => tag.name),
+          characterTags: existing?.character_tags || [],
+          movementTags: existing?.movement_tags || [],
+          musicFor: existing?.music_for || [],
+          description: existing?.description || null,
+        }),
       },
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

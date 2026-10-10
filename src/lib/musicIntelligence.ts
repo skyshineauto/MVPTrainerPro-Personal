@@ -1,5 +1,6 @@
 /* MVP_TRAINER_V5_R7_NEURAL_PLAYER_DISCOVERY */
 import type { MusicTrack } from "./musicStorage";
+import { getCachedMusicTrackIntelligence } from "./musicIntelligenceCache";
 import {
   createMusicPlaylist,
   listMusicPlaylists,
@@ -296,6 +297,122 @@ export function getSongDna(track: MusicTrack): SongDna {
   };
 }
 
+type RichSimilarityVector = {
+  energy: number;
+  heavy: number;
+  aggression: number;
+  drive: number;
+  intensity: number;
+  melodic: number;
+  dark: number;
+  bright: number;
+  atmospheric: number;
+  reflective: number;
+  relaxing: number;
+  uplifting: number;
+  motivational: number;
+  chaotic: number;
+  focus: number;
+  upbeat: number;
+  workoutFit: number;
+};
+
+function richSimilarityVector(track: MusicTrack): RichSimilarityVector {
+  const cached = getCachedMusicTrackIntelligence(track.id)?.songDna;
+  if (cached) {
+    return {
+      energy: cached.energy,
+      heavy: cached.heaviness,
+      aggression: cached.aggression,
+      drive: cached.drive,
+      intensity: cached.intensity,
+      melodic: cached.melodic,
+      dark: cached.darkness,
+      bright: cached.brightness,
+      atmospheric: cached.atmospheric,
+      reflective: cached.reflective,
+      relaxing: cached.relaxing,
+      uplifting: cached.uplifting,
+      motivational: cached.motivational,
+      chaotic: cached.chaotic,
+      focus: cached.focus,
+      upbeat: cached.upbeat,
+      workoutFit: cached.workoutFit,
+    };
+  }
+  const basic = getSongDna(track);
+  return {
+    energy: basic.energy,
+    heavy: basic.heavy,
+    aggression: basic.heavy * .72,
+    drive: basic.drive,
+    intensity: basic.energy * .55 + basic.heavy * .45,
+    melodic: basic.melodic,
+    dark: basic.dark,
+    bright: 100 - basic.dark,
+    atmospheric: 50,
+    reflective: basic.melodic * .60,
+    relaxing: Math.max(0, 100 - basic.energy),
+    uplifting: Math.max(0, 100 - basic.dark),
+    motivational: basic.workoutFit * .65,
+    chaotic: basic.heavy * .35,
+    focus: 55,
+    upbeat: Math.max(0, basic.energy - basic.dark * .25),
+    workoutFit: basic.workoutFit,
+  };
+}
+
+function richSimilarityDistance(a: MusicTrack, b: MusicTrack) {
+  const left = richSimilarityVector(a);
+  const right = richSimilarityVector(b);
+  const weights: Array<[keyof RichSimilarityVector, number]> = [
+    ["heavy", 1.35], ["drive", 1.30], ["energy", 1.22], ["melodic", 1.18],
+    ["aggression", 1.15], ["intensity", 1.10], ["dark", 1.04], ["bright", .88],
+    ["atmospheric", .92], ["reflective", .82], ["relaxing", .85], ["uplifting", .76],
+    ["motivational", .70], ["chaotic", .72], ["focus", .58], ["upbeat", .72], ["workoutFit", .74],
+  ];
+  const total = weights.reduce((sum, [, weight]) => sum + weight, 0);
+  return weights.reduce((sum, [key, weight]) => sum + Math.abs(left[key] - right[key]) * weight, 0) / total;
+}
+
+function normalizedStyleTokens(track: MusicTrack) {
+  const intelligence = getCachedMusicTrackIntelligence(track.id);
+  const values = [track.genre || "", ...(intelligence?.mainGenres || []), ...(intelligence?.subgenres || [])];
+  return new Set(values.flatMap((value) => String(value).toLowerCase().replace(/[’']/g, "'").split(/[,/|]+/)).map((value) => value.trim().replace(/[-_]+/g, " ")).filter(Boolean));
+}
+
+function styleOverlapScore(seed: MusicTrack, candidate: MusicTrack) {
+  const a = normalizedStyleTokens(seed);
+  const b = normalizedStyleTokens(candidate);
+  if (!a.size || !b.size) return 0;
+  let shared = 0;
+  for (const value of a) if (b.has(value)) shared += 1;
+  if (!shared) return -16;
+  return Math.min(30, 12 + shared * 9);
+}
+
+function releaseYear(track: MusicTrack) {
+  const year = Number(track.release_year || 0);
+  return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
+}
+
+function eraSimilarityScore(seed: MusicTrack, candidate: MusicTrack) {
+  const a = releaseYear(seed);
+  const b = releaseYear(candidate);
+  if (a == null || b == null) return 0;
+  const delta = Math.abs(a - b);
+  if (delta <= 2) return 18;
+  if (delta <= 5) return 13;
+  if (Math.floor(a / 10) === Math.floor(b / 10)) return 9;
+  if (delta <= 15) return 1;
+  return -12;
+}
+
+function exactSongFingerprintScore(seed: MusicTrack, candidate: MusicTrack) {
+  const distance = richSimilarityDistance(seed, candidate);
+  return 122 - distance * 1.72 + styleOverlapScore(seed, candidate) + eraSimilarityScore(seed, candidate);
+}
+
 export function radioModeLabel(mode: MusicRadioMode) {
   if (mode === "harder") return "Harder";
   if (mode === "heavier") return "Heavier";
@@ -447,7 +564,9 @@ function candidateScore(
   const candidateDna = getSongDna(candidate);
 
   const surpriseSimilarityScale = mode === "surprise" ? 0.58 : 1;
-  let score = 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
+  let score = mode === "more_like_this"
+    ? exactSongFingerprintScore(seed, candidate)
+    : 100 - dnaDistance(seedDna, candidateDna, mode) * surpriseSimilarityScale;
 
   if (normalizedArtist(seed) === normalizedArtist(candidate)) {
     score += mode === "surprise" ? -12 : 8;
@@ -512,7 +631,7 @@ function candidateScore(
     score += mode === "surprise" ? 22 : 12;
   }
 
-  return score + Math.random() * (mode === "surprise" ? 8 : 4);
+  return score + Math.random() * (mode === "surprise" ? 8 : mode === "more_like_this" ? 1.25 : 4);
 }
 
 function steeringLength(mode: MusicRadioMode) {
@@ -609,8 +728,13 @@ export function chooseAdaptiveNextTrack(
 
   // Do not deterministically hammer the single highest score. Randomize within
   // the best unplayed candidates while preserving the steering bias.
-  const poolSize = Math.min(10, Math.max(3, Math.ceil(Math.sqrt(ranked.length))));
-  const pool = ranked.slice(0, poolSize);
+  const radio = readRadioState();
+  const closeMatchMode = radio?.mode === "more_like_this";
+  const explore = closeMatchMode && Math.random() < 0.12;
+  const poolSize = closeMatchMode
+    ? Math.min(explore ? 8 : 3, ranked.length)
+    : Math.min(10, Math.max(3, Math.ceil(Math.sqrt(ranked.length))));
+  const pool = ranked.slice(0, Math.max(1, poolSize));
   const floor = pool[pool.length - 1]?.score ?? 0;
   const weighted = pool.map((entry) => ({ ...entry, weight: Math.max(1, entry.score - floor + 6) }));
   const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);

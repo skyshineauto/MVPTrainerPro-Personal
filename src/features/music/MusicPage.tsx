@@ -765,7 +765,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [songSearch, setSongSearch] = useState("");
-  const [songSort, setSongSort] = useState<SongSort>("library");
+  const [songSort, setSongSort] = useState<SongSort>("recently_added");
   const [artistView, setArtistView] = useState<CollectionView>(() => readCollectionView("mvp_music_artist_view_v1", "grid8"));
   const [albumView, setAlbumView] = useState<CollectionView>(() => readCollectionView("mvp_music_album_view_v1", "grid8"));
   const [energyFilter, setEnergyFilter] = useState<EnergyFilter>("all");
@@ -1974,7 +1974,7 @@ export function MusicPage({ navigate }: { navigate?: (to: string) => void }) {
               intelligenceUpdatedThisTrack = true;
               intelligenceUpdated += 1;
             } else {
-              setEnrichment((current) => ({ ...current, stage: "song_dna", serviceMessage: "Current V3 Song DNA, BPM and Key protected ✓" }));
+              setEnrichment((current) => ({ ...current, stage: "song_dna", serviceMessage: "Current V6 Song DNA, BPM and Key protected ✓" }));
             }
             if (intelligence) {
               intelligenceMap.set(track.id, intelligence);

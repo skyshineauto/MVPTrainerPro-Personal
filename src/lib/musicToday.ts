@@ -55,6 +55,8 @@ type TodayLibraryIntent = {
   decadeLabel: string | null;
   styles: string[];
   styleLabels: string[];
+  themes: string[];
+  themeLabels: string[];
   artistKeys: string[];
   artistLabels: string[];
   artistMode: "none" | "only" | "similar";
@@ -93,6 +95,8 @@ const EMPTY_LIBRARY_INTENT: TodayLibraryIntent = {
   decadeLabel: null,
   styles: [],
   styleLabels: [],
+  themes: [],
+  themeLabels: [],
   artistKeys: [],
   artistLabels: [],
   artistMode: "none",
@@ -138,7 +142,7 @@ function freshContext(): MusicTodayContext {
     tags: [],
     target: { ...EMPTY_CONTEXT.target },
     constraints: { min: {}, max: {}, bpmMin: null, bpmMax: null },
-    libraryIntent: { ...EMPTY_LIBRARY_INTENT, styles: [], styleLabels: [], artistKeys: [], artistLabels: [] },
+    libraryIntent: { ...EMPTY_LIBRARY_INTENT, styles: [], styleLabels: [], themes: [], themeLabels: [], artistKeys: [], artistLabels: [] },
   };
 }
 
@@ -406,6 +410,17 @@ const LIBRARY_STYLE_RULES: LibraryStyleRule[] = [
   { key: "ska", label: "Ska", promptTerms: ["ska"], matchTerms: ["ska", "ska punk"] },
 ];
 
+type LibraryThemeRule = {
+  key: string;
+  label: string;
+  promptTerms: string[];
+};
+
+const LIBRARY_THEME_RULES: LibraryThemeRule[] = [
+  { key: "love", label: "Love Songs", promptTerms: ["love songs", "love song", "songs about love", "romantic songs", "romance songs", "romantic music"] },
+  { key: "heartbreak", label: "Heartbreak", promptTerms: ["heartbreak songs", "heartbroken songs", "breakup songs", "break up songs", "broken heart songs"] },
+];
+
 function decadeFromPrompt(rawPrompt: string) {
   const lower = rawPrompt.toLowerCase().replace(/[’]/g, "'");
   const wordDecades: Array<[RegExp, number]> = [
@@ -432,14 +447,19 @@ function parseLibraryIntent(rawPrompt: string): TodayLibraryIntent {
   const matched = LIBRARY_STYLE_RULES.filter((rule) => rule.promptTerms.some((term) => text.includes(` ${term} `)));
   const styles = [...new Set(matched.map((rule) => rule.key))];
   const styleLabels = [...new Set(matched.map((rule) => rule.label))];
+  const matchedThemes = LIBRARY_THEME_RULES.filter((rule) => rule.promptTerms.some((term) => text.includes(` ${term} `)));
+  const themes = [...new Set(matchedThemes.map((rule) => rule.key))];
+  const themeLabels = [...new Set(matchedThemes.map((rule) => rule.label))];
   const directCue = /\b(?:play|hear|listen|put on|give me|queue|songs?|music|bands?|artists?|tracks?|all)\b/i.test(rawPrompt);
-  const directRequest = Boolean(decade || styles.length) && (directCue || styles.length > 0 || Boolean(decade));
+  const directRequest = Boolean(decade || styles.length || themes.length) && (directCue || styles.length > 0 || themes.length > 0 || Boolean(decade));
   return {
     decadeStart: decade?.start ?? null,
     decadeEnd: decade?.end ?? null,
     decadeLabel: decade?.label ?? null,
     styles,
     styleLabels,
+    themes,
+    themeLabels,
     artistKeys: [],
     artistLabels: [],
     artistMode: "none",
@@ -483,6 +503,36 @@ function inferHardConstraints(target: TodayVector, tags: string[], explicit: Tod
     setMin(constraints, "drive", 55);
     setMin(constraints, "intensity", 48);
     constraints.bpmMin = constraints.bpmMin == null ? 88 : Math.max(constraints.bpmMin, 88);
+  }
+
+  if (hasTag("Slow")) {
+    setMax(constraints, "energy", 68);
+    setMax(constraints, "drive", 64);
+    setMax(constraints, "intensity", 68);
+    constraints.bpmMax = constraints.bpmMax == null ? 98 : Math.min(constraints.bpmMax, 98);
+  }
+
+  if (hasTag("Fast")) {
+    setMin(constraints, "energy", 56);
+    setMin(constraints, "drive", 54);
+    constraints.bpmMin = constraints.bpmMin == null ? 116 : Math.max(constraints.bpmMin, 116);
+  }
+
+  if (hasTag("Heavy")) {
+    setMin(constraints, "heavy", 62);
+    setMin(constraints, "intensity", 52);
+  }
+
+  if (hasTag("Romantic")) {
+    setMin(constraints, "melodic", 48);
+    setMax(constraints, "aggression", 62);
+  }
+
+  if (hasTag("Sad", "Heartbroken")) {
+    setMin(constraints, "reflective", 44);
+    setMin(constraints, "dark", hasTag("Heartbroken") ? 50 : 42);
+    setMax(constraints, "upbeat", hasTag("Heartbroken") ? 54 : 62);
+    setMax(constraints, "uplifting", 68);
   }
 
   if (hasTag("Happy", "Playful") || target.uplifting >= 78 || target.upbeat >= 78) {
@@ -704,7 +754,7 @@ function intentLabels(intent: TodayLibraryIntent) {
   const artists = intent.artistLabels.length
     ? [intent.artistLabels.join(" + ") + (intent.artistMode === "similar" ? " + similar" : "")]
     : [];
-  return [...artists, intent.decadeLabel, ...intent.styleLabels].filter((value): value is string => Boolean(value));
+  return [...artists, intent.decadeLabel, ...intent.styleLabels, ...intent.themeLabels].filter((value): value is string => Boolean(value));
 }
 
 function styleContext(track: MusicTrack) {
@@ -744,6 +794,70 @@ function matchesLibraryStyle(track: MusicTrack, key: string) {
   });
 }
 
+function semanticRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function semanticThemeScore(track: MusicTrack, key: string) {
+  const intelligence = getCachedMusicTrackIntelligence(track.id);
+  const payload = semanticRecord(intelligence?.providerPayload);
+  const profile = semanticRecord(payload?.semantic_profile);
+  const themes = semanticRecord(profile?.themes);
+  const stored = Number(themes?.[key] ?? 0);
+  if (Number.isFinite(stored) && stored > 0) return Math.max(0, Math.min(1, stored));
+
+  // Strict fallback only uses track-level evidence, never broad artist identity.
+  const context = [
+    track.title || "",
+    ...(intelligence?.moods || []),
+    ...(intelligence?.characterTags || []),
+    ...(intelligence?.musicFor || []),
+    intelligence?.description || "",
+  ].join(" ").toLowerCase().replace(/[’']/g, "'").replace(/[-_/]+/g, " ").replace(/\s+/g, " ");
+  if (key === "love") {
+    if (/\b(?:love|romantic|romance|in love|love song|affectionate|tender)\b/i.test(context)) return .82;
+    return 0;
+  }
+  if (key === "heartbreak") {
+    if (/\b(?:heartbreak|heartbroken|broken heart|breakup|lost love|unrequited|without you|miss you)\b/i.test(context)) return .82;
+    return 0;
+  }
+  return 0;
+}
+
+function strictTagCompatibility(track: MusicTrack, tags: string[], dna: TrackDNA, bpm: number | null) {
+  const intelligence = getCachedMusicTrackIntelligence(track.id);
+  const text = [
+    ...(intelligence?.moods || []),
+    ...(intelligence?.characterTags || []),
+    ...(intelligence?.movementTags || []),
+    ...(intelligence?.musicFor || []),
+    intelligence?.description || "",
+  ].join(" ").toLowerCase();
+
+  if (tags.includes("Slow")) {
+    if (bpm == null || bpm > 98 || dna.drive > 64 || dna.energy > 68) return false;
+  }
+  if (tags.includes("Fast")) {
+    if (bpm == null || bpm < 116 || dna.drive < 54) return false;
+  }
+  if (tags.includes("Heavy") && dna.heavy < 62) return false;
+  if (tags.includes("Sad")) {
+    const explicitSad = /\b(?:sad|melanchol|sorrow|depress|bittersweet|heartbroken|grief|mourning)\b/i.test(text);
+    if (!explicitSad && !(dna.dark >= 52 && dna.reflective >= 52 && dna.upbeat <= 58)) return false;
+  }
+  if (tags.includes("Heartbroken")) {
+    const explicitHeartbreak = semanticThemeScore(track, "heartbreak") >= .62;
+    if (!explicitHeartbreak && !(dna.dark >= 60 && dna.reflective >= 58 && dna.upbeat <= 48)) return false;
+  }
+  if (tags.includes("Romantic") && semanticThemeScore(track, "love") < .62) return false;
+  if (tags.includes("Relaxed") || tags.includes("Peaceful")) {
+    if (bpm != null && bpm > 112) return false;
+    if (dna.aggression > 54 || dna.intensity > 68) return false;
+  }
+  return true;
+}
+
 function matchesLibraryIntent(track: MusicTrack, intent: TodayLibraryIntent) {
   if (!intent.directRequest) return true;
   if (intent.decadeStart != null && intent.decadeEnd != null) {
@@ -751,6 +865,7 @@ function matchesLibraryIntent(track: MusicTrack, intent: TodayLibraryIntent) {
     if (year == null || year < intent.decadeStart || year > intent.decadeEnd) return false;
   }
   if (intent.styles.length && !intent.styles.some((style) => matchesLibraryStyle(track, style))) return false;
+  if (intent.themes.length && !intent.themes.every((theme) => semanticThemeScore(track, theme) >= .62)) return false;
   if (intent.artistMode === "only" && intent.artistKeys.length && !intent.artistKeys.some((key) => artistMatchesKey(track.artist, key))) return false;
   return true;
 }
@@ -1012,6 +1127,7 @@ function strictCompatibility(constraints: TodayConstraints, dna: TrackDNA, bpm: 
     const ceiling = constraints.max[key];
     if (ceiling != null && dna[key] > ceiling) return false;
   }
+  if ((constraints.bpmMin != null || constraints.bpmMax != null) && (bpm == null || !Number.isFinite(bpm))) return false;
   if (bpm != null && constraints.bpmMin != null && bpm < constraints.bpmMin) return false;
   if (bpm != null && constraints.bpmMax != null && bpm > constraints.bpmMax) return false;
   return true;
@@ -1042,6 +1158,26 @@ function tempoAffinity(target: TodayVector, bpm: number | null) {
   if (target.relaxing >= 72 && bpm > 122) score -= (bpm - 122) * 0.15;
   if (target.drive >= 75 && bpm < 92) score -= (92 - bpm) * 0.08;
   return score;
+}
+
+function likedTasteAffinity(track: MusicTrack, likedTracks: MusicTrack[]) {
+  if (!likedTracks.length || track.play_less) return 0;
+  const candidate = staticTrackDNA(track);
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let styleBonus = 0;
+  const candidateIntel = getCachedMusicTrackIntelligence(track.id);
+  const candidateStyles = new Set([...(candidateIntel?.mainGenres || []), ...(candidateIntel?.subgenres || [])].map((value) => value.toLowerCase()));
+
+  for (const liked of likedTracks) {
+    if (liked.id === track.id) continue;
+    bestDistance = Math.min(bestDistance, vectorDistance(candidate, staticTrackDNA(liked)));
+    const likedIntel = getCachedMusicTrackIntelligence(liked.id);
+    const likedStyles = [...(likedIntel?.mainGenres || []), ...(likedIntel?.subgenres || [])].map((value) => value.toLowerCase());
+    if (likedStyles.some((style) => candidateStyles.has(style))) styleBonus = Math.max(styleBonus, 7);
+  }
+  if (!Number.isFinite(bestDistance)) return track.favorite ? 4 : 0;
+  const dnaBonus = Math.max(0, 24 - bestDistance * .92);
+  return dnaBonus + styleBonus + (track.favorite ? 4 : 0);
 }
 
 function averageRequestedArtistDNA(library: MusicTrack[], intent: TodayLibraryIntent): TodayVector | null {
@@ -1079,6 +1215,7 @@ function rankForToday(
   const unique = uniqueTracks(library);
   const constraints = inferHardConstraints(target, tags, explicitConstraints);
   const similarArtistReference = averageRequestedArtistDNA(unique, libraryIntent);
+  const likedTracks = unique.filter((track) => track.favorite && !track.play_less);
   const prepared = unique.map((track) => {
     const intelligence = getCachedMusicTrackIntelligence(track.id);
     const rawBpm = intelligence?.bpm == null ? null : Number(intelligence.bpm);
@@ -1092,7 +1229,8 @@ function rankForToday(
   const eligible = prepared.filter(({ track, dna, bpm }) =>
     matchesLibraryIntent(track, libraryIntent) &&
     matchesSimilarArtistIntent(track, libraryIntent, similarArtistReference) &&
-    strictCompatibility(constraints, dna, bpm)
+    strictCompatibility(constraints, dna, bpm) &&
+    strictTagCompatibility(track, tags, dna, bpm)
   );
   if (!eligible.length) return [];
 
@@ -1102,7 +1240,7 @@ function rankForToday(
       const stable = hashUnit(`${prompt}|${revision}|${track.id}`);
       const jitter = surpriseStrength > 0 ? stable * 24 * surpriseStrength : stable * 0.55;
       const currentPenalty = currentTrackId && track.id === currentTrackId ? 180 : 0;
-      const score = 100 - distance + moodAffinity(target, dna) + tempoAffinity(target, bpm) + jitter - currentPenalty;
+      const score = 100 - distance + moodAffinity(target, dna) + tempoAffinity(target, bpm) + likedTasteAffinity(track, likedTracks) + jitter - currentPenalty;
       return { track, score };
     })
     .sort((left, right) => right.score - left.score)

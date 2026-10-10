@@ -17,7 +17,7 @@ import {
 
 export type { MusicArtistDNA, MusicSongDNA, MusicTrackIntelligence } from "./musicIntelligenceCache";
 
-export const MUSIC_INTELLIGENCE_VERSION = 5;
+export const MUSIC_INTELLIGENCE_VERSION = 6;
 const TRACK_TABLE = "trainer_music_track_intelligence";
 const TRACK_SELECT = "track_id,artist_key,artist_name,status,analysis_version,confidence,source,song_dna,artist_dna,bpm,key_signature,tempo_label,main_genres,subgenres,moods,character_tags,movement_tags,music_for,description,musicbrainz_recording_id,musicbrainz_artist_id,cyanite_track_id,cyanite_status,provider_payload,analyzed_at,updated_at,error";
 
@@ -268,11 +268,21 @@ function chunk<T>(items: T[], size: number) {
   return result;
 }
 
+function hasStrictSemanticProfile(value: MusicTrackIntelligence) {
+  const semantic = value.providerPayload?.semantic_profile;
+  if (!semantic || typeof semantic !== "object" || Array.isArray(semantic)) return false;
+  const version = Number((semantic as Record<string, unknown>).version || 0);
+  return version >= 1;
+}
+
 export function isMusicIntelligenceCurrent(value: MusicTrackIntelligence | null | undefined) {
   return Boolean(
     value &&
       value.analysisVersion >= MUSIC_INTELLIGENCE_VERSION &&
-      (value.status === "complete" || value.status === "partial" || value.status === "processing")
+      value.status === "complete" &&
+      value.bpm != null && Number.isFinite(Number(value.bpm)) &&
+      Boolean(value.keySignature) &&
+      hasStrictSemanticProfile(value)
   );
 }
 
