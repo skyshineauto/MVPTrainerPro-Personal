@@ -1,4 +1,4 @@
-/* R29: Automatic resumable foreground worker. No manual Enrich Library repeat
+/* R35: Automatic resumable foreground worker. No manual Enrich Library repeat
  * required. It runs while the app is open and resumes unfinished tracks when
  * the app reopens. Server-side operation after all browsers close requires a
  * separately configured scheduled worker; do not claim this client does that.
@@ -13,7 +13,7 @@ import {
 } from "./musicIntelligenceEnrichment";
 import { supabase } from "./supabase";
 
-const STORAGE = "mvp_music_auto_enrichment_r31";
+const STORAGE = "mvp_music_auto_enrichment_r35";
 type Attempt = { failures: number; retryAt: number; finished?: boolean };
 type Saved = { userId: string; attempts: Record<string, Attempt> };
 let active = false;

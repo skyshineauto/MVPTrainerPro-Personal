@@ -212,6 +212,27 @@ function cleanLookupTitle(track: InputTrack) {
   const prefix = `${track.artist} / `;
   return title.toLowerCase().startsWith(prefix.toLowerCase()) ? title.slice(prefix.length).trim() : title;
 }
+// Catalog search aliases correct punctuation and release-credit formatting; they
+// never by themselves prove that a different artist or version is the recording.
+function r35TitleVariants(track: InputTrack) {
+  const raw = cleanLookupTitle(track);
+  const withoutFeatures = raw.replace(/\s*[([]\s*(?:feat\.?|ft\.?|featuring)\b[^\])]*[)]]/ig, "").trim();
+  const withoutSoundtrack = withoutFeatures.replace(/\s*\(From\s+["“].*?["”]\)\s*$/i, "").trim();
+  const withoutCredit = withoutSoundtrack.replace(/\s*\(feat\.?[^)]*\)\s*$/i, "").trim();
+  const editionVersion = versionKind(`${raw} ${track.album || ""}`);
+  const albumVersion = editionVersion === "remix" && /\bremix\b/i.test(track.album || "")
+    ? String(track.album || "").trim() : "";
+  const typo = /^your the best around$/i.test(withoutCredit) && normalizeCatalogText(track.artist).includes("joe esposito")
+    ? "You're the Best Around" : withoutCredit;
+  return [...new Set([raw, withoutFeatures, withoutSoundtrack, withoutCredit, albumVersion, typo].filter(Boolean))];
+}
+function r35ArtistVariants(artist: string) {
+  // Featured performers do not by themselves establish attribution to their own
+  // recordings. The one historical multi-artist compilation credit below
+  // identifies the original performing group, not a generic last-credit rule.
+  const yardbirds = /eric clapton\s*,\s*jeff beck\s*,\s*the yardbirds/i.test(artist) ? ["The Yardbirds"] : [];
+  return [...new Set([...yardbirds, artist, leadArtist(artist)])].filter(Boolean).slice(0, 3);
+}
 function leadArtist(value: string) {
   return String(value || "").split(/\s*(?:,|\s+&\s+|\s+feat\.?\s+|\s+featuring\s+)\s*/i)[0].trim();
 }
@@ -219,18 +240,27 @@ function leadArtist(value: string) {
 async function musicBrainzIdentity(track: InputTrack) {
   if (!track.artist || !track.title) return { recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null };
   const lookupTitle = cleanLookupTitle(track);
-  const exactQuery = `recording:"${escapeMb(lookupTitle)}" AND artist:"${escapeMb(track.artist)}"`;
-  const search = async (q: string) => musicBrainzJson(`https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(q)}&fmt=json&limit=12`);
-  let payload = await search(exactQuery);
-  let recordings = Array.isArray(payload?.recordings) ? payload.recordings as Array<Record<string, unknown>> : [];
-  if (leadArtist(track.artist) !== track.artist &&
-      !recordings.some(row => normalizeCatalogText(row.title) === normalizeCatalogText(lookupTitle) &&
-        normalizeCatalogText(musicBrainzCreditName(row)).includes(normalizeCatalogText(leadArtist(track.artist))))) {
-    payload = await search(`recording:"${escapeMb(lookupTitle)}" AND artist:"${escapeMb(leadArtist(track.artist))}"`);
-    const alternate = Array.isArray(payload?.recordings) ? payload.recordings as Array<Record<string, unknown>> : [];
-    recordings = [...recordings, ...alternate];
+  const search = async (q: string) => musicBrainzJson(`https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(q)}&fmt=json&limit=15`);
+  let recordings: Array<Record<string, unknown>> = [];
+  const candidates = r35TitleVariants(track);
+  const artists = r35ArtistVariants(track.artist);
+  // Ask alternate queries only when the preceding query has no exact eligible
+  // match. Broad title-only search is never used for attribution.
+  for (const candidate of candidates) {
+    for (const artistName of artists) {
+      const payload = await search(`recording:"${escapeMb(candidate)}" AND artist:"${escapeMb(artistName)}"`);
+      const found = Array.isArray(payload?.recordings) ? payload.recordings as Array<Record<string, unknown>> : [];
+      recordings.push(...found);
+      const wanted = normalizeCatalogText(candidate);
+      if (found.some(row => normalizeCatalogText(row.title) === wanted &&
+          normalizeCatalogText(musicBrainzCreditName(row)).includes(normalizeCatalogText(artistName)))) break;
+    }
+    if (recordings.some(row => normalizeCatalogText(row.title) === normalizeCatalogText(candidate) &&
+        r35ArtistVariants(track.artist).some(a => normalizeCatalogText(musicBrainzCreditName(row)).includes(normalizeCatalogText(a))))) break;
   }
+  recordings = [...new Map(recordings.filter(row => row.id).map(row => [String(row.id), row])).values()];
   const wantedTitle = normalizeCatalogText(lookupTitle);
+  const wantedTitles = new Set(r35TitleVariants(track).map(normalizeCatalogText));
   const wantedArtist = normalizeCatalogText(track.artist);
   const wantedLeadArtist = normalizeCatalogText(leadArtist(track.artist));
   const wantedVersion = versionKind(`${lookupTitle} ${track.album || ""}`);
@@ -239,11 +269,12 @@ async function musicBrainzIdentity(track: InputTrack) {
     const candidateTitle = normalizeCatalogText(recording.title);
     const candidateArtist = normalizeCatalogText(musicBrainzCreditName(recording));
     let score = 0;
-    if (wantedTitle && candidateTitle === wantedTitle) score += 70;
+    if (wantedTitle && wantedTitles.has(candidateTitle)) score += 70;
     else if (wantedTitle && candidateTitle && (candidateTitle.includes(wantedTitle) || wantedTitle.includes(candidateTitle))) score += 34;
     if (wantedArtist && candidateArtist === wantedArtist) score += 55;
     else if (wantedLeadArtist && candidateArtist && (candidateArtist === wantedLeadArtist || candidateArtist.startsWith(`${wantedLeadArtist} `))) score += 48;
     else if (wantedArtist && candidateArtist && (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist))) score += 22;
+    else if (r35ArtistVariants(track.artist).some(a => normalizeCatalogText(a) === candidateArtist)) score += 48;
     // Never use the studio recording as evidence of a separately uploaded live/remix/edit.
     const candidateVersion = versionKind(`${String(recording.title || "")} ${String(recording.disambiguation || "")}`);
     if (wantedVersion !== "studio" && candidateVersion !== wantedVersion) score = -1000;
@@ -341,42 +372,96 @@ async function deezerAudioFacts(track: InputTrack): Promise<DeezerAudioFacts | n
 
 // R29: Secondary, independently matched catalog data. Catalog/edition release
 // dates are NOT treated as an original recording year without primary evidence.
+// Query by the credited lead artist as well as original credit. Keep the exact
+// version, artist and duration gates on every candidate. Never use compilation
+// or deluxe date as the first publication of the recording.
 async function appleCatalog(track: InputTrack) {
   if (!track.artist || !track.title) return null;
-  const query = new URLSearchParams({ term: `${track.artist} ${track.title}`, entity: "song", limit: "12" });
+  const results: Array<Record<string, unknown>> = [];
+  for (const variant of r35TitleVariants(track).slice(0, 3)) {
+    const term = `${leadArtist(track.artist)} ${variant}`;
+    const query = new URLSearchParams({ term, entity: "song", limit: "50" });
+    const response = await fetch(`https://itunes.apple.com/search?${query}`, { signal: AbortSignal.timeout(8500) });
+    if (!response.ok) continue;
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const rows = Array.isArray(payload?.results) ? payload.results as Array<Record<string, unknown>> : [];
+    results.push(...rows);
+    const requested = versionKind(`${track.title} ${track.album || ""}`);
+    if (rows.some(row => normalizeCatalogText(row.trackName) === normalizeCatalogText(variant) &&
+        r35ArtistVariants(track.artist).some(a => normalizeCatalogText(row.artistName) === normalizeCatalogText(a)) &&
+        (requested === "studio" ? !["live", "remix", "demo"].includes(versionKind(`${row.trackName} ${row.collectionName}`))
+          : versionKind(`${row.trackName} ${row.collectionName}`) === requested))) break;
+  }
+  const rows = [...new Map(results.map(row => [String(row.trackId || `${row.artistName}-${row.trackName}-${row.collectionName}`), row])).values()];
+  const album = normalizeCatalogText(originalAlbumName(track.album || ""));
+  const titles = new Set(r35TitleVariants(track).map(normalizeCatalogText));
+  const requestedVersion = versionKind(`${track.title} ${track.album || ""}`);
+  const candidate = rows.map(row => {
+    const a = normalizeCatalogText(row.artistName), t = normalizeCatalogText(row.trackName);
+    const creditMatches = r35ArtistVariants(track.artist).some(name => normalizeCatalogText(name) === a);
+    let score = t && titles.has(t) && creditMatches ? 140 : 0;
+    const rowVersion = versionKind(`${String(row.trackName || "")} ${String(row.collectionName || "")}`);
+    if (score && requestedVersion === "live" && rowVersion !== "live") score = 0;
+    else if (score && requestedVersion === "remix" && rowVersion !== "remix") score = 0;
+    else if (score && requestedVersion === "demo" && rowVersion !== "demo") score = 0;
+    else if (score && requestedVersion === "studio" && ["live", "remix", "demo"].includes(rowVersion)) score = 0;
+    const wantedDuration = Number(track.durationSeconds || 0), duration = Number(row.trackTimeMillis || 0) / 1000;
+    if (score && wantedDuration > 0 && duration > 0 && Math.abs(duration - wantedDuration) > 35) score = 0;
+    const rowAlbum = String(row.collectionName || "");
+    const albumMatch = album && normalizeCatalogText(originalAlbumName(rowAlbum)) === album;
+    if (score && albumMatch) score += 15;
+    const year = Number(String(row.releaseDate || "").slice(0,4));
+    const collectionCredit = normalizeCatalogText(row.collectionArtistName);
+    const originalArtistAlbum = !collectionCredit || r35ArtistVariants(track.artist).some(name => normalizeCatalogText(name) === collectionCredit);
+    const originalIssue = score && originalArtistAlbum && year >= 1900 && year <= new Date().getFullYear() + 1 &&
+      !row.isCompilation && !isEdition(rowAlbum) &&
+      !isCollectionOrLive(rowAlbum) && !/\b(greatest hits|best of|karaoke|tribute|various artists)\b/i.test(rowAlbum) &&
+      (requestedVersion !== "live" || rowVersion === "live");
+    return { row, score, originalIssue, year, albumMatch };
+  }).filter(item => item.score >= 140).sort((a,b) => b.score-a.score);
+  if (!candidate.length) return null;
+  const best = candidate[0].row;
+  const original = candidate.filter(item => item.originalIssue).sort((a,b) => a.year-b.year)[0] || null;
+  return {
+    genre: typeof best.primaryGenreName === "string" ? best.primaryGenreName.trim() : "",
+    album: String(best.collectionName || ""),
+    catalogYear: Number(String(best.releaseDate || "").slice(0,4)) || null,
+    catalogTrackId: String(best.trackId || ""),
+    matchedArtist: String(best.artistName || ""),
+    matchedTitle: String(best.trackName || ""),
+    sourceUrl: typeof best.trackViewUrl === "string" && best.trackViewUrl.startsWith("https://") ? best.trackViewUrl : null,
+    isCompilation: best.isCompilation === true,
+    // Independent original issue from an exact artist/title/version/duration
+    // match, not a date copied from the uploaded deluxe or compilation.
+    originalIssue: original ? {
+      year: original.year,
+      album: String(original.row.collectionName || ""),
+      catalogTrackId: String(original.row.trackId || ""),
+      sourceUrl: typeof original.row.trackViewUrl === "string" ? original.row.trackViewUrl : null,
+      genre: String(original.row.primaryGenreName || ""),
+    } : null,
+  };
+}
+
+
+// A broad genre from the exact performing artist is a documented fallback,
+// never invented as a song-specific subgenre. Saved separately for audit.
+async function r35AppleArtistGenre(track: InputTrack) {
+  const artist = r35ArtistVariants(track.artist)[0];
+  if (!artist) return null;
+  const query = new URLSearchParams({ term: artist, entity: "musicArtist", limit: "8" });
   const response = await fetch(`https://itunes.apple.com/search?${query}`, { signal: AbortSignal.timeout(8500) });
   if (!response.ok) return null;
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-  const rows = Array.isArray(payload?.results) ? payload.results as Array<Record<string, unknown>> : [];
-  const artist = normalizeCatalogText(track.artist);
-  const title = normalizeCatalogText(cleanLookupTitle(track));
-  const album = normalizeCatalogText(originalAlbumName(track.album || ""));
-  const requestedVersion = versionKind(`${track.title} ${track.album || ""}`);
-  const scored = rows.map(row => {
-    const a = normalizeCatalogText(row.artistName), t = normalizeCatalogText(row.trackName);
-    let score = t === title && (a === artist ||
-      a === normalizeCatalogText(leadArtist(track.artist)) ||
-      a.startsWith(`${normalizeCatalogText(leadArtist(track.artist))} `)) ? 140 : 0;
-    if (score && requestedVersion !== "studio" && requestedVersion !== versionKind(String(row.trackName || ""))) score = 0;
-    if (score && requestedVersion === "studio" && ["live", "remix", "demo"].includes(versionKind(String(row.trackName || "")))) score = 0;
-    if (score && album && normalizeCatalogText(originalAlbumName(String(row.collectionName || ""))) === album) score += 15;
-    const expected = Number(track.durationSeconds || 0), actual = Number(row.trackTimeMillis || 0) / 1000;
-    if (score && expected && actual && Math.abs(actual - expected) > 35) score = 0;
-    return { row, score };
-  }).sort((a,b) => b.score-a.score);
-  const found = scored[0];
-  if (!found || found.score < 140) return null;
-  const row = found.row;
-  return {
-    genre: typeof row.primaryGenreName === "string" ? row.primaryGenreName.trim() : "",
-    album: String(row.collectionName || ""),
-    catalogYear: Number(String(row.releaseDate || "").slice(0,4)) || null,
-    catalogTrackId: String(row.trackId || ""),
-    matchedArtist: String(row.artistName || ""),
-    matchedTitle: String(row.trackName || ""),
-    sourceUrl: typeof row.trackViewUrl === "string" && row.trackViewUrl.startsWith("https://") ? row.trackViewUrl : null,
-    isCompilation: row.isCompilation === true,
-  };
+  const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const results = Array.isArray(body?.results) ? body.results as Array<Record<string, unknown>> : [];
+  const exact = results.find(row => normalizeCatalogText(row.artistName) === normalizeCatalogText(artist) &&
+    typeof row.primaryGenreName === "string" && r27GenreTags([row.primaryGenreName]).length > 0);
+  return exact ? {
+    artist: String(exact.artistName || ""),
+    genre: String(exact.primaryGenreName || ""),
+    sourceUrl: typeof exact.artistLinkUrl === "string" && exact.artistLinkUrl.startsWith("https://") ? exact.artistLinkUrl : null,
+    evidenceScope: "artist-level-broad-family",
+  } : null;
 }
 
 async function discogsAlbumMaster(track: InputTrack) {
@@ -590,48 +675,61 @@ type CachedArtistRow = {
 async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow | null): Promise<ProviderContext> {
   const lastFmKey = Deno.env.get("LASTFM_API_KEY") || "";
   const cachedTags = Array.isArray(cachedArtist?.top_tags) ? cleanTags(cachedArtist?.top_tags) : [];
-  const [trackTags, artistTags, mb, apple, discogs] = await Promise.all([
+  const [trackTags, artistTags, mb, apple, discogs, artistCatalog] = await Promise.all([
     lastFmKey && track.artist && track.title ? lastFmTags("track.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
     cachedTags.length ? Promise.resolve(cachedTags) : lastFmKey && track.artist ? lastFmTags("artist.getTopTags", track, lastFmKey).catch(() => []) : Promise.resolve([]),
     musicBrainzIdentity(track).catch(() => ({ recordingId: null, artistId: null, genres: [] as string[], originalYear: null as number | null })),
     appleCatalog(track).catch(() => null),
     discogsAlbumMaster(track).catch(() => null),
+    r35AppleArtistGenre(track).catch(() => null),
   ]);
   // Reuse the recording-specific release associations before considering albums.
   // Edition, cover and live recordings must never inherit the composition date.
-  const recordingYear = mb.originalYear || !mb.recordingId ? null
+  const recordingYear = !mb.recordingId ? null
     : await r30RecordingReleaseYear(mb.recordingId).catch(() => null);
   const albumYear = mb.originalYear || recordingYear ? null : await r27AlbumYear(track).catch(() => null);
   const singleYear = mb.originalYear || recordingYear || albumYear ? null : await exactSingleReleaseYear(track).catch(() => null);
-  const appleYear = mb.originalYear || recordingYear || albumYear || singleYear ? null : exactAppleEditionYear(track, apple);
+  const appleYear = apple?.originalIssue?.year || exactAppleEditionYear(track, apple);
+  // An exact original Apple single/album is independent evidence. An earlier
+  // such release can correct a MusicBrainz first-release date that referred
+  // to a later reissue. Otherwise retain the recording-specific MB date.
+  const recordingDates = [mb.originalYear, recordingYear, albumYear, singleYear, appleYear]
+    .filter((year): year is number => typeof year === "number" && year >= 1900 && year <= new Date().getFullYear() + 1);
+  const preferredYear = recordingDates.length ? Math.min(...recordingDates) : null;
   // Discogs master years describe the original master, not the later reissue.
   // Require Apple to establish that this exact track belongs to the same album.
-  const discogsYear = !mb.originalYear && !recordingYear && !albumYear && !singleYear && !appleYear &&
+  const discogsYear = !preferredYear &&
     discogs?.albumMasterYear && apple?.album && track.album &&
     !isCollectionOrLive(track.album) &&
     normalizeCatalogText(originalAlbumName(apple.album)) === normalizeCatalogText(originalAlbumName(track.album)) &&
     Number(discogs.albumMasterYear) >= 1900 && Number(discogs.albumMasterYear) <= new Date().getFullYear() + 1
     ? Number(discogs.albumMasterYear) : null;
-  const year = mb.originalYear || recordingYear || albumYear || singleYear || appleYear || discogsYear;
-  const classification = r27Classification(track, {
+  const year = preferredYear || discogsYear;
+  const directGenres = [...(mb.genres || []), ...(cachedArtist?.genres || []),
+    ...(apple?.genre ? [apple.genre] : []), ...(apple?.originalIssue?.genre ? [apple.originalIssue.genre] : []),
+    ...(discogs?.genre || []), ...(discogs?.style || [])];
+  const baseContext = {
     trackTags, artistTags, mbRecordingId: mb.recordingId, mbArtistId: mb.artistId,
-    mbOriginalYear: year, yearSource: "", mbGenres: [...(mb.genres || []), ...(cachedArtist?.genres || []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])], mainGenres: [], subgenres: [],
-  });
+    mbOriginalYear: year, yearSource: "", mbGenres: directGenres, mainGenres: [] as string[], subgenres: [] as string[],
+  };
+  const directClassification = r27Classification(track, baseContext);
+  const classification = directClassification.mainGenres.length ? directClassification
+    : r27Classification(track, { ...baseContext, mbGenres: [...directGenres, ...(artistCatalog?.genre ? [artistCatalog.genre] : [])] });
   return {
     trackTags,
     artistTags,
     mbRecordingId: mb.recordingId,
     mbOriginalYear: year,
-    yearSource: mb.originalYear ? "musicbrainz-recording-first-release-date" : recordingYear ? "musicbrainz-recording-release-groups" : albumYear ? "musicbrainz-original-album-release-group" : singleYear ? "musicbrainz-exact-single-release-group" : appleYear ? "apple-exact-original-release-record" : discogsYear ? "discogs-original-master-plus-apple-track-match" : "unverified",
+    yearSource: appleYear && year === appleYear ? "apple-exact-original-catalog-issue" : recordingYear && year === recordingYear ? "musicbrainz-recording-release-groups" : mb.originalYear && year === mb.originalYear ? "musicbrainz-recording-first-release-date" : albumYear && year === albumYear ? "musicbrainz-original-album-release-group" : singleYear && year === singleYear ? "musicbrainz-exact-single-release-group" : discogsYear ? "discogs-original-master-plus-apple-track-match" : "unverified",
     mainGenres: classification.mainGenres,
     subgenres: classification.subgenres,
     mbArtistId: mb.artistId || cachedArtist?.musicbrainz_artist_id || null,
-    mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : []), ...(apple?.genre ? [apple.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])])].slice(0, 16),
-    catalogSources: [...(apple ? ["itunes"] : []), ...(discogs ? ["discogs"] : [])],
+    mbGenres: [...new Set([...(mb.genres || []), ...(Array.isArray(cachedArtist?.genres) ? cachedArtist?.genres || [] : []), ...(apple?.genre ? [apple.genre] : []), ...(apple?.originalIssue?.genre ? [apple.originalIssue.genre] : []), ...(discogs?.genre || []), ...(discogs?.style || [])])].slice(0, 16),
+    catalogSources: [...(apple || artistCatalog ? ["itunes"] : []), ...(discogs ? ["discogs"] : [])],
     // Catalog edition years are evidence candidates only, not original dates.
-    catalogCandidates: { apple: apple || null, discogs: discogs || null,
+    catalogCandidates: { apple: apple || null, appleArtistGenre: artistCatalog || null, discogs: discogs || null,
       releaseYearCandidate: apple?.catalogYear || discogs?.albumMasterYear || Number(track.releaseYear) || null,
-      yearEvidence: { recordingYear, albumYear, singleYear, appleYear, discogsYear, matchedRecordingId: mb.recordingId || null,
+      yearEvidence: { recordingYear, mbFirstReleaseYear: mb.originalYear, albumYear, singleYear, appleYear, appleOriginalIssue: apple?.originalIssue || null, discogsYear, matchedRecordingId: mb.recordingId || null,
         reason: year ? "recording-or-original-edition-evidence" : "original-recording-date-unverified" } },
   };
 }
@@ -640,6 +738,9 @@ async function providerContext(track: InputTrack, cachedArtist?: CachedArtistRow
 // Prefer track evidence; artist tags alone may provide a broad family but not prove a subgenre.
 const R27_GENRES = new Map<string, string>([
   ["grunge", "grunge"], ["post grunge", "post grunge"],
+  ["rapcore", "rapcore"], ["rap core", "rapcore"], ["rap rock", "rap rock"],
+  ["nu-metal", "nu metal"], ["alternative pop", "alternative pop"],
+  ["industrial pop", "industrial pop"], ["post-hardcore", "post hardcore"],
   ["alternative metal", "alternative metal"], ["alternative rock", "alternative rock"],
   ["hard rock", "hard rock"], ["heavy metal", "heavy metal"],
   ["thrash metal", "thrash metal"], ["nu metal", "nu metal"],
@@ -1143,9 +1244,13 @@ Deno.serve(async (req) => {
       deezerAudioFacts(track).catch(() => null),
     ]);
     const oldSemantic = existing?.provider_payload?.semantic_profile;
-    if (!context.mbOriginalYear && Number(oldSemantic?.originalReleaseYear) >= 1900 && Number(oldSemantic?.originalReleaseYear) <= 2100) {
-      context.mbOriginalYear = Number(oldSemantic.originalReleaseYear);
-      context.yearSource = String(oldSemantic.originalReleaseYearSource || "previously-verified");
+    if (Number(oldSemantic?.originalReleaseYear) >= 1900 && Number(oldSemantic?.originalReleaseYear) <= 2100) {
+      const oldYear = Number(oldSemantic.originalReleaseYear);
+      if (!context.mbOriginalYear ||
+        (context.mbOriginalYear > oldYear && context.yearSource !== "apple-exact-original-catalog-issue")) {
+        context.mbOriginalYear = oldYear;
+        context.yearSource = String(oldSemantic.originalReleaseYearSource || "previously-verified");
+      }
     }
     if (existing) {
       const retainedCatalog = existing.provider_payload?.catalogCandidates &&
@@ -1155,8 +1260,17 @@ Deno.serve(async (req) => {
         ? retainedCatalog.apple as Record<string, unknown> : null;
       const previousDiscogs = retainedCatalog.discogs && typeof retainedCatalog.discogs === "object"
         ? retainedCatalog.discogs as Record<string, unknown> : null;
+      const previousSemantic = existing.provider_payload?.semantic_profile && typeof existing.provider_payload.semantic_profile === "object"
+        ? existing.provider_payload.semantic_profile as Record<string, unknown> : {};
+      const oldEvidence = Array.isArray(previousSemantic.evidence) ? previousSemantic.evidence.map(String) : [];
+      const oldArtistGenre = retainedCatalog.appleArtistGenre && typeof retainedCatalog.appleArtistGenre === "object"
+        ? retainedCatalog.appleArtistGenre as Record<string, unknown> : null;
       const priorCatalogGenres = [
+        ...oldEvidence,
+        ...(typeof oldArtistGenre?.genre === "string" ? [oldArtistGenre.genre] : []),
         ...(typeof previousApple?.genre === "string" ? [previousApple.genre] : []),
+        ...(previousApple?.originalIssue && typeof previousApple.originalIssue === "object" && typeof (previousApple.originalIssue as Record<string, unknown>).genre === "string"
+          ? [String((previousApple.originalIssue as Record<string, unknown>).genre)] : []),
         ...(Array.isArray(previousDiscogs?.genre) ? previousDiscogs.genre.map(String) : []),
         ...(Array.isArray(previousDiscogs?.style) ? previousDiscogs.style.map(String) : []),
       ];
@@ -1170,16 +1284,20 @@ Deno.serve(async (req) => {
         ...retainedCatalog,
         ...(context.catalogCandidates || {}),
         apple: context.catalogCandidates?.apple || retainedCatalog.apple || null,
+        appleArtistGenre: context.catalogCandidates?.appleArtistGenre || retainedCatalog.appleArtistGenre || null,
         discogs: context.catalogCandidates?.discogs || retainedCatalog.discogs || null,
       };
       // The saved Apple candidate previously passed exact artist/title matching;
       // reuse it when a later provider request was throttled, not an arbitrary date.
-      if (!context.mbOriginalYear && previousApple) {
+      if (previousApple) {
+        const previousOriginal = previousApple.originalIssue && typeof previousApple.originalIssue === "object"
+          ? previousApple.originalIssue as Record<string, unknown> : null;
         const stored = {
           album: String(previousApple.album || ""), catalogYear: Number(previousApple.catalogYear || 0),
         } as NonNullable<Awaited<ReturnType<typeof appleCatalog>>>;
-        const supportedYear = exactAppleEditionYear(track, stored);
-        if (supportedYear) {
+        const supportedYear = Number(previousOriginal?.year || 0) || exactAppleEditionYear(track, stored);
+        if (supportedYear >= 1900 && supportedYear <= new Date().getFullYear() + 1 &&
+          (!context.mbOriginalYear || supportedYear < context.mbOriginalYear)) {
           context.mbOriginalYear = supportedYear;
           context.yearSource = "apple-cached-exact-original-release-record";
           context.catalogSources = [...new Set([...(context.catalogSources || []), "itunes"])];
@@ -1190,11 +1308,17 @@ Deno.serve(async (req) => {
       ? cachedArtist.artist_dna as ArtistDNA
       : null;
     const aDna = cachedArtistDna || deriveArtistDna(track, context);
-    const sDna = applyTempoFacts(deriveSongDna(track, context, aDna), deezer?.bpm ?? null);
+    // Catalog-only recovery must never replace the actual audio-derived DNA.
+    const existingAudio = Boolean(existing?.bpm != null && existing?.key_signature &&
+      existing?.provider_payload?.audio_analysis && existing?.provider_payload?.master_prep);
+    const sDna = existingAudio && existing?.song_dna
+      ? existing.song_dna as SongDNA
+      : applyTempoFacts(deriveSongDna(track, context, aDna), deezer?.bpm ?? null);
     if (!cachedArtistDna) await upsertArtist(service, userId, track, context, aDna);
 
     let cyaniteTrackId = existing?.cyanite_track_id ? String(existing.cyanite_track_id) : null;
-    let cyaniteStatus: string | null = cyaniteKey ? "not_eligible" : "not_configured";
+    let cyaniteStatus: string | null = existing?.cyanite_status === "complete"
+      ? "complete" : cyaniteKey ? "not_eligible" : "not_configured";
     let cyaniteError: string | null = null;
     const eligible = Boolean(cyaniteKey && inputIsCyaniteEligible(track, audioUrl));
 
@@ -1206,12 +1330,12 @@ Deno.serve(async (req) => {
         cyaniteStatus = "failed";
         cyaniteError = error instanceof Error ? error.message : "Cyanite upload failed.";
       }
-    } else if (eligible && cyaniteTrackId) {
+    } else if (eligible && cyaniteTrackId && existing?.cyanite_status !== "complete") {
       cyaniteStatus = "processing";
     }
 
     const deezerUsed = Boolean(deezer?.bpm);
-    const sources = sourceList(context, false, deezerUsed);
+    const sources = [...new Set([...(Array.isArray(existing?.source) ? existing.source : []), ...sourceList(context, false, deezerUsed)])];
     const status = cyaniteStatus === "processing" ? "processing" : r27Complete(context, context.mainGenres) ? "complete" : "partial";
     const provisional = {
       user_id: userId,
@@ -1220,7 +1344,7 @@ Deno.serve(async (req) => {
       artist_name: track.artist || "",
       status,
       analysis_version: ANALYSIS_VERSION,
-      confidence: confidenceFor(context, false, deezerUsed),
+      confidence: Math.max(Number(existing?.confidence || 0), confidenceFor(context, false, deezerUsed)),
       source: sources,
       song_dna: sDna,
       artist_dna: aDna,
@@ -1229,14 +1353,15 @@ Deno.serve(async (req) => {
       tempo_label: tempoLabelFromBpm(deezer?.bpm ?? existing?.bpm ?? null) ?? existing?.tempo_label ?? null,
       main_genres: [...new Set([...context.mainGenres, ...(Array.isArray(existing?.main_genres) ? existing.main_genres : [])])],
       subgenres: [...new Set([...context.subgenres, ...(Array.isArray(existing?.subgenres) ? existing.subgenres : [])])],
-      moods: context.trackTags.slice(0, 10).map((tag) => tag.name),
+      moods: existingAudio && Array.isArray(existing?.moods) && existing.moods.length
+        ? existing.moods : context.trackTags.slice(0, 10).map((tag) => tag.name),
       character_tags: existing?.character_tags || [],
       movement_tags: existing?.movement_tags || [],
       music_for: existing?.music_for || [],
       description: existing?.description || null,
-      musicbrainz_recording_id: context.mbRecordingId,
-      musicbrainz_artist_id: context.mbArtistId,
-      lastfm_track_tags: context.trackTags,
+      musicbrainz_recording_id: context.mbRecordingId || existing?.musicbrainz_recording_id || null,
+      musicbrainz_artist_id: context.mbArtistId || existing?.musicbrainz_artist_id || null,
+      lastfm_track_tags: context.trackTags.length ? context.trackTags : existing?.lastfm_track_tags || [],
       cyanite_track_id: cyaniteTrackId,
       cyanite_status: cyaniteStatus,
       provider_payload: {
@@ -1244,6 +1369,7 @@ Deno.serve(async (req) => {
         lastfmArtistTags: context.artistTags,
         musicbrainzGenres: context.mbGenres,
         catalogCandidates: context.catalogCandidates || {},
+        enrichmentIntegrityVersion: 35,
         deezer: deezer ? { trackId: deezer.trackId, bpm: deezer.bpm, gain: deezer.gain, confidence: deezer.confidence } : null,
         semantic_profile: buildSemanticProfile(track, context, {
           moods: context.trackTags.slice(0, 10).map((tag) => tag.name),
