@@ -59,8 +59,6 @@ export type MusicPlayerState = {
   soundContextState: AudioContextState | null;
   soundModeGeneration: number;
   soundDimensionEnabled: boolean;
-  soundDimensionConfirmed: boolean | null;
-  soundDimensionDeltaDb: number | null;
   soundEqBassDb: number;
   soundEqMidsDb: number;
   soundEqTrebleDb: number;
@@ -266,8 +264,6 @@ let state: MusicPlayerState = {
   soundContextState: null,
   soundModeGeneration: 0,
   soundDimensionEnabled: readSoundDimensionEnabled(),
-  soundDimensionConfirmed: null,
-  soundDimensionDeltaDb: null,
   soundEqBassDb: readSoundEqDb(STORAGE_KEYS.soundEqBass),
   soundEqMidsDb: readSoundEqDb(STORAGE_KEYS.soundEqMids),
   soundEqTrebleDb: readSoundEqDb(STORAGE_KEYS.soundEqTreble),
@@ -373,7 +369,7 @@ async function connectMusicGraph() {
     const context = getAudioContext();
     const audio = ensureAudioElement();
 
-    await context.audioWorklet.addModule("/audio/mvpSoundModes-r37.worklet.js");
+    await context.audioWorklet.addModule("/audio/mvpSoundModes-r24.worklet.js");
 
     const worklet = new AudioWorkletNode(context, "mvp-sound-modes", {
       numberOfInputs: 1,
@@ -387,10 +383,6 @@ async function connectMusicGraph() {
       const message = event?.data ?? {};
       if (message.type === "ready") {
         emit({ soundEngineReady: true });
-        return;
-      }
-      if (message.type === "user-controls-active") {
-        emit({ soundDimensionConfirmed: message.dimensionEnabled === true });
         return;
       }
       if (
@@ -412,7 +404,6 @@ async function connectMusicGraph() {
           soundOutputPeakDb: Number(message.outputPeakDb),
           soundRequestedGainDb: Number(message.requestedGainDb),
           soundLimiterReductionDb: Number(message.limiterReductionDb),
-          soundDimensionDeltaDb: Number(message.dimensionDeltaDb),
           soundTrackProfileReady: Boolean(message.trackProfileApplied),
         });
         return;
@@ -1085,7 +1076,7 @@ function postMusicSoundControls() {
 export function setMusicDimensionEnabled(enabled: boolean) {
   const next = Boolean(enabled);
   saveStored(STORAGE_KEYS.soundDimension, String(next));
-  emit({ soundDimensionEnabled: next, soundDimensionConfirmed: null, soundDimensionDeltaDb: null });
+  emit({ soundDimensionEnabled: next });
   postMusicSoundControls();
 }
 

@@ -1664,9 +1664,9 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
       : `ENGINE STARTS ON PLAY • ${soundModeLabel}`;
   const soundTelemetryLabel = player.soundDeltaDb == null
     ? "LIVE METER STARTING"
-    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • GUARD ${(player.soundLimiterReductionDb ?? 0).toFixed(1)} dB • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS • GEN ${player.soundModeGeneration}`;
+    : `IN ${(player.soundInputRmsDb ?? -120).toFixed(1)} • OUT ${(player.soundOutputRmsDb ?? -120).toFixed(1)} • NET ${player.soundDeltaDb >= 0 ? "+" : ""}${player.soundDeltaDb.toFixed(1)} dB • GAIN +${Math.max(0, player.soundRequestedGainDb ?? 0).toFixed(1)} • LIMIT OFF • PEAK ${(player.soundOutputPeakDb ?? -120).toFixed(1)} dBFS • GEN ${player.soundModeGeneration}`;
   const soundProfileLabel = player.soundTrackProfileReady ? "SONG IQ • ACTIVE" : "SONG IQ • LIVE FALLBACK";
-  const soundFxLabel = `DIMENSION ${player.experienceMode === "pure" ? "PURE BYPASS" : player.soundDimensionConfirmed === player.soundDimensionEnabled ? (player.soundDimensionEnabled ? "ON · DSP" : "OFF · DSP") : "APPLYING"} • EQ B ${player.soundEqBassDb >= 0 ? "+" : ""}${player.soundEqBassDb.toFixed(1)} • M ${player.soundEqMidsDb >= 0 ? "+" : ""}${player.soundEqMidsDb.toFixed(1)} • T ${player.soundEqTrebleDb >= 0 ? "+" : ""}${player.soundEqTrebleDb.toFixed(1)}`;
+  const soundFxLabel = `DIMENSION ${player.soundDimensionEnabled ? "ON" : "OFF"} • EQ B ${player.soundEqBassDb >= 0 ? "+" : ""}${player.soundEqBassDb.toFixed(1)} • M ${player.soundEqMidsDb >= 0 ? "+" : ""}${player.soundEqMidsDb.toFixed(1)} • T ${player.soundEqTrebleDb >= 0 ? "+" : ""}${player.soundEqTrebleDb.toFixed(1)}`;
 
   return (
     <section
@@ -1925,8 +1925,8 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
                 aria-pressed={player.soundDimensionEnabled}
                 onClick={() => setMusicDimensionEnabled(!player.soundDimensionEnabled)}
               >
-                <span><b>MVP DIMENSION ULTRA SMOOTH</b><strong>{player.experienceMode === "pure" ? "PURE BYPASS" : player.soundDimensionConfirmed === player.soundDimensionEnabled ? (player.soundDimensionEnabled ? "ON · DSP" : "OFF · DSP") : "APPLYING…"}</strong></span>
-                <small>Real stereo width • center protected • no synthetic sides</small>
+                <span><b>MVP DIMENSION ULTRA SMOOTH</b><strong>{player.soundDimensionEnabled ? "ON" : "OFF"}</strong></span>
+                <small>ULTRA width • smoother sides • center locked</small>
               </button>
               <div className="tr-soundSimpleEq" aria-label="MVP EQ">
                 <header><div><b>MVP EQ</b><small>Simple 3-band tone</small></div><button type="button" onClick={resetMusicEq}>FLAT</button></header>
@@ -1948,7 +1948,7 @@ export function MusicMiniPlayer({ navigate }: { navigate: (to: string) => void }
               </div>
             </div>
             <p className="tr-soundResetNote">
-              R37 CLEAN AUDIO: PURE with FLAT EQ is source-exact. ADAPTIVE and POWER use restrained tonal shaping and measured source headroom, not a fixed loudness jump. Dimension widens real stereo only (mono may sound identical); the linked stereo output guard reports real reduction and retains peak headroom. Device output volume still sets listening level.
+              R23 DIMENSION ULTRA SMOOTH + EQ: PURE is source-exact when EQ is FLAT. ADAPTIVE and POWER keep the same direct loudness, EQ, and ULTRA width. The spatial sides are now softened in the presence/air bands and the generated spatial top end is trimmed, while bass stays centered and the vocal/center remains anchored. No compressor. No limiter. No automatic gain reduction.
             </p>
           </section>
         </div>,
