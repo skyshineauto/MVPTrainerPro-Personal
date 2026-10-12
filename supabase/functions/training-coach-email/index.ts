@@ -265,6 +265,43 @@ function decisionLabel(action: string) {
   const labels: Record<string,string> = { BASELINE:"ESTABLISH LOAD", HOLD:"HOLD", MONITOR:"BUILD REPS", INCREASE:"INCREASE", REDUCE:"REDUCE LOAD", RECOVERY:"RECOVERY FIRST" };
   return labels[action] ?? "COACH REVIEW";
 }
+// R40.2: Email-only image routing. No changes to progression calculations.
+function workoutHeroAsset(workout: string): string {
+  const key = clean(workout).toLowerCase().replace(/[_-]+/g, " ");
+  if (/\bupper\s*1\b/.test(key)) return "hero-upper-1.jpg";
+  if (/\bupper\s*2\b/.test(key)) return "hero-upper-2.jpg";
+  if (/\blower\s*1\b/.test(key)) return "hero-lower-1.jpg";
+  if (/\blower\s*2\b/.test(key)) return "hero-lower-2.jpg";
+  // Custom programs retain the original branded image.
+  return "mvp-workout-hero.jpg";
+}
+
+function priorityImageAsset(exercise: ExerciseBrief): { file: string; description: string } {
+  const name = clean(exercise.name).toLowerCase();
+  const fields = [name, ...exercise.muscles, ...exercise.patterns, ...exercise.equipment]
+    .map((value) => clean(value).toLowerCase()).join(" ");
+  const match = (pattern: RegExp) => pattern.test(name);
+  // Exact movement patterns take precedence over generic equipment/muscle tags.
+  if (match(/calf|soleus|gastrocnemius/)) return {file:"priority-calves.jpg",description:"Calf training"};
+  if (match(/leg press|hack squat|leg extension|squat|lunge|split squat|step.?up|quad/)) return {file:"priority-quads.jpg",description:"Quadriceps training"};
+  if (match(/romanian|rdl\b|deadlift|leg curl|hamstring|hip thrust|glute|hip bridge|good morning/)) return {file:"priority-posterior.jpg",description:"Hamstring and glute training"};
+  if (match(/abdom|crunch|plank|core|pallof|wood.?chop|rotation|leg raise/)) return {file:"priority-core.jpg",description:"Core training"};
+  if (match(/bicep|tricep|curl|push.?down|skull.?crusher|arm extension|kickback/)) return {file:"priority-arms.jpg",description:"Arm training"};
+  if (match(/shoulder|lateral raise|front raise|rear delt|face pull|overhead press|military press|upright row/)) return {file:"priority-shoulders.jpg",description:"Shoulder training"};
+  if (match(/chest|bench|incline.*press|decline.*press|pec|fly\b|flye|push.?up|dip/)) return {file:"priority-chest-press.jpg",description:"Chest and pressing training"};
+  if (match(/row|lat\b|pulldown|pull.?up|chin.?up|pullover|upper back|seated cable/)) return {file:"priority-back-row.jpg",description:"Back and rowing training"};
+  // Broad classification only if exercise title gave no unambiguous movement.
+  if (/\bcalves?\b/.test(fields)) return {file:"priority-calves.jpg",description:"Calf training"};
+  if (/hamstring|glute|posterior chain/.test(fields)) return {file:"priority-posterior.jpg",description:"Hamstring and glute training"};
+  if (/quad|quadricep/.test(fields)) return {file:"priority-quads.jpg",description:"Quadriceps training"};
+  if (/core|abdom|oblique/.test(fields)) return {file:"priority-core.jpg",description:"Core training"};
+  if (/bicep|tricep|forearm/.test(fields)) return {file:"priority-arms.jpg",description:"Arm training"};
+  if (/shoulder|deltoid/.test(fields)) return {file:"priority-shoulders.jpg",description:"Shoulder training"};
+  if (/chest|pectoral/.test(fields)) return {file:"priority-chest-press.jpg",description:"Chest and pressing training"};
+  if (/back|latissimus|rhomboid/.test(fields)) return {file:"priority-back-row.jpg",description:"Back and rowing training"};
+  return {file:"priority-general.jpg",description:"Gym training"};
+}
+
 function renderEmail(args: EmailContext) {
   const root = args.appUrl.replace(/\/$/, "");
   const sessionHref = `${root}/workout/${encodeURIComponent(args.sessionId)}`;
@@ -272,9 +309,9 @@ function renderEmail(args: EmailContext) {
   const heroHref = args.heroUrl;
   const priority = args.priority;
   const accent = priority?.coach.action === "REDUCE" || priority?.coach.action === "RECOVERY" ? "#ffac59" : "#4ff48e";
-  const isRowImage = priority && /^seated\s+cable\s+rows?$/i.test(priority.name.trim());
-  const priorityPhoto = isRowImage ? `<td class="priorityImage" width="194" valign="top" style="width:194px;padding:0 18px 0 0;">
-    <img src="${htmlEscape(root+'/email/mvp-cable-row.jpg')}" width="194" alt="Seated cable row equipment" style="display:block;width:194px;max-width:194px;height:auto;border:1px solid #e6831b;border-radius:12px;">
+  const priorityVisual = priority ? priorityImageAsset(priority) : null;
+  const priorityPhoto = priorityVisual ? `<td class="priorityImage" width="194" valign="top" style="width:194px;padding:0 18px 0 0;">
+    <img src="${htmlEscape(`${root}/email/${priorityVisual.file}`)}" width="194" alt="${htmlEscape(priorityVisual.description)}" style="display:block;width:194px;max-width:194px;height:auto;border:1px solid #e6831b;border-radius:12px;">
   </td>` : "";
   const priorityBody = priority ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:2px solid #fa8d18;background:#07121d;">
     <tr><td style="padding:21px 20px 16px;">
@@ -708,7 +745,7 @@ async function buildContext(admin: any, userId: string, authUser: any, pref: any
     prior: priorStats,
     priority,
     decisionCounts,
-    heroUrl: `${appUrl.replace(/\/$/, "")}/email/mvp-workout-hero.jpg`,
+    heroUrl: `${appUrl.replace(/\/$/, "")}/email/${workoutHeroAsset(workout)}`,
     timezone: pref.timezone || "America/New_York",
     logoUrl,
     appUrl,
