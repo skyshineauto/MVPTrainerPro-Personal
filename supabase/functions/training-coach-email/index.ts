@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { analyzeProgression, type ProgressionAnalysis, type TrainingSessionSample } from "../_shared/trainingIntelligence.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -113,21 +114,6 @@ function firstExerciseCue(name: string) {
   return "Use a controlled eccentric, stable setup, and a repeatable range. Stop adding load when the target muscle stops controlling the rep.";
 }
 
-function progressStatus(last: LastSet | null, repMax: number) {
-  if (!last) return { label: "BASELINE", color: "#d6e1e7" };
-  if ((last.pain ?? 0) >= 4) return { label: "HOLD", color: "#62d9ff" };
-  if (last.reps >= repMax && last.weight > 0) return { label: "INCREASE IF CLEAN", color: "#63e3a8" };
-  return { label: "BUILD REPS", color: "#ffb45d" };
-}
-
-function progressCue(last: LastSet | null, repMax: number) {
-  if (!last) return "Baseline day: choose a working load you can control through the full target range with roughly 1–2 good reps still available.";
-  if ((last.pain ?? 0) >= 4) return `Last time pain reached ${last.pain}/10. Keep progression on hold unless today's movement is comfortable and controlled.`;
-  if (last.reps >= repMax && last.weight > 0) return `Last best set: ${formatWeight(last.weight)} × ${last.reps}. If all working sets are equally clean today, earn the smallest practical load increase.`;
-  if (last.weight > 0) return `Last best set: ${formatWeight(last.weight)} × ${last.reps}. Build clean reps inside today's target before forcing a heavier load.`;
-  return `Last best set reached ${last.reps} reps. Keep execution consistent and progress one variable at a time.`;
-}
-
 function e1rm(weight: number, reps: number) {
   return weight > 0 && reps > 0 ? weight * (1 + reps / 30) : 0;
 }
@@ -180,7 +166,29 @@ function unique(values: string[]) {
   return Array.from(new Set(values.map(clean).filter(Boolean)));
 }
 
-type LastSet = { weight: number; reps: number; rir: number | null; pain: number | null };
+// Match R39 Coach's canonical name key (active-program boundary remains mandatory).
+function movementKey(name: unknown, id: string) {
+  const normalized = String(name ?? "")
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ")
+    .trim().replace(/\s+/g, " ");
+  return normalized ? `movement:${normalized}` : `exercise:${id}`;
+}
+function batches<T>(items: T[], size = 100): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+function effortLabel(key: string | null, rir: number | null) {
+  const labels: Record<string, string> = {
+    easy: "Easy", moderate: "Moderate", challenging: "Challenging",
+    very_hard: "Very hard", maximum: "Maximum", not_sure: "Not sure",
+  };
+  if (key && labels[key]) return labels[key];
+  const byRir: Record<number, string> = { 4: "Easy", 3: "Moderate", 2: "Challenging", 1: "Very hard", 0: "Maximum" };
+  return rir != null ? byRir[rir] ?? `${rir} RIR` : "Not recorded";
+}
+type LastSet = { setIndex: number; weight: number; reps: number; rir: number | null; effortKey: string | null; pain: number | null };
 type ExerciseBrief = {
   id: string;
   name: string;
@@ -192,6 +200,8 @@ type ExerciseBrief = {
   equipment: string[];
   patterns: string[];
   last: LastSet | null;
+  lastSets: LastSet[];
+  coach: ProgressionAnalysis;
 };
 type PriorStats = {
   completedAt: string | null;
@@ -221,6 +231,10 @@ type EmailContext = {
   firstCue: string;
   progressCue: string;
   prior: PriorStats | null;
+  priority: ExerciseBrief | null;
+  decisionCounts: { increase: number; hold: number; recovery: number };
+  heroUrl: string;
+  timezone: string;
   logoUrl: string | null;
   appUrl: string;
   sessionId: string;
@@ -233,117 +247,177 @@ type EmailContext = {
   readyAgeHours: number | null;
 };
 
-function metricCell(label: string, value: string, accent = "#ffffff") {
-  return `<td width="25%" valign="top" style="padding:12px 9px;border-right:1px solid #17303a;text-align:center;">
-    <div style="color:#6f8d99;font-size:9px;font-weight:900;letter-spacing:1.05px;">${htmlEscape(label)}</div>
-    <div style="margin-top:5px;color:${accent};font-size:18px;line-height:1.1;font-weight:950;">${htmlEscape(value)}</div>
+function mailMetric(value: string, caption: string) {
+  return `<td width="33.3%" align="center" valign="middle" style="padding:12px 5px;border-right:1px solid #1c5471;background-color:#081b2c;">
+    <div style="font:900 23px/1.15 Arial,Helvetica,sans-serif;color:#f7fdff;">${htmlEscape(value)}</div>
+    <div style="padding-top:4px;font:700 10px/1.4 Arial,Helvetica,sans-serif;color:#8ee2ff;letter-spacing:.7px;">${htmlEscape(caption)}</div>
   </td>`;
 }
-
+function coachCommand(exercise: ExerciseBrief) {
+  const c = exercise.coach;
+  if (c.action === "BASELINE" || c.suggestedWeight == null || c.suggestedWeight <= 0) return "SET BASELINE";
+  return `${formatWeight(c.suggestedWeight)}${c.action === "INCREASE" ? " ↑" : ""}`;
+}
+function decisionLabel(action: string) {
+  const labels: Record<string,string> = { BASELINE:"ESTABLISH LOAD", HOLD:"HOLD", MONITOR:"BUILD REPS", INCREASE:"INCREASE", REDUCE:"REDUCE LOAD", RECOVERY:"RECOVERY FIRST" };
+  return labels[action] ?? "COACH REVIEW";
+}
 function renderEmail(args: EmailContext) {
-  const first = args.exercises[0] ?? null;
-  const heroSub = [
-    args.exercises.length ? `${args.exercises.length} exercises` : null,
-    args.totalSets ? `${args.totalSets} working sets` : null,
-    args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min expected` : null,
-    args.goal || null,
-  ].filter(Boolean).join(" • ");
-
-  const plan = args.includePlan ? args.exercises.map((exercise, index) => {
-    const status = progressStatus(exercise.last, exercise.repMax);
-    const lastText = exercise.last
-      ? `${exercise.last.weight > 0 ? `${formatWeight(exercise.last.weight)} × ` : ""}${exercise.last.reps} last best`
-      : "No prior benchmark";
+  const sessionHref = `${args.appUrl.replace(/\/$/, "")}/workout/${encodeURIComponent(args.sessionId)}`;
+  const logoHref = `${args.appUrl.replace(/\/$/, "")}/email/mvp-email-logo.jpg`;
+  // The branded fallback is permanent; legacy user-upload signed assets expire.
+  const logo = `<img src="${htmlEscape(logoHref)}" width="260" alt="MVP Trainer Pro" style="display:block;width:260px;max-width:100%;height:auto;border:0;outline:0;text-decoration:none;">`;
+  const priority = args.priority;
+  const accent = priority?.coach.action === "REDUCE" || priority?.coach.action === "RECOVERY" ? "#ffb45b" : "#42e991";
+  const priorityBody = priority ? `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid #f98c1c;background-color:#081423;">
+      <tr><td style="padding:17px 20px 7px;">
+        <div style="color:#ff9e2d;font:900 12px/1.4 Arial,Helvetica,sans-serif;letter-spacing:.8px;">◎ &nbsp; PROGRESSION COACH — TOP PRIORITY</div>
+        <div style="padding-top:7px;color:#ffffff;font:900 23px/1.2 Arial,Helvetica,sans-serif;">${htmlEscape(priority.name)}</div>
+      </td></tr>
+      <tr><td style="padding:4px 20px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td class="coachSide" width="48%" valign="top" style="width:48%;padding:9px 8px 9px 0;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#071f2d;border:1px solid #136c90;"><tr><td style="padding:12px;">
+              <div style="font:800 10px/1.4 Arial,sans-serif;letter-spacing:.8px;color:#77dcfc;">RECOMMENDED START</div>
+              <div style="padding-top:4px;font:900 27px/1.2 Arial,sans-serif;color:${accent};">${htmlEscape(coachCommand(priority))}</div>
+            </td></tr></table>
+          </td>
+          <td class="coachSide" width="52%" valign="top" style="width:52%;padding:9px 0 9px 8px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#071f2d;border:1px solid #136c90;"><tr><td style="padding:12px;">
+              <div style="font:800 10px/1.4 Arial,sans-serif;letter-spacing:.8px;color:#77dcfc;">TARGET REPS</div>
+              <div style="padding-top:5px;font:900 17px/1.3 Arial,sans-serif;color:#ffffff;">${htmlEscape(priority.coach.repPlan)}</div>
+            </td></tr></table>
+          </td>
+        </tr></table>
+        <div style="padding:6px 0 4px;color:#effaff;font:400 14px/1.55 Arial,Helvetica,sans-serif;">${htmlEscape(priority.coach.reason)}</div>
+        <div style="padding-top:5px;color:#9bc5d8;font:700 11px/1.5 Arial,sans-serif;">${htmlEscape(decisionLabel(priority.coach.action))} &nbsp;·&nbsp; ${htmlEscape(priority.coach.confidence)} CONFIDENCE</div>
+      </td></tr>
+    </table>` : "";
+  const previous = args.prior ? `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:17px;background-color:#071827;border:1px solid #0b9dcd;">
+      <tr><td style="padding:15px 17px 7px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+          <td valign="middle" style="color:#64ddff;font:900 15px/1.3 Arial,Helvetica,sans-serif;">◉ &nbsp; YOUR LAST ${htmlEscape(args.workout.toUpperCase())}</td>
+          <td align="right" style="font:700 11px/1.3 Arial,sans-serif;color:#b9d7e7;">${htmlEscape(args.prior.dateLabel)}</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="padding:7px 11px 14px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+          ${mailMetric(minutesLabel(args.prior.durationSeconds),"DURATION")}
+          ${mailMetric(String(args.prior.completedSets),"SETS COMPLETED")}
+          ${mailMetric(formatVolume(args.prior.loadedVolume),"TOTAL VOLUME")}
+        </tr></table>
+      </td></tr>
+    </table>` : `<table role="presentation" width="100%" style="margin-top:17px;border:1px solid #0b9dcd;background-color:#071827;"><tr><td style="padding:14px;color:#cae7f1;font:700 13px/1.5 Arial,sans-serif;">FIRST ${htmlEscape(args.workout.toUpperCase())} · This session will establish your baseline.</td></tr></table>`;
+  const plan = args.includePlan ? args.exercises.map((exercise,index)=>{
+    const last = exercise.lastSets.length ? `${exercise.lastSets.map(s=>`${formatWeight(s.weight)} × ${s.reps} (${effortLabel(s.effortKey,s.rir)})`).join(" / ")}` : "No completed working sets yet";
     return `<tr>
-      <td style="padding:14px 0;border-bottom:1px solid #17313b;vertical-align:top;width:42px;color:#52ddff;font-size:12px;font-weight:950;">${String(index + 1).padStart(2, "0")}</td>
-      <td style="padding:14px 8px 14px 0;border-bottom:1px solid #17313b;vertical-align:top;">
-        <div style="color:#f7fbfd;font-size:15px;font-weight:950;line-height:1.25;">${htmlEscape(exercise.name)}</div>
-        <div style="margin-top:5px;color:#8da9b6;font-size:11px;font-weight:700;">${exercise.sets} sets • ${exercise.repMin}–${exercise.repMax} reps${exercise.muscles.length ? ` • ${htmlEscape(exercise.muscles.slice(0, 2).map(titleCase).join(" / "))}` : ""}</div>
-        ${args.includeProgress ? `<div style="margin-top:6px;color:#8299a3;font-size:10px;font-weight:700;">${htmlEscape(lastText)} <span style="color:${status.color};font-weight:950;">• ${status.label}</span></div>` : ""}
+      <td width="35" valign="middle" style="width:35px;padding:11px 5px 11px 0;border-bottom:1px solid #174259;color:#67dcff;font:900 15px/1.3 Arial,sans-serif;">${String(index+1).padStart(2,"0")}</td>
+      <td valign="middle" style="padding:11px 6px 11px 0;border-bottom:1px solid #174259;">
+        <div style="font:800 13px/1.4 Arial,Helvetica,sans-serif;color:#ffffff;">${htmlEscape(exercise.name)}</div>
+        <div style="padding-top:3px;font:600 10px/1.4 Arial,sans-serif;color:#98bdcf;">${exercise.sets} sets · ${exercise.repMin}–${exercise.repMax} reps</div>
+        ${args.includeProgress ? `<div style="padding-top:4px;font:600 10px/1.4 Arial,sans-serif;color:#81aabb;">LAST: ${htmlEscape(last)}</div>` : ""}
       </td>
+      <td width="112" valign="middle" style="width:112px;padding:11px 6px;border-bottom:1px solid #174259;">
+        <div style="font:900 13px/1.4 Arial,sans-serif;color:#4ae79d;">${htmlEscape(coachCommand(exercise))}</div>
+        <div style="font:700 10px/1.4 Arial,sans-serif;color:#82cbe6;">${htmlEscape(decisionLabel(exercise.coach.action))}</div>
+      </td>
+      <td class="planReps" width="126" valign="middle" style="width:126px;padding:11px 5px;border-bottom:1px solid #174259;color:#ffffff;font:800 11px/1.4 Arial,sans-serif;">${htmlEscape(exercise.coach.repPlan)}</td>
+      <td width="16" valign="middle" align="right" style="width:16px;padding:11px 0;border-bottom:1px solid #174259;color:#ff921e;font:900 18px/1 Arial,sans-serif;">›</td>
     </tr>`;
   }).join("") : "";
-
-  const logo = args.logoUrl
-    ? `<img src="${htmlEscape(args.logoUrl)}" width="230" alt="MVP Trainer Pro" style="display:block;max-width:230px;height:auto;border:0;outline:none;text-decoration:none;">`
-    : `<div style="color:#55ddff;font-size:12px;font-weight:950;letter-spacing:2.2px;">MVP TRAINER PRO</div>`;
-
-  const prior = args.prior;
-  const priorSection = prior ? `<div style="margin-top:22px;color:#879fa9;font-size:10px;font-weight:950;letter-spacing:1.35px;">LAST ${htmlEscape(args.workout.toUpperCase())}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:7px;background:#08141a;border:1px solid #17313b;border-radius:12px;overflow:hidden;">
-      <tr>
-        ${metricCell("SESSION TIME", minutesLabel(prior.durationSeconds), "#ffb45d")}
-        ${metricCell("SETS DONE", prior.completedSets ? String(prior.completedSets) : "—", "#ffffff")}
-        ${metricCell("LOADED VOLUME", prior.loadedVolume > 0 ? formatVolume(prior.loadedVolume) : "—", "#ffffff")}
-        ${metricCell("LAST TRAINED", prior.ageLabel, "#ffb45d")}
-      </tr>
-    </table>
-    <div style="margin-top:7px;color:#6f8792;font-size:10px;line-height:1.5;">${htmlEscape(prior.dateLabel)}${prior.bodyweight ? ` • Body weight ${formatWeight(prior.bodyweight)}` : ""}${prior.difficulty ? ` • Difficulty ${htmlEscape(titleCase(prior.difficulty))}` : ""}</div>` : `<div style="margin-top:22px;padding:13px 15px;border:1px solid #17313b;border-radius:11px;background:#08141a;color:#9bb0b9;font-size:12px;font-weight:750;">No prior ${htmlEscape(args.workout)} benchmark yet. Today establishes the baseline.</div>`;
-
-  const reminderLead = args.isReminder
-    ? `<div style="margin-top:9px;color:#ffb45d;font-size:12px;font-weight:900;">REMINDER ${args.reminderNumber}${args.readyAgeHours != null ? ` • READY ${Math.max(1, Math.round(args.readyAgeHours))} HOURS` : ""}</div>`
-    : "";
-
-  return `<!doctype html>
-<html><body style="margin:0;padding:0;background:#05090d;font-family:Arial,Helvetica,sans-serif;color:#f7fbfd;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#05090d;padding:24px 10px;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:700px;background:#091118;border:1px solid #17313e;border-radius:18px;overflow:hidden;">
-        <tr><td style="padding:22px 26px 20px;background:#071218;border-bottom:1px solid #17313e;">
-          ${logo}
-          <div style="margin-top:16px;color:${args.isReminder ? "#ffb45d" : "#8af0b9"};font-size:11px;font-weight:950;letter-spacing:1.6px;">${args.isReminder ? "STILL READY TO TRAIN" : "READY TO TRAIN"}${args.isTest ? " • TEST" : ""}</div>
-          ${reminderLead}
-          <div style="margin-top:6px;color:#ffffff;font-size:36px;line-height:1.05;font-weight:950;">${htmlEscape(args.workout)}</div>
-          <div style="margin-top:9px;color:#9cb3be;font-size:13px;font-weight:750;">${htmlEscape(heroSub)}</div>
+  const generated = new Date();
+  const date = localDateLabel(generated.toISOString(), args.timezone);
+  const tip = priority ? firstExerciseCue(priority.name) : args.coachCue;
+  const recovery = args.decisionCounts.recovery
+    ? `${args.decisionCounts.recovery} exercise${args.decisionCounts.recovery===1?" requires":"s require"} load or recovery review. Follow the in-workout Coach's current guidance.`
+    : "No active load or recovery correction flagged in the available workout history.";
+  const preview = `${args.exercises.length} exercises · ${args.totalSets} sets · ${priority ? `${priority.name}: ${coachCommand(priority)}` : "Your plan is ready"}.`;
+  const buttonText = args.isReminder ? "OPEN YOUR WORKOUT" : "START YOUR WORKOUT";
+  const cta = `<table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center"><tr><td align="center" bgcolor="#ff9024" style="background-color:#ff9024;border-radius:11px;">
+    <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${htmlEscape(sessionHref)}" style="height:52px;v-text-anchor:middle;width:298px;" arcsize="18%" strokecolor="#ffac42" fillcolor="#ff9024"><w:anchorlock/><center style="color:#061421;font:900 17px Arial,sans-serif;">${htmlEscape(buttonText)}</center></v:roundrect><![endif]-->
+    <!--[if !mso]><!--><a href="${htmlEscape(sessionHref)}" style="display:inline-block;min-width:230px;padding:17px 28px;border-radius:11px;color:#061421;background-color:#ff9024;border:1px solid #ffac42;text-align:center;text-decoration:none;font:900 17px/1.2 Arial,Helvetica,sans-serif;letter-spacing:.3px;">▶ &nbsp; ${htmlEscape(buttonText)} &nbsp; ›</a><!--<![endif]-->
+  </td></tr></table>`;
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>${htmlEscape(args.workout)} | MVP Trainer Pro</title>
+    <style type="text/css">
+      @media screen and (max-width:640px) {
+        .emailShell{width:100%!important;max-width:100%!important}.emailGutter{padding-left:13px!important;padding-right:13px!important}
+        .heroPhoto{display:none!important;width:0!important;max-height:0!important;overflow:hidden!important}.heroTitle{font-size:33px!important}
+        .coachSide{display:block!important;width:100%!important;padding:5px 0!important}.planReps{width:88px!important;font-size:10px!important}
+      }
+      a{color:inherit} img{border:0;outline:none;text-decoration:none}
+    </style>
+    <!--[if mso]><style type="text/css">table{border-collapse:collapse!important} td{mso-line-height-rule:exactly}</style><![endif]-->
+  </head><body style="margin:0;padding:0;width:100%;background-color:#030a11;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">
+    <div style="display:none!important;font-size:1px;color:#030a11;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${htmlEscape(preview)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#030a11;"><tr><td align="center" style="padding:12px 6px 28px;">
+      <table role="presentation" class="emailShell" width="640" border="0" cellspacing="0" cellpadding="0" style="width:640px;max-width:640px;background-color:#061320;border:1px solid #0a3452;">
+        <tr><td class="emailGutter" style="padding:20px 22px 14px;border-bottom:2px solid #02bfff;background-color:#020f1b;">
+          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
+            <td valign="middle" align="left" width="55%">${logo}</td>
+            <td valign="middle" align="right" width="45%" style="font:900 12px/1.4 Arial,sans-serif;color:#ffffff;letter-spacing:.5px;">TRAIN SMARTER.<br><span style="color:#ff912a;">GET STRONGER.</span></td>
+          </tr></table>
         </td></tr>
-        <tr><td style="padding:22px 26px 26px;">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#08141a;border:1px solid #17313b;border-radius:12px;overflow:hidden;">
-            <tr>
-              ${metricCell("EXERCISES", String(args.exercises.length), "#55ddff")}
-              ${metricCell("WORKING SETS", String(args.totalSets), "#ffffff")}
-              ${metricCell("TARGET REPS", `${args.targetRepMin}–${args.targetRepMax}`, "#ffffff")}
-              ${metricCell("EXPECTED TIME", args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "—", "#55ddff")}
-            </tr>
+        <tr><td class="emailGutter" style="padding:24px 22px 14px;background-color:#061320;">
+          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
+            <td valign="top" style="padding:3px 0;">
+              <div style="color:#11d4f6;font:900 14px/1.3 Arial,sans-serif;letter-spacing:1px;">YOUR WORKOUT BRIEFING${args.isTest ? " · TEST" : ""}</div>
+              <div class="heroTitle" style="padding-top:5px;color:#ffffff;font:900 44px/1.05 Arial,sans-serif;letter-spacing:-1px;">${htmlEscape(args.workout.toUpperCase())}</div>
+              <div style="padding-top:6px;color:#dbf2ff;font:800 19px/1.3 Arial,sans-serif;">${htmlEscape(args.goal)}</div>
+              ${args.isReminder ? `<div style="padding-top:9px;font:800 11px/1.4 Arial,sans-serif;color:#ffab4b;">REMINDER ${args.reminderNumber} · YOUR SESSION IS STILL UP NEXT</div>` : ""}
+            </td>
+            <td class="heroPhoto" width="225" valign="top" align="right" style="width:225px;">
+              <img src="${htmlEscape(args.heroUrl)}" alt="" width="225" style="display:block;width:225px;height:122px;max-width:225px;object-fit:cover;">
+            </td>
+          </tr></table>
+        </td></tr>
+        <tr><td class="emailGutter" style="padding:7px 22px 18px;">
+          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
+            ${mailMetric(String(args.exercises.length),"EXERCISES")}
+            ${mailMetric(String(args.totalSets),"WORKING SETS")}
+            ${mailMetric(args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "—","EST. DURATION")}
+          </tr></table>
+        </td></tr>
+        <tr><td align="center" class="emailGutter" style="padding:0 22px 22px;">${cta}</td></tr>
+        <tr><td class="emailGutter" style="padding:0 22px 17px;">${args.includeProgress ? previous : ""}</td></tr>
+        <tr><td class="emailGutter" style="padding:0 22px 18px;">${priorityBody}</td></tr>
+        ${args.includePlan ? `<tr><td class="emailGutter" style="padding:0 22px 18px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#071725;border:1px solid #13b9e9;">
+            <tr><td style="padding:15px 15px 11px;border-bottom:1px solid #175570;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                <td style="color:#ffffff;font:900 18px/1.3 Arial,sans-serif;">▤ &nbsp; TODAY'S WORKOUT PLAN</td>
+                <td align="right" style="color:#77dfff;font:700 10px/1.3 Arial,sans-serif;">${args.exercises.length} EXERCISES</td>
+              </tr></table>
+              <div style="padding-top:4px;color:#7dcced;font:600 11px/1.4 Arial,sans-serif;">Your active program · ${args.totalSets} working sets · ${args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "time varies"}</div>
+            </td></tr>
+            <tr><td style="padding:0 13px 9px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${plan}</table></td></tr>
           </table>
-          ${args.focusMuscles.length ? `<div style="margin-top:9px;color:#718995;font-size:10px;font-weight:800;">FOCUS • ${htmlEscape(args.focusMuscles.slice(0, 5).map(titleCase).join(" • "))}${args.totalRestMinutes > 0 ? ` • ~${Math.round(args.totalRestMinutes)} min programmed rest` : ""}</div>` : ""}
-
-          ${priorSection}
-
-          <div style="margin-top:22px;padding:17px 19px;border:1px solid #294451;border-radius:13px;background:#0c171e;">
-            <div style="color:#ffab3d;font-size:10px;font-weight:950;letter-spacing:1.4px;">TODAY'S STANDARD</div>
-            <div style="margin-top:7px;color:#ffffff;font-size:19px;line-height:1.35;font-weight:950;">${htmlEscape(args.motivation)}</div>
-          </div>
-
-          ${first ? `<div style="margin-top:18px;padding:18px 19px;border-left:3px solid #55ddff;background:#08141b;border-radius:8px;">
-            <div style="color:#55ddff;font-size:10px;font-weight:950;letter-spacing:1.4px;">FIRST EXERCISE</div>
-            <div style="margin-top:7px;color:#ffffff;font-size:22px;font-weight:950;">${htmlEscape(first.name)}</div>
-            <div style="margin-top:5px;color:#9db2bc;font-size:12px;font-weight:750;">${first.sets} sets • ${first.repMin}–${first.repMax} reps${first.restSeconds ? ` • ${first.restSeconds}s rest` : ""}</div>
-            ${first.last && args.includeProgress ? `<div style="margin-top:7px;color:#ffb45d;font-size:11px;font-weight:850;">Last best: ${first.last.weight > 0 ? `${formatWeight(first.last.weight)} × ` : ""}${first.last.reps}</div>` : ""}
-          </div>` : ""}
-
-          ${args.includeTip ? `<div style="margin-top:20px;">
-            <div style="color:#b79cff;font-size:10px;font-weight:950;letter-spacing:1.4px;">SESSION COACHING</div>
-            <div style="margin-top:7px;padding:14px 15px;border-radius:10px;background:#0a141a;color:#dce9ee;font-size:13px;line-height:1.55;font-weight:750;"><b style="color:#ffffff;">Workout:</b> ${htmlEscape(args.coachCue)}</div>
-            ${first ? `<div style="margin-top:8px;padding:14px 15px;border-radius:10px;background:#0a141a;color:#dce9ee;font-size:13px;line-height:1.55;font-weight:750;"><b style="color:#55ddff;">${htmlEscape(first.name)}:</b> ${htmlEscape(args.firstCue)}</div>` : ""}
-          </div>` : ""}
-
-          ${args.includeProgress ? `<div style="margin-top:20px;">
-            <div style="color:#ffb35a;font-size:10px;font-weight:950;letter-spacing:1.4px;">PROGRESSION TARGET</div>
-            <div style="margin-top:7px;color:#dce9ee;font-size:14px;line-height:1.55;font-weight:750;">${htmlEscape(args.progressCue)}</div>
-          </div>` : ""}
-
-          ${args.includePlan ? `<div style="margin-top:23px;color:#8da9b6;font-size:10px;font-weight:950;letter-spacing:1.4px;">TODAY'S WORKOUT PLAN</div>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:4px;">${plan}</table>` : ""}
-
-          <div style="text-align:center;margin:28px 0 8px;">
-            <a href="${htmlEscape(args.appUrl.replace(/\/$/, ""))}/workout/${encodeURIComponent(args.sessionId)}" style="display:inline-block;background:#35c98a;color:#03120c;text-decoration:none;font-size:14px;font-weight:950;letter-spacing:.45px;padding:15px 25px;border-radius:10px;">START ${htmlEscape(args.workout.toUpperCase())}</a>
-          </div>
-          <div style="margin-top:18px;text-align:center;color:#637b86;font-size:10px;line-height:1.5;">MVP Trainer Pro • This brief follows your pinned program and current Up Next rotation. Reminder settings live in Coach.</div>
+        </td></tr>` : ""}
+        <tr><td class="emailGutter" style="padding:0 22px 17px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#081b2b;border:1px solid #1c80a6;"><tr><td style="padding:14px 15px;">
+            <div style="color:#79e0ff;font:900 12px/1.3 Arial,sans-serif;letter-spacing:.7px;">ADDITIONAL NOTES</div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
+              <td width="50%" valign="top" style="padding-right:9px;color:#b8d0db;font:600 11px/1.5 Arial,sans-serif;">
+                <span style="color:#66deff;font-weight:900;">RECOVERY</span><br>${htmlEscape(recovery)}
+              </td>
+              <td width="50%" valign="top" style="padding-left:9px;border-left:1px solid #20516b;color:#b8d0db;font:600 11px/1.5 Arial,sans-serif;">
+                <span style="color:#66deff;font-weight:900;">COACHING FOCUS</span><br>${htmlEscape(args.includeTip ? tip : "Follow the recorded workout plan and use your in-session feedback.")}
+              </td>
+            </tr></table>
+          </td></tr></table>
+        </td></tr>
+        <tr><td class="emailGutter" style="padding:13px 22px 22px;border-top:3px solid #05c9ef;background-color:#030d18;">
+          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
+            <td style="color:#41d6ff;font:900 12px/1.4 Arial,sans-serif;letter-spacing:1.2px;">CONSISTENCY BUILDS RESULTS.</td>
+            <td align="right" style="color:#ffffff;font:900 12px/1.4 Arial,sans-serif;">MVP TRAINER <span style="color:#ff912a;">PRO</span></td>
+          </tr></table>
+          <div style="padding-top:9px;text-align:center;color:#7895a9;font:600 10px/1.5 Arial,sans-serif;">Briefing generated ${htmlEscape(date)}. Coaching can update after new completed performance; the current workout is authoritative.</div>
+          <div style="padding-top:5px;text-align:center;color:#7aa3bc;font:600 11px/1.5 Arial,sans-serif;">TRAIN &nbsp; · &nbsp; TRACK &nbsp; · &nbsp; IMPROVE &nbsp; · &nbsp; ACHIEVE</div>
         </td></tr>
       </table>
-    </td></tr>
-  </table>
-</body></html>`;
+    </td></tr></table>
+  </body></html>`;
 }
 
 async function currentSession(admin: any, userId: string, programId: string) {
@@ -410,75 +484,131 @@ async function buildContext(admin: any, userId: string, authUser: any, pref: any
   }
   const exerciseMap = new Map(exerciseRows.map((row: any) => [row.id, row]));
 
-  const { data: sameTypeRows } = await admin
+  // All completed exposures in this active program. Match the R39 Coach tab:
+  // same completed workout boundary, canonical-name grouping, chronological order,
+  // and the complete working-set sequence (not just a single best set).
+  const { data: programSessions, error: programSessionsError } = await admin
     .from("scheduled_sessions")
-    .select("id")
+    .select("id,session_type")
     .eq("user_id", userId)
     .eq("program_block_id", program.id)
-    .eq("session_type", session.session_type)
-    .limit(200);
-  const sameTypeIds = (sameTypeRows ?? []).map((row: any) => row.id);
-
-  let priorWorkouts: any[] = [];
-  if (sameTypeIds.length) {
-    const result = await admin
-      .from("workouts")
+    .limit(1000);
+  if (programSessionsError) throw programSessionsError;
+  const programSessionMap = new Map((programSessions ?? []).map((row: any) => [row.id, row]));
+  const allCompleted: any[] = [];
+  for (const ids of batches(Array.from(programSessionMap.keys()))) {
+    const response = await admin.from("workouts")
       .select("id,scheduled_session_id,completed_at,started_at,ended_at,active_seconds,bodyweight_lb,post_difficulty,session_rating")
-      .eq("user_id", userId)
-      .in("scheduled_session_id", sameTypeIds)
+      .eq("user_id", userId).in("scheduled_session_id", ids)
       .not("completed_at", "is", null)
-      .order("completed_at", { ascending: false })
-      .limit(6);
-    if (!result.error) priorWorkouts = result.data ?? [];
+      .order("completed_at", { ascending: false }).limit(1000);
+    if (response.error) throw response.error;
+    allCompleted.push(...(response.data ?? []));
   }
-  const previousWorkout = priorWorkouts[0] ?? null;
-
-  const lastMap = new Map<string, LastSet>();
+  allCompleted.sort((a,b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
+  // The Coach currently caps completed workouts at 1,000. Do not silently
+  // compute from a different historical window in email.
+  if (allCompleted.length > 1000) throw new Error("Coaching history exceeds the supported 1,000 completed-session window; email not sent with inconsistent recommendations.");
+  const latestSameType = allCompleted.filter((row: any) =>
+    lower((programSessionMap.get(row.scheduled_session_id) as any)?.session_type) === lower(session.session_type));
+  const previousWorkout = latestSameType[0] ?? null;
+  const allWorkExerciseRows: any[] = [];
+  for (const ids of batches(allCompleted.map(row => row.id), 40)) {
+    const result = await admin.from("workout_exercises")
+      .select("id,workout_id,exercise_id,pain,difficulty")
+      .in("workout_id", ids).limit(1000);
+    if (result.error) throw result.error;
+    allWorkExerciseRows.push(...(result.data ?? []));
+  }
+  const allExerciseIds = unique([...exerciseIds, ...allWorkExerciseRows.map(r => r.exercise_id)]);
+  const historyExerciseRows: any[] = [];
+  for (const ids of batches(allExerciseIds)) {
+    const response = await admin.from("exercises")
+      .select("id,name,primary_muscles,equipment").in("id", ids).limit(1000);
+    if (response.error) throw response.error;
+    historyExerciseRows.push(...(response.data ?? []));
+  }
+  // Resolve the same per-user display names that CoachPage resolves before
+  // canonical name grouping. A rename never rewrites historical set records.
+  const { data: nameOverrides, error: nameOverrideError } = await admin
+    .from("exercise_name_overrides").select("exercise_id,display_name")
+    .eq("user_id", userId);
+  if (nameOverrideError && !/does not exist|relation/i.test(nameOverrideError.message || "")) throw nameOverrideError;
+  const overrideMap = new Map((nameOverrides ?? [])
+    .filter((x:any)=>clean(x.display_name)).map((x:any)=>[x.exercise_id, clean(x.display_name)]));
+  for (const row of historyExerciseRows) row.name = overrideMap.get(row.id) || row.name;
+  for (const row of exerciseRows) row.name = overrideMap.get(row.id) || row.name;
+  const historyMetadata = new Map(historyExerciseRows.map((row: any) => [row.id, row]));
+  const allSetRows: any[] = [];
+  for (const ids of batches(allWorkExerciseRows.map(row => row.id), 50)) {
+    const response = await admin.from("workout_sets")
+      .select("workout_exercise_id,set_index,reps,weight,rir,effort_key")
+      .in("workout_exercise_id", ids).order("set_index", { ascending: true }).limit(1000);
+    if (response.error) throw response.error;
+    allSetRows.push(...(response.data ?? []));
+  }
+  const workoutById = new Map(allCompleted.map((row: any) => [row.id, row]));
+  const workExerciseById = new Map(allWorkExerciseRows.map((row: any) => [row.id, row]));
+  const setsByWorkExercise = new Map<string, LastSet[]>();
   let priorStats: PriorStats | null = null;
-  if (previousWorkout?.id) {
-    const { data: weRows, error: weError } = await admin
-      .from("workout_exercises")
-      .select("id,exercise_id,pain,difficulty")
-      .eq("workout_id", previousWorkout.id);
-    if (weError) throw weError;
-    const weIds = (weRows ?? []).map((row: any) => row.id);
-    let setRows: any[] = [];
-    if (weIds.length) {
-      const result = await admin.from("workout_sets").select("workout_exercise_id,reps,weight,rir,set_index").in("workout_exercise_id", weIds);
-      if (!result.error) setRows = result.data ?? [];
+  let previousCompletedSets = 0;
+  let previousVolume = 0;
+  const previousExerciseIds = new Set<string>();
+  for (const raw of allSetRows) {
+    const we: any = workExerciseById.get(raw.workout_exercise_id);
+    if (!we) continue;
+    const set: LastSet = {
+      setIndex: num(raw.set_index), weight: num(raw.weight), reps: num(raw.reps),
+      rir: raw.rir == null ? null : num(raw.rir),
+      effortKey: typeof raw.effort_key === "string" ? raw.effort_key : null,
+      pain: we.pain == null ? null : num(we.pain),
+    };
+    const list = setsByWorkExercise.get(we.id) ?? [];
+    list.push(set);
+    setsByWorkExercise.set(we.id, list);
+    if (we.workout_id === previousWorkout?.id && set.reps > 0) {
+      previousCompletedSets++;
+      previousExerciseIds.add(we.exercise_id);
+      if (set.weight > 0) previousVolume += set.weight * set.reps;
     }
-    const weById = new Map((weRows ?? []).map((row: any) => [row.id, row]));
-    const completedExerciseIds = new Set<string>();
-    let loadedVolume = 0;
-    let completedSets = 0;
-    for (const set of setRows) {
-      const we: any = weById.get(set.workout_exercise_id);
-      if (!we?.exercise_id) continue;
-      const reps = num(set.reps);
-      const weight = num(set.weight);
-      if (reps > 0) {
-        completedSets += 1;
-        completedExerciseIds.add(we.exercise_id);
-        if (weight > 0) loadedVolume += weight * reps;
-      }
-      if (!exerciseIds.includes(we.exercise_id) || reps <= 0) continue;
-      const candidate: LastSet = { weight, reps, rir: set.rir == null ? null : num(set.rir), pain: we.pain == null ? null : num(we.pain) };
-      const prior = lastMap.get(we.exercise_id);
-      if (!prior || e1rm(candidate.weight, candidate.reps) > e1rm(prior.weight, prior.reps)) lastMap.set(we.exercise_id, candidate);
-    }
+  }
+  if (previousWorkout) {
     priorStats = {
       completedAt: previousWorkout.completed_at ?? null,
       dateLabel: localDateLabel(previousWorkout.completed_at, pref.timezone),
       ageLabel: daysAgoLabel(previousWorkout.completed_at),
       durationSeconds: durationSeconds(previousWorkout),
-      completedSets,
-      completedExercises: completedExerciseIds.size,
-      loadedVolume,
+      completedSets: previousCompletedSets,
+      completedExercises: previousExerciseIds.size,
+      loadedVolume: previousVolume,
       bodyweight: previousWorkout.bodyweight_lb == null ? null : num(previousWorkout.bodyweight_lb),
       difficulty: clean(previousWorkout.post_difficulty || previousWorkout.session_rating) || null,
     };
   }
-
+  const historyByMovement = new Map<string, TrainingSessionSample[]>();
+  const recentByMovement = new Map<string, { sets: LastSet[]; completedAt: string }>();
+  // Sorting is chronological just like CoachPage's pointsMap before analysis.
+  for (const we of allWorkExerciseRows.slice().sort((a,b) =>
+    new Date((workoutById.get(a.workout_id) as any)?.completed_at ?? 0).getTime() -
+    new Date((workoutById.get(b.workout_id) as any)?.completed_at ?? 0).getTime())) {
+    const workout: any = workoutById.get(we.workout_id);
+    const meta: any = historyMetadata.get(we.exercise_id);
+    if (!workout || !meta) continue;
+    const sets = (setsByWorkExercise.get(we.id) ?? [])
+      .filter(x => x.weight > 0 && x.reps > 0).sort((a,b) => a.setIndex-b.setIndex);
+    if (!sets.length) continue;
+    const key = movementKey(meta.name, we.exercise_id);
+    const list = historyByMovement.get(key) ?? [];
+    list.push({
+      sets: sets.map(x => ({ weight:x.weight, reps:x.reps, rir:x.rir })),
+      pain: we.pain == null ? null : num(we.pain),
+      difficulty: we.difficulty ?? null,
+      completedAt: workout.completed_at ?? null,
+    });
+    historyByMovement.set(key, list);
+    recentByMovement.set(key, { sets, completedAt: workout.completed_at });
+  }
+  const priorWorkouts = latestSameType.slice(0,6);
   const durations = priorWorkouts.map(durationSeconds).filter((value): value is number => Boolean(value));
   const averageDuration = durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length : null;
 
@@ -492,17 +622,29 @@ async function buildContext(admin: any, userId: string, authUser: any, pref: any
     const meta: any = exerciseMap.get(row.exercise_id) ?? {};
     const equipment = Array.isArray(meta.equipment) ? meta.equipment : meta.equipment ? [meta.equipment] : [];
     const patterns = Array.isArray(meta.patterns) ? meta.patterns : meta.patterns ? [meta.patterns] : [];
+    const key = movementKey(meta.name, row.exercise_id);
+    const sessions = historyByMovement.get(key) ?? [];
+    const lastSets = recentByMovement.get(key)?.sets ?? [];
+    const best = lastSets.slice().sort((a,b) => e1rm(b.weight,b.reps)-e1rm(a.weight,a.reps))[0] ?? null;
+    const setsTarget = Math.max(1, num(row.sets, 3));
+    const repMin = Math.max(1, num(row.rep_min, 8));
+    const repMax = Math.max(repMin, num(row.rep_max, 12));
+    const coach = analyzeProgression({
+      goal: program.goal, sessions, repMin, repMax, setsTarget,
+      exercise: { name: meta.name ?? "Exercise", equipment: equipment.map(clean), primary_muscles: Array.isArray(meta.primary_muscles) ? meta.primary_muscles : [] },
+    });
     return {
       id: row.exercise_id,
       name: clean(meta.name) || "Exercise",
-      sets: Math.max(1, num(row.sets, 3)),
-      repMin: Math.max(1, num(row.rep_min, 8)),
-      repMax: Math.max(1, num(row.rep_max, 12)),
+      sets: setsTarget,
+      repMin, repMax,
       restSeconds: Math.max(0, num(row.rest_seconds, 90)),
       muscles: Array.isArray(meta.primary_muscles) ? meta.primary_muscles.map(clean).filter(Boolean) : [],
-      equipment: equipment.map(clean).filter(Boolean),
-      patterns: patterns.map(clean).filter(Boolean),
-      last: lastMap.get(row.exercise_id) ?? null,
+      equipment: equipment.map(clean),
+      patterns: patterns.map(clean),
+      last: best,
+      lastSets,
+      coach,
     };
   });
 
@@ -518,11 +660,23 @@ async function buildContext(admin: any, userId: string, authUser: any, pref: any
     : templateMinutes;
 
   const workout = workoutName(session.session_type || template?.name);
-  const goal = goalLabel(program.goal);
+  const baseGoal = goalLabel(program.goal);
+  const symptomDisplay = symptom ? titleCase(symptom.replace(/_/g, " ")) : "";
+  const goal = symptomDisplay && !baseGoal.toLowerCase().includes(symptomDisplay.toLowerCase()) ? `${baseGoal} + ${symptomDisplay}` : baseGoal;
   const motivationSeed = `${session.id}:${options.isReminder ? `reminder-${options.reminderNumber}` : "ready"}`;
   const motivation = MOTIVATION[hashIndex(motivationSeed, MOTIVATION.length)];
   const first = exercises[0] ?? null;
-  const progression = first ? progressCue(first.last, first.repMax) : "Start with controlled reps and build from clean execution.";
+  const priority = exercises.slice().sort((a,b) => {
+    const directiveRank = (x: ExerciseBrief) => x.coach.exerciseDirective === "PAUSE" ? 0 : x.coach.exerciseDirective === "SWAP REVIEW" ? 1 : 2;
+    const ranks: Record<string,number> = { RECOVERY:0, REDUCE:1, INCREASE:2, MONITOR:3, HOLD:4, BASELINE:5 };
+    return directiveRank(a)-directiveRank(b) || (ranks[a.coach.action] ?? 9)-(ranks[b.coach.action] ?? 9);
+  })[0] ?? null;
+  const decisionCounts = {
+    increase: exercises.filter(x => x.coach.action === "INCREASE").length,
+    hold: exercises.filter(x => x.coach.action === "HOLD" || x.coach.action === "MONITOR").length,
+    recovery: exercises.filter(x => x.coach.action === "REDUCE" || x.coach.action === "RECOVERY" || x.coach.exerciseDirective === "PAUSE" || x.coach.exerciseDirective === "SWAP REVIEW").length,
+  };
+  const progression = priority?.coach.reason ?? "Choose a controlled starting load and log the completed working sets.";
   const cue = coachCue(workout, symptom);
 
   let logoUrl: string | null = null;
@@ -548,6 +702,10 @@ async function buildContext(admin: any, userId: string, authUser: any, pref: any
     firstCue: first ? firstExerciseCue(first.name) : "",
     progressCue: progression,
     prior: priorStats,
+    priority,
+    decisionCounts,
+    heroUrl: `${appUrl.replace(/\/$/, "")}/email/mvp-workout-hero.jpg`,
+    timezone: pref.timezone || "America/New_York",
     logoUrl,
     appUrl,
     sessionId: session.id,
@@ -612,11 +770,12 @@ async function reserveDelivery(admin: any, payload: { userId: string; programId:
 
 async function sendForUser(args: { admin: any; userId: string; pref: any; authUser: any; action: "ready" | "test" | "scan"; reason: string; mailEndpoint: string; mailSecret: string; appUrl: string }) {
   const { admin, userId, pref, authUser } = args;
-  let programId = pref.program_block_id as string | null;
-  if (!programId) {
-    const { data: active } = await admin.from("program_blocks").select("id").eq("user_id", userId).eq("status", "active").order("created_at", { ascending: false }).limit(1).maybeSingle();
-    programId = active?.id ?? null;
-  }
+  // Coach and Workout use the active program, never a stale email-preference pin.
+  const { data: activeProgram, error: activeProgramError } = await admin.from("program_blocks")
+    .select("id").eq("user_id", userId).eq("status", "active")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (activeProgramError) throw activeProgramError;
+  const programId = activeProgram?.id ?? null;
   if (!programId) return { ok: true, skipped: true, reason: "no_program" };
 
   const { data: program, error: programError } = await admin
@@ -636,7 +795,7 @@ async function sendForUser(args: { admin: any; userId: string; pref: any; authUs
 
   if (args.action === "test") {
     const context = await buildContext(admin, userId, authUser, pref, program, session, args.appUrl, { isTest: true, isReminder: false, reminderNumber: 0, readyAgeHours: null });
-    const subject = `[TEST] ${context.workout} is ready — your MVP Coach brief`;
+    const subject = `[TEST] ${context.workout} | MVP Trainer Pro Performance Briefing`;
     await sendMail({ admin, mailEndpoint: args.mailEndpoint, mailSecret: args.mailSecret, destination, subject, html: renderEmail(context), deliveryId: null });
     return { ok: true, sent: true, subject, session_id: session.id };
   }
@@ -645,7 +804,7 @@ async function sendForUser(args: { admin: any; userId: string; pref: any; authUs
 
   if (args.action === "ready") {
     const context = await buildContext(admin, userId, authUser, pref, program, session, args.appUrl, { isTest: false, isReminder: false, reminderNumber: 0, readyAgeHours: null });
-    const subject = `${context.workout} is ready — your MVP Coach brief`;
+    const subject = `${context.workout} Is Ready | Your Workout Briefing — MVP Trainer Pro`;
     const reservation = await reserveDelivery(admin, { userId, programId, sessionId: session.id, kind: "workout_ready", subject, destination, reason: args.reason });
     if (reservation.skipped) return { ok: true, skipped: true, reason: "already_sent_or_processing", session_id: session.id };
     await sendMail({ admin, mailEndpoint: args.mailEndpoint, mailSecret: args.mailSecret, destination, subject, html: renderEmail(context), deliveryId: reservation.id });
@@ -666,7 +825,7 @@ async function sendForUser(args: { admin: any; userId: string; pref: any; authUs
 
   if (!readyDelivery || readyDelivery.status !== "sent" || !readyDelivery.sent_at) {
     const context = await buildContext(admin, userId, authUser, pref, program, session, args.appUrl, { isTest: false, isReminder: false, reminderNumber: 0, readyAgeHours: null });
-    const subject = `${context.workout} is ready — your MVP Coach brief`;
+    const subject = `${context.workout} Is Ready | Your Workout Briefing — MVP Trainer Pro`;
     const reservation = await reserveDelivery(admin, { userId, programId, sessionId: session.id, kind: "workout_ready", subject, destination, reason: "cron_ready_recovery" });
     if (!reservation.skipped) {
       await sendMail({ admin, mailEndpoint: args.mailEndpoint, mailSecret: args.mailSecret, destination, subject, html: renderEmail(context), deliveryId: reservation.id });
@@ -699,7 +858,7 @@ async function sendForUser(args: { admin: any; userId: string; pref: any; authUs
   const reminderNumber = sentReminders.length + 1;
   const readyAgeHours = (Date.now() - new Date(readyDelivery.sent_at).getTime()) / 3600000;
   const context = await buildContext(admin, userId, authUser, pref, program, session, args.appUrl, { isTest: false, isReminder: true, reminderNumber, readyAgeHours });
-  const subject = `Reminder: ${context.workout} is still Up Next — MVP Coach`;
+  const subject = `Your ${context.workout} Workout Is Waiting | MVP Trainer Pro`;
   const kind = `workout_reminder_${reminderNumber}`;
   const reservation = await reserveDelivery(admin, { userId, programId, sessionId: session.id, kind, subject, destination, reason: args.reason });
   if (reservation.skipped) return { ok: true, skipped: true, reason: "reminder_already_sent_or_processing", session_id: session.id };
@@ -707,7 +866,7 @@ async function sendForUser(args: { admin: any; userId: string; pref: any; authUs
   return { ok: true, sent: true, kind, session_id: session.id };
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return Response.json({ ok: false, error: "Method not allowed" }, { status: 405, headers: CORS });
 
