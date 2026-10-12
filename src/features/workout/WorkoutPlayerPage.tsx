@@ -30,7 +30,7 @@ import {
   type SymptomKey,
 } from "../../lib/sessionLabel";
 import { sameCanonicalExercise, type CanonicalExerciseDescriptor } from "../../lib/exerciseIdentity";
-import { analyzeLiveSet, analyzeProgression } from "../../lib/trainingIntelligence";
+import { analyzeLiveSet, analyzeProgression, type TrainingSessionSample } from "../../lib/trainingIntelligence";
 import { resolveMuscleVisual } from "../../lib/muscleVisuals";
 import { WorkoutRoadmapRail3D, type WorkoutRoadmapRailItem } from "./WorkoutRoadmapRail3D";
 
@@ -488,6 +488,7 @@ type PreviousSetRow = {
   reps: number;
   weight: number;
   rir?: number | null;
+  effort_key?: string | null;
   pain?: number | null;
   form?: number | null;
 };
@@ -501,6 +502,8 @@ type PreviousPerformance = {
   pain: number | null;
   difficulty: "too_easy" | "just_right" | "too_hard" | null;
   sets: PreviousSetRow[];
+  // Same full completed-session sequence used by the Coach tab.
+  historySessions: TrainingSessionSample[];
 };
 
 type SearchExerciseRow = {
@@ -1080,7 +1083,9 @@ async function loadCanonicalProgramExerciseRows(
       .select("id,name,primary_muscles,equipment")
       .in("id", chunk);
     if (error) throw error;
-    for (const row of data ?? []) metadata.set(String((row as any).id), row as CanonicalExerciseDescriptor);
+    // Use the same effective exercise names as Coach when recovering history.
+    const named = await applyExerciseNameOverrides((data ?? []) as any[]);
+    for (const row of named) metadata.set(String((row as any).id), row as CanonicalExerciseDescriptor);
   }
 
   let current = metadata.get(exerciseId) ?? null;
@@ -1091,7 +1096,8 @@ async function loadCanonicalProgramExerciseRows(
       .eq("id", exerciseId)
       .maybeSingle();
     if (error) throw error;
-    current = (data as CanonicalExerciseDescriptor | null) ?? null;
+    const named = data ? await applyExerciseNameOverrides([data as any]) : [];
+    current = (named[0] as CanonicalExerciseDescriptor | undefined) ?? null;
   }
   if (!current) return { rows: exactRows, identityRecovered: false };
 
@@ -1133,7 +1139,7 @@ async function loadPreviousPerformance(params: {
   for (const chunk of chunkValues(matchingExercises.map((row) => row.id))) {
     const { data, error } = await supabase
       .from("workout_sets")
-      .select("workout_exercise_id,set_index,reps,weight,rir,pain,form")
+      .select("workout_exercise_id,set_index,reps,weight,rir,effort_key,pain,form")
       .in("workout_exercise_id", chunk)
       .order("set_index", { ascending: true });
     if (error) throw error;
@@ -1147,6 +1153,7 @@ async function loadPreviousPerformance(params: {
       reps: Number(raw.reps ?? 0),
       weight: Number(raw.weight ?? 0),
       rir: raw.rir != null ? Number(raw.rir) : null,
+      effort_key: typeof raw.effort_key === "string" ? raw.effort_key : null,
       pain: raw.pain != null ? Number(raw.pain) : null,
       form: raw.form != null ? Number(raw.form) : null,
     };
@@ -1157,7 +1164,11 @@ async function loadPreviousPerformance(params: {
     setsByWorkoutExercise.set(key, list);
   }
 
-  // Walk completed workouts newest to oldest until an actual logged performance exists.
+  // Resolve one actual performance per completed workout, newest first. Every
+  // matching completed exposure is sent to the same progression engine as Coach.
+  // A history COUNT alone cannot substitute for the missing completed sets:
+  // observed weight increments and plateau/recovery logic need those sets.
+  const performances: PreviousPerformance[] = [];
   for (const workout of eligibleWorkouts) {
     const candidates = matchingExercises.filter((row) => row.workout_id === workout.id);
     const usable = candidates
@@ -1166,21 +1177,29 @@ async function loadPreviousPerformance(params: {
       .sort((a, b) => b.sets.filter((set) => set.weight > 0 && set.reps > 0).length - a.sets.filter((set) => set.weight > 0 && set.reps > 0).length);
     const selected = usable[0];
     if (!selected) continue;
-
     const summary = workout.workout_summary as any;
-    return {
+    performances.push({
       workoutId: workout.id,
       workoutExerciseId: selected.row.id,
       completedAt: workout.completed_at,
       templateName:
         typeof summary?.template_name === "string" && summary.template_name.trim()
-          ? summary.template_name.trim()
-          : "Previous workout",
+          ? summary.template_name.trim() : "Previous workout",
       prescriptionSnapshot: selected.row.prescription_snapshot ?? {},
       pain: selected.row.pain,
       difficulty: selected.row.difficulty,
       sets: selected.sets,
-    };
+      historySessions: [],
+    });
+  }
+  if (performances.length) {
+    const historySessions: TrainingSessionSample[] = performances.slice().reverse().map((entry) => ({
+      sets: entry.sets.filter((set) => set.weight > 0 && set.reps > 0),
+      pain: entry.pain,
+      difficulty: entry.difficulty,
+      completedAt: entry.completedAt,
+    }));
+    return { ...performances[0], historySessions };
   }
 
   return null;
@@ -1917,9 +1936,7 @@ function progressionGuidance(
 
   const analysis = analyzeProgression({
     goal,
-    sessions: previous?.sets?.length
-      ? [{ sets: previous.sets, pain: previous.pain, difficulty: previous.difficulty, completedAt: previous.completedAt }]
-      : [],
+    sessions: previous?.historySessions ?? [],
     repMin,
     repMax,
     setsTarget,
@@ -9374,7 +9391,7 @@ function ExerciseRunner({
         const [existingResult, previous, history] = await Promise.all([
           supabase
             .from("workout_sets")
-            .select("set_index,reps,weight,rir")
+            .select("set_index,reps,weight,rir,effort_key")
             .eq("workout_exercise_id", weId)
             .order("set_index", { ascending: true }),
           loadPreviousPerformance({
@@ -9405,6 +9422,7 @@ function ExerciseRunner({
           }
         })();
 
+        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget, item, goal).suggestedWeight;
         const filled = Array.from({ length: total }, (_, i) => {
           const idx = i + 1;
           const found = rows.find((r) => Number(r.set_index) === idx);
@@ -9413,10 +9431,12 @@ function ExerciseRunner({
           return {
             set_index: idx,
             reps: Number(found?.reps ?? 0),
-            weight: savedWeight > 0 ? savedWeight : previousWeightForIndex(previous, idx),
+            // Use the exact Coach-tab starting decision for an unsaved set.
+            // An explicit draft or previously chosen weight always wins.
+            weight: savedWeight > 0 ? savedWeight : (suggestedStart ?? previousWeightForIndex(previous, idx)),
             rir: found?.rir != null ? Number(found.rir) : null,
             effort_key:
-              storedEffortKeys[String(idx)] ??
+              (typeof found?.effort_key === "string" ? found.effort_key : storedEffortKeys[String(idx)]) ??
               (found?.rir != null
                 ? EFFORT_OPTIONS.find((option) => option.rir === Number(found.rir))?.key ?? null
                 : null),
@@ -9437,11 +9457,10 @@ function ExerciseRunner({
           }
         })();
         const databaseCompleted = filled
-          .filter((row) => Number(row.reps) > 0 && Number(row.weight) > 0 && row.rir != null)
+          .filter((row) => Number(row.reps) > 0 && Number(row.weight) > 0 && (row.rir != null || row.effort_key === "not_sure"))
           .map((row) => Number(row.set_index));
         setCompletedSetIndexes(Array.from(new Set([...storedCompleted, ...databaseCompleted])).sort((a, b) => a - b));
 
-        const suggestedStart = progressionGuidance(previous, history, repMin, repMax, setsTarget, item, goal).suggestedWeight;
         const firstWeight = filled.find((row) => Number(row.weight) > 0)?.weight ?? 0;
         setCalculatorWeight(Number(firstWeight || suggestedStart || history.bestWeight || 0));
       } catch (error: any) {
@@ -9452,7 +9471,7 @@ function ExerciseRunner({
 
           const { data: fallbackRows } = await supabase
             .from("workout_sets")
-            .select("set_index,reps,weight,rir")
+            .select("set_index,reps,weight,rir,effort_key")
             .eq("workout_exercise_id", weId)
             .order("set_index", { ascending: true });
 
@@ -9480,7 +9499,7 @@ function ExerciseRunner({
                 weight: Number(found?.weight ?? 0),
                 rir: found?.rir != null ? Number(found.rir) : null,
                 effort_key:
-                  storedEffortKeys[String(idx)] ??
+                  (typeof found?.effort_key === "string" ? found.effort_key : storedEffortKeys[String(idx)]) ??
                   (found?.rir != null
                     ? EFFORT_OPTIONS.find((option) => option.rir === Number(found.rir))?.key ?? null
                     : null),
@@ -9576,6 +9595,7 @@ function ExerciseRunner({
         reps: Number(row.reps ?? 0),
         weight: Number(row.weight ?? 0),
         rir: row.rir,
+        effort_key: row.effort_key ?? null,
       }, { onConflict: "workout_exercise_id,set_index" });
       if (error) throw new Error(error.message);
     });
@@ -9693,7 +9713,7 @@ function ExerciseRunner({
       // Finish any in-flight rep/effort edits before final completion is saved.
       await draftWriteRef.current.catch(() => undefined);
       const { error } = await supabase.from("workout_sets").upsert(
-        { workout_exercise_id: weId, set_index: row.set_index, reps, weight, rir },
+        { workout_exercise_id: weId, set_index: row.set_index, reps, weight, rir, effort_key: selectedEffort.key },
         { onConflict: "workout_exercise_id,set_index" }
       );
       if (error) throw new Error(error.message);
@@ -9801,6 +9821,7 @@ function ExerciseRunner({
         reps: 0,
         weight: 0,
         rir: null,
+        effort_key: null,
       },
       { onConflict: "workout_exercise_id,set_index" }
     );
@@ -10232,7 +10253,7 @@ const unlock = async () => {
                             {previousPerformance.sets.map((set) => (
                               <span key={set.set_index}>
                                 S{set.set_index} {formatLoggedWeight(set.weight)} lb × {set.reps}
-                                {set.rir != null ? ` • ${effortLabel(set.rir)}` : ""}
+                                {set.effort_key || set.rir != null ? ` • ${effortLabel(set.rir, set.effort_key)}` : ""}
                               </span>
                             ))}
                           </div>
