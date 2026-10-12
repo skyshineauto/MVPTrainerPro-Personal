@@ -3723,20 +3723,18 @@ export function AppShell({
       : "0 2px 0 rgba(0,0,0,.70), 0 0 8px rgba(0,0,0,.55)",
   });
 
-  async function resolveActiveWorkoutDbFirst(): Promise<{
+  async function resolveActiveWorkoutDbFirst(userId: string): Promise<{
     workoutId: string;
     sessionId: string;
     startedAtISO: string;
     bodyweightLb: number | null;
   } | null> {
-    const { data: u, error: uErr } = await supabase.auth.getUser();
-    if (uErr) throw uErr;
-    if (!u.user) return null;
+    if (!userId) return null;
 
     const { data: w, error } = await supabase
       .from("workouts")
       .select("id, scheduled_session_id, started_at, performed_at, bodyweight_lb")
-      .eq("user_id", u.user.id)
+      .eq("user_id", userId)
       .is("completed_at", null)
       .not("started_at", "is", null)
       .order("started_at", { ascending: false, nullsFirst: false })
@@ -3770,17 +3768,15 @@ export function AppShell({
     };
   }
 
-  async function fetchLatestSymptomKeyIfNeeded(goalMode: string | null): Promise<SymptomKey | null> {
+  async function fetchLatestSymptomKeyIfNeeded(goalMode: string | null, userId: string): Promise<SymptomKey | null> {
     if (!isSymptomMode(goalMode)) return null;
 
-    const { data: u } = await supabase.auth.getUser();
-    const uid = u.user?.id;
-    if (!uid) return null;
+    if (!userId) return null;
 
     const { data: intake } = await supabase
       .from("intake_snapshots")
       .select("symptoms, created_at")
-      .eq("user_id", uid)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -3791,9 +3787,8 @@ export function AppShell({
   async function fetchHud() {
     if (hideChrome) return;
 
-    const { data: u, error: uErr } = await supabase.auth.getUser();
-    if (uErr) throw uErr;
-    if (!u.user) {
+    const userId = user?.id ? String(user.id) : "";
+    if (!userId) {
       setHud({ mode: "signed_out" });
       return;
     }
@@ -3801,7 +3796,7 @@ export function AppShell({
     const { data: ab } = await supabase
       .from("program_blocks")
       .select("id, goal, goal_mode")
-      .eq("user_id", u.user.id)
+      .eq("user_id", userId)
       .eq("status", "active")
       .order("created_at", { ascending: false })
       .limit(1)
@@ -3809,12 +3804,12 @@ export function AppShell({
 
     const goal = (ab?.goal as string) ?? null;
     const goalMode = (ab?.goal_mode as string) ?? null;
-    const symptomKey = await fetchLatestSymptomKeyIfNeeded(goalMode);
+    const symptomKey = await fetchLatestSymptomKeyIfNeeded(goalMode, userId);
 
     const { data: lastBW } = await supabase
       .from("workouts")
       .select("bodyweight_lb, completed_at")
-      .eq("user_id", u.user.id)
+      .eq("user_id", userId)
       .not("bodyweight_lb", "is", null)
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
@@ -3823,7 +3818,7 @@ export function AppShell({
 
     const latestCompletedWeight = lastBW?.bodyweight_lb != null ? Number(lastBW.bodyweight_lb) : null;
 
-    const active = await resolveActiveWorkoutDbFirst();
+    const active = await resolveActiveWorkoutDbFirst(userId);
     if (active?.workoutId && active.sessionId) {
       lsSet(LS.activeWorkoutId, active.workoutId);
       lsSet(LS.activeSessionId, active.sessionId);
@@ -3894,7 +3889,7 @@ export function AppShell({
     const { data: nextCandidates, error: nextError } = await supabase
       .from("scheduled_sessions")
       .select("id,template_id,session_type,date,status,queue_index,created_at")
-      .eq("user_id", u.user.id)
+      .eq("user_id", userId)
       .eq("program_block_id", ab.id)
       .order("queue_index", { ascending: true, nullsFirst: false })
       .order("date", { ascending: true, nullsFirst: false })
@@ -3993,19 +3988,21 @@ export function AppShell({
 
     if (pollRef.current) window.clearInterval(pollRef.current);
 
-    // Keep the command center fresh without repeatedly competing with page/data loads.
-    // Route changes, focus and visibility still refresh immediately; this is only the
-    // background safety poll. The workout timer itself remains local and updates every second.
-    const pollMs = hud.mode === "active" ? 30000 : 120000;
-    pollRef.current = window.setInterval(() => void run(), pollMs);
+    // Inactive screens are event-driven: no full queue/rotation rebuild every two minutes.
+    // Preserve the 30-second recovery check for a live workout; its timer stays local.
+    if (hud.mode === "active") {
+      pollRef.current = window.setInterval(() => void run(), 30000);
+    }
 
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
+    window.addEventListener("mvp:workout-schedule-changed", refreshWhenVisible);
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenVisible);
+      window.removeEventListener("mvp:workout-schedule-changed", refreshWhenVisible);
 
       if (pollRef.current) {
         window.clearInterval(pollRef.current);
@@ -4098,7 +4095,7 @@ export function AppShell({
     }
     lsDel(LS.musicWasPlayingOnPause);
 
-    const active = await resolveActiveWorkoutDbFirst();
+    const active = await resolveActiveWorkoutDbFirst(String(user?.id ?? ""));
     if (active?.sessionId) navigate(`/workout/${active.sessionId}`);
   }; /* MVP_TRAINER_V4_5_2_TRUE_PAUSE_CONTINUITY_R4: TRUE PAUSE */
 
