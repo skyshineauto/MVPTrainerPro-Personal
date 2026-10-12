@@ -247,10 +247,13 @@ type EmailContext = {
   readyAgeHours: number | null;
 };
 
+// R40.1 visual-only revision. Coach snapshots, queue selection and transport unchanged.
+// R40.1 visual-only revision. Coach snapshots, queue selection and transport unchanged.
+// R40.1 visual-only revision. Coach snapshots, queue selection and transport unchanged.
 function mailMetric(value: string, caption: string) {
-  return `<td width="33.3%" align="center" valign="middle" style="padding:12px 5px;border-right:1px solid #1c5471;background-color:#081b2c;">
-    <div style="font:900 23px/1.15 Arial,Helvetica,sans-serif;color:#f7fdff;">${htmlEscape(value)}</div>
-    <div style="padding-top:4px;font:700 10px/1.4 Arial,Helvetica,sans-serif;color:#8ee2ff;letter-spacing:.7px;">${htmlEscape(caption)}</div>
+  return `<td width="33%" align="center" valign="middle" style="width:33%;padding:17px 6px 16px;border-right:1px solid #146284;background:#091e30;">
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:32px;font-weight:900;color:#ffffff;white-space:nowrap;">${htmlEscape(value)}</div>
+    <div style="padding-top:7px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:17px;font-weight:800;color:#7cddff;letter-spacing:.5px;">${htmlEscape(caption)}</div>
   </td>`;
 }
 function coachCommand(exercise: ExerciseBrief) {
@@ -263,159 +266,160 @@ function decisionLabel(action: string) {
   return labels[action] ?? "COACH REVIEW";
 }
 function renderEmail(args: EmailContext) {
-  const sessionHref = `${args.appUrl.replace(/\/$/, "")}/workout/${encodeURIComponent(args.sessionId)}`;
-  const logoHref = `${args.appUrl.replace(/\/$/, "")}/email/mvp-email-logo.jpg`;
-  // The branded fallback is permanent; legacy user-upload signed assets expire.
-  const logo = `<img src="${htmlEscape(logoHref)}" width="260" alt="MVP Trainer Pro" style="display:block;width:260px;max-width:100%;height:auto;border:0;outline:0;text-decoration:none;">`;
+  const root = args.appUrl.replace(/\/$/, "");
+  const sessionHref = `${root}/workout/${encodeURIComponent(args.sessionId)}`;
+  const logoHref = `${root}/email/mvp-email-logo.jpg`;
+  const heroHref = args.heroUrl;
   const priority = args.priority;
-  const accent = priority?.coach.action === "REDUCE" || priority?.coach.action === "RECOVERY" ? "#ffb45b" : "#42e991";
-  const priorityBody = priority ? `
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid #f98c1c;background-color:#081423;">
-      <tr><td style="padding:17px 20px 7px;">
-        <div style="color:#ff9e2d;font:900 12px/1.4 Arial,Helvetica,sans-serif;letter-spacing:.8px;">◎ &nbsp; PROGRESSION COACH — TOP PRIORITY</div>
-        <div style="padding-top:7px;color:#ffffff;font:900 23px/1.2 Arial,Helvetica,sans-serif;">${htmlEscape(priority.name)}</div>
-      </td></tr>
-      <tr><td style="padding:4px 20px 12px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-          <td class="coachSide" width="48%" valign="top" style="width:48%;padding:9px 8px 9px 0;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#071f2d;border:1px solid #136c90;"><tr><td style="padding:12px;">
-              <div style="font:800 10px/1.4 Arial,sans-serif;letter-spacing:.8px;color:#77dcfc;">RECOMMENDED START</div>
-              <div style="padding-top:4px;font:900 27px/1.2 Arial,sans-serif;color:${accent};">${htmlEscape(coachCommand(priority))}</div>
-            </td></tr></table>
-          </td>
-          <td class="coachSide" width="52%" valign="top" style="width:52%;padding:9px 0 9px 8px;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#071f2d;border:1px solid #136c90;"><tr><td style="padding:12px;">
-              <div style="font:800 10px/1.4 Arial,sans-serif;letter-spacing:.8px;color:#77dcfc;">TARGET REPS</div>
-              <div style="padding-top:5px;font:900 17px/1.3 Arial,sans-serif;color:#ffffff;">${htmlEscape(priority.coach.repPlan)}</div>
-            </td></tr></table>
-          </td>
-        </tr></table>
-        <div style="padding:6px 0 4px;color:#effaff;font:400 14px/1.55 Arial,Helvetica,sans-serif;">${htmlEscape(priority.coach.reason)}</div>
-        <div style="padding-top:5px;color:#9bc5d8;font:700 11px/1.5 Arial,sans-serif;">${htmlEscape(decisionLabel(priority.coach.action))} &nbsp;·&nbsp; ${htmlEscape(priority.coach.confidence)} CONFIDENCE</div>
-      </td></tr>
-    </table>` : "";
-  const previous = args.prior ? `
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:17px;background-color:#071827;border:1px solid #0b9dcd;">
-      <tr><td style="padding:15px 17px 7px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-          <td valign="middle" style="color:#64ddff;font:900 15px/1.3 Arial,Helvetica,sans-serif;">◉ &nbsp; YOUR LAST ${htmlEscape(args.workout.toUpperCase())}</td>
-          <td align="right" style="font:700 11px/1.3 Arial,sans-serif;color:#b9d7e7;">${htmlEscape(args.prior.dateLabel)}</td>
-        </tr></table>
-      </td></tr>
-      <tr><td style="padding:7px 11px 14px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-          ${mailMetric(minutesLabel(args.prior.durationSeconds),"DURATION")}
-          ${mailMetric(String(args.prior.completedSets),"SETS COMPLETED")}
-          ${mailMetric(formatVolume(args.prior.loadedVolume),"TOTAL VOLUME")}
-        </tr></table>
-      </td></tr>
-    </table>` : `<table role="presentation" width="100%" style="margin-top:17px;border:1px solid #0b9dcd;background-color:#071827;"><tr><td style="padding:14px;color:#cae7f1;font:700 13px/1.5 Arial,sans-serif;">FIRST ${htmlEscape(args.workout.toUpperCase())} · This session will establish your baseline.</td></tr></table>`;
+  const accent = priority?.coach.action === "REDUCE" || priority?.coach.action === "RECOVERY" ? "#ffac59" : "#4ff48e";
+  const isRowImage = priority && /^seated\s+cable\s+rows?$/i.test(priority.name.trim());
+  const priorityPhoto = isRowImage ? `<td class="priorityImage" width="194" valign="top" style="width:194px;padding:0 18px 0 0;">
+    <img src="${htmlEscape(root+'/email/mvp-cable-row.jpg')}" width="194" alt="Seated cable row equipment" style="display:block;width:194px;max-width:194px;height:auto;border:1px solid #e6831b;border-radius:12px;">
+  </td>` : "";
+  const priorityBody = priority ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:2px solid #fa8d18;background:#07121d;">
+    <tr><td style="padding:21px 20px 16px;">
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#ff982a;font-size:17px;line-height:23px;font-weight:900;letter-spacing:.4px;">◎ &nbsp; PROGRESSION COACH — TOP PRIORITY</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+        ${priorityPhoto}
+        <td valign="top" style="padding:0;">
+          <div style="font-family:Arial,Helvetica,sans-serif;font-size:25px;line-height:29px;font-weight:900;color:#ffffff;padding-bottom:12px;">${htmlEscape(priority.name)}</div>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;"><tr>
+            <td valign="top" style="width:49%;padding:0 6px 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #147ca3;background:#061e30;"><tr><td style="padding:11px 12px 12px;">
+              <div style="font-family:Arial,sans-serif;color:#71e3ff;font-size:11px;font-weight:900;line-height:16px;">RECOMMENDED START</div>
+              <div style="padding-top:5px;font-family:Arial,sans-serif;color:${accent};font-size:29px;font-weight:900;line-height:35px;">${htmlEscape(coachCommand(priority))}</div>
+            </td></tr></table></td>
+            <td valign="top" style="width:51%;padding:0 0 0 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #147ca3;background:#061e30;"><tr><td style="padding:11px 12px 12px;">
+              <div style="font-family:Arial,sans-serif;color:#71e3ff;font-size:11px;font-weight:900;line-height:16px;">TARGET REPS</div>
+              <div style="padding-top:7px;font-family:Arial,sans-serif;color:#ffffff;font-size:18px;font-weight:900;line-height:31px;">${htmlEscape(priority.coach.repPlan)}</div>
+            </td></tr></table></td>
+          </tr></table>
+          <div style="padding-top:13px;font-family:Arial,Helvetica,sans-serif;color:#ecfaff;font-size:15px;line-height:23px;font-weight:400;">${htmlEscape(priority.coach.reason)}</div>
+          <div style="padding-top:7px;font-family:Arial,Helvetica,sans-serif;color:#7be4ff;font-size:11px;line-height:16px;font-weight:800;">${htmlEscape(decisionLabel(priority.coach.action))} &nbsp;·&nbsp; ${htmlEscape(priority.coach.confidence)} CONFIDENCE</div>
+        </td>
+      </tr></table>
+    </td></tr>
+  </table>` : "";
+  const previous = args.prior ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border:2px solid #06bafa;background:#081829;">
+    <tr><td style="padding:19px 20px 12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:18px;line-height:24px;font-weight:900;color:#64e0ff;">◉ &nbsp; YOUR LAST ${htmlEscape(args.workout.toUpperCase())}</td>
+        <td align="right" valign="middle" style="font-family:Arial,sans-serif;font-size:12px;line-height:18px;font-weight:700;color:#d5e7f1;">${htmlEscape(args.prior.dateLabel)}</td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:0 12px 15px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      ${mailMetric(minutesLabel(args.prior.durationSeconds),"DURATION")}
+      ${mailMetric(String(args.prior.completedSets),"SETS COMPLETED")}
+      ${mailMetric(formatVolume(args.prior.loadedVolume),"TOTAL VOLUME")}
+    </tr></table></td></tr>
+  </table>` : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:2px solid #06bafa;background:#081829;"><tr><td style="padding:20px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;color:#d9f4ff;">FIRST ${htmlEscape(args.workout.toUpperCase())} · This session will establish the baseline.</td></tr></table>`;
   const plan = args.includePlan ? args.exercises.map((exercise,index)=>{
-    const last = exercise.lastSets.length ? `${exercise.lastSets.map(s=>`${formatWeight(s.weight)} × ${s.reps} (${effortLabel(s.effortKey,s.rir)})`).join(" / ")}` : "No completed working sets yet";
+    const last = exercise.lastSets.length ? exercise.lastSets.map(s=>`${formatWeight(s.weight)} × ${s.reps} (${effortLabel(s.effortKey,s.rir)})`).join(" / ") : "No completed working sets yet";
+    const startColor = exercise.coach.action === "RECOVERY" || exercise.coach.action === "REDUCE" ? "#ffb35a" : "#46ea97";
     return `<tr>
-      <td width="35" valign="middle" style="width:35px;padding:11px 5px 11px 0;border-bottom:1px solid #174259;color:#67dcff;font:900 15px/1.3 Arial,sans-serif;">${String(index+1).padStart(2,"0")}</td>
-      <td valign="middle" style="padding:11px 6px 11px 0;border-bottom:1px solid #174259;">
-        <div style="font:800 13px/1.4 Arial,Helvetica,sans-serif;color:#ffffff;">${htmlEscape(exercise.name)}</div>
-        <div style="padding-top:3px;font:600 10px/1.4 Arial,sans-serif;color:#98bdcf;">${exercise.sets} sets · ${exercise.repMin}–${exercise.repMax} reps</div>
-        ${args.includeProgress ? `<div style="padding-top:4px;font:600 10px/1.4 Arial,sans-serif;color:#81aabb;">LAST: ${htmlEscape(last)}</div>` : ""}
+      <td width="40" valign="middle" style="width:40px;padding:16px 8px;border-bottom:1px solid #165677;color:#5dd6ff;font-family:Arial,sans-serif;font-size:17px;line-height:23px;font-weight:900;">${String(index+1).padStart(2,"0")}</td>
+      <td valign="middle" style="padding:16px 8px 16px 4px;border-bottom:1px solid #165677;">
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#ffffff;font-size:16px;line-height:21px;font-weight:900;">${htmlEscape(exercise.name)}</div>
+        <div style="padding-top:5px;font-family:Arial,sans-serif;color:#b9d5e5;font-size:12px;line-height:17px;font-weight:700;">${exercise.sets} sets · ${exercise.repMin}–${exercise.repMax} reps</div>
+        ${args.includeProgress ? `<div class="lastDesktop" style="padding-top:4px;font-family:Arial,sans-serif;color:#83b7cb;font-size:11px;line-height:16px;font-weight:600;">LAST: ${htmlEscape(last)}</div>` : ""}
+        <div class="mobileCoach" style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+          <span style="color:${startColor};font-weight:900;">${htmlEscape(coachCommand(exercise))}</span> &nbsp;·&nbsp; ${htmlEscape(exercise.coach.repPlan)}<br>
+          <span style="color:#77d8f3;">${htmlEscape(decisionLabel(exercise.coach.action))}</span>
+          ${args.includeProgress ? `<div style="padding-top:4px;color:#93bcce;font-size:11px;line-height:16px;">LAST: ${htmlEscape(exercise.lastSets.length ? exercise.lastSets.map(s=>`${formatWeight(s.weight)} × ${s.reps} ${effortLabel(s.effortKey,s.rir)}`).join(" / ") : "No completed working sets")}</div>` : ""}
+        </div>
       </td>
-      <td width="112" valign="middle" style="width:112px;padding:11px 6px;border-bottom:1px solid #174259;">
-        <div style="font:900 13px/1.4 Arial,sans-serif;color:#4ae79d;">${htmlEscape(coachCommand(exercise))}</div>
-        <div style="font:700 10px/1.4 Arial,sans-serif;color:#82cbe6;">${htmlEscape(decisionLabel(exercise.coach.action))}</div>
+      <td class="planStart" width="128" valign="middle" style="width:128px;padding:16px 5px;border-bottom:1px solid #165677;">
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:22px;font-weight:900;color:${startColor};">${htmlEscape(coachCommand(exercise))}</div>
+        <div style="padding-top:3px;font-family:Arial,sans-serif;color:#91d5ef;font-size:11px;line-height:16px;font-weight:800;">${htmlEscape(decisionLabel(exercise.coach.action))}</div>
       </td>
-      <td class="planReps" width="126" valign="middle" style="width:126px;padding:11px 5px;border-bottom:1px solid #174259;color:#ffffff;font:800 11px/1.4 Arial,sans-serif;">${htmlEscape(exercise.coach.repPlan)}</td>
-      <td width="16" valign="middle" align="right" style="width:16px;padding:11px 0;border-bottom:1px solid #174259;color:#ff921e;font:900 18px/1 Arial,sans-serif;">›</td>
+      <td class="planReps" width="160" valign="middle" style="width:160px;padding:16px 5px;border-bottom:1px solid #165677;font-family:Arial,sans-serif;color:#ffffff;font-size:14px;line-height:21px;font-weight:900;">${htmlEscape(exercise.coach.repPlan)}</td>
+      <td width="20" align="right" valign="middle" style="width:20px;padding:16px 6px 16px 0;border-bottom:1px solid #165677;font-family:Arial,sans-serif;color:#ff971a;font-size:22px;font-weight:900;">›</td>
     </tr>`;
   }).join("") : "";
-  const generated = new Date();
-  const date = localDateLabel(generated.toISOString(), args.timezone);
+  const date = localDateLabel(new Date().toISOString(), args.timezone || "America/New_York");
   const tip = priority ? firstExerciseCue(priority.name) : args.coachCue;
   const recovery = args.decisionCounts.recovery
-    ? `${args.decisionCounts.recovery} exercise${args.decisionCounts.recovery===1?" requires":"s require"} load or recovery review. Follow the in-workout Coach's current guidance.`
-    : "No active load or recovery correction flagged in the available workout history.";
+    ? `${args.decisionCounts.recovery} exercise${args.decisionCounts.recovery===1?" requires":"s require"} load or recovery review. Follow your current in-workout coaching.`
+    : "No active load or recovery correction flagged in available workout history.";
   const preview = `${args.exercises.length} exercises · ${args.totalSets} sets · ${priority ? `${priority.name}: ${coachCommand(priority)}` : "Your plan is ready"}.`;
   const buttonText = args.isReminder ? "OPEN YOUR WORKOUT" : "START YOUR WORKOUT";
-  const cta = `<table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center"><tr><td align="center" bgcolor="#ff9024" style="background-color:#ff9024;border-radius:11px;">
-    <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${htmlEscape(sessionHref)}" style="height:52px;v-text-anchor:middle;width:298px;" arcsize="18%" strokecolor="#ffac42" fillcolor="#ff9024"><w:anchorlock/><center style="color:#061421;font:900 17px Arial,sans-serif;">${htmlEscape(buttonText)}</center></v:roundrect><![endif]-->
-    <!--[if !mso]><!--><a href="${htmlEscape(sessionHref)}" style="display:inline-block;min-width:230px;padding:17px 28px;border-radius:11px;color:#061421;background-color:#ff9024;border:1px solid #ffac42;text-align:center;text-decoration:none;font:900 17px/1.2 Arial,Helvetica,sans-serif;letter-spacing:.3px;">▶ &nbsp; ${htmlEscape(buttonText)} &nbsp; ›</a><!--<![endif]-->
+  const cta = `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#ff941e" style="background:#ff941e;border:1px solid #ffbb4a;border-radius:12px;">
+    <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${htmlEscape(sessionHref)}" style="height:62px;v-text-anchor:middle;width:365px;" arcsize="18%" strokecolor="#ffb83e" fillcolor="#ff941e"><w:anchorlock/><center style="color:#061320;font:900 20px Arial,sans-serif;">${htmlEscape(buttonText)}</center></v:roundrect><![endif]-->
+    <!--[if !mso]><!--><a href="${htmlEscape(sessionHref)}" style="display:inline-block;min-width:245px;padding:19px 23px;border-radius:12px;white-space:nowrap;color:#061320;background-color:#ff941e;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:20px;line-height:24px;font-weight:900;">▶ &nbsp; ${htmlEscape(buttonText)} &nbsp; ›</a><!--<![endif]-->
   </td></tr></table>`;
+  const logo = `<img src="${htmlEscape(logoHref)}" alt="MVP Trainer Pro" width="304" style="display:block;width:304px;max-width:100%;height:auto;border:0;outline:none;">`;
   return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>${htmlEscape(args.workout)} | MVP Trainer Pro</title>
     <style type="text/css">
-      @media screen and (max-width:640px) {
-        .emailShell{width:100%!important;max-width:100%!important}.emailGutter{padding-left:13px!important;padding-right:13px!important}
-        .heroPhoto{display:none!important;width:0!important;max-height:0!important;overflow:hidden!important}.heroTitle{font-size:33px!important}
-        .coachSide{display:block!important;width:100%!important;padding:5px 0!important}.planReps{width:88px!important;font-size:10px!important}
+      body,table,td{margin:0;padding:0} table{border-spacing:0}img{border:0;outline:none;text-decoration:none}a{color:inherit}
+      @media screen and (max-width:800px) {
+        .emailShell{width:100%!important;max-width:100%!important;}.emailGutter{padding-left:12px!important;padding-right:12px!important;}
+        .heroTitle{font-size:38px!important;line-height:41px!important;}.heroPhoto{width:36%!important;}.heroPhoto img{width:100%!important;max-width:100%!important;height:auto!important;}
+        .priorityImage{display:none!important;width:0!important;max-height:0!important;overflow:hidden!important}.planReps{width:105px!important;font-size:12px!important;line-height:18px!important}.planStart{width:103px!important;}
       }
-      a{color:inherit} img{border:0;outline:none;text-decoration:none}
+      @media screen and (max-width:460px) {
+        .heroTitle{font-size:32px!important;line-height:37px!important}.heroPhoto{display:none!important;max-height:0!important;width:0!important;overflow:hidden!important}
+        .priorityImage{display:none!important}.emailGutter{padding-left:10px!important;padding-right:10px!important}
+        .planStart,.planReps{display:none!important;width:0!important;max-height:0!important;overflow:hidden!important;padding:0!important;}
+        .mobileCoach{display:block!important;max-height:none!important;overflow:visible!important;padding-top:7px!important;font-family:Arial,Helvetica,sans-serif!important;font-size:13px!important;line-height:18px!important;color:#ffffff!important;}
+        .lastDesktop{display:none!important;}
+      }
     </style>
-    <!--[if mso]><style type="text/css">table{border-collapse:collapse!important} td{mso-line-height-rule:exactly}</style><![endif]-->
-  </head><body style="margin:0;padding:0;width:100%;background-color:#030a11;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">
-    <div style="display:none!important;font-size:1px;color:#030a11;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${htmlEscape(preview)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
-    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#030a11;"><tr><td align="center" style="padding:12px 6px 28px;">
-      <table role="presentation" class="emailShell" width="640" border="0" cellspacing="0" cellpadding="0" style="width:640px;max-width:640px;background-color:#061320;border:1px solid #0a3452;">
-        <tr><td class="emailGutter" style="padding:20px 22px 14px;border-bottom:2px solid #02bfff;background-color:#020f1b;">
+    <!--[if mso]><style type="text/css">table{border-collapse:collapse!important}td{mso-line-height-rule:exactly}</style><![endif]-->
+  </head><body style="margin:0;padding:0;width:100%;background-color:#020a12;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">
+    <div style="display:none!important;font-size:1px;color:#020a12;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${htmlEscape(preview)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;background:#020a12;"><tr><td align="center" style="padding:12px 5px 28px;">
+      <!--[if mso]><table role="presentation" width="800" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+      <table role="presentation" class="emailShell" width="800" border="0" cellspacing="0" cellpadding="0" style="width:800px;max-width:800px;background:#041321;border:1px solid #0b3e59;">
+        <tr><td class="emailGutter" style="padding:24px 27px 20px;border-bottom:2px solid #00c6fa;background:#020e1b;">
           <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
-            <td valign="middle" align="left" width="55%">${logo}</td>
-            <td valign="middle" align="right" width="45%" style="font:900 12px/1.4 Arial,sans-serif;color:#ffffff;letter-spacing:.5px;">TRAIN SMARTER.<br><span style="color:#ff912a;">GET STRONGER.</span></td>
+            <td width="55%" valign="middle" align="left">${logo}</td>
+            <td width="45%" align="right" valign="middle" style="font-family:Arial,sans-serif;font-size:15px;line-height:21px;color:#ffffff;font-weight:900;letter-spacing:.6px;">TRAIN SMARTER.<br><span style="color:#ff9226;">GET STRONGER.</span></td>
           </tr></table>
         </td></tr>
-        <tr><td class="emailGutter" style="padding:24px 22px 14px;background-color:#061320;">
-          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
-            <td valign="top" style="padding:3px 0;">
-              <div style="color:#11d4f6;font:900 14px/1.3 Arial,sans-serif;letter-spacing:1px;">YOUR WORKOUT BRIEFING${args.isTest ? " · TEST" : ""}</div>
-              <div class="heroTitle" style="padding-top:5px;color:#ffffff;font:900 44px/1.05 Arial,sans-serif;letter-spacing:-1px;">${htmlEscape(args.workout.toUpperCase())}</div>
-              <div style="padding-top:6px;color:#dbf2ff;font:800 19px/1.3 Arial,sans-serif;">${htmlEscape(args.goal)}</div>
-              ${args.isReminder ? `<div style="padding-top:9px;font:800 11px/1.4 Arial,sans-serif;color:#ffab4b;">REMINDER ${args.reminderNumber} · YOUR SESSION IS STILL UP NEXT</div>` : ""}
+        <tr><td class="emailGutter" style="padding:31px 27px 16px;background:#041321;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td valign="middle" style="padding-right:12px;">
+              <div style="font-family:Arial,sans-serif;color:#09d9fa;font-size:18px;line-height:25px;font-weight:900;letter-spacing:.5px;">YOUR WORKOUT BRIEFING${args.isTest ? " · TEST" : ""}</div>
+              <div class="heroTitle" style="padding-top:6px;font-family:Arial,sans-serif;color:#ffffff;font-size:55px;line-height:60px;font-weight:900;letter-spacing:-1px;">${htmlEscape(args.workout.toUpperCase())}</div>
+              <div style="padding-top:5px;font-family:Arial,sans-serif;color:#d6effc;font-size:23px;line-height:29px;font-weight:800;">${htmlEscape(args.goal)}</div>
+              ${args.isReminder ? `<div style="padding-top:10px;font-family:Arial,sans-serif;color:#ffad53;font-size:12px;line-height:18px;font-weight:800;">REMINDER ${args.reminderNumber} · YOUR SESSION IS STILL UP NEXT</div>` : ""}
             </td>
-            <td class="heroPhoto" width="225" valign="top" align="right" style="width:225px;">
-              <img src="${htmlEscape(args.heroUrl)}" alt="" width="225" style="display:block;width:225px;height:122px;max-width:225px;object-fit:cover;">
-            </td>
+            <td class="heroPhoto" width="295" valign="middle" align="right" style="width:295px;"><img src="${htmlEscape(heroHref)}" width="295" alt="" style="display:block;width:295px;max-width:295px;height:auto;"></td>
           </tr></table>
         </td></tr>
-        <tr><td class="emailGutter" style="padding:7px 22px 18px;">
-          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
-            ${mailMetric(String(args.exercises.length),"EXERCISES")}
-            ${mailMetric(String(args.totalSets),"WORKING SETS")}
-            ${mailMetric(args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "—","EST. DURATION")}
-          </tr></table>
-        </td></tr>
-        <tr><td align="center" class="emailGutter" style="padding:0 22px 22px;">${cta}</td></tr>
-        <tr><td class="emailGutter" style="padding:0 22px 17px;">${args.includeProgress ? previous : ""}</td></tr>
-        <tr><td class="emailGutter" style="padding:0 22px 18px;">${priorityBody}</td></tr>
-        ${args.includePlan ? `<tr><td class="emailGutter" style="padding:0 22px 18px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#071725;border:1px solid #13b9e9;">
-            <tr><td style="padding:15px 15px 11px;border-bottom:1px solid #175570;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-                <td style="color:#ffffff;font:900 18px/1.3 Arial,sans-serif;">▤ &nbsp; TODAY'S WORKOUT PLAN</td>
-                <td align="right" style="color:#77dfff;font:700 10px/1.3 Arial,sans-serif;">${args.exercises.length} EXERCISES</td>
-              </tr></table>
-              <div style="padding-top:4px;color:#7dcced;font:600 11px/1.4 Arial,sans-serif;">Your active program · ${args.totalSets} working sets · ${args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "time varies"}</div>
-            </td></tr>
-            <tr><td style="padding:0 13px 9px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${plan}</table></td></tr>
-          </table>
-        </td></tr>` : ""}
-        <tr><td class="emailGutter" style="padding:0 22px 17px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#081b2b;border:1px solid #1c80a6;"><tr><td style="padding:14px 15px;">
-            <div style="color:#79e0ff;font:900 12px/1.3 Arial,sans-serif;letter-spacing:.7px;">ADDITIONAL NOTES</div>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
-              <td width="50%" valign="top" style="padding-right:9px;color:#b8d0db;font:600 11px/1.5 Arial,sans-serif;">
-                <span style="color:#66deff;font-weight:900;">RECOVERY</span><br>${htmlEscape(recovery)}
-              </td>
-              <td width="50%" valign="top" style="padding-left:9px;border-left:1px solid #20516b;color:#b8d0db;font:600 11px/1.5 Arial,sans-serif;">
-                <span style="color:#66deff;font-weight:900;">COACHING FOCUS</span><br>${htmlEscape(args.includeTip ? tip : "Follow the recorded workout plan and use your in-session feedback.")}
-              </td>
+        <tr><td class="emailGutter" style="padding:8px 27px 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          ${mailMetric(String(args.exercises.length),"EXERCISES")}
+          ${mailMetric(String(args.totalSets),"WORKING SETS")}
+          ${mailMetric(args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "—","EST. DURATION")}
+        </tr></table></td></tr>
+        <tr><td class="emailGutter" align="center" style="padding:2px 27px 26px;">${cta}</td></tr>
+        <tr><td class="emailGutter" style="padding:0 27px 17px;">${args.includeProgress ? previous : ""}</td></tr>
+        <tr><td class="emailGutter" style="padding:0 27px 18px;">${priorityBody}</td></tr>
+        ${args.includePlan ? `<tr><td class="emailGutter" style="padding:0 27px 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#061929;border:2px solid #03bbf0;">
+          <tr><td style="padding:19px 18px 13px;border-bottom:1px solid #1b6c88;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td style="color:#ffffff;font-family:Arial,sans-serif;font-size:23px;line-height:29px;font-weight:900;">▤ &nbsp; TODAY'S WORKOUT PLAN</td>
+              <td align="right" style="color:#74dcff;font-family:Arial,sans-serif;font-size:12px;line-height:19px;font-weight:800;">${args.exercises.length} EXERCISES</td>
             </tr></table>
-          </td></tr></table>
-        </td></tr>
-        <tr><td class="emailGutter" style="padding:13px 22px 22px;border-top:3px solid #05c9ef;background-color:#030d18;">
-          <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
-            <td style="color:#41d6ff;font:900 12px/1.4 Arial,sans-serif;letter-spacing:1.2px;">CONSISTENCY BUILDS RESULTS.</td>
-            <td align="right" style="color:#ffffff;font:900 12px/1.4 Arial,sans-serif;">MVP TRAINER <span style="color:#ff912a;">PRO</span></td>
+            <div style="padding-top:5px;font-family:Arial,sans-serif;color:#9ad8f0;font-size:13px;line-height:20px;">Your active program · ${args.totalSets} working sets · ${args.expectedMinutes ? `~${Math.round(args.expectedMinutes)} min` : "duration varies"}</div>
+          </td></tr>
+          <tr><td style="padding:0 13px 11px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${plan}</table></td></tr>
+        </table></td></tr>` : ""}
+        <tr><td class="emailGutter" style="padding:0 27px 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#071e31;border:1px solid #167da4;"><tr><td style="padding:17px 19px;">
+          <div style="color:#7de3ff;font-family:Arial,sans-serif;font-size:15px;line-height:22px;font-weight:900;">ADDITIONAL NOTES</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:11px;"><tr>
+            <td width="50%" valign="top" style="width:50%;padding-right:10px;color:#c4dfeb;font-family:Arial,sans-serif;font-size:13px;line-height:19px;"><span style="color:#69deff;font-weight:900;">RECOVERY</span><br>${htmlEscape(recovery)}</td>
+            <td width="50%" valign="top" style="width:50%;padding-left:13px;border-left:1px solid #226487;color:#c4dfeb;font-family:Arial,sans-serif;font-size:13px;line-height:19px;"><span style="color:#69deff;font-weight:900;">COACHING FOCUS</span><br>${htmlEscape(args.includeTip ? tip : "Follow the recorded workout plan and use your in-session feedback.")}</td>
           </tr></table>
-          <div style="padding-top:9px;text-align:center;color:#7895a9;font:600 10px/1.5 Arial,sans-serif;">Briefing generated ${htmlEscape(date)}. Coaching can update after new completed performance; the current workout is authoritative.</div>
-          <div style="padding-top:5px;text-align:center;color:#7aa3bc;font:600 11px/1.5 Arial,sans-serif;">TRAIN &nbsp; · &nbsp; TRACK &nbsp; · &nbsp; IMPROVE &nbsp; · &nbsp; ACHIEVE</div>
+        </td></tr></table></td></tr>
+        <tr><td class="emailGutter" style="padding:18px 27px 23px;border-top:3px solid #02c5ef;background:#020e19;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="color:#2fd4ff;font-family:Arial,sans-serif;font-size:15px;line-height:21px;font-weight:900;letter-spacing:1px;">CONSISTENCY BUILDS RESULTS.</td>
+          <td align="right" style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;line-height:21px;font-weight:900;">MVP TRAINER <span style="color:#ff972b;">PRO</span></td>
+        </tr></table>
+        <div style="padding-top:13px;text-align:center;color:#99b6c8;font-family:Arial,sans-serif;font-size:12px;line-height:18px;">Briefing generated ${htmlEscape(date)}. Recommendations can update after new completed performance; the current workout is authoritative.</div>
+        <div style="padding-top:7px;text-align:center;color:#7ec7df;font-family:Arial,sans-serif;font-size:12px;line-height:18px;">TRAIN &nbsp; · &nbsp; TRACK &nbsp; · &nbsp; IMPROVE &nbsp; · &nbsp; ACHIEVE</div>
         </td></tr>
       </table>
+      <!--[if mso]></td></tr></table><![endif]-->
     </td></tr></table>
   </body></html>`;
 }
