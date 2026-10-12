@@ -3422,6 +3422,7 @@ export function AppShell({
 
   const pollRef = useRef<any>(null);
   const refreshInFlightRef = useRef(false);
+  const lastHudRefreshContextRef = useRef<string | null>(null);
 
   const isWorkoutSession = currentPath.startsWith("/workout/");
   const isWorkoutsTab = currentPath === "/" || currentPath.startsWith("/workout/");
@@ -3629,13 +3630,12 @@ export function AppShell({
     };
 
     void refreshWeather();
-    const timer = window.setInterval(refreshWeather, 10 * 60 * 1000);
-    const onFocus = () => void refreshWeather();
+    // R39.2: weather updates on initial load, location change or a deliberate return to the app; never on an idle timer.
+    const onFocus = () => { if (document.visibilityState === "visible") void refreshWeather(); };
     window.addEventListener("focus", onFocus);
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
   }, [user?.id, branding?.weatherLocation?.latitude, branding?.weatherLocation?.longitude]);
@@ -3984,7 +3984,12 @@ export function AppShell({
       }
     };
 
-    void run();
+    // R39.2: changing HUD mode only attaches/detaches live-workout recovery; it does not refetch the entire dashboard.
+    const refreshContext = `${user?.id ?? ""}|${currentPath}|${hideChrome ? "hidden" : "visible"}`;
+    if (lastHudRefreshContextRef.current !== refreshContext) {
+      lastHudRefreshContextRef.current = refreshContext;
+      void run();
+    }
 
     if (pollRef.current) window.clearInterval(pollRef.current);
 
